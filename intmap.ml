@@ -15,6 +15,7 @@ let branchbit p =
 let rec verify_nonempty t =
   match t with
   | Leaf (p, x) -> ()
+  | Branch (0, _, _) -> assert false
   | Branch (pfx, t0, t1) ->
     let pfx' = get_prefix t in
     let br = branchbit pfx' in
@@ -22,13 +23,10 @@ let rec verify_nonempty t =
     let p0 = get_prefix t0 in
     let p1 = get_prefix t1 in
     assert (pfx == pfx');
-    assert (p0 land branchbit pfx == 0 && p0 land hmask == pfx land hmask);
-    assert (p1 land branchbit pfx != 0 && p1 land hmask == pfx land hmask);
-    let m = -branchbit pfx in
-    let m0 = -branchbit p0 in
-    let m1 = -branchbit p1 in
-    assert (m0 land (lnot m) != 0);
-    assert (m1 land (lnot m) != 0);
+    assert (p0 land br == 0);
+    assert (p0 land hmask == pfx land hmask);
+    assert (p1 land br != 0);
+    assert (p1 land hmask == pfx land hmask);
     verify_nonempty t0; verify_nonempty t1
 
 let verify = function
@@ -49,11 +47,37 @@ let singleton key value =
 
 
 
+let branch_nonempty pfx a b =
+  match a, b with
+  | Branch (0, _, _), b -> b
+  | a, Branch (0, _, _) -> a
+  | a, b -> Branch (pfx, a, b)
+
 let rec mem map key = match map with 
   | Branch (0, _, _) -> false
   | Leaf (key', value') -> key' = key
   | Branch (p, t0, t1) ->
     mem (if key land (branchbit p) == 0 then t0 else t1) key
+
+let rec remove map key = match map with
+  | Branch (0, _, _) -> empty
+  | Leaf (key', value') when key' = key -> empty
+  | Leaf (key', value') -> map
+  | Branch (p, t0, t1) ->
+    if key land (branchbit p) == 0 then
+      Branch (p, remove t0 key, t1)
+    else
+      Branch (p, t0, remove t1 key)
+
+let rec get map key = match map with
+  | Branch (0, _, _) -> raise Not_found
+  | Leaf (key', value') when key' = key -> value'
+  | Leaf (key, value) -> raise Not_found
+  | Branch (p, t0, t1) ->
+    if key land (branchbit p) == 0 then
+      get t0 key
+    else 
+      get t1 key
 
 let high_bits_mask n =
   let n = n lor (n lsr 1) in
@@ -192,37 +216,90 @@ let union a b = match a, b with
 
 
 
-let branch_nonempty pfx a b =
-  match a, b with
-  | Branch (0, _, _), b -> b
-  | a, Branch (0, _, _) -> a
-  | a, b -> Branch (pfx, a, b)
-
-let rec intersection_nonempty a b =
+let rec union_with_nonempty f a b =
+  assert (not (is_empty a));
+  assert (not (is_empty b));
   let pa = get_prefix a and pb = get_prefix b in
   let npa = -pa and npb = -pb in
   let bra = pa land npa and brb = pb land npb in
   let ma = pa lxor npa and mb = pb lxor npb in
-  let pdiff = pa lxor pb in
-  match a, ma land pdiff, b, mb land pdiff with
-  | Leaf (_, xa), _, Leaf (_, xb), _ when pa = pb -> a
-  | Branch (_, a0, a1), 0, Branch (_, b0, b1), 0 ->
-     branch_nonempty pa (intersection_nonempty a0 b0) (intersection_nonempty a1 b1)
-  | Branch (_, a0, a1), 0, _, _ ->
+  match a, eqmask ma pa pb, b, eqmask mb pa pb with
+  | Leaf (_, xa), _, Leaf (_, xb), _ when pa = pb -> Leaf (pa, f xa xb)
+  | Branch (_, a0, a1), true, Branch (_, b0, b1), true ->
+    Branch (pa, union_with_nonempty f a0 b0, union_with_nonempty f a1 b1)
+  | Branch (_, a0, a1), true, _, _ ->
     if pb land bra == 0
-    then intersection_nonempty a0 b
-    else intersection_nonempty a1 b
-  | _, _, Branch (_, b0, b1), 0 ->
+    then Branch (pa, union_with_nonempty f a0 b, a1)
+    else Branch (pa, a0, union_with_nonempty f a1 b)
+  | _, _, Branch (_, b0, b1), true ->
     if pa land brb == 0
-    then intersection_nonempty a b0
-    else intersection_nonempty a b1
+    then Branch (pb, union_with_nonempty f a b0, b1)
+    else Branch (pb, b0, union_with_nonempty f a b1)
   | _, _, _, _ ->
-    empty
+    mk_branch (pa lxor pb) pa a b
+
+let union_with f a b = 
+  verify a;
+  verify b;
+  match a, b with
+  | (Branch (0, _, _), x | x, Branch (0, _, _)) -> x
+  | _, _ -> union_with_nonempty f a b
+
+
+
+
+
+let rec intersection_nonempty a b =
+  let pa = get_prefix a and pb = get_prefix b in
+  let ma = pa lxor (-pa) and mb = pb lxor (-pb) in
+  let pdiff = pa lxor pb in
+  match a, b with
+  | Leaf (_, xa), Leaf (_, xb) when pa = pb -> a
+  | Branch (_, a0, a1), _ when ma land pdiff = 0 ->
+    (match b with 
+    | Branch (_, b0, b1) when pa = pb ->
+      branch_nonempty pa (intersection_nonempty a0 b0) (intersection_nonempty a1 b1)
+    | _ -> if pb land pa = pa
+      then intersection_nonempty a1 b
+      else intersection_nonempty a0 b)
+  | _, Branch (_, b0, b1) when mb land pdiff = 0 ->
+    if pa land pb = pb
+    then intersection_nonempty a b1
+    else intersection_nonempty a b0
+  | _, _ -> empty
 
 let inter a b = match a, b with
   | Branch (0, _, _), x -> empty
   | x, Branch (0, _, _) -> empty
   | _, _ -> intersection_nonempty a b
+
+
+
+let rec diff_nonempty a b =
+  let pa = get_prefix a and pb = get_prefix b in
+  let ma = pa lxor (-pa) and mb = pb lxor (-pb) in
+  let pdiff = pa lxor pb in
+  match a, b with
+  | Leaf (_, xa), Leaf (_, xb) when pa = pb -> empty
+  | Branch (_, a0, a1), _ when ma land pdiff = 0 ->
+    (match b with 
+    | Branch (_, b0, b1) when pa = pb ->
+      branch_nonempty pa (diff_nonempty a0 b0) (diff_nonempty a1 b1)
+    | _ -> if pb land pa = pa
+      then Branch (pa, a0, diff_nonempty a1 b)
+      else Branch (pa, diff_nonempty a0 b, a1))
+  | _, Branch (_, b0, b1) when mb land pdiff = 0 ->
+    if pa land pb = pb
+    then diff_nonempty a b1
+    else diff_nonempty a b0
+  | _, _ -> a
+
+let diff a b = match a, b with
+  | (Branch (0, _, _), _) | (_, Branch (0, _, _)) -> a
+  | _, _ -> diff_nonempty a b
+
+
+
 
 
 module type IdentType = sig
@@ -248,28 +325,56 @@ module type S = sig
 
   val of_list : elt list -> t
   val to_list : t -> elt list
+
+  val subset : t -> t -> bool
 end
 
 type 'a intmap = 'a t
+
+module Fake (T : IdentType) : S with type elt = T.t = struct
+  module M = Set.Make (struct type t = T.t let compare x y = compare (T.get_id x) (T.get_id y) end)
+  type t = M.t
+  type elt = T.t
+  let empty = M.empty
+  let singleton x = M.singleton x
+  let inter = M.inter
+  let union = M.union
+  let diff = M.diff
+  let iter a f = M.iter f a
+  let fold_left a acc f = M.fold (fun x y -> f y x) a acc
+  let is_empty = M.is_empty
+  let length = M.cardinal
+  let mem a x = M.mem x a
+  let add a x = M.add x a
+  let of_list xs = List.fold_left add empty xs
+  let to_list = M.elements
+  let subset = M.subset
+end
+
+
+
 module Make (T : IdentType) : S with type elt = T.t = struct
   type t = T.t intmap
   type elt = T.t
   let empty = empty
   let singleton x = singleton (T.get_id x) x
   let inter a b = inter a b
-  let union a b = union a b
-  let diff a b = assert false
-  let iter a f = fold_left (fun _ _ x -> f x) () a
+  let union (a : t) (b : t) : t = union a b
+  let diff a b = diff a b
+  let iter a f = verify a; fold_left (fun _ _ x -> f x) () a
   let fold_left a acc f = fold_left (fun a _ x -> f a x) acc a
 
   let is_empty = is_empty
   let length a = fold_left a 0 (fun n s -> n + 1)
 
-  let mem a x = assert false
-  let add a x = assert false
-  let of_list xs = assert false
-  let to_list a = assert false
+  let mem a x = mem a (T.get_id x)
+  let add a x = union a (singleton x)
+  let of_list xs = List.fold_left add empty xs
+  let to_list a = fold_right (fun i x l -> x :: l) a []
+  let subset a b = (inter a b = a)
 end
+
+
 
 (*
 

@@ -3,8 +3,80 @@ open Lexing
 
 open Printf
 
+let parse_line f g =
+  try g (f Lexer.read (Lexing.from_string (input_line stdin))) with
+  | SyntaxError _ -> fprintf stderr "syntax error\n%!"
+  | Parser.Error -> fprintf stderr "parser error\n%!"
+;;
+
+open Types;;
+open Program;;
+
+(*
+let automaton = (constrain (compile_terms (fun f ->
+    [f Neg (TVar "x"), TVar "a"; 
+     f Pos (TVar "x"), TVar "b"]))
+     Pos (TCons (Func (TVar "a", TVar "b"))));;
+Format.printf "%a\n%a\n%!" (print_typeterm Pos) (decompile_automaton automaton) print_automaton automaton
+*)
+  
+
+parse_line Parser.prog (fun s -> 
+parse_line Parser.onlytype (fun t ->
+  let s1 = s.Program.expr in
+  let s2 = compile_terms (fun f -> f Pos t) in
+  expand_all_flow s1;
+  expand_all_flow s2;
+    Format.printf "%a\n%a\n%!"
+      print_automaton s1
+      print_automaton s2;
+    let sub s1 s2 = 
+      Format.printf "%a <: %a [%s]\n%!"
+        (print_typeterm Pos) (decompile_automaton s1) 
+        (print_typeterm Pos) (decompile_automaton s2)
+        (match subsumed (fun f -> f s1 s2) with true -> "Y" | false -> "N") in
+    sub s1 s2; sub s2 s1))
+;;  
+
+
+while true do
+  parse_line Parser.subsumption (fun (t1, t2) ->
+    let s1 = compile_terms (fun f -> f Pos t1)
+    and s2 = compile_terms (fun f -> f Pos t2) in
+    expand_all_flow s1;
+    expand_all_flow s2;
+    Format.printf "%a\n%a\n%!"
+      print_automaton s1
+      print_automaton s2;
+    let sub s1 s2 = 
+      Format.printf "%a <: %a [%s]\n%!"
+        (print_typeterm Pos) (decompile_automaton s1) 
+        (print_typeterm Pos) (decompile_automaton s2)
+        (match subsumed (fun f -> f s1 s2) with true -> "Y" | false -> "N") in
+    sub s1 s2; sub s2 s1)
+done
+
+
+
+(*
+while true do
+  parse_line Parser.prog (fun s -> Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Program.expr)) 
+  (*parse_line Parser.prog (fun s -> Format.printf "%a\n%!" print_automaton s.Program.expr)*)
+done
+*)
+
+
+(*
+
+while true do
+  parse_line Parser.onlytype (fun t -> Format.printf "%a\n%!" (print_typeterm Pos) t)
+done
+
+*)
+
+(*
 let parse_with_error lexbuf =
-  try Some (Parser.exp Lexer.read lexbuf) with
+  try Some (Parser.prog Lexer.read lexbuf) with
   | SyntaxError _ | Parser.Error ->
     fprintf stderr "nope\n%!"; None
 
@@ -12,12 +84,14 @@ let parse_with_error lexbuf =
 let rec parse_and_print lexbuf =
   match parse_with_error lexbuf with
   | Some value ->
-    printf "%s\n%!" value;
-    parse_and_print lexbuf
-  | None -> parse_and_print lexbuf
+    printf "%s\n%!" value
+  | None -> ();;
 
-let lexbuf = Lexing.from_channel stdin;;
-parse_and_print lexbuf
+while true do
+  parse_and_print (Lexing.from_string (input_line stdin))
+done
+*)
+
 (*
 let loop filename () =
   let inx = In_channel.create filename in

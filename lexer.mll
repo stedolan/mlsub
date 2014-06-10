@@ -22,6 +22,14 @@ let id = ['a'-'z' 'A'-'Z' '_'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
 rule read =
   parse
   | white    { read lexbuf }
-  | id       { IDENT (Lexing.lexeme lexbuf) }
   | "->"     { ARROW }
+  | "("      { LPAR }
+  | ")"      { RPAR }
+  | "|"      { TY_JOIN }
+  | "&"      { TY_MEET }
+  | "<:"     { SUBSUME }
+  | "rec"    { REC }
+  | "="      { EQUALS }
   | "fun"    { FUN }
+  | id       { IDENT (Lexing.lexeme lexbuf) }
+  | eof      { EOF }
