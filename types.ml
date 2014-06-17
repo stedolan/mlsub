@@ -109,7 +109,8 @@ end = struct
       mutable cons : StateSet.t constructed;
       mutable flow : StateSet.t }
 end
-and StateSet : Intmap.S with type elt = State.state = Intmap.Fake (struct type t = State.state let get_id = State.(fun s -> s.id) end)
+and StateSet : Intmap.S with type elt = State.state = 
+  Intmap.Fake (struct type t = State.state let get_id = State.(fun s -> s.id) end)
 
 open State
 type state = State.state
@@ -443,26 +444,128 @@ let rec subsumed map =
     check_dataflow()
 
 
-;;
-(*
-let term = (TCons (Func (TVar 1, TAdd (TVar 2, TVar 1)))) ;;
-
-let term = TRec (2, TAdd (TVar 1, TAdd (TVar 2, TCons (Func (TVar 1, TVar 1))))) ;;
-
-let term = (TCons (Func (TVar 1, TCons (Func (TVar 2, TAdd (TVar 1, TVar 2))))));;
-*)
-
-(*
-let kpair a b = TCons (Func (TCons (Func (a, TCons (Func (b, TCons Unit)))), TCons Unit))
-let term = (TCons (Func (TVar 1, TCons (Func (TVar 2, kpair (TVar 1) (TVar 2))))));;
-let term = (TCons (Func (TVar "1", TCons (Func (TVar "2", kpair (TAdd (TVar "1", TVar "1")) (TAdd (TVar "1", TVar "2")))))));;
-
-let term = (TCons (Func (TVar 1, TCons (Func (TVar 1, kpair (TVar 1) (TVar 1))))));;
 
 
 
-fprintf err_formatter "%a@." (print_typeterm Pos) term;;
-fprintf err_formatter "%a@." (print_typeterm Pos) (decompile_automaton (compile_term term));;
-printf "%a" print_automaton (compile_term term);;
 
-*)
+
+type edgetype = Domain | Range
+
+module EdgeMap = Map.Make (struct type t = edgetype let compare = compare end)
+
+type superblock =
+  { mutable blocks : block list; (* some may be empty *)
+    mutable edgecounts : int StateTbl.t EdgeMap.t }
+
+and block =
+  { mutable states : StateSet.t;
+    mutable size : int;
+    mutable split : block;
+    mutable superblock : superblock }
+
+
+let refine_partition (initial_partition : StateSet.t list) (back_edges : StateSet.t StateTbl.t EdgeMap.t) =
+
+
+  let count_mod (t : int StateTbl.t) (s : state) (k : int) =
+    if not (StateTbl.mem t s) then StateTbl.add t s 0;
+    let n = StateTbl.find t s + k in
+    assert (n >= 0);
+    if n = 0 then StateTbl.remove t s else StateTbl.replace t s n in
+  
+  let initial_superblock = { blocks = []; edgecounts = EdgeMap.map (fun edges ->
+    let t = StateTbl.create 20 in
+    StateTbl.iter (fun y ss ->
+      StateSet.iter ss (fun x -> count_mod t x 1)) edges; t) back_edges } in
+
+  let block_of_state : block StateTbl.t = StateTbl.create 20 in
+
+  let initial_blocks = List.map (fun states ->
+    let rec b = { states; size = StateSet.length states;
+                  split = b; superblock = initial_superblock } in
+    StateSet.iter states (fun s -> StateTbl.add block_of_state s b); 
+    b) initial_partition in
+  initial_superblock.blocks <- initial_blocks;
+
+  
+  (* Step 4 of Paige & Tarjan *)
+  let split_blocks (set : StateSet.t) (compound_blocks : superblock list) : superblock list =
+    (* Find the partition blocks b that have a nonempty intersection with set,
+       and split them into (b & set) and (b - set) *)
+    let new_blocks =
+      StateSet.fold_left set [] (fun bs x ->
+        let b = StateTbl.find block_of_state x in
+        let bs = 
+          if b.split != b then bs else begin
+            let diff_states = StateSet.diff b.states set in
+            let inter_states = StateSet.inter b.states set in
+            let b' = { states = inter_states; 
+                       size = StateSet.length inter_states;
+                       split = b;
+                       superblock = b.superblock } in
+            b.states <- diff_states;
+            b.size <- b.size - b'.size;
+            b.split <- b';
+            b.split :: bs
+          end in
+        StateTbl.replace block_of_state x b.split;
+        bs) in
+    (* reset the split fields and find any newly-compound superblocks *)
+    List.fold_left (fun compound_blocks b -> 
+      let b' = b.split in
+      assert (b' != b && b'.split == b);
+      assert (b'.superblock == b.superblock);
+      b.split <- b; b'.split <- b';
+      b.superblock.blocks <- b' :: b.superblock.blocks;
+      match b.superblock.blocks with
+      | [a; b] -> b.superblock :: compound_blocks (* this block has just become compound *)
+      | _ -> compound_blocks) compound_blocks new_blocks in
+  
+    
+  let refine_by_block (b : block) (compound_blocks : superblock list) =
+    let orig_superblock = b.superblock in
+    let edgecounts = EdgeMap.map (fun edges ->
+      let t = StateTbl.create 20 in
+      StateSet.iter b.states (fun y ->
+        StateSet.iter (StateTbl.find edges y) (fun x ->
+          count_mod t x 1)); t) back_edges in
+    b.superblock <- { blocks = [b]; edgecounts };
+    EdgeMap.fold (fun etype edges compound_blocks ->
+      (* Calculate E^-1(B) *)
+      let back_b = StateTbl.fold (fun s _ bb -> StateSet.add bb s) edges StateSet.empty in
+      (* Calculate E^-1(B) - E^-1(S - B) *)
+      let orig_edgecounts = EdgeMap.find etype orig_superblock.edgecounts in
+      let back_bsb = StateTbl.fold (fun s countB bb ->
+        let countS = StateTbl.find orig_edgecounts s in
+        if countB = countS then StateSet.add bb s else bb) edges StateSet.empty in
+      (* Update counts *)
+      StateTbl.iter (fun s countB ->
+        count_mod orig_edgecounts s (-countB)) edges;
+      split_blocks back_bsb (split_blocks back_b compound_blocks))
+      edgecounts compound_blocks in
+  
+  
+  let rec refine_loop = function
+    | [] -> ()
+    | s :: compound_blocks -> first_block compound_blocks s.blocks
+  and first_block compound_blocks = function
+    | [] -> refine_loop compound_blocks
+    | b0 :: rest when b0.size == 0 -> first_block compound_blocks rest
+    | b0 :: rest -> second_block compound_blocks b0 rest
+  and second_block compound_blocks b0 = function
+    | [] -> refine_loop compound_blocks
+    | b1 :: rest when b1.size == 0 -> second_block compound_blocks b0 rest
+    | b1 :: rest ->
+      assert (b0.superblock == b1.superblock);
+      let s = b0.superblock in
+      let b =
+        if b0.size < b1.size then
+          (s.blocks <- b1 :: rest; b0)
+        else
+          (s.blocks <- b0 :: rest; b1) in
+      refine_loop (refine_by_block b compound_blocks) in
+  refine_loop [initial_superblock];
+
+  let res = StateTbl.create 20 in
+  StateTbl.iter (fun s b -> StateTbl.add res s (StateSet.min_elt b.states)) block_of_state;
+  res

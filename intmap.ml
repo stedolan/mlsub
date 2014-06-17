@@ -327,6 +327,7 @@ module type S = sig
   val to_list : t -> elt list
 
   val subset : t -> t -> bool
+  val min_elt : t -> elt
 end
 
 type 'a intmap = 'a t
@@ -349,6 +350,7 @@ module Fake (T : IdentType) : S with type elt = T.t = struct
   let of_list xs = List.fold_left add empty xs
   let to_list = M.elements
   let subset = M.subset
+  let min_elt = M.min_elt
 end
 
 
@@ -372,6 +374,7 @@ module Make (T : IdentType) : S with type elt = T.t = struct
   let of_list xs = List.fold_left add empty xs
   let to_list a = fold_right (fun i x l -> x :: l) a []
   let subset a b = (inter a b = a)
+  let min_elt a = assert false
 end
 
 
