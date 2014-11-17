@@ -27,6 +27,12 @@ type scheme =
   { environment : state SMap.t;
     expr : state }
 
+type typing =
+    scheme SMap.t -> scheme
+
+let clone_scheme s =
+  Types.clone (fun f -> { environment = SMap.map f s.environment; expr = f s.expr })
+    
 let constrain (inputs : (state * var typeterm) list) p output =
   let (inputs, output) = compile_terms (fun f ->
     (List.map (fun (s, t) -> (s, f (polneg s.Types.State.pol) t)) inputs, f p output)) in
@@ -37,6 +43,14 @@ let constrain (inputs : (state * var typeterm) list) p output =
   then failwith "type error of some sort";
   output
 
+let ascription scheme typeterm =
+  let s = compile_terms (fun f -> f Pos typeterm) in
+  let top = compile_terms (fun f -> f Neg ty_zero) in
+  match subsumed (fun f -> f scheme.expr s &&
+                             SMap.for_all (fun v sv -> f sv top) scheme.environment) with
+  | false -> failwith "ascription check failed"
+  | true -> { environment = SMap.empty; expr = s }
+    
 (*
 let constrain (schemes : scheme list) (constraints : tyconstraint) : scheme =
   assert (List.length schemes = List.length constraints.inputs);

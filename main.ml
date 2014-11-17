@@ -20,7 +20,7 @@ let automaton = (constrain (compile_terms (fun f ->
 Format.printf "%a\n%a\n%!" (print_typeterm Pos) (decompile_automaton automaton) print_automaton automaton
 *)
   
-
+(*
 parse_line Parser.prog (fun s -> 
 parse_line Parser.onlytype (fun t ->
   let s1 = s.Program.expr in
@@ -37,14 +37,13 @@ parse_line Parser.onlytype (fun t ->
         (match subsumed (fun f -> f s1 s2) with true -> "Y" | false -> "N") in
     sub s1 s2; sub s2 s1))
 ;;  
+*)
 
-
+  (*
 while true do
   parse_line Parser.subsumption (fun (t1, t2) ->
     let s1 = compile_terms (fun f -> f Pos t1)
     and s2 = compile_terms (fun f -> f Pos t2) in
-    expand_all_flow s1;
-    expand_all_flow s2;
     Format.printf "%a\n%a\n%!"
       print_automaton s1
       print_automaton s2;
@@ -56,14 +55,19 @@ while true do
     sub s1 s2; sub s2 s1)
 done
 
+   *)
 
 
-(*
 while true do
-  parse_line Parser.prog (fun s -> Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Program.expr)) 
+  let recomp s = decompile_automaton (compile_terms (fun f -> f Pos (decompile_automaton s))) in
+  parse_line Parser.prog
+             (fun typing ->
+              let s = typing SMap.empty in
+              Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Program.expr);
+              Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Program.expr))
   (*parse_line Parser.prog (fun s -> Format.printf "%a\n%!" print_automaton s.Program.expr)*)
 done
-*)
+
 
 
 (*

@@ -1,3 +1,43 @@
+(*
+type ('a, _) map =
+| Empty : ('a, [> `Empty]) map
+| Leaf : int * 'a -> ('a, [> `Nonempty]) map
+| Branch : int * ('a, [`Nonempty]) map * ('a, [`Nonempty]) map -> ('a, [> `Nonempty]) map
+
+type 'a t = ('a, [`Nonempty | `Empty]) map
+
+type 'a nmap = ('a, [`Nonempty]) map
+
+let empty = Empty
+
+let is_empty = function
+  | Empty -> true
+  | _ -> false
+
+
+let branchbit p = 
+  (* lowest 1 bit of p *)
+  p land (-p)
+
+let rec mem_nonempty (map : ('a, [> `Nonempty]) map) key = match map with
+  | Leaf (key', value') -> key = key'
+  | Branch (p, t0, t1) ->
+    mem_nonempty (if key land (branchbit p) == 0 then t0 else t1) key
+
+let mem map key = match map with
+  | Empty -> false
+  | Leaf _ -> mem_nonempty map key
+  | Branch _ -> mem_nonempty map key
+
+
+let rec mem (map : 'a nmap) key = match map with
+  | Leaf (key', value') -> key = key'
+  | Branch (p, t0, t1) ->
+    mem (if key land (branchbit p) == 0 then t0 else t1) key
+ *)
+
+
+(*
 type 'a t =
 | Branch of int * 'a t * 'a t
 | Leaf of int * 'a
@@ -33,6 +73,7 @@ let verify = function
   | Branch (0, _, _) -> ()
   | x -> verify_nonempty x
 
+let v x = verify x; x
 
 
 
@@ -78,6 +119,9 @@ let rec get map key = match map with
       get t0 key
     else 
       get t1 key
+
+let () =
+  match Sys.word_size with 32 | 64 -> () | _ -> failwith "Unsupported word size"
 
 let high_bits_mask n =
   let n = n lor (n lsr 1) in
@@ -132,6 +176,9 @@ let of_sorted_array arr =
   let len = Array.length arr in
   if len == 0 then empty else of_sorted_subarray arr 0 len
 
+
+unionL : aL -> bL -> aR -> bR -> T
+
 *)
 
 (* Left and right folds *)
@@ -180,14 +227,49 @@ let eqmask m a b =
   a land m == b land m
 
 let mk_branch diff pa a b =
+  try
+  verify a; verify b;
   let m = high_bits_mask diff in
   let br = m lxor (m lsr 1) in
   let pfx = (pa land (lnot m)) lor br in
   if pa land br == 0 then
-    Branch (pfx, a, b)
+    v (Branch (pfx, a, b))
   else
-    Branch (pfx, b, a)
+    v (Branch (pfx, b, a))
+  with Not_found -> assert false
 
+
+(*
+let rec union_nonempty pa bra ma a pb brb mb b =
+  let mshort = ma land mb in
+  if pa land mshort <> pb land mshort then
+    (* prefixes incompatible *)
+    
+  else if ma == mb then
+    (* prefixes are the same *)
+    match a, b with
+    | Branch (_, a0, a1), Branch (_, b0, b1) when pa == pb -> 
+      Branch (pa, union_nonempty a0 b0, union_nonempty a1 b1)
+    | Leaf _, Leaf _ when pa == pb -> a
+  else if mshort == ma then
+    (* A has a shorter prefix *)
+    match a with
+    | Branch (_, a0, a1) ->
+      if pb land bra == 0 then
+        Branch (pa, union_nonempty a0 b, a1)
+      else
+        Branch (pa, a0, union_nonempty a1 b)
+    | _ -> assert false
+  else
+    (* B has a shorter prefix *)
+    match b with
+    | Branch (_, b0, b1) ->
+      if pa land brb == 0 then
+        Branch (pb, union_nonempty a b0, b1)
+      else
+        Branch (pb, b0, union_nonempty a b1)
+
+    
 
 
 let rec union_nonempty a b =
@@ -195,10 +277,26 @@ let rec union_nonempty a b =
   let npa = -pa and npb = -pb in
   let bra = pa land npa and brb = pb land npb in
   let ma = pa lxor npa and mb = pb lxor npb in
+  let mshort = ma land mb in
+  match a, b with
+  | Leaf _, Leaf _ when pa = pb -> a
+  | Branch (_, a0, a1), Branch (_, b0, b1) 
+    when eqmask mshort pa pb ->
+*)    
+
+let rec union_nonempty a b =
+  verify a; verify b;
+  let pa = get_prefix a and pb = get_prefix b in
+  let npa = -pa and npb = -pb in
+  let bra = pa land npa and brb = pb land npb in
+  let ma = pa lxor npa and mb = pb lxor npb in
+  Printf.printf "%016x %016x %016x %016x\n" pa pb ma mb;
   match a, eqmask ma pa pb, b, eqmask mb pa pb with
-  | Leaf (_, xa), _, Leaf (_, xb), _ when pa = pb -> a
+  | Leaf (_, xa), _, Leaf (_, xb), _ when pa = pb -> Printf.printf "LL\n"; a
   | Branch (_, a0, a1), true, Branch (_, b0, b1), true ->
-    Branch (pa, union_nonempty a0 b0, union_nonempty a1 b1)
+    assert (pa == pb);
+    let a = v (union_nonempty a0 b0) and b = v (union_nonempty a1 b1) in
+    (try v (Branch (pa, a, b)) with Not_found -> assert false)
   | Branch (_, a0, a1), true, _, _ ->
     if pb land bra == 0
     then Branch (pa, union_nonempty a0 b, a1)
@@ -208,7 +306,8 @@ let rec union_nonempty a b =
     then Branch (pb, union_nonempty a b0, b1)
     else Branch (pb, b0, union_nonempty a b1)
   | _, _, _, _ ->
-    mk_branch (pa lxor pb) pa a b
+    Printf.printf "B!\n"; 
+    try v (mk_branch (pa lxor pb) pa a b) with Not_found -> assert false
 
 let union a b = match a, b with
   | (Branch (0, _, _), x | x, Branch (0, _, _)) -> x
@@ -301,7 +400,7 @@ let diff a b = match a, b with
 
 
 
-
+ *)
 module type IdentType = sig
   type t
   val get_id : t -> int
@@ -330,7 +429,6 @@ module type S = sig
   val min_elt : t -> elt
 end
 
-type 'a intmap = 'a t
 
 module Fake (T : IdentType) : S with type elt = T.t = struct
   module M = Set.Make (struct type t = T.t let compare x y = compare (T.get_id x) (T.get_id y) end)
@@ -355,6 +453,9 @@ end
 
 
 
+(*                                                        
+type 'a intmap = 'a t
+
 module Make (T : IdentType) : S with type elt = T.t = struct
   type t = T.t intmap
   type elt = T.t
@@ -376,7 +477,6 @@ module Make (T : IdentType) : S with type elt = T.t = struct
   let subset a b = (inter a b = a)
   let min_elt a = assert false
 end
-
 
 
 (*
@@ -493,5 +593,6 @@ let subset a b =
     cmpb land (lnot cmp_a_not_sub) != 0
 
 
+*)
 *)
 *)

@@ -3,62 +3,106 @@ type polarity = Pos | Neg
 let polneg = function Pos -> Neg | Neg -> Pos
 let polmul = function Pos -> (fun p -> p) | Neg -> polneg
 
-type 'a constructed =
-| Top
-| Unit
-| Func of 'a * 'a
-| Bot
 
-let cons_lte_p f a b =
-  match a, b with
-  | Bot, _ -> true
-  | _, Top -> true
-  | Unit, Unit -> true
-  | Func(d,r), Func(d',r') -> f Neg d' d && f Pos r r'
+(*
+
+0
+unit
+a -> b
+unit + (a -> b)
+
+
+Object types:
+
+hasA * A ??
+
+{ a : t1 } | { b : t2 } = {}
+
+{ a : t1 } | { b : t2 } = {}
+
+{ a : t1 } <: {}
+
+[ {a : t1} ] = -b + fa*[t1] + fb*T
+[ {b : t2} ] = -a + fb*[t2] + fa*T
+[ {a : t1} | {b : t2} ] = -a + -b + fa*T + fb*T
+[ {a : t1} & {b : t2} ] = fa*[t1] + fb*[t2]
+[ {} ] = -a + -b + fa*T + fb*T
+
+
+{} <: { a : t1 } | { b : t2 }
+
+
+
+{ a : t1 } & { b : t2 } = { a : t1, b : t2 }
+
+*)
+
+
+type 'a t_unit = unit
+let t_unit_join p f () () = ()
+let t_unit_lte f x y = true
+let t_unit_subs f pol () () = true
+
+type 'a t_fun = Func of 'a * 'a
+let t_fun_join p f (Func (d,r)) (Func (d',r')) = Func (f (polneg p) d d', f p r r')
+let t_fun_lte f (Func (d, r)) (Func (d', r')) = f d' d && f r r'
+let t_fun_subs f pol (Func (d, r)) (Func (d', r')) = f (polneg pol) d' d && f pol r r'
+
+let opt_join j p f x y = 
+  match x,y with
+  | None, None -> None
+  | (None, r) | (r, None) -> r
+  | (Some x, Some y) -> Some (j p f x y)
+
+type 'a constructed = Cons of ('a t_unit option) * ('a t_fun option)
+
+let cons_join p f (Cons (ux, fx)) (Cons (uy, fy)) =
+  Cons
+    (opt_join t_unit_join p f ux uy,
+     opt_join t_fun_join p f fx fy)
+
+let cons_lte_pn f x y =
+  match x, y with
+  | Cons (None, None), _ -> true
+  | Cons _, Cons (None, None) -> true
+  | Cons (None, Some x), Cons (None, Some y) -> t_fun_lte f x y
+  | Cons (Some x, None), Cons (Some y, None) -> t_unit_lte f x y
   | _, _ -> false
 
-let cons_lte f a b = cons_lte_p (fun p a b -> f a b) a b
+let opt_lte_np l f x y =
+  match x, y with
+  | Some x, Some y -> l f x y
+  | _, _ -> false
 
+let cons_lte_np f (Cons (ux, fx)) (Cons (uy, fy)) =
+  opt_lte_np t_unit_lte f ux uy ||
+    opt_lte_np t_fun_lte f fx fy
 
+let opt_lte_pp l f pol x y =
+  match x, y with
+  | Some x, Some y -> l f pol x y
+  | None, _ -> true
+  | Some _, None -> false
 
-let cons_join pol f a b =
-  match pol with
-  | Pos -> begin (* least upper bound *)
-    match a, b with
-    | Top, _ | _, Top -> Top
-    | Bot, x | x, Bot -> x
-    | Unit, Unit -> Unit
-    | Func (d,r), Func (d',r') -> 
-      Func (f (polneg pol) d d', f pol r r')
-    | Unit, Func(_,_) | Func(_,_), Unit -> Top
-  end
-  | Neg -> begin (* greatest lower bound *)
-    match a, b with
-    | Bot, _ | _, Bot -> Bot
-    | Top, x | x, Top -> x
-    | Unit, Unit -> Unit
-    | Func (d, r), Func (d', r') -> 
-      Func (f (polneg pol) d d', f pol r r')
-    | Unit, Func(_, _) | Func(_,_), Unit -> Bot
-  end
-
-let cons_name = function
-  | Top -> "Top"
-  | Unit -> "unit"
-  | Func(_,_) -> "->"
-  | Bot -> "Bot"
-
-let cons_fields = function
-  | Func (d, r) -> ["d", d; "r", r]
-  | _ -> []
-
-let pol_ident = function Pos -> Bot | Neg -> Top
+let cons_lte_subs f pol (Cons (ux, fx)) (Cons (uy, fy)) =
+  opt_lte_pp t_unit_subs f pol ux uy &&
+    opt_lte_pp t_fun_subs f pol fx fy
 
 let cons_map p f = function
-  | Top -> Top
-  | Unit -> Unit
-  | Func (d, r) -> Func (f (polneg p) d, f p r)
-  | Bot -> Bot
+  | Cons (u, Some (Func (d, r))) -> Cons (u, Some (Func (f (polneg p) d, f p r)))
+  | Cons (u, None) -> Cons (u, None)
+
+let cons_name = function
+  | Cons (None, None) -> "0"
+  | Cons (Some _, None) -> "unit"
+  | Cons (None, Some _) -> "->"
+  | Cons (Some _, Some _) -> "unit + fun"
+
+let cons_fields = function
+  | Cons (_, Some (Func (d, r))) -> ["d", d; "r", r]
+  | _ -> []
+
+let pol_ident p = Cons (None, None)
   
 
 
@@ -71,6 +115,11 @@ type 'a typeterm =
 | TAdd of 'a typeterm * 'a typeterm
 | TRec of 'a * 'a typeterm
 
+
+let ty_unit = TCons (Cons (Some (), None))
+let ty_fun d r = TCons (Cons (None, Some (Func (d, r))))
+let ty_zero = TCons (Cons (None, None))
+                       
 let string_of_var v = v
 (*  if v < 26 then String.make 1 (Char.chr (Char.code 'a' + v)) else Printf.sprintf "v_%d" (v - 26) *)
 
@@ -78,11 +127,14 @@ open Format
 
 let rec gen_print_typeterm vstr pol ppf = function 
   | TVar v -> fprintf ppf "%s" (vstr v)
-  | TCons (Func (t1, t2)) ->
+  | TCons (Cons (None, Some (Func (t1, t2)))) ->
     fprintf ppf "@[(%a ->@ %a)@]" (gen_print_typeterm vstr (polneg pol)) t1 (gen_print_typeterm vstr pol) t2
-  | TCons Top -> fprintf ppf "Top"
-  | TCons Bot -> fprintf ppf "Bot"
-  | TCons Unit -> fprintf ppf "unit"
+  | TCons (Cons (Some (), None)) ->
+     fprintf ppf "unit"
+  | TCons (Cons (Some u, Some f)) ->
+     gen_print_typeterm vstr pol ppf (TAdd (TCons (Cons (Some u, None)), TCons (Cons (None, Some f))))
+  | TCons (Cons (None, None)) ->
+     fprintf ppf "%s" (match pol with Pos -> "Bot" | Neg -> "Top")
   | TAdd (t1, t2) -> 
     let op = match pol with Pos -> "|" | Neg -> "&" in
     fprintf ppf "@[(%a %s@ %a)@]" (gen_print_typeterm vstr pol) t1 op (gen_print_typeterm vstr pol) t2
@@ -138,7 +190,7 @@ let merge s s' =
 let next_id = ref 0
 
 
-(* FIXME: Incorrect for negative recursion *)
+(* FIXME: Does not detect negative recursion *)
 let compile_terms (map : (polarity -> var typeterm -> state) -> 'a) : 'a =
   let states = ref [] in
   let mkstate pol cons = 
@@ -238,6 +290,34 @@ let garbage_collect (root : state) =
   let states = find_reachable root in
   StateSet.iter states (fun s -> s.flow <- StateSet.inter s.flow states)
 
+                
+let fresh_id_counter = ref 1000
+let fresh_id () =
+  let n = !fresh_id_counter in incr fresh_id_counter; n
+
+let clone f =
+  let states = StateTbl.create 20 in
+  let rec copy_state s =
+    if StateTbl.mem states s then StateTbl.find states s else
+      let s' = { id = fresh_id ();
+                 pol = s.pol;
+                 cons = Cons (None, None);
+                 flow = StateSet.empty } in
+      StateTbl.add states s s';
+      List.iter
+        (fun (f, ss') -> StateSet.iter ss' (fun s -> ignore (copy_state s)))
+        (cons_fields s.cons);
+      StateSet.iter s.flow (fun s -> ignore (copy_state s));
+      s' in
+  let r = f copy_state in
+  let remap_states ss = StateSet.fold_left ss StateSet.empty
+        (fun ss' s -> StateSet.add ss' (StateTbl.find states s)) in
+  StateTbl.iter (fun s_old s_new -> 
+    s_new.cons <- cons_map s_old.pol (fun p ss -> remap_states ss) s_old.cons;
+    s_new.flow <- remap_states s_old.flow) states;
+  r
+
+                
 let make_table s f =
   let t = StateTbl.create 20 in
   StateSet.iter s (fun s -> StateTbl.add t s (f s)); 
@@ -342,7 +422,7 @@ let contraction sp_orig sn_orig =
       Hashtbl.add seen (sp.id, sn.id) ();
       StateSet.iter sn.flow (fun s -> merge s sp);
       StateSet.iter sp.flow (fun s -> merge s sn);
-      cons_lte closure_l sp.cons sn.cons
+      cons_lte_pn closure_l sp.cons sn.cons
     end
   and closure_l ssp ssn =
     StateSet.fold_left ssp true (fun b sp ->
@@ -388,7 +468,7 @@ let common_var ssn ssp =
 
 let rec entailed a ssn ssp =
   let b = if antichain_ins a ssn ssp then true else
-      common_var ssn ssp || cons_lte (entailed a) (states_follow Neg ssn) (states_follow Pos ssp) in
+      common_var ssn ssp || cons_lte_np (entailed a) (states_follow Neg ssn) (states_follow Pos ssp) in
   Printf.printf "entailment: ";
   StateSet.iter ssn (fun s -> Printf.printf "%d " s.id);
   Printf.printf "/ ";
@@ -406,24 +486,40 @@ let get_def tbl key def =
 let rec subsumed map =
   let var_ant = StateTbl.create 20 in
 
-  let rec subsume s ssr =
+  let rec subsume p ssa ssb =
+    (* sum ssa <= sum ssb *)
+    match p with
+    | Pos -> StateSet.fold_left ssa true (fun b sa -> b && subsume_one sa ssb)
+    | Neg -> StateSet.fold_left ssb true (fun b sb -> b && subsume_one sb ssa)
+  and subsume_one s ssr =
     (* s+ <= ssr+ 
        or
        ssr- <= s- *)
+    Printf.printf "%d ~ %a\n%!" s.id (fun ppf xs -> StateSet.iter xs (fun x -> Printf.fprintf ppf "%d " x.id)) ssr;
     StateSet.iter ssr (fun s' -> assert (s.pol = s'.pol));
     let (ssn, ssp) = match s.pol with Pos -> (StateSet.empty, ssr) | Neg -> (ssr, StateSet.empty) in
     if antichain_ins (get_def var_ant s antichain_new) ssn ssp then true else
-      match s.pol with
-      | Pos -> cons_lte_p (fun pol' ssa ssb -> 
+      cons_lte_subs subsume s.pol s.cons (states_follow s.pol ssr) in
+
+(*
+
+                             (fun pol ssa ssb -> sub
+                            StateSet.fold_left ssa true (fun b sa -> b && subsume sa ssb))
+                           (fun ssa ssb ->
+                            StateSet.fold_left ssb true (fun b sb -> b && subsume sa ssb))
+                            
+      | Pos -> cons_lte_pp (fun pol' ssa ssb -> 
         match pol' with 
         | Pos -> StateSet.fold_left ssa true (fun b sa -> b && subsume sa ssb)
         | Neg -> StateSet.fold_left ssb true (fun b sb -> b && subsume sb ssa))
         s.cons (states_follow s.pol ssr)
-      | Neg -> cons_lte_p (fun pol' ssa ssb -> 
+      | Neg -> cons_lte_nn (fun pol' ssa ssb -> 
         match pol' with
         | Pos -> StateSet.fold_left ssb true (fun b sb -> b && subsume sb ssa) 
         | Neg -> StateSet.fold_left ssa true (fun b sa -> b && subsume sa ssb))
         (states_follow s.pol ssr) s.cons in
+ *)
+  
   
   let ent = antichain_new () in
   let check_dataflow () = 
@@ -440,7 +536,7 @@ let rec subsumed map =
         ) b !ap
       else b)) var_ant true in
   
-  map (fun s s' -> subsume s (StateSet.singleton s')) &&
+  map (fun s s' -> subsume_one s (StateSet.singleton s')) &&
     check_dataflow()
 
 

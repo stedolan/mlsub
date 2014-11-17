@@ -10,9 +10,13 @@
 %token TY_JOIN
 %token EQUALS
 %token REC
+%token LET
+%token IN
+%token ASC
 
 %token SUBSUME
-
+%token TOP
+%token BOT
 
 %right EQUALS
 %right ARROW
@@ -24,7 +28,7 @@
   open Program
 %}
 
-%start <Program.scheme> prog
+%start <Program.typing> prog
 %start <Types.var Types.typeterm> onlytype
 %start <Types.var Types.typeterm * Types.var Types.typeterm> subsumption
 
@@ -40,13 +44,27 @@
 prog:
 | e = exp; EOF { e }
 
-(* wrong *)
+
 exp:
 | FUN; v = IDENT; ARROW; e = exp 
     { let v = Symbol.intern v in
-      let var = try [SMap.find v e.environment, TVar "a"] with Not_found -> [] in
-      { environment = SMap.remove v e.environment;
-        expr = constrain ((e.expr, TVar "b") :: var) Pos (TCons (Func (TVar "a", TVar "b"))) } }
+      fun gamma ->
+      let singleton = compile_terms (fun f -> {
+          environment = SMap.singleton v (f Neg (TVar "a"));
+          expr = f Pos (TVar "a")}) in
+      let eG = e (SMap.add v singleton gamma) in
+            
+      let var = try [SMap.find v eG.environment, TVar "a"] with Not_found -> [] in
+      { environment = SMap.remove v eG.environment;
+        expr = constrain ((eG.expr, TVar "b") :: var) Pos (ty_fun (TVar "a") (TVar "b")) } }
+| LET; v = IDENT; EQUALS; e1 = exp; IN; e2 = exp
+    { let v = Symbol.intern v in
+      fun gamma ->
+      let e1G = e1 gamma in
+      let e2G = e2 (SMap.add v e1G gamma) in
+      (* CBV soundness: use e1G even if v is unused *)
+      { environment = env_join e2G.environment e1G.environment;
+        expr = e2G.expr } }
 | e = app { e }
 
 
@@ -54,17 +72,18 @@ exp:
 app:
 | t = term { t }
 | f = app; x = term 
-    { { environment = env_join f.environment x.environment;
-        expr = constrain [f.expr, TCons (Func (TVar "a", TVar "b"));
-                          x.expr, TVar "a"] Pos (TVar "b") } }
+    { fun gamma ->
+      let fG = f gamma and xG = x gamma in
+      { environment = env_join fG.environment xG.environment;
+        expr = constrain [fG.expr, ty_fun (TVar "a") (TVar "b");
+                          xG.expr, TVar "a"] Pos (TVar "b") } }
 
 term:
 | v = IDENT 
-    { compile_terms (fun f -> {
-      environment = SMap.singleton (Symbol.intern v) (f Neg (TVar "a"));
-      expr = f Pos (TVar "a")}) }
+    { fun gamma -> clone_scheme (SMap.find (Symbol.intern v) gamma) }
 | LPAR; e = exp; RPAR { e }
-
+| LPAR; e = exp; ASC; t = typeterm; RPAR { fun gamma -> ascription (e gamma) t }
+| LPAR; RPAR { fun gamma -> { environment = SMap.empty; expr = constrain [] Pos ty_unit } }
 
 
 subsumption:
@@ -73,10 +92,13 @@ subsumption:
 onlytype:
 | t = typeterm; EOF { t }
 
+
 typeterm:
 | v = IDENT { TVar v }
-| t1 = typeterm; ARROW ; t2 = typeterm  { TCons (Func (t1, t2)) }
-| UNIT { TCons Unit }
+| t1 = typeterm; ARROW ; t2 = typeterm  { ty_fun t1 t2 }
+| TOP { ty_zero }
+| BOT { ty_zero }
+| UNIT { ty_unit }
 | t1 = typeterm; meetjoin; t2 = typeterm { TAdd (t1, t2) } %prec TY_MEET
 | REC; v = IDENT; EQUALS; t = typeterm { TRec (v, t) }
 | LPAR; t = typeterm; RPAR { t }
