@@ -1,5 +1,6 @@
 This is a prototype type inferencer for an ML-like language with
-subtyping and polymorphism. Building it requires Menhir.
+subtyping and polymorphism. It's written in OCaml, and building it
+requires Menhir.
 
 It accepts lines containing programs written in a very limited subset
 of OCaml (just lambdas, unit and `let`), and spews some debugging
