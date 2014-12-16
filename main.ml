@@ -64,7 +64,8 @@ while true do
              (fun exp ->
               let s = Typecheck.typecheck SMap.empty exp in
               Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Typecheck.expr);
-              Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Typecheck.expr))
+              Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Typecheck.expr);
+              Camlgen.to_caml Format.std_formatter exp)
   (*parse_line Parser.prog (fun s -> Format.printf "%a\n%!" print_automaton s.Typecheck.expr)*)
 done
 
