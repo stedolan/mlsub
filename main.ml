@@ -10,7 +10,7 @@ let parse_line f g =
 ;;
 
 open Types;;
-open Program;;
+open Typecheck;;
 
 (*
 let automaton = (constrain (compile_terms (fun f ->
@@ -23,7 +23,7 @@ Format.printf "%a\n%a\n%!" (print_typeterm Pos) (decompile_automaton automaton) 
 (*
 parse_line Parser.prog (fun s -> 
 parse_line Parser.onlytype (fun t ->
-  let s1 = s.Program.expr in
+  let s1 = s.Typecheck.expr in
   let s2 = compile_terms (fun f -> f Pos t) in
   expand_all_flow s1;
   expand_all_flow s2;
@@ -61,11 +61,11 @@ done
 while true do
   let recomp s = decompile_automaton (compile_terms (fun f -> f Pos (decompile_automaton s))) in
   parse_line Parser.prog
-             (fun typing ->
-              let s = typing SMap.empty in
-              Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Program.expr);
-              Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Program.expr))
-  (*parse_line Parser.prog (fun s -> Format.printf "%a\n%!" print_automaton s.Program.expr)*)
+             (fun exp ->
+              let s = Typecheck.typecheck SMap.empty exp in
+              Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Typecheck.expr);
+              Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Typecheck.expr))
+  (*parse_line Parser.prog (fun s -> Format.printf "%a\n%!" print_automaton s.Typecheck.expr)*)
 done
 
 

@@ -25,20 +25,15 @@
 
 %{
   open Types 
-  open Program
+  open Typecheck
+  open Exp
 %}
 
-%start <Program.typing> prog
+%start <Exp.exp> prog
 %start <Types.var Types.typeterm> onlytype
 %start <Types.var Types.typeterm * Types.var Types.typeterm> subsumption
 
-%{
-(*  let env_join = Intmap.union_with (fun a b -> constrain [a, TVar "a"; b, TVar "a"] Neg (TVar "a")) *)
-  let env_join = SMap.merge (fun k a b -> match a, b with
-    | (None, x) | (x, None) -> x
-    | Some a, Some b ->
-      Some (constrain [a, TVar "a"; b, TVar "a"] Neg (TVar "a")))
-%}
+
 %%
 
 prog:
@@ -47,43 +42,29 @@ prog:
 
 exp:
 | FUN; v = IDENT; ARROW; e = exp 
-    { let v = Symbol.intern v in
-      fun gamma ->
-      let singleton = compile_terms (fun f -> {
-          environment = SMap.singleton v (f Neg (TVar "a"));
-          expr = f Pos (TVar "a")}) in
-      let eG = e (SMap.add v singleton gamma) in
-            
-      let var = try [SMap.find v eG.environment, TVar "a"] with Not_found -> [] in
-      { environment = SMap.remove v eG.environment;
-        expr = constrain ((eG.expr, TVar "b") :: var) Pos (ty_fun (TVar "a") (TVar "b")) } }
+    { Lambda (Symbol.intern v, e) }
 | LET; v = IDENT; EQUALS; e1 = exp; IN; e2 = exp
-    { let v = Symbol.intern v in
-      fun gamma ->
-      let e1G = e1 gamma in
-      let e2G = e2 (SMap.add v e1G gamma) in
-      (* CBV soundness: use e1G even if v is unused *)
-      { environment = env_join e2G.environment e1G.environment;
-        expr = e2G.expr } }
-| e = app { e }
-
+    { Let (Symbol.intern v, e1, e2) }
+| e = app
+    { e }
 
 
 app:
-| t = term { t }
+| t = term
+    { t }
 | f = app; x = term 
-    { fun gamma ->
-      let fG = f gamma and xG = x gamma in
-      { environment = env_join fG.environment xG.environment;
-        expr = constrain [fG.expr, ty_fun (TVar "a") (TVar "b");
-                          xG.expr, TVar "a"] Pos (TVar "b") } }
+    { App (f, x) }
+
 
 term:
 | v = IDENT 
-    { fun gamma -> clone_scheme (SMap.find (Symbol.intern v) gamma) }
-| LPAR; e = exp; RPAR { e }
-| LPAR; e = exp; ASC; t = typeterm; RPAR { fun gamma -> ascription (e gamma) t }
-| LPAR; RPAR { fun gamma -> { environment = SMap.empty; expr = constrain [] Pos ty_unit } }
+    { Var (Symbol.intern v) }
+| LPAR; e = exp; RPAR
+    { e }
+| LPAR; e = exp; ASC; t = typeterm; RPAR
+    { Ascription (e, t) }
+| LPAR; RPAR
+    { Unit }
 
 
 subsumption:
