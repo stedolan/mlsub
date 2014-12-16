@@ -6,7 +6,7 @@ exception SyntaxError of string
 }
 
 
-let int = '-'? ['0'-'9'] ['0'-'9']*
+let int = ['1'-'9'] ['0'-'9']*
 
 
 let digit = ['0'-'9']
@@ -25,6 +25,10 @@ rule read =
   | "->"     { ARROW }
   | "("      { LPAR }
   | ")"      { RPAR }
+  | "{"      { LBRACE }
+  | "}"      { RBRACE }
+  | ","      { COMMA }
+  | "."      { DOT }
   | "|"      { TY_JOIN }
   | "&"      { TY_MEET }
   | ":"      { ASC }
@@ -38,4 +42,5 @@ rule read =
   | "let"    { LET }
   | "in"     { IN }
   | id       { IDENT (Lexing.lexeme lexbuf) }
+  | int      { INT (int_of_string (Lexing.lexeme lexbuf)) }
   | eof      { EOF }

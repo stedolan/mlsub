@@ -57,15 +57,28 @@ done
 
    *)
 
+let run exp =
+  let (name, chan) = Filename.open_temp_file ~mode:[Open_wronly] "tmp" "ml" in
+  Camlgen.to_caml (Format.formatter_of_out_channel chan) exp;
+  close_out chan;
+  ignore (Sys.command ("cat "^name ^"; ocaml " ^ name));
+  Sys.remove name
+
+;;
 
 while true do
   let recomp s = decompile_automaton (compile_terms (fun f -> f Pos (decompile_automaton s))) in
   parse_line Parser.prog
              (fun exp ->
-              let s = Typecheck.typecheck SMap.empty exp in
-              Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Typecheck.expr);
-              Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Typecheck.expr);
-              Camlgen.to_caml Format.std_formatter exp)
+              (try
+                let s = Typecheck.typecheck SMap.empty exp in
+                Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Typecheck.expr);
+                Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Typecheck.expr)
+              with
+              | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
+              | Not_found -> Format.printf "Typechecking failed: Not_found\n%!"
+              | Match_failure (file, line, col) -> Format.printf "Match failure in typechecker at %s:%d%d\n%!" file line col);
+              run exp)
   (*parse_line Parser.prog (fun s -> Format.printf "%a\n%!" print_automaton s.Typecheck.expr)*)
 done
 

@@ -1,10 +1,14 @@
 %token <string> IDENT
+%token <int> INT
 %token ARROW
 %token FUN
 
 %token EOF
 %token LPAR
 %token RPAR
+%token LBRACE
+%token RBRACE
+%token COMMA
 %token UNIT
 %token TY_MEET
 %token TY_JOIN
@@ -13,6 +17,7 @@
 %token LET
 %token IN
 %token ASC
+%token DOT
 
 %token SUBSUME
 %token TOP
@@ -65,7 +70,18 @@ term:
     { Ascription (e, t) }
 | LPAR; RPAR
     { Unit }
+| LBRACE; o = obj; RBRACE
+    { Object o }
+| e = term; DOT; f = IDENT
+    { GetField (e, Symbol.intern f) }
+| i = INT
+    { Int i }
 
+obj:
+| v = IDENT; EQUALS; e = exp
+    { [Symbol.intern v, e] }
+| v = IDENT; EQUALS; e = exp; COMMA; o = obj
+    { (Symbol.intern v, e) :: o }
 
 subsumption:
 | t1 = typeterm; SUBSUME; t2 = typeterm; EOF { (t1, t2) }
