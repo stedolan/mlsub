@@ -3,122 +3,181 @@ type polarity = Pos | Neg
 let polneg = function Pos -> Neg | Neg -> Pos
 let polmul = function Pos -> (fun p -> p) | Neg -> polneg
 
+(* FIXME *)
+module SMap = Map.Make (struct type t = int let compare = compare end)
 
-(*
-
-0
-unit
-a -> b
-unit + (a -> b)
-
-
-Object types:
-
-hasA * A ??
-
-{ a : t1 } | { b : t2 } = {}
-
-{ a : t1 } | { b : t2 } = {}
-
-{ a : t1 } <: {}
-
-[ {a : t1} ] = -b + fa*[t1] + fb*T
-[ {b : t2} ] = -a + fb*[t2] + fa*T
-[ {a : t1} | {b : t2} ] = -a + -b + fa*T + fb*T
-[ {a : t1} & {b : t2} ] = fa*[t1] + fb*[t2]
-[ {} ] = -a + -b + fa*T + fb*T
-
-
-{} <: { a : t1 } | { b : t2 }
-
-
-
-{ a : t1 } & { b : t2 } = { a : t1, b : t2 }
-
-*)
-
-
-type 'a t_unit = unit
-let t_unit_join p f () () = ()
-let t_unit_lte f x y = true
-let t_unit_subs f pol () () = true
-
-type 'a t_fun = Func of 'a * 'a
-let t_fun_join p f (Func (d,r)) (Func (d',r')) = Func (f (polneg p) d d', f p r r')
-let t_fun_lte f (Func (d, r)) (Func (d', r')) = f d' d && f r r'
-let t_fun_subs f pol (Func (d, r)) (Func (d', r')) = f (polneg pol) d' d && f pol r r'
-
-let opt_join j p f x y = 
-  match x,y with
-  | None, None -> None
-  | (None, r) | (r, None) -> r
-  | (Some x, Some y) -> Some (j p f x y)
-
-type 'a constructed = Cons of ('a t_unit option) * ('a t_fun option)
-
-let cons_join p f (Cons (ux, fx)) (Cons (uy, fy)) =
-  Cons
-    (opt_join t_unit_join p f ux uy,
-     opt_join t_fun_join p f fx fy)
-
-let cons_lte_pn f x y =
-  match x, y with
-  | Cons (None, None), _ -> true
-  | Cons _, Cons (None, None) -> true
-  | Cons (None, Some x), Cons (None, Some y) -> t_fun_lte f x y
-  | Cons (Some x, None), Cons (Some y, None) -> t_unit_lte f x y
-  | _, _ -> false
-
-let opt_lte_np l f x y =
-  match x, y with
-  | Some x, Some y -> l f x y
-  | _, _ -> false
-
-let cons_lte_np f (Cons (ux, fx)) (Cons (uy, fy)) =
-  opt_lte_np t_unit_lte f ux uy ||
-    opt_lte_np t_fun_lte f fx fy
-
-let opt_lte_pp l f pol x y =
-  match x, y with
-  | Some x, Some y -> l f pol x y
-  | None, _ -> true
-  | Some _, None -> false
-
-let cons_lte_subs f pol (Cons (ux, fx)) (Cons (uy, fy)) =
-  opt_lte_pp t_unit_subs f pol ux uy &&
-    opt_lte_pp t_fun_subs f pol fx fy
-
-let cons_map p f = function
-  | Cons (u, Some (Func (d, r))) -> Cons (u, Some (Func (f (polneg p) d, f p r)))
-  | Cons (u, None) -> Cons (u, None)
-
-let cons_name = function
-  | Cons (None, None) -> "0"
-  | Cons (Some _, None) -> "unit"
-  | Cons (None, Some _) -> "->"
-  | Cons (Some _, Some _) -> "unit + fun"
-
-let cons_fields = function
-  | Cons (_, Some (Func (d, r))) -> ["d", d; "r", r]
-  | _ -> []
-
-let pol_ident p = Cons (None, None)
+type 'a printer = Format.formatter -> 'a -> unit
+let print_to_string (pr : 'a printer) (x : 'a) : string =
+  let buf = Buffer.create 100 in
+  let ppf = Format.formatter_of_buffer buf in
+  Format.fprintf ppf "%a%!" pr x;
+  Buffer.contents buf
   
 
+module type FEATURE = sig
+    type 'a t
+    val join : polarity -> (polarity -> 'a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
+    val lte : polarity -> (polarity -> 'a -> 'a -> bool) -> 'a t -> 'a t -> bool
+    val pmap : (polarity -> 'a -> 'b) -> polarity -> 'a t -> 'b t
+
+    val print : (polarity -> 'a printer) -> polarity -> 'a t printer
+    val list_fields : 'a t -> (string * 'a) list
+  end
+
+module Unit = struct
+  type 'a t = unit
+  let join p f () () = ()
+  let lte p f () () = true
+
+  let pmap f pol () = ()
+
+  let print pr pol ppf () = Format.fprintf ppf "unit"
+  let list_fields () = []
+end
+
+module Func = struct
+  type 'a t = Func of 'a * 'a
+  let join p f (Func (d,r)) (Func (d',r')) = Func (f (polneg p) d d', f p r r')
+  let lte pol f (Func (d, r)) (Func (d', r')) = f (polneg pol) d' d && f pol r r'
+
+  let pmap f pol (Func (d, r)) = Func (f (polneg pol) d, f pol r)
+
+  let print pr pol ppf (Func (d, r)) =
+    Format.fprintf ppf "%a -> %a" (pr (polneg pol)) d (pr pol) r
+  let list_fields (Func (d, r)) = ["d", d; "r", r]
+end
+
+module type TYPES = sig
+    type 'a t
+    val join : polarity -> (polarity -> 'a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
+    val join_ident : 'a t
+    val lte_pn : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
+    val lte_np : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
+    val subs : polarity -> (polarity -> 'a -> 'a -> bool) -> 'a t -> 'a t -> bool
+
+    val pmap : (polarity -> 'a -> 'b) -> polarity -> 'a t -> 'b t
+
+    val print_first : (polarity -> 'a printer) -> polarity -> 'a t printer
+    val print_rest : (polarity -> 'a printer) -> polarity -> 'a t printer
+    val list_fields : 'a t -> (string * 'a) list
+  end
+
+module Nil : TYPES = struct
+  type 'a t = unit
+  let join p f () () = ()
+  let join_ident = ()
+  let lte_pn f () () = true
+  let lte_np f () () = false
+  let subs p f () () = true
+
+  let pmap f pol () = ()
+
+  let print_first pr pol ppf () = 
+    Format.fprintf ppf "%s" (match pol with Pos -> "Bot" | Neg -> "Top")
+  let print_rest  pr pol ppf () = ()
+  let list_fields () = []
+end
+
+module Cons (A : FEATURE) (Tail : TYPES) = struct
+  module Tail = Tail
+
+  type 'a t =
+    | Present of 'a A.t * 'a Tail.t
+    | Absent of 'a Tail.t
+
+  let join p f x y =
+    match x, y with
+    | Present (xa, xt), Present (ya, yt) ->
+       Present (A.join p f xa ya, Tail.join p f xt yt)
+    | Present (a, xt), Absent yt
+    | Absent xt, Present (a, yt) ->
+       Present (a, Tail.join p f xt yt)
+    | Absent xt, Absent yt ->
+       Absent (Tail.join p f xt yt)
+
+  let join_ident =
+    Absent Tail.join_ident
+
+  let lte_pn f x y =
+    let iszero p t = Tail.subs p (fun x -> assert false) t Tail.join_ident in
+    (* lub X <= glb Y *)
+    (* i.e. forall i,j, Xi <= Yj *)
+    match x, y with
+    | Present (xa, xt), Present (ya, yt) ->
+       A.lte Pos (fun p -> f) xa ya && 
+         iszero Pos xt && iszero Neg yt
+    | Present (_, xt), Absent yt ->
+       iszero Neg yt
+    | Absent xt, Present (_, yt) ->
+       iszero Pos xt
+    | Absent xt, Absent yt ->
+       Tail.lte_pn f xt yt
+
+  let lte_np f x y =
+    match x, y with
+    | Present (xa, xt), Present (ya, yt) ->
+       A.lte Pos (fun p -> f) xa ya || Tail.lte_np f xt yt
+    | Present (_, xt), Absent yt
+    | Absent xt, Present (_, yt)
+    | Absent xt, Absent yt ->
+      Tail.lte_np f xt yt
+
+  let subs pol f x y =
+    match x, y with
+    | Present (xa, xt), Present (ya, yt) ->
+       A.lte pol f xa ya && Tail.subs pol f xt yt
+    | Present (xa, xt), Absent yt ->
+       false
+    | Absent xt, (Present (_, yt) | Absent yt) ->
+       Tail.subs pol f xt yt
+
+
+  let pmap f pol = function
+    | Absent t -> Absent (Tail.pmap f pol t)
+    | Present (a, t) -> Present (A.pmap f pol a, Tail.pmap f pol t)
+
+  let lift x = Present (x, Tail.join_ident)
+
+  let print_rest pr pol ppf = function
+    | Absent t -> Tail.print_rest pr pol ppf t
+    | Present (a, t) ->
+       let sep = match pol with Pos -> "|" | Neg -> "&" in
+       Format.fprintf ppf "@ %s@ %a%a" sep (A.print pr pol) a (Tail.print_rest pr pol) t
+
+  let print_first pr pol ppf = function
+    | Absent t -> Tail.print_first pr pol ppf t
+    | Present (a, t) ->
+       Format.fprintf ppf "%a%a" (A.print pr pol) a (Tail.print_rest pr pol) t
+
+  let list_fields = function
+    | Present (a, t) -> A.list_fields a @ Tail.list_fields t
+    | Absent t -> Tail.list_fields t
+end
+
+
+module Ty1 = Cons (Func) (Nil)
+module TypeLat = Cons (Unit) (Ty1)
+
+let cons_unit x : 'a TypeLat.t = 
+  TypeLat.lift x
+let cons_func f : 'a TypeLat.t = 
+  TypeLat.Absent (Ty1.lift f)
+
+let cons_name pol = print_to_string (TypeLat.print_first (fun pol ppf x -> ()) pol)
 
 
 type var = string
 
 type 'a typeterm = 
 | TVar of 'a
-| TCons of ('a typeterm) constructed
+| TCons of ('a typeterm) TypeLat.t
 | TAdd of 'a typeterm * 'a typeterm
 | TRec of 'a * 'a typeterm
 
 
-let ty_unit = TCons (Cons (Some (), None))
-let ty_fun d r = TCons (Cons (None, Some (Func (d, r))))
-let ty_zero = TCons (Cons (None, None))
+let ty_unit () = TCons (cons_unit ())
+let ty_fun d r = TCons (cons_func (Func.Func (d, r)))
+let ty_zero = TCons (TypeLat.join_ident)
                        
 let string_of_var v = v
 (*  if v < 26 then String.make 1 (Char.chr (Char.code 'a' + v)) else Printf.sprintf "v_%d" (v - 26) *)
@@ -127,14 +186,8 @@ open Format
 
 let rec gen_print_typeterm vstr pol ppf = function 
   | TVar v -> fprintf ppf "%s" (vstr v)
-  | TCons (Cons (None, Some (Func (t1, t2)))) ->
-    fprintf ppf "@[(%a ->@ %a)@]" (gen_print_typeterm vstr (polneg pol)) t1 (gen_print_typeterm vstr pol) t2
-  | TCons (Cons (Some (), None)) ->
-     fprintf ppf "unit"
-  | TCons (Cons (Some u, Some f)) ->
-     gen_print_typeterm vstr pol ppf (TAdd (TCons (Cons (Some u, None)), TCons (Cons (None, Some f))))
-  | TCons (Cons (None, None)) ->
-     fprintf ppf "%s" (match pol with Pos -> "Bot" | Neg -> "Top")
+  | TCons cons ->
+     fprintf ppf "@[(%a)@]" (TypeLat.print_first (gen_print_typeterm vstr) pol) cons
   | TAdd (t1, t2) -> 
     let op = match pol with Pos -> "|" | Neg -> "&" in
     fprintf ppf "@[(%a %s@ %a)@]" (gen_print_typeterm vstr pol) t1 op (gen_print_typeterm vstr pol) t2
@@ -152,13 +205,13 @@ module rec State : sig
   type state = 
     { id : state_id;
       pol : polarity;
-      mutable cons : StateSet.t constructed;
+      mutable cons : StateSet.t TypeLat.t;
       mutable flow : StateSet.t }
 end = struct
   type state =
     { id : state_id;
       pol : polarity;
-      mutable cons : StateSet.t constructed;
+      mutable cons : StateSet.t TypeLat.t;
       mutable flow : StateSet.t }
 end
 and StateSet : Intmap.S with type elt = State.state = 
@@ -178,7 +231,7 @@ let state_cons_join p x y =
     StateSet.iter x (fun s -> assert (s.pol = p));
     StateSet.iter y (fun s -> assert (s.pol = p));
     StateSet.union x y in
-  cons_join p merge x y
+  TypeLat.join p merge x y
 
 let merge s s' =
   assert (s.pol = s'.pol);
@@ -202,17 +255,17 @@ let compile_terms (map : (polarity -> var typeterm -> state) -> 'a) : 'a =
     | TVar v -> (
       try VarMap.find v r
       with Not_found ->
-        (let s = mkstate p (pol_ident p) in
+        (let s = mkstate p TypeLat.join_ident in
          StateTbl.add state_vars s v; s))
-    | TCons c -> mkstate p (cons_map p (fun p t -> StateSet.singleton (compile r p t)) c) 
+    | TCons c -> mkstate p (TypeLat.pmap (fun p t -> StateSet.singleton (compile r p t)) p c) 
     | TAdd (t1, t2) ->
       let s1, s2 = compile r p t1, compile r p t2 in
-      let s = mkstate p (pol_ident p) in
+      let s = mkstate p TypeLat.join_ident in
       StateTbl.add epsilon_trans s s1;
       StateTbl.add epsilon_trans s s2;
       s
     | TRec (v, t) ->
-      let s = mkstate p (pol_ident p) in
+      let s = mkstate p TypeLat.join_ident in
       let s' = compile (VarMap.add v s r) p t in
       StateTbl.add epsilon_trans s s';
       s in
@@ -254,13 +307,13 @@ let print_automaton ppf (root : state) =
   let rec dump s =
     if StateTbl.mem dumped s then () else begin
       StateTbl.add dumped s s;
-      fprintf ppf "%a [label=\"%s (%d)\"];\n" pstate s (cons_name s.cons) s.id;
+      fprintf ppf "%a [label=\"%s (%d)\"];\n" pstate s (cons_name s.pol s.cons) s.id;
       List.iter (fun (f, ss') -> 
         StateSet.iter ss'
           (fun s' -> 
             fprintf ppf "%a -> %a [label=\"%s\"];\n" pstate s pstate s' f;
             dump s'))
-        (cons_fields s.cons)
+        (TypeLat.list_fields s.cons)
     end in
   fprintf ppf "digraph {\n";
   (* dump structural constraints *)
@@ -281,7 +334,7 @@ let rec find_reachable (root : state) =
       StateTbl.add states s ();
       List.iter
         (fun (f, ss') -> StateSet.iter ss' search)
-      (cons_fields s.cons)
+      (TypeLat.list_fields s.cons)
     end in
   search root;
   StateTbl.fold (fun s _ m -> StateSet.add m s) states StateSet.empty
@@ -301,19 +354,19 @@ let clone f =
     if StateTbl.mem states s then StateTbl.find states s else
       let s' = { id = fresh_id ();
                  pol = s.pol;
-                 cons = Cons (None, None);
+                 cons = TypeLat.join_ident;
                  flow = StateSet.empty } in
       StateTbl.add states s s';
       List.iter
         (fun (f, ss') -> StateSet.iter ss' (fun s -> ignore (copy_state s)))
-        (cons_fields s.cons);
+        (TypeLat.list_fields s.cons);
       StateSet.iter s.flow (fun s -> ignore (copy_state s));
       s' in
   let r = f copy_state in
   let remap_states ss = StateSet.fold_left ss StateSet.empty
         (fun ss' s -> StateSet.add ss' (StateTbl.find states s)) in
   StateTbl.iter (fun s_old s_new -> 
-    s_new.cons <- cons_map s_old.pol (fun p ss -> remap_states ss) s_old.cons;
+    s_new.cons <- TypeLat.pmap (fun p ss -> remap_states ss) s_old.pol s_old.cons;
     s_new.flow <- remap_states s_old.flow) states;
   r
 
@@ -386,10 +439,10 @@ let decompile_automaton (root : state) : var typeterm =
 
 
   let rec term_add p = function
-    | [] -> TCons (pol_ident p)
+    | [] -> TCons TypeLat.join_ident
     | [t] -> t
     | (t :: ts) ->
-      if t = TCons (pol_ident p) then term_add p ts else
+      if t = TCons TypeLat.join_ident then term_add p ts else
         TAdd (t, term_add p ts) in
 
   let state_rec_var = StateTbl.create 20 in
@@ -401,7 +454,7 @@ let decompile_automaton (root : state) : var typeterm =
     else
       let vars = StateTbl.find_all state_vars s in
       StateTbl.add state_rec_var s None;
-      let t = cons_map s.pol (fun p' ss' -> term_add p' (List.map decompile (StateSet.to_list ss'))) s.cons in
+      let t = TypeLat.pmap (fun p' ss' -> term_add p' (List.map decompile (StateSet.to_list ss'))) s.pol s.cons in
       let tv = term_add s.pol (TCons t :: vars) in
       let visited = StateTbl.find state_rec_var s in
       StateTbl.remove state_rec_var s;
@@ -422,7 +475,7 @@ let contraction sp_orig sn_orig =
       Hashtbl.add seen (sp.id, sn.id) ();
       StateSet.iter sn.flow (fun s -> merge s sp);
       StateSet.iter sp.flow (fun s -> merge s sn);
-      cons_lte_pn closure_l sp.cons sn.cons
+      TypeLat.lte_pn closure_l sp.cons sn.cons
     end
   and closure_l ssp ssn =
     StateSet.fold_left ssp true (fun b sp ->
@@ -446,7 +499,7 @@ let rec expand_flow sn sp =
   assert (sp.pol = Pos);
   sn.flow <- StateSet.add sn.flow sp;
   sp.flow <- StateSet.add sp.flow sn;
-  ignore (cons_join Pos (fun p a b ->
+  ignore (TypeLat.join Pos (fun p a b ->
     match p with
     | Pos -> expand_flows a b; StateSet.empty
     | Neg -> expand_flows b a; StateSet.empty) sn.cons sp.cons)
@@ -459,8 +512,8 @@ let expand_all_flow s =
   
     
 
-let states_follow p (s : StateSet.t) : StateSet.t constructed =
-  StateSet.fold_left s (pol_ident p) (fun c s -> cons_join p (fun p a b -> StateSet.union a b) c s.cons)
+let states_follow p (s : StateSet.t) : StateSet.t TypeLat.t =
+  StateSet.fold_left s TypeLat.join_ident (fun c s -> TypeLat.join p (fun p a b -> StateSet.union a b) c s.cons)
 
 let common_var ssn ssp =
   let flow ss = StateSet.fold_left ss StateSet.empty (fun c s -> StateSet.union c s.flow) in
@@ -468,7 +521,7 @@ let common_var ssn ssp =
 
 let rec entailed a ssn ssp =
   let b = if antichain_ins a ssn ssp then true else
-      common_var ssn ssp || cons_lte_np (entailed a) (states_follow Neg ssn) (states_follow Pos ssp) in
+      common_var ssn ssp || TypeLat.lte_np (entailed a) (states_follow Neg ssn) (states_follow Pos ssp) in
   Printf.printf "entailment: ";
   StateSet.iter ssn (fun s -> Printf.printf "%d " s.id);
   Printf.printf "/ ";
@@ -499,7 +552,7 @@ let rec subsumed map =
     StateSet.iter ssr (fun s' -> assert (s.pol = s'.pol));
     let (ssn, ssp) = match s.pol with Pos -> (StateSet.empty, ssr) | Neg -> (ssr, StateSet.empty) in
     if antichain_ins (get_def var_ant s antichain_new) ssn ssp then true else
-      cons_lte_subs subsume s.pol s.cons (states_follow s.pol ssr) in
+      TypeLat.subs s.pol subsume s.cons (states_follow s.pol ssr) in
 
 (*
 

@@ -66,4 +66,4 @@ let rec typecheck gamma = function
      ascription (typecheck gamma e) ty
        
   | Unit -> 
-     { environment = SMap.empty; expr = constrain [] Pos ty_unit }
+     { environment = SMap.empty; expr = constrain [] Pos (ty_unit ()) }

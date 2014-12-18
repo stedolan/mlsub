@@ -95,7 +95,7 @@ typeterm:
 | t1 = typeterm; ARROW ; t2 = typeterm  { ty_fun t1 t2 }
 | TOP { ty_zero }
 | BOT { ty_zero }
-| UNIT { ty_unit }
+| UNIT { ty_unit () }
 | t1 = typeterm; meetjoin; t2 = typeterm { TAdd (t1, t2) } %prec TY_MEET
 | REC; v = IDENT; EQUALS; t = typeterm { TRec (v, t) }
 | LPAR; t = typeterm; RPAR { t }
