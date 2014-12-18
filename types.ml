@@ -47,6 +47,36 @@ module Func = struct
   let list_fields (Func (d, r)) = ["d", d; "r", r]
 end
 
+module Object = struct
+  type 'a t = 'a SMap.t
+  let join p f x y =
+    let m = match p with
+      | Pos -> fun k x y -> (match x, y with
+                             | Some x, Some y -> Some (f Pos x y)
+                             | _, _ -> None)
+      | Neg -> fun k x y -> (match x, y with
+                             | Some x, Some y -> Some (f Neg x y)
+                             | Some a, None
+                             | None, Some a -> Some a
+                             | None, None -> None) in
+    SMap.merge m x y
+  let lte pol f x y =
+    SMap.for_all (fun k yk -> SMap.mem k x && f pol (SMap.find k x) yk) y
+
+  let pmap f pol o = SMap.map (f pol) o
+
+  let list_fields o = List.map (fun (k, v) -> (Symbol.to_string k, v)) (SMap.bindings o)
+
+  let print pr pol ppf o =
+    let rec pfield ppf = function
+      | [] -> ()
+      | [f, x] ->
+         Format.fprintf ppf "%s :@ %a" f (pr pol) x
+      | (f, x) :: xs ->
+         Format.fprintf ppf "%s :@ %a,@ %a" f (pr pol) x pfield xs in
+    Format.fprintf ppf "{%a}" pfield (list_fields o)
+end
+
 module type TYPES = sig
     type 'a t
     val join : polarity -> (polarity -> 'a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
@@ -155,13 +185,16 @@ module Cons (A : FEATURE) (Tail : TYPES) = struct
 end
 
 
-module Ty1 = Cons (Func) (Nil)
+module Ty2 = Cons (Object) (Nil)
+module Ty1 = Cons (Func) (Ty2)
 module TypeLat = Cons (Unit) (Ty1)
 
 let cons_unit x : 'a TypeLat.t = 
   TypeLat.lift x
 let cons_func f : 'a TypeLat.t = 
   TypeLat.Absent (Ty1.lift f)
+let cons_object o : 'a TypeLat.t =
+  TypeLat.Absent (Ty1.Absent (Ty2.lift o))
 
 let cons_name pol = print_to_string (TypeLat.print_first (fun pol ppf x -> ()) pol)
 
@@ -178,6 +211,7 @@ type 'a typeterm =
 let ty_unit () = TCons (cons_unit ())
 let ty_fun d r = TCons (cons_func (Func.Func (d, r)))
 let ty_zero = TCons (TypeLat.join_ident)
+let ty_obj o = TCons (cons_object o)
                        
 let string_of_var v = v
 (*  if v < 26 then String.make 1 (Char.chr (Char.code 'a' + v)) else Printf.sprintf "v_%d" (v - 26) *)

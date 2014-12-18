@@ -67,3 +67,20 @@ let rec typecheck gamma = function
        
   | Unit -> 
      { environment = SMap.empty; expr = constrain [] Pos (ty_unit ()) }
+
+  | Object o ->
+     let (env, fields) = List.fold_right (fun (s, e) (env, fields) ->
+        let {environment = env'; expr = expr'} = typecheck gamma e in
+        (env_join env env', (s, expr') :: fields)) o (SMap.empty, []) in
+     let constraints = List.map (fun (sym, ty) -> 
+        (ty, TVar (Symbol.to_string sym))) fields in
+     let o = List.fold_right (fun (sym, ty) o ->
+        Types.SMap.add sym (TVar (Symbol.to_string sym)) o) fields Types.SMap.empty in
+     { environment = env; expr = constrain constraints Pos (ty_obj o) }
+
+  | GetField (e, field) ->
+     let e_ty = typecheck gamma e in
+     { environment = e_ty.environment;
+       expr = constrain [e_ty.expr,
+                         ty_obj (Types.SMap.singleton field (TVar "a"))]
+                        Pos (TVar "a") }
