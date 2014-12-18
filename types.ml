@@ -525,24 +525,6 @@ let antichain_ins (a : antichain) ssn ssp =
     true
   else
     (a := (ssn,ssp) :: !a; false)
-
-
-let rec expand_flow sn sp =
-  Printf.printf "expanding flow %d %d\n" sn.id sp.id;
-  assert (sn.pol = Neg);
-  assert (sp.pol = Pos);
-  sn.flow <- StateSet.add sn.flow sp;
-  sp.flow <- StateSet.add sp.flow sn;
-  ignore (TypeLat.join Pos (fun p a b ->
-    match p with
-    | Pos -> expand_flows a b; StateSet.empty
-    | Neg -> expand_flows b a; StateSet.empty) sn.cons sp.cons)
-and expand_flows ssn ssp =
-  StateSet.iter ssn (fun sn -> StateSet.iter ssp (fun sp -> expand_flow sn sp))
-
-let expand_all_flow s =
-  StateSet.iter (find_reachable s) (fun s -> 
-    if s.pol = Neg then StateSet.iter s.flow (fun s' -> expand_flow s s'))
   
     
 
