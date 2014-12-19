@@ -7,6 +7,8 @@ type exp =
   | Ascription of exp * Types.var Types.typeterm
   | Unit
   | Int of int
+  | Bool of bool
+  | If of exp * exp * exp
   | Object of (Symbol.t * exp) list
   | GetField of exp * Symbol.t
 

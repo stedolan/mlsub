@@ -6,6 +6,7 @@ type caml_exp =
   | CAlloc of caml_exp array
   | CGetField of caml_exp * caml_exp
   | CRaw of string
+  | CIf of caml_exp * caml_exp * caml_exp
   | CInt of int
 
 
@@ -41,6 +42,10 @@ let rec lower g = function
      CRaw "()"
   | Int n ->
      CInt n
+  | Bool b ->
+     CRaw (string_of_bool b)
+  | If (c, t, f) ->
+     CIf (lower g c, lower g t, lower g f)
   | Object fields ->
      let dict = add_global g "dict" (obj_shape 1 fields)
         (fun shape ->
@@ -75,8 +80,12 @@ let rec emit_caml ppf = function
      fprintf ppf "@[%a.(%a)@]" emit_caml exp emit_caml field
   | CInt n ->
      fprintf ppf "!(%d)" n
+  | CIf (c, t, f) ->
+     fprintf ppf "if !(%a)@ then !(%a)@ else !(%a)"
+             print_caml c print_caml t print_caml f
   | CRaw s ->
      fprintf ppf "%s" s
+
 and print_caml ppf e =
   fprintf ppf "@[<v 2>%a@]" emit_caml e
 

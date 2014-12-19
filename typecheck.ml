@@ -71,6 +71,18 @@ let rec typecheck gamma = function
   | Int n ->
      { environment = SMap.empty; expr = constrain [] Pos (ty_base (Symbol.intern "int")) }
 
+  | Bool b ->
+     { environment = SMap.empty; expr = constrain [] Pos (ty_base (Symbol.intern "bool")) }
+
+  | If (cond, tcase, fcase) ->
+     let {environment = envC; expr = exprC} = typecheck gamma cond in
+     let {environment = envT; expr = exprT} = typecheck gamma tcase in
+     let {environment = envF; expr = exprF} = typecheck gamma fcase in
+     { environment = env_join envC (env_join envT envF);
+       expr = constrain [exprC, ty_base (Symbol.intern "bool");
+                         exprT, TVar "a";
+                         exprF, TVar "a"] Pos (TVar "a") }
+
   | Object o ->
      let (env, fields) = List.fold_right (fun (s, e) (env, fields) ->
         let {environment = env'; expr = expr'} = typecheck gamma e in

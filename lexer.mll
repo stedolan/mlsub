@@ -41,6 +41,11 @@ rule read =
   | "unit"   { UNIT }
   | "let"    { LET }
   | "in"     { IN }
+  | "true"   { TRUE }
+  | "false"  { FALSE }
+  | "if"     { IF }
+  | "then"   { THEN }
+  | "else"   { ELSE }
   | id       { IDENT (Lexing.lexeme lexbuf) }
   | int      { INT (int_of_string (Lexing.lexeme lexbuf)) }
   | eof      { EOF }

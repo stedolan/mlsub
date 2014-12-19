@@ -18,6 +18,11 @@
 %token IN
 %token ASC
 %token DOT
+%token TRUE
+%token FALSE
+%token IF
+%token THEN
+%token ELSE
 
 %token SUBSUME
 %token TOP
@@ -50,6 +55,8 @@ exp:
     { Lambda (Symbol.intern v, e) }
 | LET; v = IDENT; EQUALS; e1 = exp; IN; e2 = exp
     { Let (Symbol.intern v, e1, e2) }
+| IF; cond = exp; THEN; tcase = exp; ELSE; fcase = exp
+    { If (cond, tcase, fcase) }
 | e = app
     { e }
 
@@ -76,6 +83,11 @@ term:
     { GetField (e, Symbol.intern f) }
 | i = INT
     { Int i }
+| TRUE
+    { Bool true }
+| FALSE
+    { Bool false }
+
 
 obj:
 | v = IDENT; EQUALS; e = exp
