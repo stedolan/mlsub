@@ -24,17 +24,6 @@ module type FEATURE = sig
     val list_fields : 'a t -> (string * 'a) list
   end
 
-module Unit = struct
-  type 'a t = unit
-  let join p f () () = ()
-  let lte p f () () = true
-
-  let pmap f pol () = ()
-
-  let print pr pol ppf () = Format.fprintf ppf "unit"
-  let list_fields () = []
-end
-
 module Func = struct
   type 'a t = Func of 'a * 'a
   let join p f (Func (d,r)) (Func (d',r')) = Func (f (polneg p) d d', f p r r')
@@ -92,20 +81,38 @@ module type TYPES = sig
     val list_fields : 'a t -> (string * 'a) list
   end
 
-module Nil : TYPES = struct
-  type 'a t = unit
-  let join p f () () = ()
-  let join_ident = ()
-  let lte_pn f () () = true
-  let lte_np f () () = false
-  let subs p f () () = true
+module Base = struct
+  type 'a t = unit SMap.t (* FIXME: real sets of symbols would be nice *)
+  let join p _ x y =
+    SMap.merge (fun k x y -> match x, y with None, None -> None | _, _ -> Some ()) x y
 
-  let pmap f pol () = ()
+  let join_ident = SMap.empty
 
-  let print_first pr pol ppf () = 
-    Format.fprintf ppf "%s" (match pol with Pos -> "Bot" | Neg -> "Top")
-  let print_rest  pr pol ppf () = ()
-  let list_fields () = []
+  let lte_pn f x y =
+    (* x = y = singleton || x = empty || y = empty *)
+    SMap.for_all (fun k _ -> SMap.for_all (fun k' _ -> k = k') y) x
+
+  let lte_np f x y =
+    (* nonempty intersection *)
+    SMap.exists (fun k _ -> SMap.mem k x) y
+
+  let subs p f x y =
+    (* subset *)
+    SMap.for_all (fun k _ -> SMap.mem k y) x
+
+  let pmap f pol x = x
+
+  let print_rest  pr pol ppf x =
+    SMap.iter (fun k _ -> Format.fprintf ppf "@ %s@ %s" (match pol with Pos -> "|" | Neg -> "&") (Symbol.to_string k)) x
+
+  let print_first pr pol ppf x =
+    if SMap.is_empty x then
+      Format.fprintf ppf "%s" (match pol with Pos -> "Bot" | Neg -> "Top")
+    else
+      let (k, ()) = SMap.min_binding x in
+      Format.fprintf ppf "%s%a" (Symbol.to_string k) (print_rest pr pol) (SMap.remove k x)
+
+  let list_fields _ = []
 end
 
 module Cons (A : FEATURE) (Tail : TYPES) = struct
@@ -185,16 +192,17 @@ module Cons (A : FEATURE) (Tail : TYPES) = struct
 end
 
 
-module Ty2 = Cons (Object) (Nil)
+module Ty2 = Cons (Object) (Base)
 module Ty1 = Cons (Func) (Ty2)
-module TypeLat = Cons (Unit) (Ty1)
+module TypeLat = Ty1
 
-let cons_unit x : 'a TypeLat.t = 
-  TypeLat.lift x
 let cons_func f : 'a TypeLat.t = 
-  TypeLat.Absent (Ty1.lift f)
+  Ty1.lift f
 let cons_object o : 'a TypeLat.t =
-  TypeLat.Absent (Ty1.Absent (Ty2.lift o))
+  Ty1.Absent (Ty2.lift o)
+let cons_base x : 'a TypeLat.t =
+  Ty1.Absent (Ty2.Absent (SMap.singleton x ()))
+
 
 let cons_name pol = print_to_string (TypeLat.print_first (fun pol ppf x -> ()) pol)
 
@@ -208,10 +216,10 @@ type 'a typeterm =
 | TRec of 'a * 'a typeterm
 
 
-let ty_unit () = TCons (cons_unit ())
 let ty_fun d r = TCons (cons_func (Func.Func (d, r)))
 let ty_zero = TCons (TypeLat.join_ident)
 let ty_obj o = TCons (cons_object o)
+let ty_base s = TCons (cons_base s)
                        
 let string_of_var v = v
 (*  if v < 26 then String.make 1 (Char.chr (Char.code 'a' + v)) else Printf.sprintf "v_%d" (v - 26) *)

@@ -66,7 +66,10 @@ let rec typecheck gamma = function
      ascription (typecheck gamma e) ty
        
   | Unit -> 
-     { environment = SMap.empty; expr = constrain [] Pos (ty_unit ()) }
+     { environment = SMap.empty; expr = constrain [] Pos (ty_base (Symbol.intern "unit")) }
+
+  | Int n ->
+     { environment = SMap.empty; expr = constrain [] Pos (ty_base (Symbol.intern "int")) }
 
   | Object o ->
      let (env, fields) = List.fold_right (fun (s, e) (env, fields) ->
