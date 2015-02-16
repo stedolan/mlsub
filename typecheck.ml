@@ -12,14 +12,25 @@ type typing =
 let clone_scheme s =
   Types.clone (fun f -> { environment = SMap.map f s.environment; expr = f s.expr })
     
-let constrain (inputs : (state * var typeterm) list) p output =
+let constrain name (inputs : (state * var typeterm) list) p output =
   let (inputs, output) = compile_terms (fun f ->
     (List.map (fun (s, t) -> (s, f (polneg s.Types.State.pol) t)) inputs, f p output)) in
+  let dump title =
+    let find_states f =
+      let id = ref 0 in
+      List.iter (fun (s, t) ->
+                 f (Printf.sprintf "s-%d" !id) s;
+                 f (Printf.sprintf "t-%d" !id) t;
+                 incr id) inputs;
+      f "out" output in
+    Format.printf "%a\n%!" (print_automaton title) find_states in
+  (*  dump (name ^ "_before"); *)
   if not (List.fold_left (fun b (s, c) -> b && 
     match s.Types.State.pol with
     | Pos -> assert (c.Types.State.pol = Neg); contraction s c
     | Neg -> assert (c.Types.State.pol = Pos); contraction c s) true inputs)
   then failwith "type error of some sort";
+  (* dump (name ^ "_after"); *)
   output
 
 let ascription scheme typeterm =
@@ -33,7 +44,14 @@ let ascription scheme typeterm =
 let env_join = SMap.merge (fun k a b -> match a, b with
   | (None, x) | (x, None) -> x
   | Some a, Some b ->
-    Some (constrain [a, TVar "a"; b, TVar "a"] Neg (TVar "a")))
+    Some (constrain "join" [a, TVar "a"; b, TVar "a"] Neg (TVar "a")))
+
+let add_singleton v gamma =
+  let singleton = compile_terms (fun f -> {
+        environment = SMap.singleton v (f Neg (TVar "a"));
+        expr = f Pos (TVar "a")}) in
+  SMap.add v singleton gamma
+
 
 open Exp
 let rec typecheck gamma = function
@@ -41,13 +59,10 @@ let rec typecheck gamma = function
      clone_scheme (SMap.find v gamma)
                   
   | Lambda (arg, body) ->
-     let singleton = compile_terms (fun f -> {
-          environment = SMap.singleton arg (f Neg (TVar "a"));
-          expr = f Pos (TVar "a")}) in
-     let body_ty = typecheck (SMap.add arg singleton gamma) body in
+     let body_ty = typecheck (add_singleton arg gamma) body in
      let var = try [SMap.find arg body_ty.environment, TVar "a"] with Not_found -> [] in
       { environment = SMap.remove arg body_ty.environment;
-        expr = constrain ((body_ty.expr, TVar "b") :: var) Pos (ty_fun (TVar "a") (TVar "b")) }
+        expr = constrain "lambda" ((body_ty.expr, TVar "b") :: var) Pos (ty_fun (TVar "a") (TVar "b")) }
 
   | Let (name, exp, body) ->
      let exp_ty = typecheck gamma exp in
@@ -59,29 +74,29 @@ let rec typecheck gamma = function
   | App (fn, arg) ->
      let fn_ty = typecheck gamma fn and arg_ty = typecheck gamma arg in
      { environment = env_join fn_ty.environment arg_ty.environment;
-       expr = constrain [fn_ty.expr, ty_fun (TVar "a") (TVar "b");
-                         arg_ty.expr, TVar "a"] Pos (TVar "b") }
+       expr = constrain "app" [fn_ty.expr, ty_fun (TVar "a") (TVar "b");
+                               arg_ty.expr, TVar "a"] Pos (TVar "b") }
 
   | Ascription (e, ty) ->
      ascription (typecheck gamma e) ty
        
   | Unit -> 
-     { environment = SMap.empty; expr = constrain [] Pos (ty_base (Symbol.intern "unit")) }
+     { environment = SMap.empty; expr = constrain "unit" [] Pos (ty_base (Symbol.intern "unit")) }
 
   | Int n ->
-     { environment = SMap.empty; expr = constrain [] Pos (ty_base (Symbol.intern "int")) }
+     { environment = SMap.empty; expr = constrain "int" [] Pos (ty_base (Symbol.intern "int")) }
 
   | Bool b ->
-     { environment = SMap.empty; expr = constrain [] Pos (ty_base (Symbol.intern "bool")) }
+     { environment = SMap.empty; expr = constrain "bool" [] Pos (ty_base (Symbol.intern "bool")) }
 
   | If (cond, tcase, fcase) ->
      let {environment = envC; expr = exprC} = typecheck gamma cond in
      let {environment = envT; expr = exprT} = typecheck gamma tcase in
      let {environment = envF; expr = exprF} = typecheck gamma fcase in
      { environment = env_join envC (env_join envT envF);
-       expr = constrain [exprC, ty_base (Symbol.intern "bool");
-                         exprT, TVar "a";
-                         exprF, TVar "a"] Pos (TVar "a") }
+       expr = constrain "if" [exprC, ty_base (Symbol.intern "bool");
+                              exprT, TVar "a";
+                              exprF, TVar "a"] Pos (TVar "a") }
 
   | Object o ->
      let (env, fields) = List.fold_right (fun (s, e) (env, fields) ->
@@ -91,11 +106,11 @@ let rec typecheck gamma = function
         (ty, TVar (Symbol.to_string sym))) fields in
      let o = List.fold_right (fun (sym, ty) o ->
         Types.SMap.add sym (TVar (Symbol.to_string sym)) o) fields Types.SMap.empty in
-     { environment = env; expr = constrain constraints Pos (ty_obj o) }
+     { environment = env; expr = constrain "object" constraints Pos (ty_obj o) }
 
   | GetField (e, field) ->
      let e_ty = typecheck gamma e in
      { environment = e_ty.environment;
-       expr = constrain [e_ty.expr,
-                         ty_obj (Types.SMap.singleton field (TVar "a"))]
+       expr = constrain "field" [e_ty.expr,
+                                 ty_obj (Types.SMap.singleton field (TVar "a"))]
                         Pos (TVar "a") }

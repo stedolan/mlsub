@@ -343,23 +343,24 @@ let compile_terms (map : (polarity -> var typeterm -> state) -> 'a) : 'a =
 
   root
 
-let print_automaton ppf (root : state) =
+let print_automaton diagram_name ppf (map : (string -> state -> unit) -> unit) =
   let dumped = StateTbl.create 20 in
   let pstate ppf s = fprintf ppf "n%d" s.id in
-  let rec dump s =
+  let rec dump s name =
     if StateTbl.mem dumped s then () else begin
       StateTbl.add dumped s s;
-      fprintf ppf "%a [label=\"%s (%d)\"];\n" pstate s (cons_name s.pol s.cons) s.id;
+      let name = (match name with None -> "" | Some n -> n ^ ": ") ^ cons_name s.pol s.cons in
+      fprintf ppf "%a [label=\"%s (%d)\"];\n" pstate s name s.id;
       List.iter (fun (f, ss') -> 
         StateSet.iter ss'
           (fun s' -> 
             fprintf ppf "%a -> %a [label=\"%s\"];\n" pstate s pstate s' f;
-            dump s'))
+            dump s' None))
         (TypeLat.list_fields s.cons)
     end in
-  fprintf ppf "digraph {\n";
+  fprintf ppf "digraph %s{\n" diagram_name;
   (* dump structural constraints *)
-  dump root;
+  map (fun n s -> dump s (Some n); ());
   (* dump dataflow constraints *)
   StateTbl.iter (fun s _ ->
     if s.pol = Neg then StateSet.iter s.flow (fun s' -> 
