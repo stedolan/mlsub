@@ -71,6 +71,12 @@ let rec typecheck gamma = function
      { environment = env_join exp_ty.environment body_ty.environment;
        expr = body_ty.expr }
 
+  | Rec (v, exp) ->
+     let exp_ty = typecheck (add_singleton v gamma) exp in
+     let var = try [SMap.find v exp_ty.environment, TVar "a"] with Not_found -> [] in
+     { environment = SMap.remove v exp_ty.environment;
+       expr = constrain "rec" ((exp_ty.expr, TVar "a") :: var) Pos (TVar "a") }
+
   | App (fn, arg) ->
      let fn_ty = typecheck gamma fn and arg_ty = typecheck gamma arg in
      { environment = env_join fn_ty.environment arg_ty.environment;

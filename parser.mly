@@ -61,6 +61,8 @@ exp:
     { Lambda (Symbol.intern v, e) }
 | LET; v = IDENT; EQUALS; e1 = exp; IN; e2 = exp
     { Let (Symbol.intern v, e1, e2) }
+| LET; REC; v = IDENT; EQUALS; e1 = exp; IN; e2 = exp
+    { Let (Symbol.intern v, Rec (Symbol.intern v, e1), e2) }
 | IF; cond = exp; THEN; tcase = exp; ELSE; fcase = exp
     { If (cond, tcase, fcase) }
 | MATCH; e = term; WITH; 
