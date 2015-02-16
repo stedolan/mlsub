@@ -97,6 +97,26 @@ let rec typecheck gamma = function
        expr = constrain "if" [exprC, ty_base (Symbol.intern "bool");
                               exprT, TVar "a";
                               exprF, TVar "a"] Pos (TVar "a") }
+  | Nil ->
+     { environment = SMap.empty; expr = constrain "nil" [] Pos (ty_list (TVar "a")) }
+  | Cons (x, xs) ->
+     let x_ty = typecheck gamma x in
+     let xs_ty = typecheck gamma xs in
+     { environment = env_join x_ty.environment xs_ty.environment;
+       expr = constrain "cons" [x_ty.expr, TVar "a";
+                                xs_ty.expr, ty_list (TVar "a")] Pos (ty_list (TVar "a")) }
+  | Match (e, nil, x, xs, cons) ->
+     let e_ty = typecheck gamma e in
+     let nil_ty = typecheck gamma nil in
+     let cons_ty = typecheck (add_singleton x (add_singleton xs gamma)) cons in
+     let vars =
+       (try [SMap.find x cons_ty.environment, TVar "a"] with Not_found -> []) @
+       (try [SMap.find xs cons_ty.environment, ty_list (TVar "a")] with Not_found -> []) in
+     { environment = env_join e_ty.environment (env_join nil_ty.environment (SMap.remove x (SMap.remove xs cons_ty.environment)));
+       expr = constrain "match" ([e_ty.expr, ty_list (TVar "a");
+                                  nil_ty.expr, TVar "res";
+                                  cons_ty.expr, TVar "res"]
+                                 @ vars) Pos (TVar "res") }
 
   | Object o ->
      let (env, fields) = List.fold_right (fun (s, e) (env, fields) ->

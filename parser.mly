@@ -24,6 +24,12 @@
 %token THEN
 %token ELSE
 
+%token NIL
+%token CONS
+%token MATCH
+%token WITH
+%token LIST
+
 %token SUBSUME
 %token TOP
 %token BOT
@@ -57,6 +63,12 @@ exp:
     { Let (Symbol.intern v, e1, e2) }
 | IF; cond = exp; THEN; tcase = exp; ELSE; fcase = exp
     { If (cond, tcase, fcase) }
+| MATCH; e = term; WITH; 
+    NIL; ARROW; n = exp; 
+    TY_JOIN; x = IDENT; CONS; xs = IDENT; ARROW; c = exp
+    { Match (e, n, Symbol.intern x, Symbol.intern xs, c) }
+| x = app; CONS; xs = exp
+    { Cons(x, xs) }
 | e = app
     { e }
 
@@ -83,6 +95,8 @@ term:
     { GetField (e, Symbol.intern f) }
 | i = INT
     { Int i }
+| NIL
+    { Nil }
 | TRUE
     { Bool true }
 | FALSE
@@ -107,6 +121,7 @@ typeterm:
 | t1 = typeterm; ARROW ; t2 = typeterm  { ty_fun t1 t2 }
 | TOP { ty_zero }
 | BOT { ty_zero }
+| LPAR; t = typeterm; LIST; RPAR { ty_list t }
 | UNIT { ty_base (Symbol.intern "unit") }
 | t1 = typeterm; meetjoin; t2 = typeterm { TAdd (t1, t2) } %prec TY_MEET
 | REC; v = IDENT; EQUALS; t = typeterm { TRec (v, t) }

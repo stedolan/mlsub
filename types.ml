@@ -36,6 +36,16 @@ module Func = struct
   let list_fields (Func (d, r)) = ["d", d; "r", r]
 end
 
+module ListT = struct
+  type 'a t = 'a
+  let join p f a b = f p a b
+  let lte pol f a b = f pol a b
+  let pmap f pol a = f pol a
+  let print pr pol ppf a =
+    Format.fprintf ppf "%a list" (pr pol) a
+  let list_fields x = ["e", x]
+end
+
 module Object = struct
   type 'a t = 'a SMap.t
   let join p f x y =
@@ -194,14 +204,17 @@ end
 
 module Ty2 = Cons (Object) (Base)
 module Ty1 = Cons (Func) (Ty2)
-module TypeLat = Ty1
+module Ty0 = Cons (ListT) (Ty1)
+module TypeLat = Ty0
 
+let cons_list e : 'a TypeLat.t =
+  Ty0.lift e
 let cons_func f : 'a TypeLat.t = 
-  Ty1.lift f
+  Ty0.Absent (Ty1.lift f)
 let cons_object o : 'a TypeLat.t =
-  Ty1.Absent (Ty2.lift o)
+  Ty0.Absent (Ty1.Absent (Ty2.lift o))
 let cons_base x : 'a TypeLat.t =
-  Ty1.Absent (Ty2.Absent (SMap.singleton x ()))
+  Ty0.Absent (Ty1.Absent (Ty2.Absent (SMap.singleton x ())))
 
 
 let cons_name pol = print_to_string (TypeLat.print_first (fun pol ppf x -> ()) pol)
@@ -216,6 +229,7 @@ type 'a typeterm =
 | TRec of 'a * 'a typeterm
 
 
+let ty_list e = TCons (cons_list e)
 let ty_fun d r = TCons (cons_func (Func.Func (d, r)))
 let ty_zero = TCons (TypeLat.join_ident)
 let ty_obj o = TCons (cons_object o)

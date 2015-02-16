@@ -56,6 +56,7 @@ let rec lower g = function
   | GetField (obj, field) ->
      withtmp (lower g obj) (fun obj ->
        CApp (CRaw "get_field", [obj; CInt (Symbol.hash field)]))
+  | _ -> CRaw "assert false"
 
 open Format                   
 

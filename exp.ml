@@ -9,7 +9,8 @@ type exp =
   | Int of int
   | Bool of bool
   | If of exp * exp * exp
+  | Nil
+  | Cons of exp * exp
+  | Match of exp * exp * Symbol.t * Symbol.t * exp
   | Object of (Symbol.t * exp) list
   | GetField of exp * Symbol.t
-
-

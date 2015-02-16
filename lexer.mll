@@ -46,6 +46,13 @@ rule read =
   | "if"     { IF }
   | "then"   { THEN }
   | "else"   { ELSE }
+
+  | "list"   { LIST }
+  | "[]"     { NIL }
+  | "::"     { CONS }
+  | "match"  { MATCH }
+  | "with"   { WITH }
+
   | id       { IDENT (Lexing.lexeme lexbuf) }
   | int      { INT (int_of_string (Lexing.lexeme lexbuf)) }
   | eof      { EOF }
