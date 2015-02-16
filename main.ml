@@ -64,6 +64,12 @@ let run exp =
   ignore (Sys.command ("cat "^name ^"; ocaml " ^ name));
   Sys.remove name
 
+let gamma0 = SMap.singleton (Symbol.intern "p") 
+   { environment = SMap.empty;
+     expr = (compile_terms 
+       (fun f -> f Pos (ty_fun (ty_base (Symbol.intern "int")) 
+                               (ty_base (Symbol.intern "unit"))))) }
+
 ;;
 
 while true do
@@ -71,14 +77,14 @@ while true do
   parse_line Parser.prog
              (fun exp ->
               (try
-                let s = Typecheck.typecheck SMap.empty exp in
-                Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Typecheck.expr);
+                let s = Typecheck.typecheck gamma0 exp in
+                (*                Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Typecheck.expr); *)
                 Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Typecheck.expr)
               with
               | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
               | Not_found -> Format.printf "Typechecking failed: Not_found\n%!"
               | Match_failure (file, line, col) -> Format.printf "Match failure in typechecker at %s:%d%d\n%!" file line col);
-              run exp)
+              run exp )
   (*parse_line Parser.prog (fun s -> Format.printf "%a\n%!" print_automaton s.Typecheck.expr)*)
 done
 
