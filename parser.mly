@@ -46,6 +46,7 @@
 %}
 
 %start <Exp.exp> prog
+%start <(string * Exp.exp) list> modlist
 %start <Types.var Types.typeterm> onlytype
 %start <Types.var Types.typeterm * Types.var Types.typeterm> subsumption
 
@@ -55,6 +56,10 @@
 prog:
 | e = exp; EOF { e }
 
+modlist:
+| EOF { [] }
+| LET; v = IDENT; EQUALS; e = exp; m = modlist; { (v,e) :: m }
+| LET; REC; v = IDENT; EQUALS; e = exp; m = modlist; { (v,Rec(Symbol.intern v, e)) :: m }
 
 exp:
 | FUN; v = IDENT; ARROW; e = exp 

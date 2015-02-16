@@ -75,25 +75,43 @@ let gamma0 =
       expr = (compile_terms
         (fun f -> f Pos (ty_fun (ty_base (Symbol.intern "unit")) (ty_zero)))) })
 
+let recomp s = decompile_automaton (compile_terms (fun f -> f Pos (decompile_automaton s)))
+
+let repl () = 
+  while true do
+
+    parse_line Parser.prog
+               (fun exp ->
+                (try
+                  let s = Typecheck.typecheck gamma0 exp in
+                  (*                Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Typecheck.expr); *)
+                  Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Typecheck.expr)
+                with
+                | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
+                | Not_found -> Format.printf "Typechecking failed: Not_found\n%!"
+                | Match_failure (file, line, col) -> Format.printf "Match failure in typechecker at %s:%d%d\n%!" file line col);
+               (* run exp *) )
+    (*parse_line Parser.prog (fun s -> Format.printf "%a\n%!" print_automaton s.Typecheck.expr)*)
+  done
+
+let process file =
+  let check gamma (name, exp) =
+    let s = Typecheck.typecheck gamma exp in
+    Format.printf "val %s : %a\n%!" name (print_typeterm Pos) (recomp s.Typecheck.expr);
+    SMap.add (Symbol.intern name) s gamma in
+  try
+    ignore (List.fold_left check gamma0 (Parser.modlist Lexer.read (Lexing.from_channel (open_in file))))
+  with
+  | SyntaxError _ -> fprintf stderr "syntax error\n%!"
+  | Parser.Error -> fprintf stderr "parser error\n%!"
+  | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
+  | Not_found -> Format.printf "Typechecking failed: Not_found\n%!"
+  | Match_failure (file, line, col) -> Format.printf "Match failure in typechecker at %s:%d%d\n%!" file line col
+
 ;;
 
-while true do
-  let recomp s = decompile_automaton (compile_terms (fun f -> f Pos (decompile_automaton s))) in
-  parse_line Parser.prog
-             (fun exp ->
-              (try
-                let s = Typecheck.typecheck gamma0 exp in
-                (*                Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Typecheck.expr); *)
-                Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Typecheck.expr)
-              with
-              | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
-              | Not_found -> Format.printf "Typechecking failed: Not_found\n%!"
-              | Match_failure (file, line, col) -> Format.printf "Match failure in typechecker at %s:%d%d\n%!" file line col);
-              run exp )
-  (*parse_line Parser.prog (fun s -> Format.printf "%a\n%!" print_automaton s.Typecheck.expr)*)
-done
-
-
+if Array.length Sys.argv = 1 then repl () else
+  Array.iter process (Array.sub Sys.argv 1 (Array.length Sys.argv - 1))
 
 (*
 
