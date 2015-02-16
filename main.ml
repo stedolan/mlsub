@@ -64,11 +64,16 @@ let run exp =
   ignore (Sys.command ("cat "^name ^"; ocaml " ^ name));
   Sys.remove name
 
-let gamma0 = SMap.singleton (Symbol.intern "p") 
+let gamma0 =
+  SMap.add (Symbol.intern "p")
    { environment = SMap.empty;
      expr = (compile_terms 
        (fun f -> f Pos (ty_fun (ty_base (Symbol.intern "int")) 
                                (ty_base (Symbol.intern "unit"))))) }
+  (SMap.singleton (Symbol.intern "error")
+    { environment = SMap.empty;
+      expr = (compile_terms
+        (fun f -> f Pos (ty_fun (ty_base (Symbol.intern "unit")) (ty_zero)))) })
 
 ;;
 
