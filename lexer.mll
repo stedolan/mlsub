@@ -16,12 +16,14 @@ let float = digit* frac? exp?
 
 
 let white = [' ' '\t' '\n' '\r']+
+let comment = '(' '*' ( [^ '*']* | '*' [^ ')']) * '*' ')'
 let id = ['a'-'z' '_'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
 
 
 rule read =
   parse
   | white    { read lexbuf }
+  | comment  { read lexbuf }
   | "->"     { ARROW }
   | "("      { LPAR }
   | ")"      { RPAR }
