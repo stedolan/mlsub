@@ -236,7 +236,6 @@ let ty_obj o = TCons (cons_object o)
 let ty_base s = TCons (cons_base s)
                        
 let string_of_var v = v
-(*  if v < 26 then String.make 1 (Char.chr (Char.code 'a' + v)) else Printf.sprintf "v_%d" (v - 26) *)
 
 open Format
 
@@ -487,7 +486,9 @@ let decompile_automaton (root : state) : var typeterm =
   let biclique_decomposition = find_biclique_decomposition () in
 
   (* Each biclique in the decomposition corresponds to a variable *)
-  let fresh_var = let var_id = ref (-1) in fun () -> incr var_id; "v" ^ string_of_int !var_id in
+  let name_var id =
+    if id < 26 then String.make 1 (Char.chr (Char.code 'a' + id)) else Printf.sprintf "v_%d" (id - 26) in
+  let fresh_var = let var_id = ref (-1) in fun () -> incr var_id; name_var !var_id in
   let state_vars = StateTbl.create 20 in
   List.iter (fun (ss, ss') -> 
     let v = TVar (fresh_var ()) in
