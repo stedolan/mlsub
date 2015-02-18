@@ -24,6 +24,14 @@
 %token THEN
 %token ELSE
 
+%token EQEQUALS
+%token CMP_LT
+%token CMP_GT
+%token CMP_LTE
+%token CMP_GTE
+%token OP_ADD
+%token OP_SUB
+
 %token NIL
 %token CONS
 %token MATCH
@@ -38,6 +46,15 @@
 %right ARROW
 %right TY_MEET
 %right TY_JOIN
+
+%nonassoc EQEQUALS
+%nonassoc CMP_LT
+%nonassoc CMP_GT
+%nonassoc CMP_LTE
+%nonassoc CMP_GTE
+%left OP_ADD
+%left OP_SUB
+%right CONS
 
 %{
   open Types 
@@ -74,11 +91,26 @@ exp:
     NIL; ARROW; n = exp; 
     TY_JOIN; x = IDENT; CONS; xs = IDENT; ARROW; c = exp
     { Match (e, n, Symbol.intern x, Symbol.intern xs, c) }
-| x = app; CONS; xs = exp
+| e = simple_exp
+    { e }
+
+simple_exp:
+| e1 = simple_exp; op = binop; e2 = simple_exp
+    { App(App(Var (Symbol.intern op), e1), e2) }
+| x = app; CONS; xs = simple_exp
     { Cons(x, xs) }
 | e = app
     { e }
 
+%inline binop:
+| EQUALS   { "(=)" }
+| EQEQUALS { "(==)" }
+| CMP_LT   { "(<)" }
+| CMP_GT   { "(>)" }
+| CMP_LTE  { "(<=)" }
+| CMP_GTE  { "(>=)" }
+| OP_ADD   { "(+)" }
+| OP_SUB   { "(-)" }
 
 app:
 | t = term

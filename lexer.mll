@@ -6,7 +6,7 @@ exception SyntaxError of string
 }
 
 
-let int = ['1'-'9'] ['0'-'9']*
+let int = ['1'-'9'] ['0'-'9']* | '0'
 
 
 let digit = ['0'-'9']
@@ -48,6 +48,14 @@ rule read =
   | "if"     { IF }
   | "then"   { THEN }
   | "else"   { ELSE }
+
+  | "=="     { EQEQUALS }
+  | "<"      { CMP_LT }
+  | ">"      { CMP_GT }
+  | "<="     { CMP_LTE }
+  | ">="     { CMP_GTE }
+  | "+"      { OP_ADD }
+  | "-"      { OP_SUB }
 
   | "list"   { LIST }
   | "[]"     { NIL }
