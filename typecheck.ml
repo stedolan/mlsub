@@ -56,7 +56,8 @@ let add_singleton v gamma =
 open Exp
 let rec typecheck gamma = function
   | Var v ->
-     clone_scheme (SMap.find v gamma)
+     (try clone_scheme (SMap.find v gamma)
+      with Not_found -> failwith "unbound variable")
                   
   | Lambda (arg, body) ->
      let body_ty = typecheck (add_singleton arg gamma) body in

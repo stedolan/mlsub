@@ -124,7 +124,6 @@ let process file =
   | SyntaxError _ -> fprintf stderr "syntax error\n%!"
   | Parser.Error -> fprintf stderr "parser error\n%!"
   | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
-  | Not_found -> Format.printf "Typechecking failed: Not_found\n%!"
   | Match_failure (file, line, col) -> Format.printf "Match failure in typechecker at %s:%d%d\n%!" file line col
 
 ;;
