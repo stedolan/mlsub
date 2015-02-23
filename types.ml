@@ -384,21 +384,20 @@ let print_automaton diagram_name ppf (map : (string -> state -> unit) -> unit) =
       with Not_found -> ())) dumped;
   fprintf ppf "}\n"
 
-let rec find_reachable (root : state) =
+let find_reachable (roots : state list) =
   let states = StateTbl.create 20 in
-  let rec search s =
-    if StateTbl.mem states s then () else begin
+  let rec search s acc =
+    if StateTbl.mem states s then acc else begin
       StateTbl.add states s ();
-      List.iter
-        (fun (f, ss') -> StateSet.iter ss' search)
-      (TypeLat.list_fields s.cons)
+      s :: List.fold_right (fun (f, ss') acc -> StateSet.fold_left ss' acc
+        (fun acc s' -> search s' acc)) (TypeLat.list_fields s.cons) acc
     end in
-  search root;
-  StateTbl.fold (fun s _ m -> StateSet.add m s) states StateSet.empty
+  List.fold_right search roots []
 
 let garbage_collect (root : state) =
-  let states = find_reachable root in
-  StateSet.iter states (fun s -> s.flow <- StateSet.inter s.flow states)
+  let states = find_reachable [root] in
+  let state_set = List.fold_left StateSet.add StateSet.empty states in
+  List.iter (fun s -> s.flow <- StateSet.inter s.flow state_set) states
 
 let clone f =
   let states = StateTbl.create 20 in
@@ -430,7 +429,8 @@ let make_table s f =
 
 (* FIXME: deterministic? ID-dependent? *)
 let decompile_automaton (root : state) : var typeterm =
-  let states = find_reachable root in
+  let state_list = find_reachable [root] in
+  let states = List.fold_left StateSet.add StateSet.empty state_list in
   let state_flow = make_table states (fun s -> StateSet.inter s.flow states) in
 
 
@@ -461,11 +461,12 @@ let decompile_automaton (root : state) : var typeterm =
       (ss, ss') 
     end in
   let find_biclique () =
-    StateSet.fold_left states (0, StateSet.empty, StateSet.empty)
+    List.fold_left
       (fun ((best_n, _, _) as best) s ->
         let (ss, ss') = principal_biclique s in
         let n = StateSet.(length ss + length ss') in
-        if n > best_n then (n, ss, ss') else best) in
+        if n > best_n then (n, ss, ss') else best)
+      (0, StateSet.empty, StateSet.empty) state_list in
   let del_biclique ss ss' =
     let del ss ss' = 
       StateSet.iter ss (fun s -> 
@@ -558,11 +559,11 @@ let common_var ssn ssp =
 let rec entailed a ssn ssp =
   let b = if antichain_ins a ssn ssp then true else
       common_var ssn ssp || TypeLat.lte_np (entailed a) (states_follow Neg ssn) (states_follow Pos ssp) in
-  Printf.printf "entailment: ";
+(*  Printf.printf "entailment: ";
   StateSet.iter ssn (fun s -> Printf.printf "%d " s.id);
   Printf.printf "/ ";
   StateSet.iter ssp (fun s -> Printf.printf "%d " s.id);
-  Printf.printf "%s\n" (match b with true -> "[Y]" | false -> "[N]");
+  Printf.printf "%s\n" (match b with true -> "[Y]" | false -> "[N]"); *)
   b
 
 let get_def tbl key def =
@@ -612,7 +613,7 @@ let rec subsumed map =
   
   let ent = antichain_new () in
   let check_dataflow () = 
-    Printf.printf "dataflow\n";
+    (*Printf.printf "dataflow\n";*)
     StateTbl.fold (fun sp ap b -> match sp.pol with
     | Neg -> b
     | Pos -> StateSet.fold_left sp.flow b (fun b sn -> 
@@ -630,6 +631,23 @@ let rec subsumed map =
 
 
 
+let optimise_flow (roots : state list) =
+  let states = find_reachable roots in
+  let state_set = List.fold_left StateSet.add StateSet.empty states in
+  let flows = StateTbl.create 20 in
+  (* clear out all flow edges *)
+  List.iter (fun s -> StateTbl.add flows s (StateSet.inter s.flow state_set);
+                      s.flow <- StateSet.empty) states;
+  (* re-add them in reverse postorder *)
+  let antichain = antichain_new () in
+  let add_flow sn sp =
+    assert (sn.pol = Neg); assert (sp.pol = Pos);
+    if not (entailed antichain (StateSet.singleton sn) (StateSet.singleton sp)) then
+      (sn.flow <- StateSet.add sn.flow sp; sp.flow <- StateSet.add sp.flow sn) in
+  let process s =
+    if s.pol = Neg then
+      StateSet.iter (StateTbl.find flows s) (fun sp -> add_flow s sp) in
+  List.iter process (List.rev states)
 
 
 

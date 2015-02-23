@@ -96,6 +96,11 @@ let gamma0 =
 
 let recomp s = decompile_automaton (compile_terms (fun f -> f Pos (decompile_automaton s)))
 
+let optimise s =
+  let states = s.Typecheck.expr :: SMap.fold (fun v s ss -> s :: ss) s.Typecheck.environment [] in
+  Types.optimise_flow states
+
+
 let repl () = 
   while true do
 
@@ -103,7 +108,7 @@ let repl () =
                (fun exp ->
                 (try
                   let s = Typecheck.typecheck gamma0 exp in
-                  (*                Format.printf "%a\n%!" (print_typeterm Pos) (decompile_automaton s.Typecheck.expr); *)
+                  optimise s;
                   Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Typecheck.expr)
                 with
                 | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
@@ -116,6 +121,7 @@ let repl () =
 let process file =
   let check gamma (name, exp) =
     let s = Typecheck.typecheck gamma exp in
+    optimise s;
     Format.printf "val %s : %a\n%!" name (print_typeterm Pos) (recomp s.Typecheck.expr);
     SMap.add (Symbol.intern name) s gamma in
   try
