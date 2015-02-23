@@ -295,15 +295,16 @@ let merge s s' =
   StateSet.iter s.flow (fun s' -> assert (s'.pol <> s.pol))
 
 
-let next_id = ref 0
-
+let fresh_id_counter = ref 0
+let fresh_id () =
+  let n = !fresh_id_counter in incr fresh_id_counter; n
 
 (* FIXME: Does not detect negative recursion *)
 let compile_terms (map : (polarity -> var typeterm -> state) -> 'a) : 'a =
   let states = ref [] in
   let mkstate pol cons = 
-    let r = { id = !next_id; pol; cons; flow = StateSet.empty} in 
-    (states := r :: !states; incr next_id; r) in
+    let r = { id = fresh_id (); pol; cons; flow = StateSet.empty} in
+    (states := r :: !states; r) in
   let state_vars = StateTbl.create 20 in
   let epsilon_trans = StateTbl.create 20 in
   let rec compile r p = function
@@ -398,11 +399,6 @@ let rec find_reachable (root : state) =
 let garbage_collect (root : state) =
   let states = find_reachable root in
   StateSet.iter states (fun s -> s.flow <- StateSet.inter s.flow states)
-
-                
-let fresh_id_counter = ref 1000
-let fresh_id () =
-  let n = !fresh_id_counter in incr fresh_id_counter; n
 
 let clone f =
   let states = StateTbl.create 20 in
