@@ -29,7 +29,10 @@ rule read =
   | ")"      { RPAR }
   | "{"      { LBRACE }
   | "}"      { RBRACE }
+  | "["      { LBRACK }
+  | "]"      { RBRACK }
   | ","      { COMMA }
+  | ";"      { SEMI }
   | "."      { DOT }
   | "|"      { TY_JOIN }
   | "&"      { TY_MEET }
@@ -58,7 +61,6 @@ rule read =
   | "-"      { OP_SUB }
 
   | "list"   { LIST }
-  | "[]"     { NIL }
   | "::"     { CONS }
   | "match"  { MATCH }
   | "with"   { WITH }

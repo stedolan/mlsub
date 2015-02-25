@@ -8,7 +8,10 @@
 %token RPAR
 %token LBRACE
 %token RBRACE
+%token LBRACK
+%token RBRACK
 %token COMMA
+%token SEMI
 %token UNIT
 %token TY_MEET
 %token TY_JOIN
@@ -32,7 +35,6 @@
 %token OP_ADD
 %token OP_SUB
 
-%token NIL
 %token CONS
 %token MATCH
 %token WITH
@@ -88,7 +90,7 @@ exp:
 | IF; cond = exp; THEN; tcase = exp; ELSE; fcase = exp
     { If (cond, tcase, fcase) }
 | MATCH; e = term; WITH; 
-    NIL; ARROW; n = exp; 
+    LBRACK; RBRACK; ARROW; n = exp; 
     TY_JOIN; x = IDENT; CONS; xs = IDENT; ARROW; c = exp
     { Match (e, n, Symbol.intern x, Symbol.intern xs, c) }
 | e = simple_exp
@@ -130,12 +132,14 @@ term:
     { Unit }
 | LBRACE; o = obj; RBRACE
     { Object o }
+| LBRACK; RBRACK
+    { Nil }
+| LBRACK; e = nonemptylist; RBRACK
+    { e }
 | e = term; DOT; f = IDENT
     { GetField (e, Symbol.intern f) }
 | i = INT
     { Int i }
-| NIL
-    { Nil }
 | TRUE
     { Bool true }
 | FALSE
@@ -145,8 +149,14 @@ term:
 obj:
 | v = IDENT; EQUALS; e = exp
     { [Symbol.intern v, e] }
-| v = IDENT; EQUALS; e = exp; COMMA; o = obj
+| v = IDENT; EQUALS; e = exp; SEMI; o = obj
     { (Symbol.intern v, e) :: o }
+
+nonemptylist:
+| x = exp
+    { Cons(x, Nil) }
+| x = exp; SEMI; xs = nonemptylist
+    { Cons(x, xs) }
 
 subsumption:
 | t1 = typeterm; SUBSUME; t2 = typeterm; EOF { (t1, t2) }
