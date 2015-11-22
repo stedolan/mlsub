@@ -80,6 +80,8 @@ module type TYPES = sig
     type 'a t
     val join : polarity -> (polarity -> 'a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
     val join_ident : 'a t
+    val is_join_ident : 'a t -> bool
+
     val lte_pn : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
     val lte_np : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
     val subs : polarity -> (polarity -> 'a -> 'a -> bool) -> 'a t -> 'a t -> bool
@@ -97,6 +99,7 @@ module Base = struct
     SMap.merge (fun k x y -> match x, y with None, None -> None | _, _ -> Some ()) x y
 
   let join_ident = SMap.empty
+  let is_join_ident = SMap.is_empty
 
   let lte_pn f x y =
     (* x = y = singleton || x = empty || y = empty *)
@@ -145,22 +148,27 @@ module Cons (A : FEATURE) (Tail : TYPES) = struct
   let join_ident =
     Absent Tail.join_ident
 
+  let is_join_ident = function
+    | Present _ -> false
+    | Absent t -> Tail.is_join_ident t
+
   let lte_pn f x y =
-    let iszero p t = Tail.subs p (fun x -> assert false) t Tail.join_ident in
     (* lub X <= glb Y *)
     (* i.e. forall i,j, Xi <= Yj *)
     match x, y with
     | Present (xa, xt), Present (ya, yt) ->
        A.lte Pos (fun p -> f) xa ya && 
-         iszero Pos xt && iszero Neg yt
+         Tail.is_join_ident xt && Tail.is_join_ident yt
     | Present (_, xt), Absent yt ->
-       iszero Neg yt
+       Tail.is_join_ident yt
     | Absent xt, Present (_, yt) ->
-       iszero Pos xt
+       Tail.is_join_ident xt
     | Absent xt, Absent yt ->
        Tail.lte_pn f xt yt
 
   let lte_np f x y =
+    (* glb X <= lub Y *)
+    (* i.e. exists i,j, Xi <= Yj *)
     match x, y with
     | Present (xa, xt), Present (ya, yt) ->
        A.lte Pos (fun p -> f) xa ya || Tail.lte_np f xt yt
