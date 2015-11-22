@@ -64,6 +64,7 @@ let run exp =
   ignore (Sys.command ("cat "^name ^"; ocaml " ^ name));
   Sys.remove name
 
+let reparse s = compile_terms (fun f -> f Pos (decompile_automaton s))
 let recomp s = decompile_automaton (compile_terms (fun f -> f Pos (decompile_automaton s)))
 
 
@@ -74,7 +75,7 @@ let repl () =
                (fun exp ->
                 (try
                   let s = optimise (Typecheck.typecheck gamma0 exp) in
-                  Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Typecheck.expr)
+                  Format.printf "%a\n%!" (print_typeterm Pos) (recomp (reparse (reparse (reparse s.Typecheck.expr))))
                 with
                 | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
                 | Not_found -> Format.printf "Typechecking failed: Not_found\n%!"
@@ -86,8 +87,8 @@ let repl () =
 let process file =
   let check gamma (name, exp) =
     let s = optimise (Typecheck.typecheck gamma exp) in
-    Format.printf "val %s : %a\n%!" name (print_typeterm Pos) (recomp s.Typecheck.expr);
-    SMap.add (Symbol.intern name) s gamma in
+    Format.printf "val %s : %a\n%!" (Symbol.to_string name) (print_typeterm Pos) (recomp s.Typecheck.expr);
+    SMap.add name s gamma in
   try
     ignore (List.fold_left check gamma0 (Parser.modlist Lexer.read (Lexing.from_channel (open_in file))))
   with

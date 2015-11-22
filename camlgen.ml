@@ -28,7 +28,7 @@ let add_global (globs, seen) name x lower =
     let n = Symbol.fresh name in
     (Hashtbl.add seen x n; Hashtbl.add globs n (lower x); n)
   
-let rec lower g = function
+let rec lower g (loc, exp) = match exp with
   | Var v -> CVar v
   | Lambda (args, body) ->
      CLambda ([args], lower g body)

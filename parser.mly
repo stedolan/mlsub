@@ -65,7 +65,7 @@
 %}
 
 %start <Exp.exp> prog
-%start <(string * Exp.exp) list> modlist
+%start <(Symbol.t * Exp.exp) list> modlist
 %start <Types.var Types.typeterm> onlytype
 %start <Types.var Types.typeterm * Types.var Types.typeterm> subsumption
 
@@ -77,32 +77,44 @@ prog:
 
 modlist:
 | EOF { [] }
-| LET; v = IDENT; EQUALS; e = exp; m = modlist; { (v,e) :: m }
-| LET; REC; v = IDENT; EQUALS; e = exp; m = modlist; { (v,Rec(Symbol.intern v, e)) :: m }
+| LET; v = IDENT; EQUALS; e = exp; m = modlist; { (Symbol.intern v,e) :: m }
+| LET; REC; v = IDENT; EQUALS; ve = exp_rec; m = modlist; { ve :: m }
 
-exp:
+exp_rec:
+| REC; v = IDENT; EQUALS; e = exp
+    { Symbol.intern v , (Pos ($startpos(v), $endpos), Rec(Symbol.intern v, e)) }
+
+exp_r:
 | FUN; v = IDENT; ARROW; e = exp 
     { Lambda (Symbol.intern v, e) }
 | LET; v = IDENT; EQUALS; e1 = exp; IN; e2 = exp
     { Let (Symbol.intern v, e1, e2) }
-| LET; REC; v = IDENT; EQUALS; e1 = exp; IN; e2 = exp
-    { Let (Symbol.intern v, Rec (Symbol.intern v, e1), e2) }
+| LET; ve1 = exp_rec; IN; e2 = exp
+    { let (v, e1) = ve1 in Let (v, e1, e2) }
 | IF; cond = exp; THEN; tcase = exp; ELSE; fcase = exp
     { If (cond, tcase, fcase) }
 | MATCH; e = term; WITH; 
     LBRACK; RBRACK; ARROW; n = exp; 
     TY_JOIN; x = IDENT; CONS; xs = IDENT; ARROW; c = exp
     { Match (e, n, Symbol.intern x, Symbol.intern xs, c) }
-| e = simple_exp
+| e = simple_exp_r
+    { e }
+
+exp:
+| e = exp_r
+    { (Pos ($startpos, $endpos), e) }
+
+simple_exp_r:
+| e1 = simple_exp; op = binop; e2 = simple_exp
+    { App((Pos ($startpos(e1), $endpos(op)), App((Pos ($startpos(op), $endpos(op)), Var (Symbol.intern op)), e1)), e2) }
+| x = app; CONS; xs = simple_exp
+    { Cons(x, xs) }
+| e = app_r
     { e }
 
 simple_exp:
-| e1 = simple_exp; op = binop; e2 = simple_exp
-    { App(App(Var (Symbol.intern op), e1), e2) }
-| x = app; CONS; xs = simple_exp
-    { Cons(x, xs) }
-| e = app
-    { e }
+| e = simple_exp_r
+    { (Pos ($startpos, $endpos), e) }
 
 %inline binop:
 | EQUALS   { "(=)" }
@@ -114,17 +126,20 @@ simple_exp:
 | OP_ADD   { "(+)" }
 | OP_SUB   { "(-)" }
 
-app:
-| t = term
+app_r:
+| t = term_r
     { t }
-| f = app; x = term 
+| f = app; x = term
     { App (f, x) }
 
+app:
+| e = app_r
+    { (Pos ($startpos, $endpos), e) }
 
-term:
+term_r:
 | v = IDENT 
     { Var (Symbol.intern v) }
-| LPAR; e = exp; RPAR
+| LPAR; e = exp_r; RPAR
     { e }
 | LPAR; e = exp; ASC; t = typeterm; RPAR
     { Ascription (e, t) }
@@ -134,7 +149,7 @@ term:
     { Object o }
 | LBRACK; RBRACK
     { Nil }
-| LBRACK; e = nonemptylist; RBRACK
+| LBRACK; e = nonemptylist_r; RBRACK
     { e }
 | e = term; DOT; f = IDENT
     { GetField (e, Symbol.intern f) }
@@ -145,6 +160,9 @@ term:
 | FALSE
     { Bool false }
 
+term:
+| t = term_r
+    { (Pos ($startpos, $endpos), t) }
 
 obj:
 | v = IDENT; EQUALS; e = exp
@@ -152,11 +170,15 @@ obj:
 | v = IDENT; EQUALS; e = exp; SEMI; o = obj
     { (Symbol.intern v, e) :: o }
 
-nonemptylist:
+nonemptylist_r:
 | x = exp
-    { Cons(x, Nil) }
+    { Cons(x, (Unknown, Nil)) }
 | x = exp; SEMI; xs = nonemptylist
     { Cons(x, xs) }
+
+nonemptylist:
+| e = nonemptylist_r
+    { (Pos ($startpos, $endpos), e) }
 
 subsumption:
 | t1 = typeterm; SUBSUME; t2 = typeterm; EOF { (t1, t2) }

@@ -55,7 +55,7 @@ let add_singleton v gamma =
 
 
 open Exp
-let rec typecheck gamma = function
+let rec typecheck gamma (loc, exp) = match exp with
   | Var v ->
      (try clone_scheme (SMap.find v gamma)
       with Not_found -> failwith ("unbound variable '" ^ Symbol.to_string v ^ "'"))

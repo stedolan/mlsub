@@ -1,5 +1,9 @@
 type 'a arguments = 'a
-type exp =
+type loc =
+  | Unknown
+  | Pos of Lexing.position * Lexing.position
+
+type rexp =
   | Var of Symbol.t
   | Lambda of Symbol.t arguments * exp
   | Let of Symbol.t * exp * exp
@@ -15,3 +19,5 @@ type exp =
   | Match of exp * exp * Symbol.t * Symbol.t * exp
   | Object of (Symbol.t * exp) list
   | GetField of exp * Symbol.t
+
+and exp = loc * rexp
