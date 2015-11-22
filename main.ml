@@ -64,41 +64,7 @@ let run exp =
   ignore (Sys.command ("cat "^name ^"; ocaml " ^ name));
   Sys.remove name
 
-let ty_int = ty_base (Symbol.intern "int")
-let ty_unit = ty_base (Symbol.intern "unit")
-let ty_bool = ty_base (Symbol.intern "bool")
-
-let ty_fun2 x y res = ty_fun x (ty_fun y res)
-
-let ty_polycmp = ty_fun2 (TVar "a") (TVar "a") ty_bool
-let ty_binarith = ty_fun2 ty_int ty_int ty_int
-
-let predefined =
-  ["p", ty_fun ty_int ty_unit;
-   "error", ty_fun ty_unit ty_zero;
-   "(=)", ty_polycmp;
-   "(==)", ty_polycmp;
-   "(<)", ty_polycmp;
-   "(>)", ty_polycmp;
-   "(<=)", ty_polycmp;
-   "(>=)", ty_polycmp;
-   "(+)", ty_binarith;
-   "(-)", ty_binarith
-  ]
-
-let gamma0 =
-  List.fold_right
-    (fun (n, t) g ->
-     SMap.add (Symbol.intern n)
-              { environment = SMap.empty;
-                expr = (compile_terms (fun f -> f Pos t)) } g)
-    predefined SMap.empty
-
 let recomp s = decompile_automaton (compile_terms (fun f -> f Pos (decompile_automaton s)))
-
-let optimise s =
-  let states = s.Typecheck.expr :: SMap.fold (fun v s ss -> s :: ss) s.Typecheck.environment [] in
-  Types.optimise_flow states
 
 
 let repl () = 
@@ -107,8 +73,7 @@ let repl () =
     parse_line Parser.prog
                (fun exp ->
                 (try
-                  let s = Typecheck.typecheck gamma0 exp in
-                  optimise s;
+                  let s = optimise (Typecheck.typecheck gamma0 exp) in
                   Format.printf "%a\n%!" (print_typeterm Pos) (recomp s.Typecheck.expr)
                 with
                 | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
@@ -120,8 +85,7 @@ let repl () =
 
 let process file =
   let check gamma (name, exp) =
-    let s = Typecheck.typecheck gamma exp in
-    optimise s;
+    let s = optimise (Typecheck.typecheck gamma exp) in
     Format.printf "val %s : %a\n%!" name (print_typeterm Pos) (recomp s.Typecheck.expr);
     SMap.add (Symbol.intern name) s gamma in
   try

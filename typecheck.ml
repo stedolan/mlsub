@@ -24,13 +24,14 @@ let constrain name (inputs : (state * var typeterm) list) p output =
                  incr id) inputs;
       f "out" output in
     Format.printf "%a\n%!" (print_automaton title) find_states in
-  (*  dump (name ^ "_before"); *)
+  let debug = false in
+  if debug then dump (name ^ "_before");
   if not (List.fold_left (fun b (s, c) -> b && 
     match s.Types.State.pol with
     | Pos -> assert (c.Types.State.pol = Neg); contraction s c
     | Neg -> assert (c.Types.State.pol = Pos); contraction c s) true inputs)
   then failwith "type error of some sort";
-  (* dump (name ^ "_after"); *)
+  if debug then dump (name ^ "_after");
   output
 
 let ascription scheme typeterm =
@@ -57,7 +58,7 @@ open Exp
 let rec typecheck gamma = function
   | Var v ->
      (try clone_scheme (SMap.find v gamma)
-      with Not_found -> failwith "unbound variable")
+      with Not_found -> failwith ("unbound variable '" ^ Symbol.to_string v ^ "'"))
                   
   | Lambda (arg, body) ->
      let body_ty = typecheck (add_singleton arg gamma) body in
@@ -141,3 +142,70 @@ let rec typecheck gamma = function
        expr = constrain "field" [e_ty.expr,
                                  ty_obj (Types.SMap.singleton field (TVar "a"))]
                         Pos (TVar "a") }
+
+
+let ty_int = ty_base (Symbol.intern "int")
+let ty_unit = ty_base (Symbol.intern "unit")
+let ty_bool = ty_base (Symbol.intern "bool")
+
+let ty_fun2 x y res = ty_fun x (ty_fun y res)
+
+let ty_polycmp = ty_fun2 (TVar "a") (TVar "a") ty_bool
+let ty_binarith = ty_fun2 ty_int ty_int ty_int
+
+let predefined =
+  ["p", ty_fun ty_int ty_unit;
+   "error", ty_fun ty_unit ty_zero;
+   "(=)", ty_polycmp;
+   "(==)", ty_polycmp;
+   "(<)", ty_polycmp;
+   "(>)", ty_polycmp;
+   "(<=)", ty_polycmp;
+   "(>=)", ty_polycmp;
+   "(+)", ty_binarith;
+   "(-)", ty_binarith
+  ]
+
+let gamma0 =
+  List.fold_right
+    (fun (n, t) g ->
+     SMap.add (Symbol.intern n)
+              { environment = SMap.empty;
+                expr = (compile_terms (fun f -> f Pos t)) } g)
+    predefined SMap.empty
+
+
+let optimise s =
+  let states = s.expr :: SMap.fold (fun v s ss -> s :: ss) s.environment [] in
+  Types.optimise_flow states;
+  s
+       
+type result =
+  | Type of scheme
+  | TypeError of string
+
+
+
+let infer_module modlist =
+  let recomp s =
+    assert (s.environment = SMap.empty);
+    { environment = SMap.empty; expr = compile_terms (fun f -> f Pos (decompile_automaton s.expr)) } in 
+  let infer gamma exp =
+    try
+      let s = typecheck gamma exp in
+      Type (recomp (optimise s))
+    with
+    | Failure msg -> TypeError ("Type inference failed: " ^ msg)
+    | Match_failure (file, line, col) ->
+       TypeError (Format.sprintf "Match failure in typechecker at %s:%d%d\n%!" file line col) in
+
+  let rec infer_mod gamma acc = function
+    | [] -> acc
+    | (name, exp) :: rest ->
+       let t = infer gamma exp in
+       match t with
+       | Type s -> infer_mod (SMap.add (Symbol.intern name) s gamma) ((name, t) :: acc) rest
+       | TypeError _ -> (name, t) :: acc in
+  
+  List.rev (infer_mod gamma0 [] modlist)
+

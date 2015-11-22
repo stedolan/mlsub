@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>MLsub type inference</title>
+  <script type="text/javascript" src="mlsub.js"></script>
+  <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+  <h1>MLsub type inference</h1>
+  <p>This is a demo of the prototype MLsub type inference engine,
+    which does Hindley-Milner style type inference with
+    subtyping. Edit the code on the left, and its type will be printed
+    on the right.</p>
+
+  <p>The syntax is a fragment of OCaml, with functions, let, lists, and records.</p>
+  <div id="content">
+    <div id="left">
+<textarea id="input">
+let id = fun x -> x
+
+let rec map = fun f -> fun l ->
+  match l with
+    [] -> []
+  | x :: xs -> f x :: map f xs
+
+let twice = fun f -> fun x -> f (f x)
+
+let object1 = { x = 42; y = id }
+let object2 = { x = 17; y = false }
+
+let pick_an_object = fun b ->
+  if b then object1 else object2
+
+let list_of_objects =
+  [object1; object2]
+
+let x_fields = map (fun o -> o.x) list_of_objects
+
+let rec recursive_monster = fun x ->
+  { thing = x;
+    self = recursive_monster x }
+</textarea>
+    </div>
+    <div id="right">
+      <div id="output"></div>
+    </div>
+  </div>
+  <p>
+    The MLsub typechecker is written in OCaml, and the code is
+    available
+    on <a href="https://github.com/stedolan/mlsub">github</a>.
+    </p>
+  <p>
+    The demo above is the was compiled to javascript from the MLsub
+    source
+    using <a href="http://ocsigen.org/js_of_ocaml/">js_of_ocaml</a>,
+    and the colors on this page
+    are from <a href="http://ethanschoonover.com/solarized">Solarized</a>.
+  </p>
+</body>
+</html>
