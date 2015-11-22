@@ -1,4 +1,4 @@
-%token <string> IDENT
+%token <Symbol.t> IDENT
 %token <int> INT
 %token ARROW
 %token FUN
@@ -77,18 +77,18 @@ prog:
 
 modlist:
 | EOF { [] }
-| LET; v = IDENT; EQUALS; e = exp; m = modlist; { (Symbol.intern v,e) :: m }
-| LET; REC; v = IDENT; EQUALS; ve = exp_rec; m = modlist; { ve :: m }
+| LET; v = IDENT; EQUALS; e = exp; m = modlist; { (v,e) :: m }
+| LET; ve = exp_rec; m = modlist; { ve :: m }
 
 exp_rec:
 | REC; v = IDENT; EQUALS; e = exp
-    { Symbol.intern v , (Pos ($startpos(v), $endpos), Rec(Symbol.intern v, e)) }
+    { v , (Pos ($startpos(v), $endpos), Rec(v, e)) }
 
 exp_r:
 | FUN; v = IDENT; ARROW; e = exp 
-    { Lambda (Symbol.intern v, e) }
+    { Lambda (v, e) }
 | LET; v = IDENT; EQUALS; e1 = exp; IN; e2 = exp
-    { Let (Symbol.intern v, e1, e2) }
+    { Let (v, e1, e2) }
 | LET; ve1 = exp_rec; IN; e2 = exp
     { let (v, e1) = ve1 in Let (v, e1, e2) }
 | IF; cond = exp; THEN; tcase = exp; ELSE; fcase = exp
@@ -96,7 +96,7 @@ exp_r:
 | MATCH; e = term; WITH; 
     LBRACK; RBRACK; ARROW; n = exp; 
     TY_JOIN; x = IDENT; CONS; xs = IDENT; ARROW; c = exp
-    { Match (e, n, Symbol.intern x, Symbol.intern xs, c) }
+    { Match (e, n, x, xs, c) }
 | e = simple_exp_r
     { e }
 
@@ -138,7 +138,7 @@ app:
 
 term_r:
 | v = IDENT 
-    { Var (Symbol.intern v) }
+    { Var v }
 | LPAR; e = exp_r; RPAR
     { e }
 | LPAR; e = exp; ASC; t = typeterm; RPAR
@@ -152,7 +152,7 @@ term_r:
 | LBRACK; e = nonemptylist_r; RBRACK
     { e }
 | e = term; DOT; f = IDENT
-    { GetField (e, Symbol.intern f) }
+    { GetField (e, f) }
 | i = INT
     { Int i }
 | TRUE
@@ -166,9 +166,9 @@ term:
 
 obj:
 | v = IDENT; EQUALS; e = exp
-    { [Symbol.intern v, e] }
+    { [v, e] }
 | v = IDENT; EQUALS; e = exp; SEMI; o = obj
-    { (Symbol.intern v, e) :: o }
+    { (v, e) :: o }
 
 nonemptylist_r:
 | x = exp
@@ -188,14 +188,14 @@ onlytype:
 
 
 typeterm:
-| v = IDENT { TVar v }
+| v = IDENT { TVar (Symbol.to_string v) }
 | t1 = typeterm; ARROW ; t2 = typeterm  { ty_fun t1 t2 }
 | TOP { ty_zero }
 | BOT { ty_zero }
 | LPAR; t = typeterm; LIST; RPAR { ty_list t }
 | UNIT { ty_base (Symbol.intern "unit") }
 | t1 = typeterm; meetjoin; t2 = typeterm { TAdd (t1, t2) } %prec TY_MEET
-| REC; v = IDENT; EQUALS; t = typeterm { TRec (v, t) }
+| REC; v = IDENT; EQUALS; t = typeterm { TRec (Symbol.to_string v, t) }
 | LPAR; t = typeterm; RPAR { t }
 
 %inline meetjoin : TY_MEET | TY_JOIN {}
