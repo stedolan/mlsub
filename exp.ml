@@ -1,7 +1,4 @@
 type 'a arguments = 'a
-type loc =
-  | Unknown
-  | Pos of Lexing.position * Lexing.position
 
 type rexp =
   | Var of Symbol.t
@@ -20,4 +17,4 @@ type rexp =
   | Object of (Symbol.t * exp) list
   | GetField of exp * Symbol.t
 
-and exp = loc * rexp
+and exp = Location.t * rexp

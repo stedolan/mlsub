@@ -62,6 +62,7 @@
   open Types 
   open Typecheck
   open Exp
+  open Location
 %}
 
 %start <Exp.exp> prog
@@ -172,7 +173,7 @@ obj:
 
 nonemptylist_r:
 | x = exp
-    { Cons(x, (Unknown, Nil)) }
+    { Cons(x, (let (l, _) = x in l, Nil)) }
 | x = exp; SEMI; xs = nonemptylist
     { Cons(x, xs) }
 
