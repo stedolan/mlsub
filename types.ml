@@ -247,6 +247,13 @@ let string_of_var v = v
 
 open Format
 
+let printp paren ppf fmt =
+  let openbox ppf = if paren then fprintf ppf "@[(" else fprintf ppf "@[" in
+  let closebox ppf = if paren then fprintf ppf "@])" else fprintf ppf "@]" in
+  openbox ppf;
+  kfprintf closebox ppf fmt
+
+
 let rec gen_print_typeterm vstr pol ppf = function 
   | TVar v -> fprintf ppf "%s" (vstr v)
   | TCons cons ->
@@ -593,7 +600,7 @@ let rec subsumed map =
     (* s+ <= ssr+ 
        or
        ssr- <= s- *)
-    Printf.printf "%d ~ %a\n%!" s.id (fun ppf xs -> StateSet.iter xs (fun x -> Printf.fprintf ppf "%d " x.id)) ssr;
+    (* Printf.printf "%d ~ %a\n%!" s.id (fun ppf xs -> StateSet.iter xs (fun x -> Printf.fprintf ppf "%d " x.id)) ssr; *)
     StateSet.iter ssr (fun s' -> assert (s.pol = s'.pol));
     let (ssn, ssp) = match s.pol with Pos -> (StateSet.empty, ssr) | Neg -> (ssr, StateSet.empty) in
     if antichain_ins (get_def var_ant s antichain_new) ssn ssp then true else
@@ -676,8 +683,6 @@ and block =
 
 
 let refine_partition (initial_partition : StateSet.t list) (back_edges : StateSet.t StateTbl.t EdgeMap.t) =
-
-
   let count_mod (t : int StateTbl.t) (s : state) (k : int) =
     if not (StateTbl.mem t s) then StateTbl.add t s 0;
     let n = StateTbl.find t s + k in
