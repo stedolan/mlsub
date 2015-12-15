@@ -19,6 +19,7 @@ module type FEATURE = sig
     val join : polarity -> (polarity -> 'a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
     val lte : polarity -> (polarity -> 'a -> 'a -> bool) -> 'a t -> 'a t -> bool
     val pmap : (polarity -> 'a -> 'b) -> polarity -> 'a t -> 'b t
+    val pfold : (polarity -> 'a -> 'r -> 'r) -> polarity -> 'a t -> 'r -> 'r
 
     val print : (polarity -> 'a printer) -> polarity -> 'a t printer
     val list_fields : 'a t -> (string * 'a) list
@@ -30,6 +31,7 @@ module Func = struct
   let lte pol f (Func (d, r)) (Func (d', r')) = f (polneg pol) d' d && f pol r r'
 
   let pmap f pol (Func (d, r)) = Func (f (polneg pol) d, f pol r)
+  let pfold f pol (Func (l, d, r)) x = f (polneg pol) d (f pol r x)
 
   let print pr pol ppf (Func (d, r)) =
     Format.fprintf ppf "%a -> %a" (pr (polneg pol)) d (pr pol) r
@@ -42,6 +44,7 @@ module ListT = struct
   let lte pol f a b = f pol a b
   let pmap f pol a = f pol a
   let print pr pol ppf a =
+  let pfold f pol (l, a) r = f pol a r
     Format.fprintf ppf "%a list" (pr pol) a
   let list_fields x = ["e", x]
 end
@@ -63,6 +66,8 @@ module Object = struct
     SMap.for_all (fun k yk -> SMap.mem k x && f pol (SMap.find k x) yk) y
 
   let pmap f pol o = SMap.map (f pol) o
+  let pfold f pol o r =
+    SMap.fold (fun k (l, x) r -> f pol x r) o r
 
   let list_fields o = List.map (fun (k, v) -> (Symbol.to_string k, v)) (SMap.bindings o)
 
@@ -87,6 +92,7 @@ module type TYPES = sig
     val subs : polarity -> (polarity -> 'a -> 'a -> bool) -> 'a t -> 'a t -> bool
 
     val pmap : (polarity -> 'a -> 'b) -> polarity -> 'a t -> 'b t
+    val pfold : (polarity -> 'a -> 'r -> 'r) -> polarity -> 'a t -> 'r -> 'r
 
     val print_first : (polarity -> 'a printer) -> polarity -> 'a t printer
     val print_rest : (polarity -> 'a printer) -> polarity -> 'a t printer
@@ -114,6 +120,7 @@ module Base = struct
     SMap.for_all (fun k _ -> SMap.mem k y) x
 
   let pmap f pol x = x
+  let pfold f pol x r = r
 
   let print_rest  pr pol ppf x =
     SMap.iter (fun k _ -> Format.fprintf ppf "@ %s@ %s" (match pol with Pos -> "|" | Neg -> "&") (Symbol.to_string k)) x
@@ -191,6 +198,10 @@ module Cons (A : FEATURE) (Tail : TYPES) = struct
     | Absent t -> Absent (Tail.pmap f pol t)
     | Present (a, t) -> Present (A.pmap f pol a, Tail.pmap f pol t)
 
+  let pfold f pol a r = match a with
+    | Absent t -> Tail.pfold f pol t r
+    | Present (a, t) -> A.pfold f pol a (Tail.pfold f pol t r)
+       
   let lift x = Present (x, Tail.join_ident)
 
   let print_rest pr pol ppf = function
@@ -213,7 +224,10 @@ end
 module Ty2 = Cons (Object) (Base)
 module Ty1 = Cons (Func) (Ty2)
 module Ty0 = Cons (ListT) (Ty1)
-module TypeLat = Ty0
+module TypeLat = struct
+    include Ty0
+    let iter f p x = pfold (fun pol x r -> f pol x) p x ()
+end
 
 let cons_list e : 'a TypeLat.t =
   Ty0.lift e
@@ -318,7 +332,7 @@ let fresh_id () =
 let compile_terms (map : (polarity -> var typeterm -> state) -> 'a) : 'a =
   let states = ref [] in
   let mkstate pol cons = 
-    let r = { id = fresh_id (); pol; cons; flow = StateSet.empty} in
+    let r = { id = fresh_id (); pol; cons; flow = StateSet.empty } in
     (states := r :: !states; r) in
   let state_vars = StateTbl.create 20 in
   let epsilon_trans = StateTbl.create 20 in
@@ -372,14 +386,14 @@ let compile_terms (map : (polarity -> var typeterm -> state) -> 'a) : 'a =
 
   root
 
-let print_automaton diagram_name ppf (map : (string -> state -> unit) -> unit) =
+let print_automaton diagram_name id ppf (map : (string -> state -> unit) -> unit) =
   let dumped = StateTbl.create 20 in
   let pstate ppf s = fprintf ppf "n%d" s.id in
   let rec dump s name =
     if StateTbl.mem dumped s then () else begin
       StateTbl.add dumped s s;
       let name = (match name with None -> "" | Some n -> n ^ ": ") ^ cons_name s.pol s.cons in
-      fprintf ppf "%a [label=\"%s (%d)\"];\n" pstate s name s.id;
+      fprintf ppf "%a [label=\"%s (%d)\"];\n" pstate s name (id s);
       List.iter (fun (f, ss') -> 
         StateSet.iter ss'
           (fun s' -> 
@@ -413,29 +427,6 @@ let garbage_collect (root : state) =
   let states = find_reachable [root] in
   let state_set = List.fold_left StateSet.add StateSet.empty states in
   List.iter (fun s -> s.flow <- StateSet.inter s.flow state_set) states
-
-let clone f =
-  let states = StateTbl.create 20 in
-  let rec copy_state s =
-    if StateTbl.mem states s then StateTbl.find states s else
-      let s' = { id = fresh_id ();
-                 pol = s.pol;
-                 cons = TypeLat.join_ident;
-                 flow = StateSet.empty } in
-      StateTbl.add states s s';
-      List.iter
-        (fun (f, ss') -> StateSet.iter ss' (fun s -> ignore (copy_state s)))
-        (TypeLat.list_fields s.cons);
-      StateSet.iter s.flow (fun s -> ignore (copy_state s));
-      s' in
-  let r = f copy_state in
-  let remap_states ss = StateSet.fold_left ss StateSet.empty
-        (fun ss' s -> StateSet.add ss' (StateTbl.find states s)) in
-  StateTbl.iter (fun s_old s_new -> 
-    s_new.cons <- TypeLat.pmap (fun p ss -> remap_states ss) s_old.pol s_old.cons;
-    s_new.flow <- remap_states s_old.flow) states;
-  r
-
                 
 let make_table s f =
   let t = StateTbl.create 20 in
@@ -552,6 +543,215 @@ let contraction sp_orig sn_orig =
       b && StateSet.fold_left ssn true (fun b sn ->
         b && closure sp sn)) in
   closure sp_orig sn_orig
+
+
+
+
+let states_follow p (s : StateSet.t) : StateSet.t TypeLat.t =
+  StateSet.fold_left s TypeLat.join_ident (fun c s -> TypeLat.join p (fun p a b -> StateSet.union a b) c s.cons)
+
+
+(* Deterministic automata *)
+
+
+type dstate_id = int
+
+module rec DState : sig
+  type dstate = 
+    { id : dstate_id;
+      pol : polarity;
+      mutable cons : dstate TypeLat.t;
+      mutable flow : DStateSet.t; }
+end = struct
+  type dstate =
+    { id : dstate_id;
+      pol : polarity;
+      mutable cons : dstate TypeLat.t;
+      mutable flow : DStateSet.t }
+end
+and DStateSet : Intmap.S with type elt = DState.dstate = 
+  Intmap.Fake (struct type t = DState.dstate let get_id = DState.(fun s -> s.id) end)
+
+type dstate = DState.dstate
+let fresh_dstate p =
+  DState.{ id = fresh_id ();
+           pol = p;
+           cons = TypeLat.join_ident;
+           flow = DStateSet.empty } 
+
+module DStateHash = struct type t = dstate let equal x y = x == y let hash x = x.DState.id end
+module DStateTbl = Hashtbl.Make (DStateHash)
+
+
+(* Convert a DFA into an NFA *)
+let clone f =
+  let states = DStateTbl.create 20 in
+  let rec copy_state s =
+    if DStateTbl.mem states s then
+      DStateTbl.find states s 
+    else begin
+      let s' = { id = fresh_id ();
+                 pol = s.DState.pol;
+                 cons = TypeLat.join_ident;
+                 flow = StateSet.empty } in
+      DStateTbl.add states s s';
+      s'.cons <- TypeLat.pmap (fun pol d ->
+        assert (pol = d.DState.pol);
+        StateSet.singleton (copy_state d)) s.DState.pol s.DState.cons;
+      s'.flow <- DStateSet.fold_left s.DState.flow StateSet.empty
+        (fun flow d -> StateSet.add flow (copy_state d));
+      s' 
+    end in
+  f copy_state
+
+
+
+
+(* Convert an NFA (bunch of states) into a DFA (bunch of dstates) *)
+let determinise old_states =
+  (* DFA states correspond to sets of NFA states *)
+  let module M = Map.Make (StateSet) in
+  let dstates = ref M.empty in
+  let rec follow p s =
+    if M.mem s !dstates then
+      M.find s !dstates
+    else begin
+      let d = fresh_dstate p in
+      dstates := M.add s d !dstates;
+      d.DState.cons <- TypeLat.pmap follow p (states_follow p s);
+      d
+    end in
+  old_states |> List.iter (fun s ->
+    ignore (follow s.pol (StateSet.singleton s)));
+  (* flow edges:
+     there should be a flow A -> B whenever there is
+     a flow a -> b for a in A, b in B *)
+  let dstates_containing =
+    let tbl = StateTbl.create 20 in
+    M.iter (fun ss d -> StateSet.iter ss (fun s -> StateTbl.add tbl s d)) !dstates;
+    fun s -> StateTbl.find_all tbl s in
+  let flows_to a =
+    StateSet.fold_left a.flow DStateSet.empty (fun ds s ->
+      DStateSet.union ds (DStateSet.of_list (dstates_containing s))) in
+  !dstates |> M.iter (fun ss d ->
+    d.DState.flow <- StateSet.fold_left ss DStateSet.empty (fun ds s ->
+      DStateSet.union ds (flows_to s)));
+  let all_dstates = !dstates |> M.bindings |> List.map snd in
+  (fun s -> M.find (StateSet.singleton s) !dstates), all_dstates
+
+
+(* Construct a minimal DFA using (roughly) Hopcroft's algorithm *)
+let minimise dstates =
+  let open DState in
+
+  let rec check_disjoint s = function
+    | [] -> ()
+    | (p :: ps) ->
+       assert (DStateSet.(is_empty (inter s p)));
+      check_disjoint (DStateSet.union s p) ps in
+    
+(*
+  let dump_partition ps =
+    let open Format in
+    ps |> List.iter (fun p ->
+      printf "[%s]" (p |> DStateSet.to_list |> List.map (fun s -> string_of_int (s.id)) |> String.concat " "));
+    printf "\n%!"
+  in
+*)
+  
+  (* Horrible O(n^2) initial partition *)
+  let rec partition_list cmp acc = function
+    | [] -> acc
+    | (x :: xs) ->
+       let (same, different) = List.partition (cmp x) xs in
+       partition_list cmp ((x :: same) :: acc) different in
+
+  let rec repartition cmp = function
+    | [] -> []
+    | (p :: ps) ->
+       partition_list cmp (repartition cmp ps) p in
+
+  let same_ctor d d' =
+    let sub_ctor d1 d2 =
+      assert (d1.pol = d2.pol);
+      TypeLat.subs d1.pol (fun pol x y -> true) d1.cons d2.cons in
+    sub_ctor d d' && sub_ctor d' d in
+    
+
+  let initial_partition = [ dstates ]
+    |> repartition (fun d d' -> d.pol = d'.pol)
+    |> repartition same_ctor
+    |> repartition (fun d d' -> DStateSet.compare d.flow d'.flow = 0)
+    |> List.map DStateSet.of_list in
+
+
+  let predecessors = DStateTbl.create 20 in
+  dstates |> List.iter (fun d ->
+    TypeLat.iter (fun p d' -> DStateTbl.add predecessors d' d) d.pol d.cons);
+
+  (* Find predecessors of a set ds' of dstates *)
+  let pred_ctor p ds' =
+    let ds = DStateSet.(fold_left ds' empty
+      (fun ds d' -> union ds (of_list (DStateTbl.find_all predecessors d')))) in
+    DStateSet.fold_left ds TypeLat.join_ident (fun t d ->
+      TypeLat.join p (fun p x y -> DStateSet.union x y) t
+        (TypeLat.pmap (fun p d' -> 
+        if DStateSet.mem ds' d' then
+          DStateSet.singleton d
+        else DStateSet.empty) d.pol d.cons)) in
+
+  let active = ref initial_partition in
+  let rec split pol ds = function
+    | [] -> []
+    | p :: ps ->
+       let open DStateSet in
+       let p1 = inter p ds in
+       let p2 = diff p ds in
+       match is_empty p1, is_empty p2 with
+       | false, false -> 
+          let smaller = 
+            if length p1 < length p2 then p1 else p2 in
+          active := smaller :: !active;
+          p1 :: p2 :: split pol ds ps
+       | false, true 
+       | true, false -> p :: split pol ds ps
+       | true, true -> assert false (* p should be nonempty *) in
+
+  let rec partition_polarity p =
+    (List.hd (DStateSet.to_list p)).DState.pol in
+
+  let rec refine ps =
+    check_disjoint DStateSet.empty ps;
+    (*
+    dump_partition ps;*)
+    match !active with
+    | [] -> ps
+    | (ds :: rest) ->
+      active := rest;
+      let pol = partition_polarity ds in
+      refine (TypeLat.pfold split pol (pred_ctor pol ds) ps) in
+
+  let remap_tbl = DStateTbl.create 20 in
+  let new_dstates = initial_partition |> refine |> List.map (fun p ->
+    let d = fresh_dstate (partition_polarity p) in
+    DStateSet.iter p (fun x -> DStateTbl.add remap_tbl x d);
+    (d, DStateSet.to_list p |> List.hd)) in
+
+  let remap d = DStateTbl.find remap_tbl d in
+  
+  new_dstates |> List.iter (fun (s, d) ->
+    s.cons <- TypeLat.pmap (fun p x -> remap x) d.pol d.cons;
+    s.flow <- DStateSet.fold_left d.flow DStateSet.empty (fun flow x -> DStateSet.add flow (remap x)));
+
+  remap
+
+
+    
+    
+
+
+
+(* Non-deterministic entailment and subsumption *)
 
 
 type antichain = (StateSet.t * StateSet.t) list ref

@@ -427,6 +427,8 @@ module type S = sig
 
   val subset : t -> t -> bool
   val min_elt : t -> elt
+
+  val compare : t -> t -> int
 end
 
 
@@ -449,6 +451,8 @@ module Fake (T : IdentType) : S with type elt = T.t = struct
   let to_list = M.elements
   let subset = M.subset
   let min_elt = M.min_elt
+
+  let compare = M.compare
 end
 
 

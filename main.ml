@@ -83,6 +83,21 @@ let repl () =
                (* run exp *) )
     (*parse_line Parser.prog (fun s -> Format.printf "%a\n%!" print_automaton s.Typecheck.expr)*)
   done
+*)
+
+let to_dscheme name s =
+  let states = s.expr :: SMap.fold (fun v s ss -> s :: ss) s.environment [] in
+  let remap, dstates = Types.determinise states in
+(*  Types.print_automaton (Symbol.to_string name) (fun s -> try (remap s).Types.DState.id with Not_found -> -1) Format.std_formatter (fun f -> f "t" s.Typecheck.expr);
+  Types.print_automaton (Symbol.to_string name) (fun s -> s.Types.State.id) Format.std_formatter 
+    (fun f -> f "t" (clone (fun f -> f (remap s.expr))));*)
+
+  let minim = Types.minimise dstates in
+  let remap x = minim (remap x) in 
+(*  Types.print_automaton (Symbol.to_string name) (fun s -> s.Types.State.id) Format.std_formatter 
+    (fun f -> f "t" (clone (fun f -> f (remap s.expr))));*)
+  { d_environment = SMap.map remap s.environment; d_expr = remap s.expr }
+
 
 let process file =
   let check gamma (name, exp) =

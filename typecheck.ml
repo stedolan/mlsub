@@ -6,13 +6,24 @@ type scheme =
   { environment : state SMap.t;
     expr : state }
 
+type dscheme =
+  { d_environment : dstate SMap.t;
+    d_expr : dstate }
+
 type typing =
     scheme SMap.t -> scheme
 
+let to_dscheme s =
+  let states = s.expr :: SMap.fold (fun v s ss -> s :: ss) s.environment [] in
+  let remap, dstates = Types.determinise states in
+  let minim = Types.minimise dstates in
+  let remap x = minim (remap x) in 
+  { d_environment = SMap.map remap s.environment; d_expr = remap s.expr }
+
 let clone_scheme s =
-  Types.clone (fun f -> { environment = SMap.map f s.environment; expr = f s.expr })
+  Types.clone (fun f -> { environment = SMap.map f s.d_environment; expr = f s.d_expr })
     
-let constrain name (inputs : (state * var typeterm) list) p output =
+let constrain err name (inputs : (state * var typeterm) list) p output =
   let (inputs, output) = compile_terms (fun f ->
     (List.map (fun (s, t) -> (s, f (polneg s.Types.State.pol) t)) inputs, f p output)) in
   let dump title =
@@ -23,7 +34,7 @@ let constrain name (inputs : (state * var typeterm) list) p output =
                  f (Printf.sprintf "t-%d" !id) t;
                  incr id) inputs;
       f "out" output in
-    Format.printf "%a\n%!" (print_automaton title) find_states in
+    Format.printf "%a\n%!" (print_automaton title (fun s -> s.Types.State.id)) find_states in
   let debug = false in
   if debug then dump (name ^ "_before");
   if not (List.fold_left (fun b (s, c) -> b && 
@@ -47,15 +58,15 @@ let env_join = SMap.merge (fun k a b -> match a, b with
   | Some a, Some b ->
     Some (constrain "join" [a, TVar "a"; b, TVar "a"] Neg (TVar "a")))
 
-let add_singleton v gamma =
+let add_singleton v gamma loc =
   let singleton = compile_terms (fun f -> {
-        environment = SMap.singleton v (f Neg (TVar "a"));
-        expr = f Pos (TVar "a")}) in
-  SMap.add v singleton gamma
+        environment = SMap.singleton v (f Neg (ty_var "a" loc));
+        expr = f Pos (ty_var "a" loc)}) in
+  SMap.add v (to_dscheme singleton) gamma
 
 
 open Exp
-let rec typecheck gamma (loc, exp) = match exp with
+let rec typecheck err gamma (loc, exp) = match exp with
   | Var v ->
      (try clone_scheme (SMap.find v gamma)
       with Not_found -> failwith ("unbound variable '" ^ Symbol.to_string v ^ "'"))
