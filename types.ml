@@ -3,6 +3,8 @@ type polarity = Pos | Neg
 let polneg = function Pos -> Neg | Neg -> Pos
 let polmul = function Pos -> (fun p -> p) | Neg -> polneg
 
+let pol_flip f pol x y = match pol with Pos -> f x y | Neg -> f y x
+
 (* FIXME *)
 module SMap = Map.Make (struct type t = int let compare = compare end)
 
@@ -28,8 +30,11 @@ end
 
 module type FEATURE = sig
     type 'a t
+    (* join Pos is least-upper-bound, join Neg is greatest-lower-bound. *)
     val join : polarity -> (polarity -> 'a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
-    val lte : polarity -> (polarity -> 'a -> 'a -> Reason.t list) -> 'a t -> 'a t -> Reason.t list
+    (* lte Pos f a b is a <= b, lte Neg f a b is a >= b. f works the same way *)
+    val lte : polarity -> (polarity -> 'a -> 'b -> Reason.t list) -> 'a t -> 'b t -> Reason.t list
+
     val pmap : (polarity -> 'a -> 'b) -> polarity -> 'a t -> 'b t
     val pfold : (polarity -> 'a -> 'r -> 'r) -> polarity -> 'a t -> 'r -> 'r
 
@@ -44,7 +49,7 @@ module type FEATURE = sig
 module Func = struct
   type 'a t = Func of Location.set * 'a * 'a
   let join p f (Func (l,d,r)) (Func (l',d',r')) = Func (Location.join l l', f (polneg p) d d', f p r r')
-  let lte pol f (Func (l, d, r)) (Func (l', d', r')) = f (polneg pol) d' d @ f pol r r'
+  let lte pol f (Func (l, d, r)) (Func (l', d', r')) = f (polneg pol) d d' @ f pol r r'
 
   let pmap f pol (Func (l, d, r)) = Func (l, f (polneg pol) d, f pol r)
   let pfold f pol (Func (l, d, r)) x = f (polneg pol) d (f pol r x)
@@ -75,10 +80,10 @@ module Object = struct
   type 'a t = (Location.set * 'a) SMap.t
   let join p f x y =
     let m = match p with
-      | Pos -> fun k x y -> (match x, y with
+      | Pos -> fun k x y -> (match x, y with (* lub takes intersection of fields *)
                              | Some (lx, x), Some (ly, y) -> Some (Location.join lx ly, f Pos x y)
                              | _, _ -> None)
-      | Neg -> fun k x y -> (match x, y with
+      | Neg -> fun k x y -> (match x, y with (* glb takes union of fields *)
                              | Some (lx, x), Some (ly, y) -> Some (Location.join lx ly, f Neg x y)
                              | Some a, None
                              | None, Some a -> Some a
@@ -90,11 +95,19 @@ module Object = struct
     SMap.map (fun (l, a) -> (l', a)) o
 
   let lte pol f x y : Reason.t list =
-    SMap.fold (fun k (yl, yk) r -> 
-      if SMap.mem k x then
-        let (xl, xk) = SMap.find k x in
-        f pol xk yk @ r
-      else [Reason.Conflict (locations x, "{}", yl, Symbol.to_string k)] @ r) y []
+    match pol with
+    | Pos -> 
+       SMap.fold (fun k (yl, yk) r -> 
+         if SMap.mem k x then
+           let (xl, xk) = SMap.find k x in
+           f pol xk yk @ r
+         else [Reason.Conflict (locations x, "{}", yl, Symbol.to_string k)] @ r) y []
+    | Neg ->
+       SMap.fold (fun k (xl, xk) r ->
+         if SMap.mem k y then
+           let (yl, yk) = SMap.find k y in
+           f pol xk yk @ r
+         else [Reason.Conflict (xl, Symbol.to_string k, locations y, "{}")] @ r) x []
 
   let pmap f pol o = SMap.map (fun (l, x) -> (l, f pol x)) o
   let pfold f pol o r =
@@ -123,7 +136,7 @@ module type TYPES = sig
 
     val lte_pn : ('a -> 'a -> Reason.t list) -> 'a t -> 'a t -> Reason.t list
     val lte_np : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
-    val subs : polarity -> (polarity -> 'a -> 'a -> bool) -> 'a t -> 'a t -> bool
+    val subs : polarity -> (polarity -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
 
     val pmap : (polarity -> 'a -> 'b) -> polarity -> 'a t -> 'b t
     val pfold : (polarity -> 'a -> 'r -> 'r) -> polarity -> 'a t -> 'r -> 'r
@@ -160,7 +173,7 @@ module Base = struct
 
   let subs p f x y =
     let subset a b = SMap.for_all (fun k _ -> SMap.mem k b) a in
-    match p with Pos -> subset x y | Neg -> subset y x
+    pol_flip subset p x y
 
   let pmap f pol x = x
   let pfold f pol x r = r
@@ -215,7 +228,7 @@ module Cons (A : FEATURE) (Tail : TYPES) = struct
           List.map (fun (yn, yl) -> Reason.Conflict (xl, xn, yl, yn)) in
     match x, y with
     | Present (xa, xt), Present (ya, yt) ->
-       A.lte Pos (fun p -> f) xa ya @
+       A.lte Pos (pol_flip f) xa ya @
          check_x (A.locations ya) A.name xt @
          check_y (A.locations xa) A.name yt
     | Present (xa, xt), Absent yt ->
@@ -230,7 +243,7 @@ module Cons (A : FEATURE) (Tail : TYPES) = struct
     (* i.e. exists i,j, Xi <= Yj *)
     match x, y with
     | Present (xa, xt), Present (ya, yt) ->
-       A.lte Pos (fun p x y -> if f x y then [] else [Reason.excuse]) xa ya = [] || Tail.lte_np f xt yt
+       A.lte Pos (fun p x y -> if pol_flip f p x y then [] else [Reason.excuse]) xa ya = [] || Tail.lte_np f xt yt
     | Present (_, xt), Absent yt
     | Absent xt, Present (_, yt)
     | Absent xt, Absent yt ->
