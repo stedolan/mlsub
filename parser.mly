@@ -70,6 +70,7 @@
 %start <Types.var Types.typeterm> onlytype
 %start <Types.var Types.typeterm * Types.var Types.typeterm> subsumption
 
+%parameter <L : Location.Locator>
 
 %%
 
@@ -83,7 +84,7 @@ modlist:
 
 exp_rec:
 | REC; v = IDENT; EQUALS; e = exp
-    { v , (Pos ($startpos(v), $endpos), Rec(v, e)) }
+    { v , (L.pos ($startpos(v), $endpos), Rec(v, e)) }
 
 exp_r:
 | FUN; v = IDENT; ARROW; e = exp 
@@ -103,11 +104,11 @@ exp_r:
 
 exp:
 | e = exp_r
-    { (Pos ($startpos, $endpos), e) }
+    { (L.pos ($startpos, $endpos), e) }
 
 simple_exp_r:
 | e1 = simple_exp; op = binop; e2 = simple_exp
-    { App((Pos ($startpos(e1), $endpos(op)), App((Pos ($startpos(op), $endpos(op)), Var (Symbol.intern op)), e1)), e2) }
+    { App((L.pos ($startpos(e1), $endpos(op)), App((L.pos ($startpos(op), $endpos(op)), Var (Symbol.intern op)), e1)), e2) }
 | x = app; CONS; xs = simple_exp
     { Cons(x, xs) }
 | e = app_r
@@ -115,7 +116,7 @@ simple_exp_r:
 
 simple_exp:
 | e = simple_exp_r
-    { (Pos ($startpos, $endpos), e) }
+    { (L.pos ($startpos, $endpos), e) }
 
 %inline binop:
 | EQUALS   { "(=)" }
@@ -135,7 +136,7 @@ app_r:
 
 app:
 | e = app_r
-    { (Pos ($startpos, $endpos), e) }
+    { (L.pos ($startpos, $endpos), e) }
 
 term_r:
 | v = IDENT 
@@ -163,7 +164,7 @@ term_r:
 
 term:
 | t = term_r
-    { (Pos ($startpos, $endpos), t) }
+    { (L.pos ($startpos, $endpos), t) }
 
 obj:
 | v = IDENT; EQUALS; e = exp
@@ -179,7 +180,7 @@ nonemptylist_r:
 
 nonemptylist:
 | e = nonemptylist_r
-    { (Pos ($startpos, $endpos), e) }
+    { (L.pos ($startpos, $endpos), e) }
 
 subsumption:
 | t1 = typeterm; SUBSUME; t2 = typeterm; EOF { (t1, t2) }
@@ -189,13 +190,13 @@ onlytype:
 
 
 typeterm:
-| v = IDENT { TVar (Symbol.to_string v) }
-| t1 = typeterm; ARROW ; t2 = typeterm  { ty_fun t1 t2 }
-| TOP { ty_zero }
-| BOT { ty_zero }
-| LPAR; t = typeterm; LIST; RPAR { ty_list t }
-| UNIT { ty_base (Symbol.intern "unit") }
-| t1 = typeterm; meetjoin; t2 = typeterm { TAdd (t1, t2) } %prec TY_MEET
+| v = IDENT { ty_var (Symbol.to_string v) (L.pos ($startpos, $endpos))}
+| t1 = typeterm; ARROW ; t2 = typeterm  { ty_fun (fun _ -> t1) (fun _ -> t2) (L.pos ($startpos, $endpos)) }
+| TOP { ty_zero (L.pos ($startpos, $endpos)) }
+| BOT { ty_zero (L.pos ($startpos, $endpos)) }
+| LPAR; t = typeterm; LIST; RPAR { ty_list (fun _ -> t) (L.pos ($startpos, $endpos)) }
+| UNIT { ty_base (Symbol.intern "unit") (L.pos ($startpos, $endpos)) }
+| t1 = typeterm; meetjoin; t2 = typeterm { TAdd (t1, t2)  } %prec TY_MEET
 | REC; v = IDENT; EQUALS; t = typeterm { TRec (Symbol.to_string v, t) }
 | LPAR; t = typeterm; RPAR { t }
 

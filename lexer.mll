@@ -1,8 +1,10 @@
 {
 open Lexing
-open Parser
 
-exception SyntaxError of string
+module Make (L : Location.Locator) = struct
+module P = Parser.Make (L)
+open P
+
 }
 
 
@@ -68,3 +70,7 @@ rule read =
   | id       { IDENT (Symbol.intern (Lexing.lexeme lexbuf)) }
   | int      { INT (int_of_string (Lexing.lexeme lexbuf)) }
   | eof      { EOF }
+
+{
+end
+}

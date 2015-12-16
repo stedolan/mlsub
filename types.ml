@@ -14,62 +14,93 @@ let print_to_string (pr : 'a printer) (x : 'a) : string =
   Buffer.contents buf
   
 
+module Reason = struct
+  type t = 
+    | Conflict of Location.set * string * Location.set * string
+  let print ppf (Conflict (la, a, lb, b)) = 
+    Location.LocSet.iter (Location.print ppf) la;
+    Location.LocSet.iter (Location.print ppf) lb;
+    Format.fprintf ppf "%s - %s\n%!" a b
+  let excuse = Conflict (Location.empty, "?", Location.empty, "?")
+end
+  
+
+
 module type FEATURE = sig
     type 'a t
     val join : polarity -> (polarity -> 'a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
-    val lte : polarity -> (polarity -> 'a -> 'a -> bool) -> 'a t -> 'a t -> bool
+    val lte : polarity -> (polarity -> 'a -> 'a -> Reason.t list) -> 'a t -> 'a t -> Reason.t list
     val pmap : (polarity -> 'a -> 'b) -> polarity -> 'a t -> 'b t
     val pfold : (polarity -> 'a -> 'r -> 'r) -> polarity -> 'a t -> 'r -> 'r
 
     val print : (polarity -> 'a printer) -> polarity -> 'a t printer
     val list_fields : 'a t -> (string * 'a) list
+    val name : string
+
+    val locations : 'a t -> Location.set
+    val change_locations : Location.set -> 'a t -> 'a t
   end
 
 module Func = struct
-  type 'a t = Func of 'a * 'a
-  let join p f (Func (d,r)) (Func (d',r')) = Func (f (polneg p) d d', f p r r')
-  let lte pol f (Func (d, r)) (Func (d', r')) = f (polneg pol) d' d && f pol r r'
+  type 'a t = Func of Location.set * 'a * 'a
+  let join p f (Func (l,d,r)) (Func (l',d',r')) = Func (Location.join l l', f (polneg p) d d', f p r r')
+  let lte pol f (Func (l, d, r)) (Func (l', d', r')) = f (polneg pol) d' d @ f pol r r'
 
-  let pmap f pol (Func (d, r)) = Func (f (polneg pol) d, f pol r)
+  let pmap f pol (Func (l, d, r)) = Func (l, f (polneg pol) d, f pol r)
   let pfold f pol (Func (l, d, r)) x = f (polneg pol) d (f pol r x)
 
-  let print pr pol ppf (Func (d, r)) =
+  let print pr pol ppf (Func (_, d, r)) =
     Format.fprintf ppf "%a -> %a" (pr (polneg pol)) d (pr pol) r
-  let list_fields (Func (d, r)) = ["d", d; "r", r]
+  let list_fields (Func (_, d, r)) = ["d", d; "r", r]
+  let name = "function"
+  let locations (Func (l, _, _)) = l
+  let change_locations l' (Func (l, d, r)) = Func (l', d, r)
 end
 
 module ListT = struct
-  type 'a t = 'a
-  let join p f a b = f p a b
-  let lte pol f a b = f pol a b
-  let pmap f pol a = f pol a
-  let print pr pol ppf a =
+  type 'a t = Location.set * 'a
+  let join p f (la, a) (lb, b) = (Location.join la lb, f p a b)
+  let lte pol f (_, a) (_, b) = f pol a b
+  let pmap f pol (l, a) = (l, f pol a)
   let pfold f pol (l, a) r = f pol a r
+  let print pr pol ppf (_, a) =
     Format.fprintf ppf "%a list" (pr pol) a
-  let list_fields x = ["e", x]
+  let list_fields (_, x) = ["e", x]
+  let name = "list"
+  let locations (l, _) = l
+  let change_locations l' (l, a) = l', a
 end
 
 module Object = struct
-  type 'a t = 'a SMap.t
+  type 'a t = (Location.set * 'a) SMap.t
   let join p f x y =
     let m = match p with
       | Pos -> fun k x y -> (match x, y with
-                             | Some x, Some y -> Some (f Pos x y)
+                             | Some (lx, x), Some (ly, y) -> Some (Location.join lx ly, f Pos x y)
                              | _, _ -> None)
       | Neg -> fun k x y -> (match x, y with
-                             | Some x, Some y -> Some (f Neg x y)
+                             | Some (lx, x), Some (ly, y) -> Some (Location.join lx ly, f Neg x y)
                              | Some a, None
                              | None, Some a -> Some a
                              | None, None -> None) in
     SMap.merge m x y
-  let lte pol f x y =
-    SMap.for_all (fun k yk -> SMap.mem k x && f pol (SMap.find k x) yk) y
+  let locations (o : 'a t) = 
+    SMap.fold (fun _ (l, _) locs -> Location.join l locs) o Location.empty
+  let change_locations l' o =
+    SMap.map (fun (l, a) -> (l', a)) o
 
-  let pmap f pol o = SMap.map (f pol) o
+  let lte pol f x y : Reason.t list =
+    SMap.fold (fun k (yl, yk) r -> 
+      if SMap.mem k x then
+        let (xl, xk) = SMap.find k x in
+        f pol xk yk @ r
+      else [Reason.Conflict (locations x, "{}", yl, Symbol.to_string k)] @ r) y []
+
+  let pmap f pol o = SMap.map (fun (l, x) -> (l, f pol x)) o
   let pfold f pol o r =
     SMap.fold (fun k (l, x) r -> f pol x r) o r
 
-  let list_fields o = List.map (fun (k, v) -> (Symbol.to_string k, v)) (SMap.bindings o)
+  let list_fields o = List.map (fun (k, (_, v)) -> (Symbol.to_string k, v)) (SMap.bindings o)
 
   let print pr pol ppf o =
     let rec pfield ppf = function
@@ -79,15 +110,18 @@ module Object = struct
       | (f, x) :: xs ->
          Format.fprintf ppf "%s :@ %a,@ %a" f (pr pol) x pfield xs in
     Format.fprintf ppf "{%a}" pfield (list_fields o)
+
+  let name = "object"
 end
 
 module type TYPES = sig
     type 'a t
     val join : polarity -> (polarity -> 'a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
     val join_ident : 'a t
-    val is_join_ident : 'a t -> bool
 
-    val lte_pn : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
+    val check_join_ident : 'a t -> (string * Location.set) list
+
+    val lte_pn : ('a -> 'a -> Reason.t list) -> 'a t -> 'a t -> Reason.t list
     val lte_np : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
     val subs : polarity -> (polarity -> 'a -> 'a -> bool) -> 'a t -> 'a t -> bool
 
@@ -97,19 +131,28 @@ module type TYPES = sig
     val print_first : (polarity -> 'a printer) -> polarity -> 'a t printer
     val print_rest : (polarity -> 'a printer) -> polarity -> 'a t printer
     val list_fields : 'a t -> (string * 'a) list
+
+    val change_locations : Location.set -> 'a t -> 'a t
   end
 
 module Base = struct
-  type 'a t = unit SMap.t (* FIXME: real sets of symbols would be nice *)
+  type 'a t = Location.set SMap.t (* FIXME: real sets of symbols would be nice *)
   let join p _ x y =
-    SMap.merge (fun k x y -> match x, y with None, None -> None | _, _ -> Some ()) x y
+    SMap.merge (fun k x y -> match x, y with
+      Some l, Some l' -> Some (Location.join l l')
+    | (Some _ as l), None
+    | None, (Some _ as l) -> l
+    | None, None -> None) x y
 
   let join_ident = SMap.empty
-  let is_join_ident = SMap.is_empty
 
-  let lte_pn f x y =
+  let check_join_ident t = List.map (fun (k, l) -> Symbol.to_string k, l) (SMap.bindings t)
+
+  let lte_pn f x y : Reason.t list =
     (* x = y = singleton || x = empty || y = empty *)
-    SMap.for_all (fun k _ -> SMap.for_all (fun k' _ -> k = k') y) x
+    SMap.fold (fun k loc rs -> 
+      SMap.fold (fun k' loc' rs -> 
+        (if k = k' then [] else [Reason.Conflict (loc, Symbol.to_string k, loc', Symbol.to_string k')]) @ rs) y rs) x []
 
   let lte_np f x y =
     (* nonempty intersection *)
@@ -129,10 +172,12 @@ module Base = struct
     if SMap.is_empty x then
       Format.fprintf ppf "%s" (match pol with Pos -> "Bot" | Neg -> "Top")
     else
-      let (k, ()) = SMap.min_binding x in
+      let (k, _) = SMap.min_binding x in
       Format.fprintf ppf "%s%a" (Symbol.to_string k) (print_rest pr pol) (SMap.remove k x)
 
   let list_fields _ = []
+
+  let change_locations l' t = SMap.map (fun _ -> l') t
 end
 
 module Cons (A : FEATURE) (Tail : TYPES) = struct
@@ -155,21 +200,28 @@ module Cons (A : FEATURE) (Tail : TYPES) = struct
   let join_ident =
     Absent Tail.join_ident
 
-  let is_join_ident = function
-    | Present _ -> false
-    | Absent t -> Tail.is_join_ident t
+  let check_join_ident = function
+    | Present (a, t) -> (A.name, A.locations a) :: Tail.check_join_ident t
+    | Absent t -> Tail.check_join_ident t
 
   let lte_pn f x y =
     (* lub X <= glb Y *)
     (* i.e. forall i,j, Xi <= Yj *)
+    let check_x yl yn xt =
+      Tail.check_join_ident xt |>
+          List.map (fun (xn, xl) -> Reason.Conflict (xl, xn, yl, xn)) in
+    let check_y xl xn yt =
+      Tail.check_join_ident yt |>
+          List.map (fun (yn, yl) -> Reason.Conflict (xl, xn, yl, yn)) in
     match x, y with
     | Present (xa, xt), Present (ya, yt) ->
-       A.lte Pos (fun p -> f) xa ya && 
-         Tail.is_join_ident xt && Tail.is_join_ident yt
-    | Present (_, xt), Absent yt ->
-       Tail.is_join_ident yt
-    | Absent xt, Present (_, yt) ->
-       Tail.is_join_ident xt
+       A.lte Pos (fun p -> f) xa ya @
+         check_x (A.locations ya) A.name xt @
+         check_y (A.locations xa) A.name yt
+    | Present (xa, xt), Absent yt ->
+       check_y (A.locations xa) A.name yt
+    | Absent xt, Present (ya, yt) ->
+       check_x (A.locations ya) A.name xt
     | Absent xt, Absent yt ->
        Tail.lte_pn f xt yt
 
@@ -178,7 +230,7 @@ module Cons (A : FEATURE) (Tail : TYPES) = struct
     (* i.e. exists i,j, Xi <= Yj *)
     match x, y with
     | Present (xa, xt), Present (ya, yt) ->
-       A.lte Pos (fun p -> f) xa ya || Tail.lte_np f xt yt
+       A.lte Pos (fun p x y -> if f x y then [] else [Reason.excuse]) xa ya = [] || Tail.lte_np f xt yt
     | Present (_, xt), Absent yt
     | Absent xt, Present (_, yt)
     | Absent xt, Absent yt ->
@@ -187,7 +239,7 @@ module Cons (A : FEATURE) (Tail : TYPES) = struct
   let subs pol f x y =
     match x, y with
     | Present (xa, xt), Present (ya, yt) ->
-       A.lte pol f xa ya && Tail.subs pol f xt yt
+       A.lte pol (fun p x y -> if f p x y then [] else [Reason.excuse]) xa ya = [] && Tail.subs pol f xt yt
     | Present (xa, xt), Absent yt ->
        false
     | Absent xt, (Present (_, yt) | Absent yt) ->
@@ -218,6 +270,10 @@ module Cons (A : FEATURE) (Tail : TYPES) = struct
   let list_fields = function
     | Present (a, t) -> A.list_fields a @ Tail.list_fields t
     | Absent t -> Tail.list_fields t
+
+  let change_locations l' = function
+    | Present (a, t) -> Present (A.change_locations l' a, Tail.change_locations l' t)
+    | Absent t -> Absent (Tail.change_locations l' t)
 end
 
 
@@ -235,8 +291,8 @@ let cons_func f : 'a TypeLat.t =
   Ty0.Absent (Ty1.lift f)
 let cons_object o : 'a TypeLat.t =
   Ty0.Absent (Ty1.Absent (Ty2.lift o))
-let cons_base x : 'a TypeLat.t =
-  Ty0.Absent (Ty1.Absent (Ty2.Absent (SMap.singleton x ())))
+let cons_base x loc : 'a TypeLat.t =
+  Ty0.Absent (Ty1.Absent (Ty2.Absent (SMap.singleton x loc)))
 
 
 let cons_name pol = print_to_string (TypeLat.print_first (fun pol ppf x -> ()) pol)
@@ -251,11 +307,13 @@ type 'a typeterm =
 | TRec of 'a * 'a typeterm
 
 
-let ty_list e = TCons (cons_list e)
-let ty_fun d r = TCons (cons_func (Func.Func (d, r)))
-let ty_zero = TCons (TypeLat.join_ident)
-let ty_obj o = TCons (cons_object o)
-let ty_base s = TCons (cons_base s)
+let ty_add t t' loc = TAdd (t loc, t' loc)
+let ty_var v loc = TVar v
+let ty_list e loc = TCons (cons_list (Location.one loc, e loc))
+let ty_fun d r loc = TCons (cons_func (Func.Func (Location.one loc, d loc, r loc)))
+let ty_zero loc = TCons (TypeLat.join_ident)
+let ty_obj o loc = TCons (cons_object (SMap.map (fun x -> (Location.one loc, x loc)) o))
+let ty_base s loc = TCons (cons_base s (Location.one loc))
                        
 let string_of_var v = v
 
@@ -268,7 +326,7 @@ let printp paren ppf fmt =
   kfprintf closebox ppf fmt
 
 
-let rec gen_print_typeterm vstr pol ppf = function 
+let rec gen_print_typeterm vstr pol ppf = function
   | TVar v -> fprintf ppf "%s" (vstr v)
   | TCons cons ->
      fprintf ppf "@[(%a)@]" (TypeLat.print_first (gen_print_typeterm vstr) pol) cons
@@ -290,7 +348,7 @@ module rec State : sig
     { id : state_id;
       pol : polarity;
       mutable cons : StateSet.t TypeLat.t;
-      mutable flow : StateSet.t }
+      mutable flow : StateSet.t; }
 end = struct
   type state =
     { id : state_id;
@@ -306,6 +364,7 @@ type state = State.state
 
 module StateHash = struct type t = state let equal x y = x == y let hash x = x.id end
 module StateTbl = Hashtbl.Make (StateHash)
+
 
 module VarOrd = struct type t = var let compare = compare end
 module VarMap = Map.Make (VarOrd)
@@ -531,7 +590,7 @@ let contraction sp_orig sn_orig =
   assert (sn_orig.pol = Neg);
   let seen = Hashtbl.create 20 in
   let rec closure sp sn =
-    if Hashtbl.mem seen (sp.id, sn.id) then true
+    if Hashtbl.mem seen (sp.id, sn.id) then []
     else begin
       Hashtbl.add seen (sp.id, sn.id) ();
       StateSet.iter sn.flow (fun s -> merge s sp);
@@ -539,9 +598,9 @@ let contraction sp_orig sn_orig =
       TypeLat.lte_pn closure_l sp.cons sn.cons
     end
   and closure_l ssp ssn =
-    StateSet.fold_left ssp true (fun b sp ->
-      b && StateSet.fold_left ssn true (fun b sn ->
-        b && closure sp sn)) in
+    StateSet.fold_left ssp [] (fun rs sp ->
+      rs @ StateSet.fold_left ssn rs (fun rs sn ->
+        rs @ closure sp sn)) in
   closure sp_orig sn_orig
 
 
@@ -586,7 +645,7 @@ module DStateTbl = Hashtbl.Make (DStateHash)
 (* Convert a DFA into an NFA *)
 let clone f =
   let states = DStateTbl.create 20 in
-  let rec copy_state s =
+  let rec copy_state loc s =
     if DStateTbl.mem states s then
       DStateTbl.find states s 
     else begin
@@ -597,9 +656,10 @@ let clone f =
       DStateTbl.add states s s';
       s'.cons <- TypeLat.pmap (fun pol d ->
         assert (pol = d.DState.pol);
-        StateSet.singleton (copy_state d)) s.DState.pol s.DState.cons;
+        StateSet.singleton (copy_state loc d)) s.DState.pol s.DState.cons
+      |> TypeLat.change_locations loc;
       s'.flow <- DStateSet.fold_left s.DState.flow StateSet.empty
-        (fun flow d -> StateSet.add flow (copy_state d));
+        (fun flow d -> StateSet.add flow (copy_state loc d));
       s' 
     end in
   f copy_state
@@ -761,11 +821,6 @@ let antichain_ins (a : antichain) ssn ssp =
     true
   else
     (a := (ssn,ssp) :: !a; false)
-  
-    
-
-let states_follow p (s : StateSet.t) : StateSet.t TypeLat.t =
-  StateSet.fold_left s TypeLat.join_ident (fun c s -> TypeLat.join p (fun p a b -> StateSet.union a b) c s.cons)
 
 let common_var ssn ssp =
   let flow ss = StateSet.fold_left ss StateSet.empty (fun c s -> StateSet.union c s.flow) in

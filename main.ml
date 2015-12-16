@@ -2,13 +2,13 @@ open Lexer
 open Lexing
 
 open Printf
-
+(*
 let parse_line f g =
   try g (f Lexer.read (Lexing.from_string (input_line stdin))) with
   | SyntaxError _ -> fprintf stderr "syntax error\n%!"
   | Parser.Error -> fprintf stderr "parser error\n%!"
 ;;
-
+*)
 open Types;;
 open Typecheck;;
 
@@ -67,14 +67,15 @@ let run exp =
 let reparse s = compile_terms (fun f -> f Pos (decompile_automaton s))
 let recomp s = decompile_automaton (compile_terms (fun f -> f Pos (decompile_automaton s)))
 
-
+(*
 let repl () = 
   while true do
 
     parse_line Parser.prog
                (fun exp ->
+                 let print_err e = Format.printf "%s\n%!" (Types.Reason.fmt e) in
                 (try
-                  let s = optimise (Typecheck.typecheck gamma0 exp) in
+                  let s = optimise (Typecheck.typecheck print_err gamma0 exp) in
                   Format.printf "%a\n%!" (print_typeterm Pos) (recomp (reparse (reparse (reparse s.Typecheck.expr))))
                 with
                 | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
@@ -100,21 +101,24 @@ let to_dscheme name s =
 
 
 let process file =
+  let print_err e = Types.Reason.print Format.err_formatter e in
   let check gamma (name, exp) =
-    let s = optimise (Typecheck.typecheck gamma exp) in
-    Format.printf "val %s : %a\n%!" (Symbol.to_string name) (print_typeterm Pos) (recomp s.Typecheck.expr);
+    let s = optimise (Typecheck.typecheck print_err gamma exp) in
+(*    Format.printf "val %s : %a\n%!" (Symbol.to_string name) (print_typeterm Pos) (decompile_automaton s.Typecheck.expr);
+    Format.printf "val %s : %a\n%!" (Symbol.to_string name) (print_typeterm Pos) (recomp s.Typecheck.expr);*)
+    let s = to_dscheme name s in
+    Format.printf "val %s : %a\n%!" (Symbol.to_string name) (print_typeterm Pos) 
+      (decompile_automaton (Types.clone (fun f -> f (Location.one Location.internal) s.Typecheck.d_expr)));
     SMap.add name s gamma in
   try
-    ignore (List.fold_left check gamma0 (Parser.modlist Lexer.read (Lexing.from_channel (open_in file))))
+    ignore (List.fold_left check gamma0 (Source.parse_modlist (Location.of_file file)))
   with
-  | SyntaxError _ -> fprintf stderr "syntax error\n%!"
-  | Parser.Error -> fprintf stderr "parser error\n%!"
   | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
   | Match_failure (file, line, col) -> Format.printf "Match failure in typechecker at %s:%d%d\n%!" file line col
 
 ;;
 
-if Array.length Sys.argv = 1 then repl () else
+if Array.length Sys.argv = 1 then assert false (* repl () *) else
   Array.iter process (Array.sub Sys.argv 1 (Array.length Sys.argv - 1))
 
 (*
