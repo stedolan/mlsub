@@ -159,8 +159,8 @@ module Base = struct
     SMap.exists (fun k _ -> SMap.mem k x) y
 
   let subs p f x y =
-    (* subset *)
-    SMap.for_all (fun k _ -> SMap.mem k y) x
+    let subset a b = SMap.for_all (fun k _ -> SMap.mem k b) a in
+    match p with Pos -> subset x y | Neg -> subset y x
 
   let pmap f pol x = x
   let pfold f pol x r = r
