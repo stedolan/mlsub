@@ -190,7 +190,11 @@ onlytype:
 
 
 typeterm:
-| v = IDENT { ty_var (Symbol.to_string v) (L.pos ($startpos, $endpos))}
+| v = IDENT {
+  let t = match Symbol.to_string v with
+    | "int" | "unit" | "bool" -> ty_base v
+    | s -> ty_var s in
+  t  (L.pos ($startpos, $endpos))}
 | t1 = typeterm; ARROW ; t2 = typeterm  { ty_fun (fun _ -> t1) (fun _ -> t2) (L.pos ($startpos, $endpos)) }
 | TOP { ty_zero (L.pos ($startpos, $endpos)) }
 | BOT { ty_zero (L.pos ($startpos, $endpos)) }
