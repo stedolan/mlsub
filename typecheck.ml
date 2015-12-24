@@ -50,8 +50,10 @@ let constrain err name (inputs : (state * var typeterm) list) p output =
 let ascription scheme typeterm =
   let s = compile_terms (fun f -> f Pos typeterm) in
   let top = compile_terms (fun f -> f Neg (ty_zero Location.internal)) in
-  match subsumed (fun f -> f scheme.expr s &&
-                             SMap.for_all (fun v sv -> f sv top) scheme.environment) with
+  let dsch = to_dscheme { environment = SMap.map (fun _ -> top) scheme.environment; expr = s } in
+  match subsumed (fun f -> f Pos scheme.expr dsch.d_expr &&
+                             SMap.for_all (fun v sv -> 
+                               f Neg sv (SMap.find v dsch.d_environment)) scheme.environment) with
   | false -> failwith "ascription check failed"
   | true -> { environment = SMap.empty; expr = s }
 

@@ -172,8 +172,8 @@ module Base = struct
     SMap.exists (fun k _ -> SMap.mem k x) y
 
   let subs p f x y =
-    let subset a b = SMap.for_all (fun k _ -> SMap.mem k b) a in
-    pol_flip subset p x y
+    (* subset *)
+    SMap.for_all (fun k _ -> SMap.mem k y) x
 
   let pmap f pol x = x
   let pfold f pol x r = r
@@ -630,28 +630,30 @@ type dstate_id = int
 
 module rec DState : sig
   type dstate = 
-    { id : dstate_id;
-      pol : polarity;
-      mutable cons : dstate TypeLat.t;
-      mutable flow : DStateSet.t; }
+    { d_id : dstate_id;
+      d_pol : polarity;
+      mutable d_cons : dstate TypeLat.t;
+      mutable d_flow : DStateSet.t; }
 end = struct
   type dstate =
-    { id : dstate_id;
-      pol : polarity;
-      mutable cons : dstate TypeLat.t;
-      mutable flow : DStateSet.t }
+    { d_id : dstate_id;
+      d_pol : polarity;
+      mutable d_cons : dstate TypeLat.t;
+      mutable d_flow : DStateSet.t }
 end
 and DStateSet : Intmap.S with type elt = DState.dstate = 
-  Intmap.Fake (struct type t = DState.dstate let get_id = DState.(fun s -> s.id) end)
+  Intmap.Fake (struct type t = DState.dstate let get_id = fun s -> s.DState.d_id end)
+
+open DState
 
 type dstate = DState.dstate
 let fresh_dstate p =
-  DState.{ id = fresh_id ();
-           pol = p;
-           cons = TypeLat.join_ident;
-           flow = DStateSet.empty } 
+  DState.{ d_id = fresh_id ();
+           d_pol = p;
+           d_cons = TypeLat.join_ident;
+           d_flow = DStateSet.empty } 
 
-module DStateHash = struct type t = dstate let equal x y = x == y let hash x = x.DState.id end
+module DStateHash = struct type t = dstate let equal x y = x == y let hash x = x.d_id end
 module DStateTbl = Hashtbl.Make (DStateHash)
 
 
@@ -663,15 +665,15 @@ let clone f =
       DStateTbl.find states s 
     else begin
       let s' = { id = fresh_id ();
-                 pol = s.DState.pol;
+                 pol = s.d_pol;
                  cons = TypeLat.join_ident;
                  flow = StateSet.empty } in
       DStateTbl.add states s s';
       s'.cons <- TypeLat.pmap (fun pol d ->
-        assert (pol = d.DState.pol);
-        StateSet.singleton (copy_state loc d)) s.DState.pol s.DState.cons
+        assert (pol = d.d_pol);
+        StateSet.singleton (copy_state loc d)) s.d_pol s.d_cons
       |> TypeLat.change_locations loc;
-      s'.flow <- DStateSet.fold_left s.DState.flow StateSet.empty
+      s'.flow <- DStateSet.fold_left s.d_flow StateSet.empty
         (fun flow d -> StateSet.add flow (copy_state loc d));
       s' 
     end in
@@ -691,7 +693,7 @@ let determinise old_states =
     else begin
       let d = fresh_dstate p in
       dstates := M.add s d !dstates;
-      d.DState.cons <- TypeLat.pmap follow p (states_follow p s);
+      d.d_cons <- TypeLat.pmap follow p (states_follow p s);
       d
     end in
   old_states |> List.iter (fun s ->
@@ -707,7 +709,7 @@ let determinise old_states =
     StateSet.fold_left a.flow DStateSet.empty (fun ds s ->
       DStateSet.union ds (DStateSet.of_list (dstates_containing s))) in
   !dstates |> M.iter (fun ss d ->
-    d.DState.flow <- StateSet.fold_left ss DStateSet.empty (fun ds s ->
+    d.d_flow <- StateSet.fold_left ss DStateSet.empty (fun ds s ->
       DStateSet.union ds (flows_to s)));
   let all_dstates = !dstates |> M.bindings |> List.map snd in
   (fun s -> M.find (StateSet.singleton s) !dstates), all_dstates
@@ -715,8 +717,6 @@ let determinise old_states =
 
 (* Construct a minimal DFA using (roughly) Hopcroft's algorithm *)
 let minimise dstates =
-  let open DState in
-
   let rec check_disjoint s = function
     | [] -> ()
     | (p :: ps) ->
@@ -746,21 +746,21 @@ let minimise dstates =
 
   let same_ctor d d' =
     let sub_ctor d1 d2 =
-      assert (d1.pol = d2.pol);
-      TypeLat.subs d1.pol (fun pol x y -> true) d1.cons d2.cons in
+      assert (d1.d_pol = d2.d_pol);
+      TypeLat.subs d1.d_pol (fun pol x y -> true) d1.d_cons d2.d_cons in
     sub_ctor d d' && sub_ctor d' d in
     
 
   let initial_partition = [ dstates ]
-    |> repartition (fun d d' -> d.pol = d'.pol)
+    |> repartition (fun d d' -> d.d_pol = d'.d_pol)
     |> repartition same_ctor
-    |> repartition (fun d d' -> DStateSet.compare d.flow d'.flow = 0)
+    |> repartition (fun d d' -> DStateSet.compare d.d_flow d'.d_flow = 0)
     |> List.map DStateSet.of_list in
 
 
   let predecessors = DStateTbl.create 20 in
   dstates |> List.iter (fun d ->
-    TypeLat.iter (fun p d' -> DStateTbl.add predecessors d' d) d.pol d.cons);
+    TypeLat.iter (fun p d' -> DStateTbl.add predecessors d' d) d.d_pol d.d_cons);
 
   (* Find predecessors of a set ds' of dstates *)
   let pred_ctor p ds' =
@@ -771,7 +771,7 @@ let minimise dstates =
         (TypeLat.pmap (fun p d' -> 
         if DStateSet.mem ds' d' then
           DStateSet.singleton d
-        else DStateSet.empty) d.pol d.cons)) in
+        else DStateSet.empty) d.d_pol d.d_cons)) in
 
   let active = ref initial_partition in
   let rec split pol ds = function
@@ -791,7 +791,7 @@ let minimise dstates =
        | true, true -> assert false (* p should be nonempty *) in
 
   let rec partition_polarity p =
-    (List.hd (DStateSet.to_list p)).DState.pol in
+    (List.hd (DStateSet.to_list p)).d_pol in
 
   let rec refine ps =
     check_disjoint DStateSet.empty ps;
@@ -813,108 +813,78 @@ let minimise dstates =
   let remap d = DStateTbl.find remap_tbl d in
   
   new_dstates |> List.iter (fun (s, d) ->
-    s.cons <- TypeLat.pmap (fun p x -> remap x) d.pol d.cons;
-    s.flow <- DStateSet.fold_left d.flow DStateSet.empty (fun flow x -> DStateSet.add flow (remap x)));
+    s.d_cons <- TypeLat.pmap (fun p x -> remap x) d.d_pol d.d_cons;
+    s.d_flow <- DStateSet.fold_left d.d_flow DStateSet.empty (fun flow x -> DStateSet.add flow (remap x)));
 
   remap
 
 
-    
-    
+(* Entailment of flow edges on deterministic automata *)
 
 
+let rec entailed dn dp =
+  assert (dn.d_pol = Neg && dp.d_pol = Pos);
+  assert (DStateSet.mem dn.d_flow dp = DStateSet.mem dp.d_flow dn);
+  if DStateSet.mem dn.d_flow dp then true else begin
+    dn.d_flow <- DStateSet.add dn.d_flow dp;
+    dp.d_flow <- DStateSet.add dp.d_flow dn;
+    if TypeLat.lte_np entailed dn.d_cons dp.d_cons then
+      true
+    else begin
+      dn.d_flow <- DStateSet.remove dn.d_flow dp;
+      dp.d_flow <- DStateSet.remove dp.d_flow dn;
+      false
+    end
+  end
 
-(* Non-deterministic entailment and subsumption *)
+let subsumed map =
+  let seen = StateTbl.create 20 in
+  let add sa db =
+    let open StateTbl in
+    if mem seen sa then begin
+      let s = find seen sa in
+      if DStateSet.mem s db then
+        true
+      else begin
+        replace seen sa (DStateSet.add s db);
+        false
+      end
+    end else begin
+      add seen sa (DStateSet.singleton db);
+      false
+    end in
+
+  let rec subsume pol sa db =
+    assert (pol = db.d_pol && pol = sa.pol);
+    (* db is rigid.
+       pol = Pos: sa <= db
+       pol = Neg: sa >= db *)
+    if add sa db then true else TypeLat.subs pol subsume_all sa.cons db.d_cons 
+  and subsume_all pol ssa db =
+    StateSet.fold_left ssa true (fun r sa -> r && subsume pol sa db) in
 
 
-type antichain = (StateSet.t * StateSet.t) list ref
-let antichain_new () = ref []
-let antichain_ins (a : antichain) ssn ssp =
-  if List.fold_left (fun b (ssn', ssp') -> b || (StateSet.subset ssn' ssn && StateSet.subset ssp' ssp) ) false !a then
-    true
-  else
-    (a := (ssn,ssp) :: !a; false)
+  let all_entailed r dns dps =
+    DStateSet.fold_left dns r (fun r dn ->
+      DStateSet.fold_left dps r (fun r dp ->
+        r && entailed dn dp)) in
 
-let common_var ssn ssp =
-  let flow ss = StateSet.fold_left ss StateSet.empty (fun c s -> StateSet.union c s.flow) in
-  StateSet.(not (is_empty (inter (flow ssn) ssp)))
+  let check_dataflow r =
+    StateTbl.fold (fun sa dbs r ->
+      match sa.pol with
+      | Pos -> r
+      | Neg ->
+         StateSet.fold_left sa.flow r (fun r sa' ->
+           let dbs' = try StateTbl.find seen sa' with Not_found -> DStateSet.empty in
+           (* dbs <= sa <= sa' <= dbs' *)
+           all_entailed r dbs dbs')) seen r in
+  
+  let r = map subsume in
+  check_dataflow r
 
-let rec entailed a ssn ssp =
-  let b = if antichain_ins a ssn ssp then true else
-      common_var ssn ssp || TypeLat.lte_np (entailed a) (states_follow Neg ssn) (states_follow Pos ssp) in
-(*  Printf.printf "entailment: ";
-  StateSet.iter ssn (fun s -> Printf.printf "%d " s.id);
-  Printf.printf "/ ";
-  StateSet.iter ssp (fun s -> Printf.printf "%d " s.id);
-  Printf.printf "%s\n" (match b with true -> "[Y]" | false -> "[N]"); *)
-  b
 
-let get_def tbl key def =
-  if StateTbl.mem tbl key then 
-    StateTbl.find tbl key 
-  else
-    let v = def () in
-    (StateTbl.add tbl key v; v)
-
-let rec subsumed map =
-  let var_ant = StateTbl.create 20 in
-
-  let rec subsume p ssa ssb =
-    (* sum ssa <= sum ssb *)
-    match p with
-    | Pos -> StateSet.fold_left ssa true (fun b sa -> b && subsume_one sa ssb)
-    | Neg -> StateSet.fold_left ssb true (fun b sb -> b && subsume_one sb ssa)
-  and subsume_one s ssr =
-    (* s+ <= ssr+ 
-       or
-       ssr- <= s- *)
-    (* Printf.printf "%d ~ %a\n%!" s.id (fun ppf xs -> StateSet.iter xs (fun x -> Printf.fprintf ppf "%d " x.id)) ssr; *)
-    StateSet.iter ssr (fun s' -> assert (s.pol = s'.pol));
-    let (ssn, ssp) = match s.pol with Pos -> (StateSet.empty, ssr) | Neg -> (ssr, StateSet.empty) in
-    if antichain_ins (get_def var_ant s antichain_new) ssn ssp then true else
-      TypeLat.subs s.pol subsume s.cons (states_follow s.pol ssr) in
-
+let optimise_flow (roots : state list) = ()
 (*
-
-                             (fun pol ssa ssb -> sub
-                            StateSet.fold_left ssa true (fun b sa -> b && subsume sa ssb))
-                           (fun ssa ssb ->
-                            StateSet.fold_left ssb true (fun b sb -> b && subsume sa ssb))
-                            
-      | Pos -> cons_lte_pp (fun pol' ssa ssb -> 
-        match pol' with 
-        | Pos -> StateSet.fold_left ssa true (fun b sa -> b && subsume sa ssb)
-        | Neg -> StateSet.fold_left ssb true (fun b sb -> b && subsume sb ssa))
-        s.cons (states_follow s.pol ssr)
-      | Neg -> cons_lte_nn (fun pol' ssa ssb -> 
-        match pol' with
-        | Pos -> StateSet.fold_left ssb true (fun b sb -> b && subsume sb ssa) 
-        | Neg -> StateSet.fold_left ssa true (fun b sa -> b && subsume sa ssb))
-        (states_follow s.pol ssr) s.cons in
- *)
-  
-  
-  let ent = antichain_new () in
-  let check_dataflow () = 
-    (*Printf.printf "dataflow\n";*)
-    StateTbl.fold (fun sp ap b -> match sp.pol with
-    | Neg -> b
-    | Pos -> StateSet.fold_left sp.flow b (fun b sn -> 
-      if StateTbl.mem var_ant sn then
-        let an = StateTbl.find var_ant sn in
-        List.fold_left (fun b (_,sp') -> b && 
-          List.fold_left (fun b (sn',_) -> b &&
-            entailed ent sn' sp'
-          ) b !an
-        ) b !ap
-      else b)) var_ant true in
-  
-  map (fun s s' -> subsume_one s (StateSet.singleton s')) &&
-    check_dataflow()
-
-
-
-let optimise_flow (roots : state list) =
   let states = find_reachable roots in
   let state_set = List.fold_left StateSet.add StateSet.empty states in
   let flows = StateTbl.create 20 in
@@ -931,125 +901,5 @@ let optimise_flow (roots : state list) =
     if s.pol = Neg then
       StateSet.iter (StateTbl.find flows s) (fun sp -> add_flow s sp) in
   List.iter process (List.rev states)
+*)
 
-
-
-
-type edgetype = Domain | Range
-
-module EdgeMap = Map.Make (struct type t = edgetype let compare = compare end)
-
-type superblock =
-  { mutable blocks : block list; (* some may be empty *)
-    mutable edgecounts : int StateTbl.t EdgeMap.t }
-
-and block =
-  { mutable states : StateSet.t;
-    mutable size : int;
-    mutable split : block;
-    mutable superblock : superblock }
-
-
-let refine_partition (initial_partition : StateSet.t list) (back_edges : StateSet.t StateTbl.t EdgeMap.t) =
-  let count_mod (t : int StateTbl.t) (s : state) (k : int) =
-    if not (StateTbl.mem t s) then StateTbl.add t s 0;
-    let n = StateTbl.find t s + k in
-    assert (n >= 0);
-    if n = 0 then StateTbl.remove t s else StateTbl.replace t s n in
-  
-  let initial_superblock = { blocks = []; edgecounts = EdgeMap.map (fun edges ->
-    let t = StateTbl.create 20 in
-    StateTbl.iter (fun y ss ->
-      StateSet.iter ss (fun x -> count_mod t x 1)) edges; t) back_edges } in
-
-  let block_of_state : block StateTbl.t = StateTbl.create 20 in
-
-  let initial_blocks = List.map (fun states ->
-    let rec b = { states; size = StateSet.length states;
-                  split = b; superblock = initial_superblock } in
-    StateSet.iter states (fun s -> StateTbl.add block_of_state s b); 
-    b) initial_partition in
-  initial_superblock.blocks <- initial_blocks;
-
-  
-  (* Step 4 of Paige & Tarjan *)
-  let split_blocks (set : StateSet.t) (compound_blocks : superblock list) : superblock list =
-    (* Find the partition blocks b that have a nonempty intersection with set,
-       and split them into (b & set) and (b - set) *)
-    let new_blocks =
-      StateSet.fold_left set [] (fun bs x ->
-        let b = StateTbl.find block_of_state x in
-        let bs = 
-          if b.split != b then bs else begin
-            let diff_states = StateSet.diff b.states set in
-            let inter_states = StateSet.inter b.states set in
-            let b' = { states = inter_states; 
-                       size = StateSet.length inter_states;
-                       split = b;
-                       superblock = b.superblock } in
-            b.states <- diff_states;
-            b.size <- b.size - b'.size;
-            b.split <- b';
-            b.split :: bs
-          end in
-        StateTbl.replace block_of_state x b.split;
-        bs) in
-    (* reset the split fields and find any newly-compound superblocks *)
-    List.fold_left (fun compound_blocks b -> 
-      let b' = b.split in
-      assert (b' != b && b'.split == b);
-      assert (b'.superblock == b.superblock);
-      b.split <- b; b'.split <- b';
-      b.superblock.blocks <- b' :: b.superblock.blocks;
-      match b.superblock.blocks with
-      | [a; b] -> b.superblock :: compound_blocks (* this block has just become compound *)
-      | _ -> compound_blocks) compound_blocks new_blocks in
-  
-    
-  let refine_by_block (b : block) (compound_blocks : superblock list) =
-    let orig_superblock = b.superblock in
-    let edgecounts = EdgeMap.map (fun edges ->
-      let t = StateTbl.create 20 in
-      StateSet.iter b.states (fun y ->
-        StateSet.iter (StateTbl.find edges y) (fun x ->
-          count_mod t x 1)); t) back_edges in
-    b.superblock <- { blocks = [b]; edgecounts };
-    EdgeMap.fold (fun etype edges compound_blocks ->
-      (* Calculate E^-1(B) *)
-      let back_b = StateTbl.fold (fun s _ bb -> StateSet.add bb s) edges StateSet.empty in
-      (* Calculate E^-1(B) - E^-1(S - B) *)
-      let orig_edgecounts = EdgeMap.find etype orig_superblock.edgecounts in
-      let back_bsb = StateTbl.fold (fun s countB bb ->
-        let countS = StateTbl.find orig_edgecounts s in
-        if countB = countS then StateSet.add bb s else bb) edges StateSet.empty in
-      (* Update counts *)
-      StateTbl.iter (fun s countB ->
-        count_mod orig_edgecounts s (-countB)) edges;
-      split_blocks back_bsb (split_blocks back_b compound_blocks))
-      edgecounts compound_blocks in
-  
-  
-  let rec refine_loop = function
-    | [] -> ()
-    | s :: compound_blocks -> first_block compound_blocks s.blocks
-  and first_block compound_blocks = function
-    | [] -> refine_loop compound_blocks
-    | b0 :: rest when b0.size == 0 -> first_block compound_blocks rest
-    | b0 :: rest -> second_block compound_blocks b0 rest
-  and second_block compound_blocks b0 = function
-    | [] -> refine_loop compound_blocks
-    | b1 :: rest when b1.size == 0 -> second_block compound_blocks b0 rest
-    | b1 :: rest ->
-      assert (b0.superblock == b1.superblock);
-      let s = b0.superblock in
-      let b =
-        if b0.size < b1.size then
-          (s.blocks <- b1 :: rest; b0)
-        else
-          (s.blocks <- b0 :: rest; b1) in
-      refine_loop (refine_by_block b compound_blocks) in
-  refine_loop [initial_superblock];
-
-  let res = StateTbl.create 20 in
-  StateTbl.iter (fun s b -> StateTbl.add res s (StateSet.min_elt b.states)) block_of_state;
-  res

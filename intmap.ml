@@ -421,6 +421,7 @@ module type S = sig
 
   val mem : t -> elt -> bool
   val add : t -> elt -> t
+  val remove : t -> elt -> t
 
   val of_list : elt list -> t
   val to_list : t -> elt list
@@ -447,6 +448,7 @@ module Fake (T : IdentType) : S with type elt = T.t = struct
   let length = M.cardinal
   let mem a x = M.mem x a
   let add a x = M.add x a
+  let remove a x = M.remove x a
   let of_list xs = List.fold_left add empty xs
   let to_list = M.elements
   let subset = M.subset
