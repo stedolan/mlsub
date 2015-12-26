@@ -26,113 +26,133 @@ module Reason = struct
   let excuse = Conflict (Location.empty, "?", Location.empty, "?")
 end
   
+module Components = struct
+  type 'a t =
+    | Func of Location.set * 'a * 'a
+    | Object of (Location.set * 'a) SMap.t
+    | List of Location.set * 'a
+    | Base of Location.set * Symbol.t
 
+  let locations = function
+    | Func (l, _, _) -> l
+    | Object o -> SMap.fold (fun _ (l, _) locs -> Location.join l locs) o Location.empty
+    | List (l, _) -> l
+    | Base (l, _) -> l
 
-module type FEATURE = sig
-    type 'a t
-    (* join Pos is least-upper-bound, join Neg is greatest-lower-bound. *)
-    val join : polarity -> (polarity -> 'a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
-    (* lte Pos f a b is a <= b, lte Neg f a b is a >= b. f works the same way *)
-    val lte : polarity -> (polarity -> 'a -> 'b -> Reason.t list) -> 'a t -> 'b t -> Reason.t list
+  let change_locations l' = function
+    | Func (l, d, r) -> Func (l', d, r)
+    | Object o -> Object (SMap.map (fun (l, a) -> (l', a)) o)
+    | List (l, a) -> List (l', a)
+    | Base (l, s) -> Base (l', s)
 
-    val pmap : (polarity -> 'a -> 'b) -> polarity -> 'a t -> 'b t
-    val pfold : (polarity -> 'a -> 'r -> 'r) -> polarity -> 'a t -> 'r -> 'r
+  let pmap f pol = function
+    | Func (l, d, r) -> Func (l, f (polneg pol) d, f pol r)
+    | Object o -> Object (SMap.map (fun (l, x) -> (l, f pol x)) o)
+    | List (l, a) -> List (l, f pol a)
+    | Base (l, s) -> Base (l, s)
 
-    val print : (polarity -> 'a printer) -> polarity -> 'a t printer
-    val list_fields : 'a t -> (string * 'a) list
-    val name : string
+  let pfold f pol t x = match t with
+    | Func (l, d, r) -> f (polneg pol) d (f pol r x)
+    | Object o -> SMap.fold (fun k (l, t) x -> f pol t x) o x
+    | List (l, a) -> f pol a x
+    | Base (l, s) -> x
 
-    val locations : 'a t -> Location.set
-    val change_locations : Location.set -> 'a t -> 'a t
-  end
+  let cmp_component x y = match x, y with
+    | Func _, Func _ -> true
+    | Object _, Object _ -> true
+    | List _, List _ -> true
+    | Base (l, s), Base (l', s') -> s = s'
+    | _, _ -> false
 
-module Func = struct
-  type 'a t = Func of Location.set * 'a * 'a
-  let join p f (Func (l,d,r)) (Func (l',d',r')) = Func (Location.join l l', f (polneg p) d d', f p r r')
-  let lte pol f (Func (l, d, r)) (Func (l', d', r')) = f (polneg pol) d d' @ f pol r r'
+  let join pol f x y = match x, y, pol with
+    | Func (l, d, r), Func (l', d', r'), pol ->
+       Func (Location.join l l', f (polneg pol) d d', f pol r r')
 
-  let pmap f pol (Func (l, d, r)) = Func (l, f (polneg pol) d, f pol r)
-  let pfold f pol (Func (l, d, r)) x = f (polneg pol) d (f pol r x)
+    | Object x, Object y, Pos ->
+       Object (SMap.merge (fun k x y ->
+         match x, y with (* lub takes intersection of fields *)
+         | Some (lx, x), Some (ly, y) -> Some (Location.join lx ly, f Pos x y)
+         | _, _ -> None) x y)
+    | Object x, Object y, Neg ->
+       Object (SMap.merge (fun k x y ->
+         match x, y with (* glb takes union of fields *)
+         | Some (lx, x), Some (ly, y) -> Some (Location.join lx ly, f Neg x y)
+         | Some a, None
+         | None, Some a -> Some a
+         | None, None -> None) x y)
 
-  let print pr pol ppf (Func (_, d, r)) =
-    Format.fprintf ppf "%a -> %a" (pr (polneg pol)) d (pr pol) r
-  let list_fields (Func (_, d, r)) = ["d", d; "r", r]
-  let name = "function"
-  let locations (Func (l, _, _)) = l
-  let change_locations l' (Func (l, d, r)) = Func (l', d, r)
-end
+    | List (l, a), List (l', a'), pol ->
+       List (Location.join l l', f pol a a')
 
-module ListT = struct
-  type 'a t = Location.set * 'a
-  let join p f (la, a) (lb, b) = (Location.join la lb, f p a b)
-  let lte pol f (_, a) (_, b) = f pol a b
-  let pmap f pol (l, a) = (l, f pol a)
-  let pfold f pol (l, a) r = f pol a r
-  let print pr pol ppf (_, a) =
-    Format.fprintf ppf "%a list" (pr pol) a
-  let list_fields (_, x) = ["e", x]
-  let name = "list"
-  let locations (l, _) = l
-  let change_locations l' (l, a) = l', a
-end
+    | Base (l, s), Base (l', s'), pol when s = s' ->
+       Base (Location.join l l', s)
 
-module Object = struct
-  type 'a t = (Location.set * 'a) SMap.t
-  let join p f x y =
-    let m = match p with
-      | Pos -> fun k x y -> (match x, y with (* lub takes intersection of fields *)
-                             | Some (lx, x), Some (ly, y) -> Some (Location.join lx ly, f Pos x y)
-                             | _, _ -> None)
-      | Neg -> fun k x y -> (match x, y with (* glb takes union of fields *)
-                             | Some (lx, x), Some (ly, y) -> Some (Location.join lx ly, f Neg x y)
-                             | Some a, None
-                             | None, Some a -> Some a
-                             | None, None -> None) in
-    SMap.merge m x y
-  let locations (o : 'a t) = 
-    SMap.fold (fun _ (l, _) locs -> Location.join l locs) o Location.empty
-  let change_locations l' o =
-    SMap.map (fun (l, a) -> (l', a)) o
+    | _, _, _ ->
+       assert (cmp_component x y); assert false
 
-  let lte pol f x y : Reason.t list =
-    match pol with
-    | Pos -> 
+  let lte pol f x y = match x, y, pol with
+    | Func (l, d, r), Func (l', d', r'), pol ->
+       f (polneg pol) d d' @ f pol r r'
+
+    | Object ox, Object oy, Pos -> 
        SMap.fold (fun k (yl, yk) r -> 
-         if SMap.mem k x then
-           let (xl, xk) = SMap.find k x in
+         if SMap.mem k ox then
+           let (xl, xk) = SMap.find k ox in
            f pol xk yk @ r
-         else [Reason.Conflict (locations x, "{}", yl, Symbol.to_string k)] @ r) y []
-    | Neg ->
+         else [Reason.Conflict (locations x, "{}", yl, Symbol.to_string k)] @ r) oy []
+    | Object ox, Object oy, Neg ->
        SMap.fold (fun k (xl, xk) r ->
-         if SMap.mem k y then
-           let (yl, yk) = SMap.find k y in
+         if SMap.mem k oy then
+           let (yl, yk) = SMap.find k oy in
            f pol xk yk @ r
-         else [Reason.Conflict (xl, Symbol.to_string k, locations y, "{}")] @ r) x []
+         else [Reason.Conflict (xl, Symbol.to_string k, locations y, "{}")] @ r) ox []
 
-  let pmap f pol o = SMap.map (fun (l, x) -> (l, f pol x)) o
-  let pfold f pol o r =
-    SMap.fold (fun k (l, x) r -> f pol x r) o r
 
-  let list_fields o = List.map (fun (k, (_, v)) -> (Symbol.to_string k, v)) (SMap.bindings o)
+    | List (l, a), List (l', a'), pol ->
+       f pol a a'
 
-  let print pr pol ppf o =
-    let rec pfield ppf = function
-      | [] -> ()
-      | [f, x] ->
-         Format.fprintf ppf "%s :@ %a" f (pr pol) x
-      | (f, x) :: xs ->
-         Format.fprintf ppf "%s :@ %a,@ %a" f (pr pol) x pfield xs in
-    Format.fprintf ppf "{%a}" pfield (list_fields o)
+    | Base (l, s), Base (l', s'), pol when s = s' ->
+       []
 
-  let name = "object"
+    (* error cases *)
+    | x, y, pol ->
+       let name = function
+       | Func _ -> "function"
+       | Object _ -> "object"
+       | List _ -> "list"
+       | Base (_, s) -> Symbol.to_string s in
+       let err a b =
+         [Reason.Conflict (locations a, name a, locations b, name b)] in
+       match pol with Pos -> err x y | Neg -> err y x
+
+  let list_fields = function
+    | Func (l, d, r) -> ["d", d; "r", r]
+    | Object o -> List.map (fun (k, (_, v)) -> (Symbol.to_string k, v)) (SMap.bindings o)
+    | List (l, a) -> ["e", a]
+    | Base (l, s) -> []
+
+  let print pr pol ppf = function
+    | Func (l, d, r) ->
+       Format.fprintf ppf "%a -> %a" (pr (polneg pol)) d (pr pol) r
+    | Object _ as o ->
+       let rec pfield ppf = function
+         | [] -> ()
+         | [f, x] ->
+            Format.fprintf ppf "%s :@ %a" f (pr pol) x
+         | (f, x) :: xs ->
+            Format.fprintf ppf "%s :@ %a,@ %a" f (pr pol) x pfield xs in
+       Format.fprintf ppf "{%a}" pfield (list_fields o)
+    | List (l, a) ->
+       Format.fprintf ppf "%a list" (pr pol) a
+    | Base (l, s) ->
+       Format.fprintf ppf "%s" (Symbol.to_string s)
 end
 
 module type TYPES = sig
     type 'a t
+    val lift : 'a Components.t -> 'a t
     val join : polarity -> (polarity -> 'a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
     val join_ident : 'a t
-
-    val check_join_ident : 'a t -> (string * Location.set) list
 
     val lte_pn : ('a -> 'a -> Reason.t list) -> 'a t -> 'a t -> Reason.t list
     val lte_np : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
@@ -140,175 +160,69 @@ module type TYPES = sig
 
     val pmap : (polarity -> 'a -> 'b) -> polarity -> 'a t -> 'b t
     val pfold : (polarity -> 'a -> 'r -> 'r) -> polarity -> 'a t -> 'r -> 'r
+    val iter : (polarity -> 'a -> unit) -> polarity -> 'a t -> unit
 
-    val print_first : (polarity -> 'a printer) -> polarity -> 'a t printer
-    val print_rest : (polarity -> 'a printer) -> polarity -> 'a t printer
+    val print : (polarity -> 'a printer) -> polarity -> 'a t printer
     val list_fields : 'a t -> (string * 'a) list
 
     val change_locations : Location.set -> 'a t -> 'a t
   end
 
-module Base = struct
-  type 'a t = Location.set SMap.t (* FIXME: real sets of symbols would be nice *)
-  let join p _ x y =
-    SMap.merge (fun k x y -> match x, y with
-      Some l, Some l' -> Some (Location.join l l')
-    | (Some _ as l), None
-    | None, (Some _ as l) -> l
-    | None, None -> None) x y
+module TypeLat : TYPES = struct
+  type 'a t = 'a Components.t list
+  let lift t = [t]
+  let pmap f pol ty = List.map (Components.pmap f pol) ty
+  let rec pfold f pol ty x = match ty with
+    | [] -> x
+    | t :: ts -> Components.pfold f pol t (pfold f pol ts x)
 
-  let join_ident = SMap.empty
+  let iter f p x = pfold (fun pol x r -> f pol x) p x ()
 
-  let check_join_ident t = List.map (fun (k, l) -> Symbol.to_string k, l) (SMap.bindings t)
+  let rec join pol f xs ys = match xs with
+    | [] -> ys
+    | x :: xs ->
+       match List.partition (Components.cmp_component x) ys with
+       | [], ys -> x :: join pol f xs ys
+       | [y], ys -> Components.join pol f x y :: join pol f xs ys
+       | y1 :: y2 :: _, _ -> failwith "two terms in same component"
 
-  let lte_pn f x y : Reason.t list =
-    (* x = y = singleton || x = empty || y = empty *)
-    SMap.fold (fun k loc rs -> 
-      SMap.fold (fun k' loc' rs -> 
-        (if k = k' then [] else [Reason.Conflict (loc, Symbol.to_string k, loc', Symbol.to_string k')]) @ rs) y rs) x []
+  let join_ident = []
 
-  let lte_np f x y =
-    (* nonempty intersection *)
-    SMap.exists (fun k _ -> SMap.mem k x) y
-
-  let subs p f x y =
-    (* subset *)
-    SMap.for_all (fun k _ -> SMap.mem k y) x
-
-  let pmap f pol x = x
-  let pfold f pol x r = r
-
-  let print_rest  pr pol ppf x =
-    SMap.iter (fun k _ -> Format.fprintf ppf "@ %s@ %s" (match pol with Pos -> "|" | Neg -> "&") (Symbol.to_string k)) x
-
-  let print_first pr pol ppf x =
-    if SMap.is_empty x then
-      Format.fprintf ppf "%s" (match pol with Pos -> "Bot" | Neg -> "Top")
-    else
-      let (k, _) = SMap.min_binding x in
-      Format.fprintf ppf "%s%a" (Symbol.to_string k) (print_rest pr pol) (SMap.remove k x)
-
-  let list_fields _ = []
-
-  let change_locations l' t = SMap.map (fun _ -> l') t
-end
-
-module Cons (A : FEATURE) (Tail : TYPES) = struct
-  module Tail = Tail
-
-  type 'a t =
-    | Present of 'a A.t * 'a Tail.t
-    | Absent of 'a Tail.t
-
-  let join p f x y =
-    match x, y with
-    | Present (xa, xt), Present (ya, yt) ->
-       Present (A.join p f xa ya, Tail.join p f xt yt)
-    | Present (a, xt), Absent yt
-    | Absent xt, Present (a, yt) ->
-       Present (a, Tail.join p f xt yt)
-    | Absent xt, Absent yt ->
-       Absent (Tail.join p f xt yt)
-
-  let join_ident =
-    Absent Tail.join_ident
-
-  let check_join_ident = function
-    | Present (a, t) -> (A.name, A.locations a) :: Tail.check_join_ident t
-    | Absent t -> Tail.check_join_ident t
-
-  let lte_pn f x y =
+  let lte_pn f xs ys =
     (* lub X <= glb Y *)
     (* i.e. forall i,j, Xi <= Yj *)
-    let check_x yl yn xt =
-      Tail.check_join_ident xt |>
-          List.map (fun (xn, xl) -> Reason.Conflict (xl, xn, yl, xn)) in
-    let check_y xl xn yt =
-      Tail.check_join_ident yt |>
-          List.map (fun (yn, yl) -> Reason.Conflict (xl, xn, yl, yn)) in
-    match x, y with
-    | Present (xa, xt), Present (ya, yt) ->
-       A.lte Pos (pol_flip f) xa ya @
-         check_x (A.locations ya) A.name xt @
-         check_y (A.locations xa) A.name yt
-    | Present (xa, xt), Absent yt ->
-       check_y (A.locations xa) A.name yt
-    | Absent xt, Present (ya, yt) ->
-       check_x (A.locations ya) A.name xt
-    | Absent xt, Absent yt ->
-       Tail.lte_pn f xt yt
+    List.fold_right (fun x rs -> 
+      List.fold_right (fun y rs -> 
+        Components.lte Pos (pol_flip f) x y @ rs) ys rs) xs []
 
-  let lte_np f x y =
+  let lte_np f xs ys =
     (* glb X <= lub Y *)
     (* i.e. exists i,j, Xi <= Yj *)
-    match x, y with
-    | Present (xa, xt), Present (ya, yt) ->
-       A.lte Pos (fun p x y -> if pol_flip f p x y then [] else [Reason.excuse]) xa ya = [] || Tail.lte_np f xt yt
-    | Present (_, xt), Absent yt
-    | Absent xt, Present (_, yt)
-    | Absent xt, Absent yt ->
-      Tail.lte_np f xt yt
+    List.exists (fun x -> List.exists (fun y ->
+      Components.lte Pos (fun p x y -> if pol_flip f p x y then [] else [Reason.excuse]) x y = [])  xs) ys
 
-  let subs pol f x y =
-    match x, y with
-    | Present (xa, xt), Present (ya, yt) ->
-       A.lte pol (fun p x y -> if f p x y then [] else [Reason.excuse]) xa ya = [] && Tail.subs pol f xt yt
-    | Present (xa, xt), Absent yt ->
-       false
-    | Absent xt, (Present (_, yt) | Absent yt) ->
-       Tail.subs pol f xt yt
+  let rec subs pol f xs ys =
+    (* lub X <= lub Y or glb X >= glb Y *)
+    match xs with
+    | [] -> true
+    | x :: xs -> match List.partition (Components.cmp_component x) ys with
+      | [], ys -> false
+      | [y], ys -> 
+         Components.lte pol (fun p x y -> if f p x y then [] else [Reason.excuse]) x y = []
+         && subs pol f xs ys
+      | y1 :: y2 :: _, _ -> failwith "two terms in same component"
 
+  let list_fields x =
+    x |> List.map Components.list_fields |> List.concat
 
-  let pmap f pol = function
-    | Absent t -> Absent (Tail.pmap f pol t)
-    | Present (a, t) -> Present (A.pmap f pol a, Tail.pmap f pol t)
+  let print pr pol =
+    let pp_sep ppf () = Format.fprintf ppf "@ %s@ " (match pol with Pos -> "|" | Neg -> "&") in
+    Format.pp_print_list ~pp_sep (Components.print pr pol)
 
-  let pfold f pol a r = match a with
-    | Absent t -> Tail.pfold f pol t r
-    | Present (a, t) -> A.pfold f pol a (Tail.pfold f pol t r)
-       
-  let lift x = Present (x, Tail.join_ident)
-
-  let print_rest pr pol ppf = function
-    | Absent t -> Tail.print_rest pr pol ppf t
-    | Present (a, t) ->
-       let sep = match pol with Pos -> "|" | Neg -> "&" in
-       Format.fprintf ppf "@ %s@ %a%a" sep (A.print pr pol) a (Tail.print_rest pr pol) t
-
-  let print_first pr pol ppf = function
-    | Absent t -> Tail.print_first pr pol ppf t
-    | Present (a, t) ->
-       Format.fprintf ppf "%a%a" (A.print pr pol) a (Tail.print_rest pr pol) t
-
-  let list_fields = function
-    | Present (a, t) -> A.list_fields a @ Tail.list_fields t
-    | Absent t -> Tail.list_fields t
-
-  let change_locations l' = function
-    | Present (a, t) -> Present (A.change_locations l' a, Tail.change_locations l' t)
-    | Absent t -> Absent (Tail.change_locations l' t)
+  let change_locations l = List.map (Components.change_locations l)
 end
 
-
-module Ty2 = Cons (Object) (Base)
-module Ty1 = Cons (Func) (Ty2)
-module Ty0 = Cons (ListT) (Ty1)
-module TypeLat = struct
-    include Ty0
-    let iter f p x = pfold (fun pol x r -> f pol x) p x ()
-end
-
-let cons_list e : 'a TypeLat.t =
-  Ty0.lift e
-let cons_func f : 'a TypeLat.t = 
-  Ty0.Absent (Ty1.lift f)
-let cons_object o : 'a TypeLat.t =
-  Ty0.Absent (Ty1.Absent (Ty2.lift o))
-let cons_base x loc : 'a TypeLat.t =
-  Ty0.Absent (Ty1.Absent (Ty2.Absent (SMap.singleton x loc)))
-
-
-let cons_name pol = print_to_string (TypeLat.print_first (fun pol ppf x -> ()) pol)
+let cons_name pol = print_to_string (TypeLat.print (fun pol ppf x -> ()) pol)
 
 
 type var = string
@@ -322,11 +236,11 @@ type 'a typeterm =
 
 let ty_add t t' loc = TAdd (t loc, t' loc)
 let ty_var v loc = TVar v
-let ty_list e loc = TCons (cons_list (Location.one loc, e loc))
-let ty_fun d r loc = TCons (cons_func (Func.Func (Location.one loc, d loc, r loc)))
+let ty_list e loc = TCons (TypeLat.lift (Components.List (Location.one loc, e loc)))
+let ty_fun d r loc = TCons (TypeLat.lift (Components.Func (Location.one loc, d loc, r loc)))
 let ty_zero loc = TCons (TypeLat.join_ident)
-let ty_obj o loc = TCons (cons_object (SMap.map (fun x -> (Location.one loc, x loc)) o))
-let ty_base s loc = TCons (cons_base s (Location.one loc))
+let ty_obj o loc = TCons (TypeLat.lift (Components.Object (SMap.map (fun x -> (Location.one loc, x loc)) o)))
+let ty_base s loc = TCons (TypeLat.lift (Components.Base (Location.one loc, s)))
                        
 let string_of_var v = v
 
@@ -342,7 +256,7 @@ let printp paren ppf fmt =
 let rec gen_print_typeterm vstr pol ppf = function
   | TVar v -> fprintf ppf "%s" (vstr v)
   | TCons cons ->
-     fprintf ppf "@[(%a)@]" (TypeLat.print_first (gen_print_typeterm vstr) pol) cons
+     fprintf ppf "@[(%a)@]" (TypeLat.print (gen_print_typeterm vstr) pol) cons
   | TAdd (t1, t2) -> 
     let op = match pol with Pos -> "|" | Neg -> "&" in
     fprintf ppf "@[(%a %s@ %a)@]" (gen_print_typeterm vstr pol) t1 op (gen_print_typeterm vstr pol) t2
