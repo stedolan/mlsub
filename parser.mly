@@ -34,6 +34,7 @@
 %token CMP_GTE
 %token OP_ADD
 %token OP_SUB
+%token UNDER
 
 %token CONS
 %token MATCH
@@ -74,6 +75,9 @@
 
 %%
 
+located(X):
+| e = X { (L.pos ($startpos(e), $endpos(e)), e) }
+
 prog:
 | e = exp; EOF { e }
 
@@ -87,8 +91,8 @@ exp_rec:
     { v , (L.pos ($startpos(v), $endpos), Rec(v, e)) }
 
 exp_r:
-| FUN; v = IDENT; ARROW; e = exp 
-    { Lambda (v, e) }
+| FUN; LPAR; p = separated_list(COMMA, param); RPAR; ARROW; e = exp 
+    { Lambda (p, e) }
 | LET; v = IDENT; EQUALS; e1 = exp; IN; e2 = exp
     { Let (v, e1, e2) }
 | LET; ve1 = exp_rec; IN; e2 = exp
@@ -103,23 +107,46 @@ exp_r:
     { e }
 
 exp:
-| e = exp_r
-    { (L.pos ($startpos, $endpos), e) }
+| e = located(exp_r)
+    { e }
+
+param_r:
+| v = IDENT
+    { Ppositional v }
+| v = IDENT; EQUALS; UNDER
+    { Preq_keyword v }
+| v = IDENT; EQUALS; e = exp
+    { Popt_keyword (v, e) }
+
+param:
+| p = located(param_r)
+    { p }
+
+argument_r:
+| e = exp
+    { Apositional e }
+| v = IDENT; EQUALS; e = exp
+    { Akeyword (v, e) }
+
+argument:
+| a = located(argument_r)
+    { a }
+
+
 
 simple_exp_r:
 | e1 = simple_exp; op = binop; e2 = simple_exp
-    { App((L.pos ($startpos(e1), $endpos(op)), App((L.pos ($startpos(op), $endpos(op)), Var (Symbol.intern op)), e1)), e2) }
+    { App((L.pos ($startpos(op), $endpos(op)), Var (Symbol.intern op)), [(L.pos ($startpos(e1), $endpos(e1)), Apositional e1); (L.pos ($startpos(e1), $endpos(e2)), Apositional e2)]) }
 | x = app; CONS; xs = simple_exp
     { Cons(x, xs) }
 | e = app_r
     { e }
 
 simple_exp:
-| e = simple_exp_r
-    { (L.pos ($startpos, $endpos), e) }
+| e = located(simple_exp_r)
+    { e }
 
 %inline binop:
-| EQUALS   { "(=)" }
 | EQEQUALS { "(==)" }
 | CMP_LT   { "(<)" }
 | CMP_GT   { "(>)" }
@@ -131,12 +158,12 @@ simple_exp:
 app_r:
 | t = term_r
     { t }
-| f = app; x = term
+| f = app; LPAR; x = separated_list(COMMA, argument); RPAR
     { App (f, x) }
 
 app:
-| e = app_r
-    { (L.pos ($startpos, $endpos), e) }
+| e = located(app_r)
+    { e }
 
 term_r:
 | v = IDENT 
@@ -179,8 +206,8 @@ nonemptylist_r:
     { Cons(x, xs) }
 
 nonemptylist:
-| e = nonemptylist_r
-    { (L.pos ($startpos, $endpos), e) }
+| e = located(nonemptylist_r)
+    { e }
 
 subsumption:
 | t1 = typeterm; SUBSUME; t2 = typeterm; EOF { (t1, t2) }
@@ -195,7 +222,7 @@ typeterm:
     | "int" | "unit" | "bool" -> ty_base v
     | s -> ty_var s in
   t  (L.pos ($startpos, $endpos))}
-| t1 = typeterm; ARROW ; t2 = typeterm  { ty_fun (fun _ -> t1) (fun _ -> t2) (L.pos ($startpos, $endpos)) }
+(* | t1 = typeterm; ARROW ; t2 = typeterm  { ty_fun (fun _ -> t1) (fun _ -> t2) (L.pos ($startpos, $endpos)) } *)
 | TOP { ty_zero (L.pos ($startpos, $endpos)) }
 | BOT { ty_zero (L.pos ($startpos, $endpos)) }
 | LPAR; t = typeterm; LIST; RPAR { ty_list (fun _ -> t) (L.pos ($startpos, $endpos)) }

@@ -61,6 +61,7 @@ rule read =
   | ">="     { CMP_GTE }
   | "+"      { OP_ADD }
   | "-"      { OP_SUB }
+  | "_"      { UNDER }
 
   | "list"   { LIST }
   | "::"     { CONS }

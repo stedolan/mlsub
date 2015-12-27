@@ -1,11 +1,22 @@
-type 'a arguments = 'a
+type 'a located = Location.t * 'a
 
-type rexp =
+type rparam =
+| Ppositional of Symbol.t
+| Preq_keyword of Symbol.t
+| Popt_keyword of Symbol.t * exp
+and param = rparam located
+
+and rargument =
+| Apositional of exp
+| Akeyword of Symbol.t * exp
+and argument = rargument located
+
+and rexp =
   | Var of Symbol.t
-  | Lambda of Symbol.t arguments * exp
+  | Lambda of param list * exp
   | Let of Symbol.t * exp * exp
   | Rec of Symbol.t * exp
-  | App of exp * exp arguments
+  | App of exp * argument list
   | Ascription of exp * Types.var Types.typeterm
   | Unit
   | Int of int
@@ -17,4 +28,4 @@ type rexp =
   | Object of (Symbol.t * exp) list
   | GetField of exp * Symbol.t
 
-and exp = Location.t * rexp
+and exp = rexp located

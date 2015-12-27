@@ -31,11 +31,13 @@ let add_global (globs, seen) name x lower =
 let rec lower g (loc, exp) = match exp with
   | Var v -> CVar v
   | Lambda (args, body) ->
-     CLambda ([args], lower g body)
+     assert false
+     (* CLambda ([args], lower g body) *)
   | Let (var, exp, body) ->
      CLet (var, lower g exp, lower g body)
   | App (fn, args) ->
-     CApp (lower g fn, [lower g args])
+     assert false
+    (* CApp (lower g fn, [lower g args]) *)
   | Ascription (exp, ty) ->
      lower g exp
   | Unit ->

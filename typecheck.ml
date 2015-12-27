@@ -75,11 +75,36 @@ let rec typecheck err gamma (loc, exp) = match exp with
      (try clone_scheme (Location.one loc) (SMap.find v gamma)
       with Not_found -> failwith ("unbound variable '" ^ Symbol.to_string v ^ "'"))
                   
-  | Lambda (arg, body) ->
-     let body_ty = typecheck err (add_singleton arg gamma loc) body in
-     let var = try [SMap.find arg body_ty.environment, ty_var "a" loc] with Not_found -> [] in
-      { environment = SMap.remove arg body_ty.environment;
-        expr = constrain err "lambda" ((body_ty.expr, ty_var "b" loc) :: var) Pos (ty_fun (ty_var "a") (ty_var "b") loc) }
+  | Lambda (params, body) ->
+     let var env arg t = try [SMap.find arg env, t] with Not_found -> [] in
+     let rec check_params gamma = function
+       (* FIXME check for duplicate arguments *)
+       | [] -> typecheck err gamma body
+       | (loc, (Ppositional arg | Preq_keyword arg)) :: params -> check_params (add_singleton arg gamma loc) params
+       | (loc, Popt_keyword(arg, default)) :: params ->
+          let {environment = envD; expr = exprD} = typecheck err gamma default in
+          let {environment = envE; expr = exprE} = check_params (add_singleton arg gamma loc) params in
+          { environment = env_join err loc envD envE;
+            expr = constrain err "default-arg" ([(exprE, ty_var "a" loc); (exprD, ty_var "d" loc)] @ var envE arg (ty_var "d" loc))
+              Pos (ty_var "a" loc) } in
+     let body_ty = check_params gamma params in
+     let argvar k = ty_var ("arg-" ^ Symbol.to_string k) in
+     let rec remove_params env = function
+       | [] -> [], env
+       | (loc, (Ppositional arg | Preq_keyword arg | Popt_keyword (arg, _))) :: params ->
+          let (constraints, env) = remove_params env params in
+          (var env arg (argvar arg loc) @ constraints), SMap.remove arg env in
+     let rec build_funtype pos kwargs = function
+       | [] -> ty_fun (List.rev pos) kwargs (ty_var "res") loc
+       | (loc, Ppositional arg) :: params ->
+          build_funtype (argvar arg :: pos) kwargs params
+       | (loc, Preq_keyword arg) :: params ->
+          build_funtype pos (Types.SMap.add arg (argvar arg, true) kwargs) params
+       | (loc, Popt_keyword (arg, _)) :: params ->
+          build_funtype pos (Types.SMap.add arg (argvar arg, false) kwargs) params in
+     let (constraints, env) = remove_params body_ty.environment params in
+     { environment = env;
+       expr = constrain err "lambda" ((body_ty.expr, ty_var "res" loc) :: constraints) Pos (build_funtype [] Types.SMap.empty params) }
 
   | Let (name, exp, body) ->
      let exp_ty = typecheck err gamma exp in
@@ -94,12 +119,31 @@ let rec typecheck err gamma (loc, exp) = match exp with
      { environment = SMap.remove v exp_ty.environment;
        expr = constrain err "rec" ((exp_ty.expr, ty_var "a" loc) :: var) Pos (ty_var "a" loc) }
 
-  | App (fn, arg) ->
+  | App (fn, args) ->
+     let { environment = envF; expr = exprF } = typecheck err gamma fn in
+     let fresh =
+       let id = ref 0 in
+       fun () -> incr id; ty_var ("arg-" ^ string_of_int !id) in
+     let rec check_args env pos kwargs constraints = function
+       | [] ->
+          { environment = env;
+            expr = constrain err "app" ((exprF, ty_fun (List.rev pos) kwargs (ty_var "res") loc) :: constraints) 
+              Pos (ty_var "res" loc) }
+       | (loc, Apositional e) :: args ->
+          let { environment = envE; expr = exprE } = typecheck err gamma e in
+          let var = fresh () in
+          check_args (env_join err loc env envE) (var :: pos) kwargs ((exprE, var loc) :: constraints) args
+       | (loc, Akeyword (k, e)) :: args ->
+          let { environment = envE; expr = exprE } = typecheck err gamma e in
+          let var = fresh () in
+          check_args (env_join err loc env envE) pos (Types.SMap.add k (var, false) kwargs) ((exprE, var loc) :: constraints) args in
+     check_args envF [] Types.SMap.empty [] args
+(*               
      let fn_ty = typecheck err gamma fn and arg_ty = typecheck err gamma arg in
      { environment = env_join err loc fn_ty.environment arg_ty.environment;
        expr = constrain err "app" [fn_ty.expr, ty_fun (ty_var "a") (ty_var "b") loc;
                                arg_ty.expr, ty_var "a" loc] Pos (ty_var "b" loc) }
-
+*)
   | Ascription (e, ty) ->
      ascription (typecheck err gamma e) ty
        
@@ -163,16 +207,15 @@ let ty_int = ty_base (Symbol.intern "int")
 let ty_unit = ty_base (Symbol.intern "unit")
 let ty_bool = ty_base (Symbol.intern "bool")
 
-let ty_fun2 x y res = ty_fun x (ty_fun y res)
+let ty_fun2 x y res = ty_fun [x; y] Types.SMap.empty res
 
 let ty_polycmp = ty_fun2 (ty_var "a") (ty_var "a") ty_bool
 let ty_binarith = ty_fun2 ty_int ty_int ty_int
 
 let predefined =
   let i = Location.internal in
-  ["p", ty_fun ty_int ty_unit i;
-   "error", ty_fun ty_unit ty_zero i;
-   "(=)", ty_polycmp i;
+  ["p", ty_fun [ty_int] Types.SMap.empty ty_unit i;
+   "error", ty_fun [ty_unit] Types.SMap.empty ty_zero i;
    "(==)", ty_polycmp i;
    "(<)", ty_polycmp i;
    "(>)", ty_polycmp i;

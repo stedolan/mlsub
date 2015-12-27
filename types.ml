@@ -28,45 +28,87 @@ end
   
 module Components = struct
   type 'a t =
-    | Func of Location.set * 'a * 'a
+    | Func of (Location.set * 'a) list * (Location.set * 'a) SMap.t * unit SMap.t * (Location.set * 'a)
     | Object of (Location.set * 'a) SMap.t
     | List of Location.set * 'a
     | Base of Location.set * Symbol.t
 
   let locations = function
-    | Func (l, _, _) -> l
+    | Func (pos, kwargs, reqs, (l, res)) -> 
+       List.fold_right (fun (l, a) r -> Location.join l r) pos 
+         (SMap.fold (fun k (l, a) r -> Location.join l r) kwargs l)
     | Object o -> SMap.fold (fun _ (l, _) locs -> Location.join l locs) o Location.empty
     | List (l, _) -> l
     | Base (l, _) -> l
 
   let change_locations l' = function
-    | Func (l, d, r) -> Func (l', d, r)
+    | Func (pos, kwargs, reqs, (l, res)) -> 
+       Func (List.map (fun (l, a) -> (l', a)) pos, 
+             SMap.map (fun (l, a) -> (l', a)) kwargs,
+             reqs,
+             (l', res))
     | Object o -> Object (SMap.map (fun (l, a) -> (l', a)) o)
     | List (l, a) -> List (l', a)
     | Base (l, s) -> Base (l', s)
 
   let pmap f pol = function
-    | Func (l, d, r) -> Func (l, f (polneg pol) d, f pol r)
+    | Func (pos, kwargs, reqs, (l, res)) -> 
+       Func (List.map (fun (l, a) -> (l, f (polneg pol) a)) pos,
+             SMap.map (fun (l, a) -> (l, f (polneg pol) a)) kwargs,
+             reqs,
+             (l, f pol res))
     | Object o -> Object (SMap.map (fun (l, x) -> (l, f pol x)) o)
     | List (l, a) -> List (l, f pol a)
     | Base (l, s) -> Base (l, s)
 
   let pfold f pol t x = match t with
-    | Func (l, d, r) -> f (polneg pol) d (f pol r x)
+    | Func (pos, kwargs, reqs, (l, res)) -> 
+       List.fold_right (fun (l, a) r -> f (polneg pol) a r) pos
+         (SMap.fold (fun k (l, a) r -> f (polneg pol) a r) kwargs
+            (f pol res x))
+
     | Object o -> SMap.fold (fun k (l, t) x -> f pol t x) o x
     | List (l, a) -> f pol a x
     | Base (l, s) -> x
 
-  let cmp_component x y = match x, y with
-    | Func _, Func _ -> true
+  let cmp_component (type a) (type b) (x : a t) (y : b t) = match x, y with
+    | Func (pos, _, _, _), Func (pos', _, _, _) -> List.length pos = List.length pos'
     | Object _, Object _ -> true
     | List _, List _ -> true
     | Base (l, s), Base (l', s') -> s = s'
     | _, _ -> false
 
   let join pol f x y = match x, y, pol with
-    | Func (l, d, r), Func (l', d', r'), pol ->
-       Func (Location.join l l', f (polneg pol) d d', f pol r r')
+    | Func (pos, kwargs, reqs, (l, res)), Func (pos', kwargs', reqs', (l', res')), pol ->
+       let kw_merge k x y = match pol, x, y with
+         | pol, Some (l, a), Some (l', a') -> Some
+            (Location.join l l',
+             f (polneg pol) a a')
+
+         (* negatively, take union of keyword arguments *)
+         | Neg, (Some _ as arg), None
+         | Neg, None, (Some _ as arg) -> arg
+
+         (* positively, take intersection of keyword arguments *)
+         | Pos, Some _, None
+         | Pos, None, Some _ -> None
+
+         | pol, None, None -> None in
+       let req_merge k x y = match pol, x, y with
+         | _, Some (), Some () -> Some ()
+         | _, None, None -> None
+
+         (* negatively, take intersection of required arguments *)
+         | Neg, Some (), None
+         | Neg, None, Some () -> None
+
+         (* positively, take union of required arguments *)
+         | Pos, Some (), None
+         | Pos, None, Some () -> Some () in
+       Func (List.map2 (fun (l, a) (l', a') -> (Location.join l l', f (polneg pol) a a')) pos pos',
+             SMap.merge kw_merge kwargs kwargs',
+             SMap.merge req_merge reqs reqs',
+             (Location.join l l', f pol res res'))
 
     | Object x, Object y, Pos ->
        Object (SMap.merge (fun k x y ->
@@ -90,9 +132,33 @@ module Components = struct
     | _, _, _ ->
        assert (cmp_component x y); assert false
 
-  let lte pol f x y = match x, y, pol with
-    | Func (l, d, r), Func (l', d', r'), pol ->
-       f (polneg pol) d d' @ f pol r r'
+  let lte (type a) (type b) pol f (x : a t) (y : b t) = match x, y, pol with
+    | Func (pos, kwargs, reqs, (l, res)), Func (pos', kwargs', reqs', (l', res')), pol when cmp_component x y ->
+       let kw_cmp r = match pol with
+         | Pos -> 
+            SMap.fold (fun k (l', t') r ->
+              if SMap.mem k kwargs then
+                let (l, t) = SMap.find k kwargs in
+                f (polneg pol) t t' @ r
+              else [Reason.Conflict (locations x, "keyword", l', Symbol.to_string k)] @ r) kwargs' r
+         | Neg ->
+            SMap.fold (fun k (l, t) r ->
+              if SMap.mem k kwargs' then
+                let (l', t') = SMap.find k kwargs' in
+                f (polneg pol) t t' @ r
+              else [Reason.Conflict (l, Symbol.to_string k, locations y, "keyword")] @ r) kwargs r in
+       let req_cmp r = match pol with
+         | Pos ->
+            SMap.fold (fun k () r ->
+              if SMap.mem k reqs' then r else
+                [Reason.Conflict (locations x, "required", locations y, Symbol.to_string k)] @ r) reqs r
+         | Neg ->
+            SMap.fold (fun k () r ->
+              if SMap.mem k reqs then r else
+                [Reason.Conflict (locations x, "required", locations y, Symbol.to_string k)] @ r) reqs' r in
+
+       f pol res res' |> req_cmp |> kw_cmp |>
+           List.fold_right2 (fun (l, x) (l, y) r -> f (polneg pol) x y @ r) pos pos'
 
     | Object ox, Object oy, Pos -> 
        SMap.fold (fun k (yl, yk) r -> 
@@ -126,14 +192,31 @@ module Components = struct
        match pol with Pos -> err x y | Neg -> err y x
 
   let list_fields = function
-    | Func (l, d, r) -> ["d", d; "r", r]
+    | Func (pos, kwargs, reqs, (l, res)) -> 
+       List.mapi (fun i (l, a) -> (string_of_int i, a)) pos @
+         (SMap.bindings kwargs |> List.map (fun (k, (l, a)) -> (Symbol.to_string k, a))) @
+         ["res", res]
     | Object o -> List.map (fun (k, (_, v)) -> (Symbol.to_string k, v)) (SMap.bindings o)
     | List (l, a) -> ["e", a]
     | Base (l, s) -> []
 
   let print pr pol ppf = function
-    | Func (l, d, r) ->
-       Format.fprintf ppf "%a -> %a" (pr (polneg pol)) d (pr pol) r
+    | Func (pos, kwargs, reqs, (l, res)) ->
+       let args = List.map (fun (l, a) -> (None, Some a)) pos @
+         (SMap.merge (fun k arg req -> match arg, req with
+          | Some (l, a), None -> Some (Some (Symbol.to_string k ^ "?"), Some a)
+          | Some (l, a), Some () -> Some (Some (Symbol.to_string k), Some a)
+          | None, Some () -> Some (Some (Symbol.to_string k), None)
+          | None, None -> None) kwargs reqs |> SMap.bindings |> List.map (fun (a, b) -> b)) in
+       let pr_arg ppf = function
+         | None, None -> ()
+         | None, Some t -> Format.fprintf ppf "%a" (pr (polneg pol)) t
+         | Some name, Some t -> Format.fprintf ppf "%s : %a" name (pr (polneg pol)) t
+         | Some name, None -> Format.fprintf ppf "%s : <err>" name in
+       let comma ppf () = Format.fprintf ppf "@ ,@ " in
+       Format.fprintf ppf "(%a) -> %a"
+         (Format.pp_print_list ~pp_sep:comma pr_arg) args
+         (pr pol) res
     | Object _ as o ->
        let rec pfield ppf = function
          | [] -> ()
@@ -215,9 +298,11 @@ module TypeLat : TYPES = struct
   let list_fields x =
     x |> List.map Components.list_fields |> List.concat
 
-  let print pr pol =
-    let pp_sep ppf () = Format.fprintf ppf "@ %s@ " (match pol with Pos -> "|" | Neg -> "&") in
-    Format.pp_print_list ~pp_sep (Components.print pr pol)
+  let print pr pol ppf = function
+    | [] -> Format.fprintf ppf "%s" (match pol with Pos -> "Bot" | Neg -> "Top")
+    | ty ->
+       let pp_sep ppf () = Format.fprintf ppf "@ %s@ " (match pol with Pos -> "|" | Neg -> "&") in
+       Format.pp_print_list ~pp_sep (Components.print pr pol) ppf ty
 
   let change_locations l = List.map (Components.change_locations l)
 end
@@ -237,7 +322,11 @@ type 'a typeterm =
 let ty_add t t' loc = TAdd (t loc, t' loc)
 let ty_var v loc = TVar v
 let ty_list e loc = TCons (TypeLat.lift (Components.List (Location.one loc, e loc)))
-let ty_fun d r loc = TCons (TypeLat.lift (Components.Func (Location.one loc, d loc, r loc)))
+let ty_fun pos kwargs res loc = TCons (TypeLat.lift (Components.Func (
+  List.map (fun a -> (Location.one loc, a loc)) pos,
+  SMap.map (fun (a, req) -> (Location.one loc, a loc)) kwargs,
+  SMap.filter (fun k (a, req) -> req) kwargs |> SMap.map (fun _ -> ()),
+  (Location.one loc, res loc))))
 let ty_zero loc = TCons (TypeLat.join_ident)
 let ty_obj o loc = TCons (TypeLat.lift (Components.Object (SMap.map (fun x -> (Location.one loc, x loc)) o)))
 let ty_base s loc = TCons (TypeLat.lift (Components.Base (Location.one loc, s)))
