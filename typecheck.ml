@@ -70,13 +70,24 @@ let add_singleton v gamma loc =
 
 
 open Exp
-let rec typecheck err gamma (loc, exp) = match exp with
+let var env arg t = try [SMap.find arg env, t] with Not_found -> []
+let bottom loc = compile_terms (fun f -> { environment = SMap.empty; expr = f Pos (ty_zero loc) })
+
+
+let ty_int = ty_base (Symbol.intern "int")
+let ty_unit = ty_base (Symbol.intern "unit")
+let ty_bool = ty_base (Symbol.intern "bool")
+
+
+let rec typecheck err gamma = function
+| (loc, Some exp) -> typecheck' err gamma loc exp
+| (loc, None) -> (err (Reason.SyntaxErr loc); bottom loc)
+and typecheck' err gamma loc exp = match exp with
   | Var v ->
      (try clone_scheme (Location.one loc) (SMap.find v gamma)
-      with Not_found -> failwith ("unbound variable '" ^ Symbol.to_string v ^ "'"))
+      with Not_found -> (err (Reason.Unbound (loc, v)); bottom loc))
                   
   | Lambda (params, body) ->
-     let var env arg t = try [SMap.find arg env, t] with Not_found -> [] in
      let rec check_params gamma = function
        (* FIXME check for duplicate arguments *)
        | [] -> typecheck err gamma body
@@ -136,7 +147,7 @@ let rec typecheck err gamma (loc, exp) = match exp with
        | (loc, Akeyword (k, e)) :: args ->
           let { environment = envE; expr = exprE } = typecheck err gamma e in
           let var = fresh () in
-          check_args (env_join err loc env envE) pos (Types.SMap.add k (var, false) kwargs) ((exprE, var loc) :: constraints) args in
+          check_args (env_join err loc env envE) pos (Types.SMap.add k (var, true) kwargs) ((exprE, var loc) :: constraints) args in
      check_args envF [] Types.SMap.empty [] args
 (*               
      let fn_ty = typecheck err gamma fn and arg_ty = typecheck err gamma arg in
@@ -144,6 +155,13 @@ let rec typecheck err gamma (loc, exp) = match exp with
        expr = constrain err "app" [fn_ty.expr, ty_fun (ty_var "a") (ty_var "b") loc;
                                arg_ty.expr, ty_var "a" loc] Pos (ty_var "b" loc) }
 *)
+
+  | Seq (e1, e2) ->
+     let {environment = env1; expr = expr1 } = typecheck err gamma e1 in
+     let {environment = env2; expr = expr2 } = typecheck err gamma e2 in
+     { environment = env_join err loc env1 env2;
+       expr = constrain err "seq" [(expr1, ty_unit loc); (expr2, ty_var "a" loc)] Pos (ty_var "a" loc) }
+
   | Ascription (e, ty) ->
      ascription (typecheck err gamma e) ty
        
@@ -203,10 +221,6 @@ let rec typecheck err gamma (loc, exp) = match exp with
                         Pos (ty_var "a" loc) }
 
 
-let ty_int = ty_base (Symbol.intern "int")
-let ty_unit = ty_base (Symbol.intern "unit")
-let ty_bool = ty_base (Symbol.intern "bool")
-
 let ty_fun2 x y res = ty_fun [x; y] Types.SMap.empty res
 
 let ty_polycmp = ty_fun2 (ty_var "a") (ty_var "a") ty_bool
@@ -243,27 +257,40 @@ type result =
   | TypeError of string
 
 
+type 'a sigitem =
+  | SDef of Symbol.t * 'a
+  | SLet of Symbol.t * 'a
+and signature = dstate sigitem list
 
-let infer_module err modlist =
-  let recomp s =
-    assert (s.environment = SMap.empty);
-    { environment = SMap.empty; expr = compile_terms (fun f -> f Pos (decompile_automaton s.expr)) } in 
-  let infer gamma exp =
-    try
-      let s = typecheck err gamma exp in
-      Type (recomp (optimise s))
-    with
-    | Failure msg -> TypeError ("Type inference failed: " ^ msg)
-    | Match_failure (file, line, col) ->
-       TypeError (Format.sprintf "Match failure in typechecker at %s:%d%d\n%!" file line col) in
+let rec infer_module err modl : signature =
+  let rec infer gamma = function
+    | [] -> SMap.empty, []
+    | (loc, MDef (f, p, body)) :: modl ->
+       (* Possibly-recursive function *)
+       let {environment = envF; expr = exprF} as tyF =
+         typecheck' err gamma loc (Rec (f, (loc, Some (Lambda (p, body))))) in
+       let envM, sigM = infer (SMap.add f (to_dscheme tyF) gamma) modl in
+       env_join err loc envF envM, (SDef (f, exprF) :: sigM)
+    | (loc, MLet (v, e)) :: modl ->
+       let {environment = envE; expr = exprE} = typecheck err gamma e in
+       let envM, sigM = infer (add_singleton v gamma loc) modl in
+       env_join err loc envE (SMap.remove v envM),
+       (SLet (v, constrain err "let" ((exprE, ty_var "a" loc) :: var envM v (ty_var "a" loc))
+         Pos (ty_var "a" loc)) :: sigM) in
+  let envM, sigM = infer gamma0 modl in
+  assert (SMap.is_empty envM);
+  let states = List.map (function SDef (f, t) -> t | SLet (v, t) -> t) sigM in
+  let remap, dstates = Types.determinise states in
+  let minim = Types.minimise dstates in
+  List.map (function SDef (f, t) -> SDef (f, minim (remap t)) | SLet (v, t) -> SLet (v, minim (remap t))) sigM
 
-  let rec infer_mod gamma acc = function
-    | [] -> acc
-    | (name, exp) :: rest ->
-       let t = infer gamma exp in
-       match t with
-       | Type s -> infer_mod (SMap.add (Symbol.intern name) (to_dscheme s) gamma) ((name, t) :: acc) rest
-       | TypeError _ -> (name, t) :: acc in
-  
-  List.rev (infer_mod gamma0 [] modlist)
-
+let rec print_signature ppf (sigm : signature) =
+  let elems = sigm
+     |> Types.clone (fun f -> List.map (function SLet (_, t) | SDef (_, t) -> f (Location.one Location.internal) t))
+     |> decompile_automaton in
+  let print s t = match s with
+    | SLet (v, _) ->
+       Format.fprintf ppf "val %s : %a\n%!" (Symbol.to_string v) (print_typeterm Pos) t
+    | SDef (f, _) ->
+       Format.fprintf ppf "def %s : %a\n%!" (Symbol.to_string f) (print_typeterm Pos) t in
+  List.iter2 print sigm elems

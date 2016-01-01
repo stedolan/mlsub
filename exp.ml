@@ -17,6 +17,7 @@ and rexp =
   | Let of Symbol.t * exp * exp
   | Rec of Symbol.t * exp
   | App of exp * argument list
+  | Seq of exp * exp
   | Ascription of exp * Types.var Types.typeterm
   | Unit
   | Int of int
@@ -28,4 +29,10 @@ and rexp =
   | Object of (Symbol.t * exp) list
   | GetField of exp * Symbol.t
 
-and exp = rexp located
+and exp = rexp option located
+
+and moditem =
+  | MDef of Symbol.t * param list * exp
+  | MLet of Symbol.t * exp
+
+and modlist = moditem located list

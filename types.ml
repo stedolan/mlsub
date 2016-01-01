@@ -19,10 +19,19 @@ let print_to_string (pr : 'a printer) (x : 'a) : string =
 module Reason = struct
   type t = 
     | Conflict of Location.set * string * Location.set * string
-  let print ppf (Conflict (la, a, lb, b)) = 
-    Location.LocSet.iter (Location.print ppf) la;
-    Location.LocSet.iter (Location.print ppf) lb;
-    Format.fprintf ppf "%s - %s\n%!" a b
+    | SyntaxErr of Location.t
+    | Unbound of Location.t * Symbol.t
+  let print ppf = function
+    | (Conflict (la, a, lb, b)) ->
+       (Location.LocSet.iter (Location.print ppf) la;
+        Location.LocSet.iter (Location.print ppf) lb;
+        Format.fprintf ppf "%s - %s\n%!" a b)
+    | (SyntaxErr l) ->
+       (Format.fprintf ppf "syntax error\n";
+        Location.print ppf l)
+    | Unbound (l, v) ->
+       (Format.fprintf ppf "'%s' not in scope\n" (Symbol.to_string v);
+        Location.print ppf l)
   let excuse = Conflict (Location.empty, "?", Location.empty, "?")
 end
   
@@ -151,11 +160,11 @@ module Components = struct
          | Pos ->
             SMap.fold (fun k () r ->
               if SMap.mem k reqs' then r else
-                [Reason.Conflict (locations x, "required", locations y, Symbol.to_string k)] @ r) reqs r
+                [Reason.Conflict (locations x, "required+", locations y, Symbol.to_string k)] @ r) reqs r
          | Neg ->
             SMap.fold (fun k () r ->
               if SMap.mem k reqs then r else
-                [Reason.Conflict (locations x, "required", locations y, Symbol.to_string k)] @ r) reqs' r in
+                [Reason.Conflict (locations x, "required-", locations y, Symbol.to_string k)] @ r) reqs' r in
 
        f pol res res' |> req_cmp |> kw_cmp |>
            List.fold_right2 (fun (l, x) (l, y) r -> f (polneg pol) x y @ r) pos pos'
@@ -213,7 +222,7 @@ module Components = struct
          | None, Some t -> Format.fprintf ppf "%a" (pr (polneg pol)) t
          | Some name, Some t -> Format.fprintf ppf "%s : %a" name (pr (polneg pol)) t
          | Some name, None -> Format.fprintf ppf "%s : <err>" name in
-       let comma ppf () = Format.fprintf ppf "@ ,@ " in
+       let comma ppf () = Format.fprintf ppf ",@ " in
        Format.fprintf ppf "(%a) -> %a"
          (Format.pp_print_list ~pp_sep:comma pr_arg) args
          (pr pol) res
@@ -226,7 +235,7 @@ module Components = struct
             Format.fprintf ppf "%s :@ %a,@ %a" f (pr pol) x pfield xs in
        Format.fprintf ppf "{%a}" pfield (list_fields o)
     | List (l, a) ->
-       Format.fprintf ppf "%a list" (pr pol) a
+       Format.fprintf ppf "List[%a]" (pr pol) a
     | Base (l, s) ->
        Format.fprintf ppf "%s" (Symbol.to_string s)
 end
@@ -345,10 +354,10 @@ let printp paren ppf fmt =
 let rec gen_print_typeterm vstr pol ppf = function
   | TVar v -> fprintf ppf "%s" (vstr v)
   | TCons cons ->
-     fprintf ppf "@[(%a)@]" (TypeLat.print (gen_print_typeterm vstr) pol) cons
+     fprintf ppf "@[%a@]" (TypeLat.print (gen_print_typeterm vstr) pol) cons
   | TAdd (t1, t2) -> 
     let op = match pol with Pos -> "|" | Neg -> "&" in
-    fprintf ppf "@[(%a %s@ %a)@]" (gen_print_typeterm vstr pol) t1 op (gen_print_typeterm vstr pol) t2
+    fprintf ppf "@[%a %s@ %a@]" (gen_print_typeterm vstr pol) t1 op (gen_print_typeterm vstr pol) t2
   | TRec (v, t) ->
     fprintf ppf "rec %s = %a" (vstr v) (gen_print_typeterm vstr pol) t
 
@@ -509,8 +518,8 @@ let make_table s f =
   t
 
 (* FIXME: deterministic? ID-dependent? *)
-let decompile_automaton (root : state) : var typeterm =
-  let state_list = find_reachable [root] in
+let decompile_automaton (roots : state list) : var typeterm list =
+  let state_list = find_reachable roots in
   let states = List.fold_left StateSet.add StateSet.empty state_list in
   let state_flow = make_table states (fun s -> StateSet.inter s.flow states) in
 
@@ -565,7 +574,7 @@ let decompile_automaton (root : state) : var typeterm =
 
   (* Each biclique in the decomposition corresponds to a variable *)
   let name_var id =
-    if id < 26 then String.make 1 (Char.chr (Char.code 'a' + id)) else Printf.sprintf "v_%d" (id - 26) in
+    if id < 26 then String.make 1 (Char.chr (Char.code 'A' + id)) else Printf.sprintf "T_%d" (id - 26) in
   let fresh_var = let var_id = ref (-1) in fun () -> incr var_id; name_var !var_id in
   let state_vars = StateTbl.create 20 in
   List.iter (fun (ss, ss') -> 
@@ -597,7 +606,7 @@ let decompile_automaton (root : state) : var typeterm =
       match visited with
       | None -> tv
       | Some v -> TRec (v, tv) in
-  decompile root
+  List.map decompile roots
   
 
 

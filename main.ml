@@ -64,9 +64,6 @@ let run exp =
   ignore (Sys.command ("cat "^name ^"; ocaml " ^ name));
   Sys.remove name
 
-let reparse s = compile_terms (fun f -> f Pos (decompile_automaton s))
-let recomp s = decompile_automaton (compile_terms (fun f -> f Pos (decompile_automaton s)))
-
 (*
 let repl () = 
   while true do
@@ -101,17 +98,13 @@ let to_dscheme name s =
 
 
 let process file =
-  let print_err e = Types.Reason.print Format.err_formatter e in
-  let check gamma (name, exp) =
-    let s = optimise (Typecheck.typecheck print_err gamma exp) in
-(*    Format.printf "val %s : %a\n%!" (Symbol.to_string name) (print_typeterm Pos) (decompile_automaton s.Typecheck.expr);
-    Format.printf "val %s : %a\n%!" (Symbol.to_string name) (print_typeterm Pos) (recomp s.Typecheck.expr);*)
-    let s = to_dscheme name s in
-    Format.printf "val %s : %a\n%!" (Symbol.to_string name) (print_typeterm Pos) 
-      (decompile_automaton (Types.clone (fun f -> f (Location.one Location.internal) s.Typecheck.d_expr)));
-    SMap.add name s gamma in
+  let print_err e = Types.Reason.print Format.err_formatter e; Format.fprintf Format.err_formatter "%!" in
   try
-    ignore (List.fold_left check gamma0 (Source.parse_modlist (Location.of_file file)))
+    file
+      |> Location.of_file
+      |> Source.parse_modlist
+      |> infer_module print_err
+      |> print_signature Format.std_formatter
   with
   | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
   | Match_failure (file, line, col) -> Format.printf "Match failure in typechecker at %s:%d%d\n%!" file line col

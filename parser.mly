@@ -4,12 +4,17 @@
 %token FUN
 
 %token EOF
+%token NL
 %token LPAR
 %token RPAR
 %token LBRACE
 %token RBRACE
 %token LBRACK
 %token RBRACK
+
+%token DEF
+%token END
+
 %token COMMA
 %token SEMI
 %token UNIT
@@ -58,6 +63,7 @@
 %left OP_ADD
 %left OP_SUB
 %right CONS
+%right SEMI
 
 %{
   open Types 
@@ -67,7 +73,7 @@
 %}
 
 %start <Exp.exp> prog
-%start <(Symbol.t * Exp.exp) list> modlist
+%start <Exp.modlist> modlist
 %start <Types.var Types.typeterm> onlytype
 %start <Types.var Types.typeterm * Types.var Types.typeterm> subsumption
 
@@ -75,42 +81,60 @@
 
 %%
 
-located(X):
-| e = X { (L.pos ($startpos(e), $endpos(e)), e) }
+%inline located(X): e = X { (L.pos ($startpos(e), $endpos(e)), e) }
+%inline mayfail(X): e = X { Some e } | error { None }
+%inline nofail(X): e = X { Some e }
 
 prog:
-| e = exp; EOF { e }
+ e = exp; EOF { e }
+
+nl: NL+ { () }
+onl: NL* { () }
 
 modlist:
-| EOF { [] }
-| LET; v = IDENT; EQUALS; e = exp; m = modlist; { (v,e) :: m }
-| LET; ve = exp_rec; m = modlist; { ve :: m }
+| onl; e = nonempty_list(moditem_nl); EOF { e}
+| onl; EOF { [] }
 
-exp_rec:
-| REC; v = IDENT; EQUALS; e = exp
-    { v , (L.pos ($startpos(v), $endpos), Rec(v, e)) }
+moditem_nl: e = located(moditem); onl { e } 
+
+moditem:
+| LET; v = IDENT; EQUALS; onl; e = exp { MLet (v, e) }
+| DEF; f = IDENT; p = params; onl; e = block; END { MDef (f, p, e) }
+
+block_r:
+| e = exp_r; onl
+    { e }
+| e1 = located(mayfail(exp_r)); nl; e2 = block
+    { Seq (e1, e2) }
+
+block:
+| b = located(mayfail(block_r))
+    { b }
+
 
 exp_r:
-| FUN; LPAR; p = separated_list(COMMA, param); RPAR; ARROW; e = exp 
+| FUN; p = params; ARROW; onl; e = exp 
     { Lambda (p, e) }
 | LET; v = IDENT; EQUALS; e1 = exp; IN; e2 = exp
     { Let (v, e1, e2) }
-| LET; ve1 = exp_rec; IN; e2 = exp
-    { let (v, e1) = ve1 in Let (v, e1, e2) }
 | IF; cond = exp; THEN; tcase = exp; ELSE; fcase = exp
     { If (cond, tcase, fcase) }
 | MATCH; e = term; WITH; 
     LBRACK; RBRACK; ARROW; n = exp; 
     TY_JOIN; x = IDENT; CONS; xs = IDENT; ARROW; c = exp
     { Match (e, n, x, xs, c) }
+(*| e1 = exp; SEMI; e2 = exp
+    { Seq (e1, e2) }*)
 | e = simple_exp_r
     { e }
 
 exp:
-| e = located(exp_r)
+| e = located(mayfail(exp_r))
     { e }
 
-param_r:
+params: LPAR; p = separated_list(COMMA, located(param)); RPAR { p }
+
+param:
 | v = IDENT
     { Ppositional v }
 | v = IDENT; EQUALS; UNDER
@@ -118,32 +142,23 @@ param_r:
 | v = IDENT; EQUALS; e = exp
     { Popt_keyword (v, e) }
 
-param:
-| p = located(param_r)
-    { p }
-
-argument_r:
+argument:
 | e = exp
     { Apositional e }
 | v = IDENT; EQUALS; e = exp
     { Akeyword (v, e) }
 
-argument:
-| a = located(argument_r)
-    { a }
-
-
 
 simple_exp_r:
 | e1 = simple_exp; op = binop; e2 = simple_exp
-    { App((L.pos ($startpos(op), $endpos(op)), Var (Symbol.intern op)), [(L.pos ($startpos(e1), $endpos(e1)), Apositional e1); (L.pos ($startpos(e1), $endpos(e2)), Apositional e2)]) }
-| x = app; CONS; xs = simple_exp
+    { App((L.pos ($startpos(op), $endpos(op)), Some (Var (Symbol.intern op))), [(L.pos ($startpos(e1), $endpos(e1)), Apositional e1); (L.pos ($startpos(e1), $endpos(e2)), Apositional e2)]) }
+| x = term; CONS; xs = simple_exp
     { Cons(x, xs) }
-| e = app_r
+| e = term_r
     { e }
 
 simple_exp:
-| e = located(simple_exp_r)
+| e = located(mayfail(simple_exp_r))
     { e }
 
 %inline binop:
@@ -155,16 +170,6 @@ simple_exp:
 | OP_ADD   { "(+)" }
 | OP_SUB   { "(-)" }
 
-app_r:
-| t = term_r
-    { t }
-| f = app; LPAR; x = separated_list(COMMA, argument); RPAR
-    { App (f, x) }
-
-app:
-| e = located(app_r)
-    { e }
-
 term_r:
 | v = IDENT 
     { Var v }
@@ -172,6 +177,8 @@ term_r:
     { e }
 | LPAR; e = exp; ASC; t = typeterm; RPAR
     { Ascription (e, t) }
+| f = term; LPAR; x = separated_list(COMMA, located(argument)); RPAR
+    { App (f, x) }
 | LPAR; RPAR
     { Unit }
 | LBRACE; o = obj; RBRACE
@@ -190,8 +197,8 @@ term_r:
     { Bool false }
 
 term:
-| t = term_r
-    { (L.pos ($startpos, $endpos), t) }
+| t = located(mayfail(term_r))
+    { t }
 
 obj:
 | v = IDENT; EQUALS; e = exp
@@ -201,12 +208,12 @@ obj:
 
 nonemptylist_r:
 | x = exp
-    { Cons(x, (let (l, _) = x in l, Nil)) }
-| x = exp; SEMI; xs = nonemptylist
+    { Cons(x, (let (l, _) = x in l, Some Nil)) }
+| x = exp; COMMA; xs = nonemptylist
     { Cons(x, xs) }
 
-nonemptylist:
-| e = located(nonemptylist_r)
+%inline nonemptylist:
+| e = located(nofail(nonemptylist_r))
     { e }
 
 subsumption:
@@ -232,28 +239,3 @@ typeterm:
 | LPAR; t = typeterm; RPAR { t }
 
 %inline meetjoin : TY_MEET | TY_JOIN {}
-
-(*
-prog:
-  | v = value { Some v }
-  | EOF       { None   } ;
-
-value:
-  | LEFT_BRACE; obj = obj_fields; RIGHT_BRACE { `Assoc obj  }
-  | LEFT_BRACK; vl = list_fields; RIGHT_BRACK { `List vl    }
-  | s = STRING                                { `String s   }
-  | i = INT                                   { `Int i      }
-  | x = FLOAT                                 { `Float x    }
-  | TRUE                                      { `Bool true  }
-  | FALSE                                     { `Bool false }
-  | NULL                                      { `Null       } ;
-
-obj_fields:
-    obj = separated_list(COMMA, obj_field)    { obj } ;
-
-obj_field:
-    k = STRING; COLON; v = value              { (k, v) } ;
-
-list_fields:
-    vl = separated_list(COMMA, value)         { vl } ;
-*)
