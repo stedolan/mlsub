@@ -141,64 +141,42 @@ module Components = struct
     | _, _, _ ->
        assert (cmp_component x y); assert false
 
-  let lte (type a) (type b) pol f (x : a t) (y : b t) = match x, y, pol with
-    | Func (pos, kwargs, reqs, (l, res)), Func (pos', kwargs', reqs', (l', res')), pol when cmp_component x y ->
-       let kw_cmp r = match pol with
-         | Pos -> 
-            SMap.fold (fun k (l', t') r ->
-              if SMap.mem k kwargs then
-                let (l, t) = SMap.find k kwargs in
-                f (polneg pol) t t' @ r
-              else [Reason.Conflict (locations x, "keyword", l', Symbol.to_string k)] @ r) kwargs' r
-         | Neg ->
-            SMap.fold (fun k (l, t) r ->
-              if SMap.mem k kwargs' then
-                let (l', t') = SMap.find k kwargs' in
-                f (polneg pol) t t' @ r
-              else [Reason.Conflict (l, Symbol.to_string k, locations y, "keyword")] @ r) kwargs r in
-       let req_cmp r = match pol with
-         | Pos ->
-            SMap.fold (fun k () r ->
-              if SMap.mem k reqs' then r else
-                [Reason.Conflict (locations x, "required+", locations y, Symbol.to_string k)] @ r) reqs r
-         | Neg ->
-            SMap.fold (fun k () r ->
-              if SMap.mem k reqs then r else
-                [Reason.Conflict (locations x, "required-", locations y, Symbol.to_string k)] @ r) reqs' r in
+  let lte (type a) (type b) f (x : a t) (y : b t) = match x, y with
+    | Func (pos, kwargs, reqs, (l, res)), Func (pos', kwargs', reqs', (l', res')) when cmp_component x y ->
+       let kw_cmp r =
+         SMap.fold (fun k (l', t') r ->
+           if SMap.mem k kwargs then
+             let (l, t) = SMap.find k kwargs in
+             f Neg t t' @ r
+           else [Reason.Conflict (locations x, "keyword", l', Symbol.to_string k)] @ r) kwargs' r in
+       let req_cmp r =
+         SMap.fold (fun k () r ->
+           if SMap.mem k reqs' then r else
+             [Reason.Conflict (locations x, "required+", locations y, Symbol.to_string k)] @ r) reqs r in
+       f Pos res res' |> req_cmp |> kw_cmp |>
+           List.fold_right2 (fun (l, x) (l, y) r -> f Neg x y @ r) pos pos'
 
-       f pol res res' |> req_cmp |> kw_cmp |>
-           List.fold_right2 (fun (l, x) (l, y) r -> f (polneg pol) x y @ r) pos pos'
-
-    | Object ox, Object oy, Pos -> 
+    | Object ox, Object oy -> 
        SMap.fold (fun k (yl, yk) r -> 
          if SMap.mem k ox then
            let (xl, xk) = SMap.find k ox in
-           f pol xk yk @ r
+           f Pos xk yk @ r
          else [Reason.Conflict (locations x, "{}", yl, Symbol.to_string k)] @ r) oy []
-    | Object ox, Object oy, Neg ->
-       SMap.fold (fun k (xl, xk) r ->
-         if SMap.mem k oy then
-           let (yl, yk) = SMap.find k oy in
-           f pol xk yk @ r
-         else [Reason.Conflict (xl, Symbol.to_string k, locations y, "{}")] @ r) ox []
 
+    | List (l, a), List (l', a') ->
+       f Pos a a'
 
-    | List (l, a), List (l', a'), pol ->
-       f pol a a'
-
-    | Base (l, s), Base (l', s'), pol when s = s' ->
+    | Base (l, s), Base (l', s') when s = s' ->
        []
 
     (* error cases *)
-    | x, y, pol ->
+    | x, y ->
        let name = function
        | Func _ -> "function"
        | Object _ -> "object"
        | List _ -> "list"
        | Base (_, s) -> Symbol.to_string s in
-       let err a b =
-         [Reason.Conflict (locations a, name a, locations b, name b)] in
-       match pol with Pos -> err x y | Neg -> err y x
+       [Reason.Conflict (locations x, name x, locations y, name y)]
 
   let list_fields = function
     | Func (pos, kwargs, reqs, (l, res)) -> 
@@ -285,13 +263,13 @@ module TypeLat : TYPES = struct
     (* i.e. forall i,j, Xi <= Yj *)
     List.fold_right (fun x rs -> 
       List.fold_right (fun y rs -> 
-        Components.lte Pos (pol_flip f) x y @ rs) ys rs) xs []
+        Components.lte (pol_flip f) x y @ rs) ys rs) xs []
 
   let lte_np f xs ys =
     (* glb X <= lub Y *)
     (* i.e. exists i,j, Xi <= Yj *)
     List.exists (fun x -> List.exists (fun y ->
-      Components.lte Pos (fun p x y -> if pol_flip f p x y then [] else [Reason.excuse]) x y = [])  xs) ys
+      Components.lte (fun p x y -> if pol_flip f p x y then [] else [Reason.excuse]) x y = [])  xs) ys
 
   let rec subs pol f xs ys =
     (* lub X <= lub Y or glb X >= glb Y *)
@@ -299,8 +277,10 @@ module TypeLat : TYPES = struct
     | [] -> true
     | x :: xs -> match List.partition (Components.cmp_component x) ys with
       | [], ys -> false
-      | [y], ys -> 
-         Components.lte pol (fun p x y -> if f p x y then [] else [Reason.excuse]) x y = []
+      | [y], ys ->
+         (match pol with
+         | Pos -> Components.lte (fun p x y -> if f p x y then [] else [Reason.excuse]) x y = []
+         | Neg -> Components.lte (fun p y x -> if f (polneg p) x y then [] else [Reason.excuse]) y x = [])
          && subs pol f xs ys
       | y1 :: y2 :: _, _ -> failwith "two terms in same component"
 
