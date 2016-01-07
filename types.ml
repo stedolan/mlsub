@@ -814,12 +814,16 @@ let minimise dstates =
 (* Entailment of flow edges on deterministic automata *)
 
 
+let add_flow dn dp =
+  dn.d_flow <- DStateSet.add dn.d_flow dp;
+  dp.d_flow <- DStateSet.add dp.d_flow dn
+
+
 let rec entailed dn dp =
   assert (dn.d_pol = Neg && dp.d_pol = Pos);
   assert (DStateSet.mem dn.d_flow dp = DStateSet.mem dp.d_flow dn);
   if DStateSet.mem dn.d_flow dp then true else begin
-    dn.d_flow <- DStateSet.add dn.d_flow dp;
-    dp.d_flow <- DStateSet.add dp.d_flow dn;
+    add_flow dn dp;
     if TypeLat.lte_np entailed dn.d_cons dp.d_cons then
       true
     else begin
@@ -875,23 +879,37 @@ let subsumed map =
   check_dataflow r
 
 
-let optimise_flow (roots : state list) = ()
-(*
-  let states = find_reachable roots in
-  let state_set = List.fold_left StateSet.add StateSet.empty states in
-  let flows = StateTbl.create 20 in
-  (* clear out all flow edges *)
-  List.iter (fun s -> StateTbl.add flows s (StateSet.inter s.flow state_set);
-                      s.flow <- StateSet.empty) states;
-  (* re-add them in reverse postorder *)
-  let antichain = antichain_new () in
-  let add_flow sn sp =
-    assert (sn.pol = Neg); assert (sp.pol = Pos);
-    if not (entailed antichain (StateSet.singleton sn) (StateSet.singleton sp)) then
-      (sn.flow <- StateSet.add sn.flow sp; sp.flow <- StateSet.add sp.flow sn) in
-  let process s =
-    if s.pol = Neg then
-      StateSet.iter (StateTbl.find flows s) (fun sp -> add_flow s sp) in
-  List.iter process (List.rev states)
-*)
+let find_reachable_dstates (roots : dstate list) =
+  let states = DStateTbl.create 20 in
+  let rec search s acc =
+    if DStateTbl.mem states s then acc else begin
+      DStateTbl.add states s ();
+      s :: TypeLat.pfold (fun p s acc -> search s acc) s.d_pol s.d_cons acc
+    end in
+  List.fold_right search roots []
 
+let optimise_flow (roots : dstate list) =
+  let states = find_reachable_dstates roots in
+  let state_set = DStateSet.of_list states in
+  let flows = states
+    |> List.rev
+    |> List.map (fun sn ->
+      match sn.d_pol with
+      | Pos -> []
+      | Neg -> sn.d_flow
+        |> DStateSet.inter state_set
+        |> DStateSet.to_list
+        |> List.map (fun sp -> (sn, sp)))
+    |> List.concat in
+  let clear_flows () =
+    List.iter (fun s -> s.d_flow <- DStateSet.empty) states in
+  (* remove flows and re-add them in reverse postorder *)
+  clear_flows ();
+  let rec filter_flows = function
+    | [] -> []
+    | (sn, sp) as flow :: flows ->
+       if entailed sn sp then filter_flows flows
+       else (add_flow sn sp; flow :: filter_flows flows) in
+  let flows' = filter_flows flows in
+  clear_flows ();
+  flows' |> List.iter (fun (sn, sp) -> add_flow sn sp);

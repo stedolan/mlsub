@@ -246,12 +246,6 @@ let gamma0 =
                             expr = (compile_terms (fun f -> f Pos t)) }) g)
     predefined SMap.empty
 
-
-let optimise s =
-  let states = s.expr :: SMap.fold (fun v s ss -> s :: ss) s.environment [] in
-  Types.optimise_flow states;
-  s
-       
 type result =
   | Type of scheme
   | TypeError of string
@@ -281,6 +275,7 @@ let rec infer_module err modl : signature =
   assert (SMap.is_empty envM);
   let states = List.map (function SDef (f, t) -> t | SLet (v, t) -> t) sigM in
   let remap, dstates = Types.determinise states in
+  Types.optimise_flow dstates;
   let minim = Types.minimise dstates in
   List.map (function SDef (f, t) -> SDef (f, minim (remap t)) | SLet (v, t) -> SLet (v, minim (remap t))) sigM
 
