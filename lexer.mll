@@ -60,8 +60,8 @@ rule lex s =
   | ","      { tok COMMA }
   | ";"      { tok SEMI }
   | "."      { tok DOT }
-  | "|"      { tok TY_JOIN }
-  | "&"      { tok TY_MEET }
+  | "|"      { tok OR }
+  | "&"      { tok AND }
   | ":"      { tok ASC }
   | "<:"     { tok SUBSUME }
   | "Top"    { tok TOP }
@@ -85,8 +85,8 @@ rule lex s =
   | ">"      { tok CMP_GT }
   | "<="     { tok CMP_LTE }
   | ">="     { tok CMP_GTE }
-  | "+"      { tok OP_ADD }
-  | "-"      { tok OP_SUB }
+  | "+"      { tok PLUS }
+  | "-"      { tok MINUS }
   | "_"      { tok UNDER }
 
   | "list"   { tok LIST }

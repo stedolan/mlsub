@@ -70,7 +70,7 @@ let repl () =
 
     parse_line Parser.prog
                (fun exp ->
-                 let print_err e = Format.printf "%s\n%!" (Types.Reason.fmt e) in
+                 let print_err e = Format.printf "%s\n%!" (Types.Error.fmt e) in
                 (try
                   let s = optimise (Typecheck.typecheck print_err gamma0 exp) in
                   Format.printf "%a\n%!" (print_typeterm Pos) (recomp (reparse (reparse (reparse s.Typecheck.expr))))
@@ -98,7 +98,7 @@ let to_dscheme name s =
 
 
 let process file =
-  let print_err e = Types.Reason.print Format.err_formatter e; Format.fprintf Format.err_formatter "%!" in
+  let print_err e = Error.print Format.err_formatter e; Format.fprintf Format.err_formatter "%!" in
   try
     file
       |> Location.of_file

@@ -18,8 +18,8 @@
 %token COMMA
 %token SEMI
 %token UNIT
-%token TY_MEET
-%token TY_JOIN
+%token AND
+%token OR
 %token EQUALS
 %token REC
 %token LET
@@ -37,8 +37,8 @@
 %token CMP_GT
 %token CMP_LTE
 %token CMP_GTE
-%token OP_ADD
-%token OP_SUB
+%token PLUS
+%token MINUS
 %token UNDER
 
 %token CONS
@@ -52,16 +52,16 @@
 
 %right EQUALS
 %right ARROW
-%right TY_MEET
-%right TY_JOIN
+%right AND
+%right OR
 
 %nonassoc EQEQUALS
 %nonassoc CMP_LT
 %nonassoc CMP_GT
 %nonassoc CMP_LTE
 %nonassoc CMP_GTE
-%left OP_ADD
-%left OP_SUB
+%left PLUS
+%left MINUS
 %right CONS
 %right SEMI
 
@@ -74,8 +74,8 @@
 
 %start <Exp.exp> prog
 %start <Exp.modlist> modlist
-%start <Types.var Types.typeterm> onlytype
-%start <Types.var Types.typeterm * Types.var Types.typeterm> subsumption
+%start <Exp.typeterm> onlytype
+%start <Exp.typeterm * Exp.typeterm> subsumption
 
 %parameter <L : Location.Locator>
 
@@ -121,7 +121,7 @@ exp_r:
     { If (cond, tcase, fcase) }
 | MATCH; e = term; WITH; 
     LBRACK; RBRACK; ARROW; n = exp; 
-    TY_JOIN; x = IDENT; CONS; xs = IDENT; ARROW; c = exp
+    OR; x = IDENT; CONS; xs = IDENT; ARROW; c = exp
     { Match (e, n, x, xs, c) }
 (*| e1 = exp; SEMI; e2 = exp
     { Seq (e1, e2) }*)
@@ -167,8 +167,8 @@ simple_exp:
 | CMP_GT   { "(>)" }
 | CMP_LTE  { "(<=)" }
 | CMP_GTE  { "(>=)" }
-| OP_ADD   { "(+)" }
-| OP_SUB   { "(-)" }
+| PLUS     { "(+)" }
+| MINUS    { "(-)" }
 
 term_r:
 | v = IDENT 
@@ -234,8 +234,8 @@ typeterm:
 | BOT { ty_zero (L.pos ($startpos, $endpos)) }
 | LPAR; t = typeterm; LIST; RPAR { ty_list (fun _ -> t) (L.pos ($startpos, $endpos)) }
 | UNIT { ty_base (Symbol.intern "unit") (L.pos ($startpos, $endpos)) }
-| t1 = typeterm; meetjoin; t2 = typeterm { TAdd (t1, t2)  } %prec TY_MEET
+| t1 = typeterm; p = meetjoin; t2 = typeterm { TAdd (p, t1, t2)  } %prec AND
 | REC; v = IDENT; EQUALS; t = typeterm { TRec (Symbol.to_string v, t) }
 | LPAR; t = typeterm; RPAR { t }
 
-%inline meetjoin : TY_MEET | TY_JOIN {}
+%inline meetjoin : AND { Typelat.Neg } | OR { Typelat.Pos }

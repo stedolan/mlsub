@@ -1,4 +1,6 @@
+open Typelat
 open Types
+open Exp
 
 module SMap = Map.Make (struct type t = int let compare = compare end)
 
@@ -23,7 +25,7 @@ let to_dscheme s =
 let clone_scheme loc s =
   Types.clone (fun f -> { environment = SMap.map (f loc) s.d_environment; expr = f loc s.d_expr })
     
-let constrain err name (inputs : (state * var typeterm) list) p output =
+let constrain err name (inputs : (state * typeterm) list) p output =
   let (inputs, output) = compile_terms (fun f ->
     (List.map (fun (s, t) -> (s, f (polneg s.Types.State.pol) t)) inputs, f p output)) in
   let dump title =
@@ -81,11 +83,11 @@ let ty_bool = ty_base (Symbol.intern "bool")
 
 let rec typecheck err gamma = function
 | (loc, Some exp) -> typecheck' err gamma loc exp
-| (loc, None) -> (err (Reason.SyntaxErr loc); bottom loc)
+| (loc, None) -> (err (Error.SyntaxErr loc); bottom loc)
 and typecheck' err gamma loc exp = match exp with
   | Var v ->
      (try clone_scheme (Location.one loc) (SMap.find v gamma)
-      with Not_found -> (err (Reason.Unbound (loc, v)); bottom loc))
+      with Not_found -> (err (Error.Unbound (loc, v)); bottom loc))
                   
   | Lambda (params, body) ->
      let rec check_params gamma = function
@@ -110,12 +112,12 @@ and typecheck' err gamma loc exp = match exp with
        | (loc, Ppositional arg) :: params ->
           build_funtype (argvar arg :: pos) kwargs params
        | (loc, Preq_keyword arg) :: params ->
-          build_funtype pos (Types.SMap.add arg (argvar arg, true) kwargs) params
+          build_funtype pos (Typelat.SMap.add arg (argvar arg, true) kwargs) params
        | (loc, Popt_keyword (arg, _)) :: params ->
-          build_funtype pos (Types.SMap.add arg (argvar arg, false) kwargs) params in
+          build_funtype pos (Typelat.SMap.add arg (argvar arg, false) kwargs) params in
      let (constraints, env) = remove_params body_ty.environment params in
      { environment = env;
-       expr = constrain err "lambda" ((body_ty.expr, ty_var "res" loc) :: constraints) Pos (build_funtype [] Types.SMap.empty params) }
+       expr = constrain err "lambda" ((body_ty.expr, ty_var "res" loc) :: constraints) Pos (build_funtype [] Typelat.SMap.empty params) }
 
   | Let (name, exp, body) ->
      let exp_ty = typecheck err gamma exp in
@@ -147,8 +149,8 @@ and typecheck' err gamma loc exp = match exp with
        | (loc, Akeyword (k, e)) :: args ->
           let { environment = envE; expr = exprE } = typecheck err gamma e in
           let var = fresh () in
-          check_args (env_join err loc env envE) pos (Types.SMap.add k (var, true) kwargs) ((exprE, var loc) :: constraints) args in
-     check_args envF [] Types.SMap.empty [] args
+          check_args (env_join err loc env envE) pos (Typelat.SMap.add k (var, true) kwargs) ((exprE, var loc) :: constraints) args in
+     check_args envF [] Typelat.SMap.empty [] args
 (*               
      let fn_ty = typecheck err gamma fn and arg_ty = typecheck err gamma arg in
      { environment = env_join err loc fn_ty.environment arg_ty.environment;
@@ -210,26 +212,26 @@ and typecheck' err gamma loc exp = match exp with
      let constraints = List.map (fun (sym, ty) -> 
         (ty, ty_var (Symbol.to_string sym) loc)) fields in
      let o = List.fold_right (fun (sym, ty) o ->
-        Types.SMap.add sym (ty_var (Symbol.to_string sym)) o) fields Types.SMap.empty in
+        Typelat.SMap.add sym (ty_var (Symbol.to_string sym)) o) fields Typelat.SMap.empty in
      { environment = env; expr = constrain err "object" constraints Pos (ty_obj o loc) }
 
   | GetField (e, field) ->
      let e_ty = typecheck err gamma e in
      { environment = e_ty.environment;
        expr = constrain err "field" [e_ty.expr,
-                                 ty_obj (Types.SMap.singleton field (ty_var "a")) loc]
+                                 ty_obj (Typelat.SMap.singleton field (ty_var "a")) loc]
                         Pos (ty_var "a" loc) }
 
 
-let ty_fun2 x y res = ty_fun [x; y] Types.SMap.empty res
+let ty_fun2 x y res = ty_fun [x; y] Typelat.SMap.empty res
 
 let ty_polycmp = ty_fun2 (ty_var "a") (ty_var "a") ty_bool
 let ty_binarith = ty_fun2 ty_int ty_int ty_int
 
 let predefined =
   let i = Location.internal in
-  ["p", ty_fun [ty_int] Types.SMap.empty ty_unit i;
-   "error", ty_fun [ty_unit] Types.SMap.empty ty_zero i;
+  ["p", ty_fun [ty_int] Typelat.SMap.empty ty_unit i;
+   "error", ty_fun [ty_unit] Typelat.SMap.empty ty_zero i;
    "(==)", ty_polycmp i;
    "(<)", ty_polycmp i;
    "(>)", ty_polycmp i;

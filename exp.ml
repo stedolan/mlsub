@@ -18,7 +18,7 @@ and rexp =
   | Rec of Symbol.t * exp
   | App of exp * argument list
   | Seq of exp * exp
-  | Ascription of exp * Types.var Types.typeterm
+  | Ascription of exp * typeterm
   | Unit
   | Int of int
   | Bool of bool
@@ -36,3 +36,11 @@ and moditem =
   | MLet of Symbol.t * exp
 
 and modlist = moditem located list
+
+and tyvar = string
+
+and typeterm =
+| TVar of tyvar
+| TCons of typeterm Typelat.TypeLat.t
+| TAdd of Typelat.polarity * typeterm * typeterm
+| TRec of tyvar * typeterm
