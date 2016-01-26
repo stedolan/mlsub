@@ -1,5 +1,29 @@
 type 'a located = Location.t * 'a
 
+
+
+type tyvar = string
+
+type typaram =
+| PPos of Symbol.t
+| PNeg of Symbol.t
+| PPosNeg of Symbol.t
+
+type tyarg =
+| APos of typeterm
+| ANeg of typeterm
+| AUnspec of typeterm
+| ANegPos of typeterm * typeterm
+
+and typeterm =
+| TZero of Typector.polarity
+| TNamed of tyvar * tyarg list
+| TCons of typeterm Typector.Components.t
+| TAdd of Typector.polarity * typeterm * typeterm
+| TRec of tyvar * typeterm
+
+
+
 type rparam =
 | Ppositional of Symbol.t
 | Preq_keyword of Symbol.t
@@ -32,15 +56,10 @@ and rexp =
 and exp = rexp option located
 
 and moditem =
+  | MType of Symbol.t * typaram list * typeterm
   | MDef of Symbol.t * param list * exp
   | MLet of Symbol.t * exp
 
 and modlist = moditem located list
 
-and tyvar = string
 
-and typeterm =
-| TVar of tyvar
-| TCons of typeterm Typelat.TypeLat.t
-| TAdd of Typelat.polarity * typeterm * typeterm
-| TRec of tyvar * typeterm

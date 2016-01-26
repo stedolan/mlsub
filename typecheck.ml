@@ -1,3 +1,4 @@
+open Typector
 open Typelat
 open Types
 open Exp
@@ -51,7 +52,7 @@ let constrain err name (inputs : (state * typeterm) list) p output =
 
 let ascription scheme typeterm =
   let s = compile_terms (fun f -> f Pos typeterm) in
-  let top = compile_terms (fun f -> f Neg (ty_zero Location.internal)) in
+  let top = compile_terms (fun f -> f Neg (TZero Neg )) in
   let dsch = to_dscheme { environment = SMap.map (fun _ -> top) scheme.environment; expr = s } in
   match subsumed (fun f -> f Pos scheme.expr dsch.d_expr &&
                              SMap.for_all (fun v sv -> 
@@ -73,7 +74,7 @@ let add_singleton v gamma loc =
 
 open Exp
 let var env arg t = try [SMap.find arg env, t] with Not_found -> []
-let bottom loc = compile_terms (fun f -> { environment = SMap.empty; expr = f Pos (ty_zero loc) })
+let bottom loc = compile_terms (fun f -> { environment = SMap.empty; expr = f Pos (TZero Pos) })
 
 
 let ty_int = ty_base (Symbol.intern "int")
@@ -112,12 +113,12 @@ and typecheck' err gamma loc exp = match exp with
        | (loc, Ppositional arg) :: params ->
           build_funtype (argvar arg :: pos) kwargs params
        | (loc, Preq_keyword arg) :: params ->
-          build_funtype pos (Typelat.SMap.add arg (argvar arg, true) kwargs) params
+          build_funtype pos (Typector.SMap.add arg (argvar arg, true) kwargs) params
        | (loc, Popt_keyword (arg, _)) :: params ->
-          build_funtype pos (Typelat.SMap.add arg (argvar arg, false) kwargs) params in
+          build_funtype pos (Typector.SMap.add arg (argvar arg, false) kwargs) params in
      let (constraints, env) = remove_params body_ty.environment params in
      { environment = env;
-       expr = constrain err "lambda" ((body_ty.expr, ty_var "res" loc) :: constraints) Pos (build_funtype [] Typelat.SMap.empty params) }
+       expr = constrain err "lambda" ((body_ty.expr, ty_var "res" loc) :: constraints) Pos (TCons (build_funtype [] Typector.SMap.empty params)) }
 
   | Let (name, exp, body) ->
      let exp_ty = typecheck err gamma exp in
@@ -140,7 +141,7 @@ and typecheck' err gamma loc exp = match exp with
      let rec check_args env pos kwargs constraints = function
        | [] ->
           { environment = env;
-            expr = constrain err "app" ((exprF, ty_fun (List.rev pos) kwargs (ty_var "res") loc) :: constraints) 
+            expr = constrain err "app" ((exprF, TCons (ty_fun (List.rev pos) kwargs (ty_var "res") loc)) :: constraints) 
               Pos (ty_var "res" loc) }
        | (loc, Apositional e) :: args ->
           let { environment = envE; expr = exprE } = typecheck err gamma e in
@@ -149,8 +150,8 @@ and typecheck' err gamma loc exp = match exp with
        | (loc, Akeyword (k, e)) :: args ->
           let { environment = envE; expr = exprE } = typecheck err gamma e in
           let var = fresh () in
-          check_args (env_join err loc env envE) pos (Typelat.SMap.add k (var, true) kwargs) ((exprE, var loc) :: constraints) args in
-     check_args envF [] Typelat.SMap.empty [] args
+          check_args (env_join err loc env envE) pos (Typector.SMap.add k (var, true) kwargs) ((exprE, var loc) :: constraints) args in
+     check_args envF [] Typector.SMap.empty [] args
 (*               
      let fn_ty = typecheck err gamma fn and arg_ty = typecheck err gamma arg in
      { environment = env_join err loc fn_ty.environment arg_ty.environment;
@@ -162,45 +163,45 @@ and typecheck' err gamma loc exp = match exp with
      let {environment = env1; expr = expr1 } = typecheck err gamma e1 in
      let {environment = env2; expr = expr2 } = typecheck err gamma e2 in
      { environment = env_join err loc env1 env2;
-       expr = constrain err "seq" [(expr1, ty_unit loc); (expr2, ty_var "a" loc)] Pos (ty_var "a" loc) }
+       expr = constrain err "seq" [(expr1, TCons (ty_unit loc)); (expr2, ty_var "a" loc)] Pos (ty_var "a" loc) }
 
   | Ascription (e, ty) ->
      ascription (typecheck err gamma e) ty
        
   | Unit -> 
-     { environment = SMap.empty; expr = constrain err "unit" [] Pos (ty_base (Symbol.intern "unit") loc) }
+     { environment = SMap.empty; expr = constrain err "unit" [] Pos (TCons (ty_base (Symbol.intern "unit") loc)) }
 
   | Int n ->
-     { environment = SMap.empty; expr = constrain err "int" [] Pos (ty_base (Symbol.intern "int") loc) }
+     { environment = SMap.empty; expr = constrain err "int" [] Pos (TCons (ty_base (Symbol.intern "int") loc)) }
 
   | Bool b ->
-     { environment = SMap.empty; expr = constrain err "bool" [] Pos (ty_base (Symbol.intern "bool") loc) }
+     { environment = SMap.empty; expr = constrain err "bool" [] Pos (TCons (ty_base (Symbol.intern "bool") loc)) }
 
   | If (cond, tcase, fcase) ->
      let {environment = envC; expr = exprC} = typecheck err gamma cond in
      let {environment = envT; expr = exprT} = typecheck err gamma tcase in
      let {environment = envF; expr = exprF} = typecheck err gamma fcase in
      { environment = env_join err loc envC (env_join err loc envT envF);
-       expr = constrain err "if" [exprC, ty_base (Symbol.intern "bool") loc;
+       expr = constrain err "if" [exprC, TCons (ty_base (Symbol.intern "bool") loc);
                               exprT, ty_var "a" loc;
                               exprF, ty_var "a" loc] Pos (ty_var "a" loc) }
   | Nil ->
-     { environment = SMap.empty; expr = constrain err "nil" [] Pos (ty_list (ty_var "a") loc) }
+     { environment = SMap.empty; expr = constrain err "nil" [] Pos (TCons (ty_list (ty_var "a") loc)) }
   | Cons (x, xs) ->
      let x_ty = typecheck err gamma x in
      let xs_ty = typecheck err gamma xs in
      { environment = env_join err loc x_ty.environment xs_ty.environment;
        expr = constrain err "cons" [x_ty.expr, ty_var "a" loc;
-                                xs_ty.expr, ty_list (ty_var "a") loc] Pos (ty_list (ty_var "a") loc) }
+                                xs_ty.expr, TCons (ty_list (ty_var "a") loc)] Pos (TCons (ty_list (ty_var "a") loc)) }
   | Match (e, nil, x, xs, cons) ->
      let e_ty = typecheck err gamma e in
      let nil_ty = typecheck err gamma nil in
      let cons_ty = typecheck err (add_singleton x (add_singleton xs gamma loc) loc) cons in
      let vars =
        (try [SMap.find x cons_ty.environment, ty_var "a" loc] with Not_found -> []) @
-       (try [SMap.find xs cons_ty.environment, ty_list (ty_var "a") loc] with Not_found -> []) in
+       (try [SMap.find xs cons_ty.environment, TCons (ty_list (ty_var "a") loc)] with Not_found -> []) in
      { environment = env_join err loc e_ty.environment (env_join err loc nil_ty.environment (SMap.remove x (SMap.remove xs cons_ty.environment)));
-       expr = constrain err "match" ([e_ty.expr, ty_list (ty_var "a") loc;
+       expr = constrain err "match" ([e_ty.expr, TCons (ty_list (ty_var "a") loc);
                                   nil_ty.expr, ty_var "res" loc;
                                   cons_ty.expr, ty_var "res" loc]
                                  @ vars) Pos (ty_var "res" loc) }
@@ -212,33 +213,34 @@ and typecheck' err gamma loc exp = match exp with
      let constraints = List.map (fun (sym, ty) -> 
         (ty, ty_var (Symbol.to_string sym) loc)) fields in
      let o = List.fold_right (fun (sym, ty) o ->
-        Typelat.SMap.add sym (ty_var (Symbol.to_string sym)) o) fields Typelat.SMap.empty in
-     { environment = env; expr = constrain err "object" constraints Pos (ty_obj o loc) }
+        Typector.SMap.add sym (ty_var (Symbol.to_string sym)) o) fields Typector.SMap.empty in
+     { environment = env; expr = constrain err "object" constraints Pos (TCons (ty_obj o loc)) }
 
   | GetField (e, field) ->
      let e_ty = typecheck err gamma e in
      { environment = e_ty.environment;
        expr = constrain err "field" [e_ty.expr,
-                                 ty_obj (Typelat.SMap.singleton field (ty_var "a")) loc]
+                                 TCons (ty_obj (Typector.SMap.singleton field (ty_var "a")) loc)]
                         Pos (ty_var "a" loc) }
 
 
-let ty_fun2 x y res = ty_fun [x; y] Typelat.SMap.empty res
+let ty_cons t loc = TCons (t loc)
+let ty_fun2 x y res = ty_fun [x; y] Typector.SMap.empty res
 
-let ty_polycmp = ty_fun2 (ty_var "a") (ty_var "a") ty_bool
-let ty_binarith = ty_fun2 ty_int ty_int ty_int
+let ty_polycmp = ty_fun2 (ty_var "a") (ty_var "a") (ty_cons (ty_bool))
+let ty_binarith = ty_fun2 (ty_cons ty_int) (ty_cons ty_int) (ty_cons ty_int)
 
 let predefined =
-  let i = Location.internal in
-  ["p", ty_fun [ty_int] Typelat.SMap.empty ty_unit i;
-   "error", ty_fun [ty_unit] Typelat.SMap.empty ty_zero i;
-   "(==)", ty_polycmp i;
-   "(<)", ty_polycmp i;
-   "(>)", ty_polycmp i;
-   "(<=)", ty_polycmp i;
-   "(>=)", ty_polycmp i;
-   "(+)", ty_binarith i;
-   "(-)", ty_binarith i]
+  ["p", ty_fun [ty_cons ty_int] Typector.SMap.empty (ty_cons ty_unit);
+   "error", ty_fun [ty_cons ty_unit] Typector.SMap.empty (fun loc -> TZero Pos);
+   "(==)", ty_polycmp;
+   "(<)", ty_polycmp;
+   "(>)", ty_polycmp;
+   "(<=)", ty_polycmp;
+   "(>=)", ty_polycmp;
+   "(+)", ty_binarith;
+   "(-)", ty_binarith] 
+  |> List.map (fun (n, t) -> (n, ty_cons t Location.internal))
 
 let gamma0 =
   List.fold_right
@@ -287,7 +289,7 @@ let rec print_signature ppf (sigm : signature) =
      |> decompile_automaton in
   let print s t = match s with
     | SLet (v, _) ->
-       Format.fprintf ppf "val %s : %a\n%!" (Symbol.to_string v) (print_typeterm Pos) t
+       Format.fprintf ppf "val %s : %a\n%!" (Symbol.to_string v) print_typeterm t
     | SDef (f, _) ->
-       Format.fprintf ppf "def %s : %a\n%!" (Symbol.to_string f) (print_typeterm Pos) t in
+       Format.fprintf ppf "def %s : %a\n%!" (Symbol.to_string f) print_typeterm t in
   List.iter2 print sigm elems

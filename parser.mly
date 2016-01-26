@@ -13,6 +13,7 @@
 %token RBRACK
 
 %token DEF
+%token TYPE
 %token END
 
 %token COMMA
@@ -40,6 +41,8 @@
 %token PLUS
 %token MINUS
 %token UNDER
+%token ANY
+%token NOTHING
 
 %token CONS
 %token MATCH
@@ -47,8 +50,7 @@
 %token LIST
 
 %token SUBSUME
-%token TOP
-%token BOT
+
 
 %right EQUALS
 %right ARROW
@@ -66,6 +68,8 @@
 %right SEMI
 
 %{
+  open Typector
+  open Typelat
   open Types 
   open Typecheck
   open Exp
@@ -100,6 +104,11 @@ moditem_nl: e = located(moditem); onl { e }
 moditem:
 | LET; v = IDENT; EQUALS; onl; e = exp { MLet (v, e) }
 | DEF; f = IDENT; p = params; onl; e = block; END { MDef (f, p, e) }
+| TYPE; n = IDENT; args = loption(delimited(LBRACK, 
+                            separated_nonempty_list(COMMA, typeparam), RBRACK));
+  EQUALS; t = typeterm
+    { MType (n, args, t) }
+
 
 block_r:
 | e = exp_r; onl
@@ -223,19 +232,30 @@ onlytype:
 | t = typeterm; EOF { t }
 
 
+typearg:
+| PLUS; t = typeterm { APos t }
+| MINUS; t = typeterm { ANeg t }
+| MINUS; s = typeterm; PLUS; t = typeterm
+| PLUS; t = typeterm; MINUS; s = typeterm { ANegPos (s, t) }
+| t = typeterm { AUnspec t }
+
+typeparam:
+| PLUS; v = IDENT { PPos v }
+| MINUS; v = IDENT { PNeg v }
+| PLUS; MINUS; v = IDENT
+| MINUS; PLUS; v = IDENT { PPosNeg v }
+
 typeterm:
-| v = IDENT {
-  let t = match Symbol.to_string v with
-    | "int" | "unit" | "bool" -> ty_base v
-    | s -> ty_var s in
-  t  (L.pos ($startpos, $endpos))}
+| v = IDENT { TNamed (Symbol.to_string v, []) }
+| v = IDENT; LBRACK; ps = separated_list(COMMA, typearg); RBRACK
+     { TNamed (Symbol.to_string v, ps) }
 (* | t1 = typeterm; ARROW ; t2 = typeterm  { ty_fun (fun _ -> t1) (fun _ -> t2) (L.pos ($startpos, $endpos)) } *)
-| TOP { ty_zero (L.pos ($startpos, $endpos)) }
-| BOT { ty_zero (L.pos ($startpos, $endpos)) }
-| LPAR; t = typeterm; LIST; RPAR { ty_list (fun _ -> t) (L.pos ($startpos, $endpos)) }
-| UNIT { ty_base (Symbol.intern "unit") (L.pos ($startpos, $endpos)) }
+| ANY { TZero Neg }
+| NOTHING { TZero Pos }
+| LPAR; t = typeterm; LIST; RPAR { TCons (ty_list (fun _ -> t) (L.pos ($startpos, $endpos))) }
+| UNIT { TCons (ty_base (Symbol.intern "unit") (L.pos ($startpos, $endpos))) }
 | t1 = typeterm; p = meetjoin; t2 = typeterm { TAdd (p, t1, t2)  } %prec AND
 | REC; v = IDENT; EQUALS; t = typeterm { TRec (Symbol.to_string v, t) }
 | LPAR; t = typeterm; RPAR { t }
 
-%inline meetjoin : AND { Typelat.Neg } | OR { Typelat.Pos }
+%inline meetjoin : AND { Typector.Neg } | OR { Typector.Pos }

@@ -1,21 +1,23 @@
 open Typelat
-
+open Typector
 open Exp
+
+
+(*
+type tybody =
+  | BParam of Symbol.t
+  | BCons of tybody Typector.Components.t
+*)
+
+let print_to_string (pr : 'a printer) (x : 'a) : string =
+  let buf = Buffer.create 100 in
+  let ppf = Format.formatter_of_buffer buf in
+  Format.fprintf ppf "%a%!" pr x;
+  Buffer.contents buf
 
 let cons_name pol = print_to_string (TypeLat.print (fun pol ppf x -> ()) pol)
 
 
-let ty_var v loc = TVar v
-let ty_list e loc = TCons (TypeLat.lift (Components.List (Location.one loc, e loc)))
-let ty_fun pos kwargs res loc = TCons (TypeLat.lift (Components.Func (
-  List.map (fun a -> (Location.one loc, a loc)) pos,
-  SMap.map (fun (a, req) -> (Location.one loc, a loc)) kwargs,
-  SMap.filter (fun k (a, req) -> req) kwargs |> SMap.map (fun _ -> ()),
-  (Location.one loc, res loc))))
-let ty_zero loc = TCons (TypeLat.join_ident)
-let ty_obj o loc = TCons (TypeLat.lift (Components.Object (SMap.map (fun x -> (Location.one loc, x loc)) o)))
-let ty_base s loc = TCons (TypeLat.lift (Components.Base (Location.one loc, s)))
-                       
 let string_of_var v = v
 
 open Format
@@ -27,15 +29,25 @@ let printp paren ppf fmt =
   kfprintf closebox ppf fmt
 
 
-let rec print_typeterm pol ppf = function
-  | TVar v -> fprintf ppf "%s" (string_of_var v)
+let rec print_typeterm ppf = function
+  | TZero Pos -> fprintf ppf "nothing"
+  | TZero Neg -> fprintf ppf "any"
+  | TNamed (v, []) -> fprintf ppf "%s" (string_of_var v)
+  | TNamed (v, args) -> 
+     let print_arg ppf = function
+       | APos t -> fprintf ppf "+%a" print_typeterm t
+       | ANeg t -> fprintf ppf "-%a" print_typeterm t
+       | AUnspec t -> fprintf ppf "%a" print_typeterm t
+       | ANegPos (s, t) -> fprintf ppf "-%a +%a" print_typeterm s print_typeterm t in
+     let comma ppf () = Format.fprintf ppf ",@ " in
+     fprintf ppf "%s[%a]" (string_of_var v) (Format.pp_print_list ~pp_sep:comma print_arg) args
   | TCons cons ->
-     fprintf ppf "@[%a@]" (TypeLat.print print_typeterm pol) cons
+     fprintf ppf "@[%a@]" (Components.print (fun pol -> print_typeterm) Pos) cons
   | TAdd (p, t1, t2) -> 
     let op = match p with Pos -> "|" | Neg -> "&" in
-    fprintf ppf "@[%a %s@ %a@]" (print_typeterm pol) t1 op (print_typeterm pol) t2
+    fprintf ppf "@[%a %s@ %a@]" print_typeterm t1 op print_typeterm t2
   | TRec (v, t) ->
-    fprintf ppf "rec %s = %a" (string_of_var v) (print_typeterm pol) t
+    fprintf ppf "rec %s = %a" (string_of_var v) print_typeterm t
 
 
 type state_id = int
@@ -94,12 +106,16 @@ let compile_terms (map : (polarity -> typeterm -> state) -> 'a) : 'a =
   let state_vars = StateTbl.create 20 in
   let epsilon_trans = StateTbl.create 20 in
   let rec compile r p = function
-    | TVar v -> (
+    | TZero p' ->
+       (* FIXME *) assert (p = p');
+       mkstate p TypeLat.join_ident
+    | TNamed (v, []) -> (
       try VarMap.find v r
       with Not_found ->
         (let s = mkstate p TypeLat.join_ident in
          StateTbl.add state_vars s v; s))
-    | TCons c -> mkstate p (TypeLat.pmap (fun p t -> StateSet.singleton (compile r p t)) p c) 
+    | TNamed (v, args) -> failwith "unsupported parameterised type"
+    | TCons c -> mkstate p (TypeLat.pmap (fun p t -> StateSet.singleton (compile r p t)) p (TypeLat.lift c)) 
     | TAdd (p', t1, t2) ->
       (* FIXME *) assert (p = p');
       let s1, s2 = compile r p t1, compile r p t2 in
@@ -252,29 +268,22 @@ let decompile_automaton (roots : state list) : typeterm list =
   let fresh_var = let var_id = ref (-1) in fun () -> incr var_id; name_var !var_id in
   let state_vars = StateTbl.create 20 in
   List.iter (fun (ss, ss') -> 
-    let v = TVar (fresh_var ()) in
+    let v = TNamed (fresh_var (), []) in
     let iter ss = StateSet.iter ss (fun s -> StateTbl.add state_vars s v) in
     iter ss; iter ss') biclique_decomposition;
 
-
-  let rec term_add p = function
-    | [] -> TCons TypeLat.join_ident
-    | [t] -> t
-    | (t :: ts) ->
-      if t = TCons TypeLat.join_ident then term_add p ts else
-        TAdd (p, t, term_add p ts) in
 
   let state_rec_var = StateTbl.create 20 in
   let rec decompile s =
     if StateTbl.mem state_rec_var s then
       match StateTbl.find state_rec_var s with
-      | Some v -> TVar v
-      | None -> let v = fresh_var () in (StateTbl.replace state_rec_var s (Some v); TVar v)
+      | Some v -> TNamed (v, [])
+      | None -> let v = fresh_var () in (StateTbl.replace state_rec_var s (Some v); TNamed (v, []))
     else
       let vars = StateTbl.find_all state_vars s in
       StateTbl.add state_rec_var s None;
-      let t = TypeLat.pmap (fun p' ss' -> term_add p' (List.map decompile (StateSet.to_list ss'))) s.pol s.cons in
-      let tv = term_add s.pol (TCons t :: vars) in
+      let t = TypeLat.pmap (fun p' ss' -> ty_add p' (List.map decompile (StateSet.to_list ss'))) s.pol s.cons in
+      let tv = ty_add s.pol (TypeLat.to_typeterm s.pol t :: vars) in
       let visited = StateTbl.find state_rec_var s in
       StateTbl.remove state_rec_var s;
       match visited with

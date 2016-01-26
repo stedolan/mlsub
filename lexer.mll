@@ -64,8 +64,6 @@ rule lex s =
   | "&"      { tok AND }
   | ":"      { tok ASC }
   | "<:"     { tok SUBSUME }
-  | "Top"    { tok TOP }
-  | "Bot"    { tok BOT }
   | "rec"    { tok REC }
   | "="      { tok EQUALS }
   | "fun"    { tok FUN }
@@ -79,6 +77,9 @@ rule lex s =
   | "else"   { tok ELSE }
   | "def"    { bopen DEF Block }
   | "end"    { bclose END Block }
+  | "type"   { tok TYPE }
+  | "any"    { tok ANY }
+  | "nothing"{ tok NOTHING }
 
   | "=="     { tok EQEQUALS }
   | "<"      { tok CMP_LT }

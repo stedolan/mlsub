@@ -32,6 +32,6 @@ let hash (n : t) : int = let (s, h) = Hashtbl.find id_table n in h
                                               
 let fresh_name_ctr = ref 0
 let rec fresh s =
-  incr fresh_name_ctr;
-  let v = s ^ "_" ^ string_of_int !fresh_name_ctr in
-  if Hashtbl.mem sym_table v then fresh v else intern v
+    incr fresh_name_ctr;
+    let v = s ^ "_" ^ string_of_int !fresh_name_ctr in
+    if Hashtbl.mem sym_table v then fresh v else intern v
