@@ -25,7 +25,7 @@
 %token REC
 %token LET
 %token IN
-%token ASC
+%token COLON
 %token DOT
 %token TRUE
 %token FALSE
@@ -68,8 +68,8 @@
 %right SEMI
 
 %{
+  open Variance
   open Typector
-  open Typelat
   open Types 
   open Typecheck
   open Exp
@@ -141,7 +141,13 @@ exp:
 | e = located(mayfail(exp_r))
     { e }
 
-params: LPAR; p = separated_list(COMMA, located(param)); RPAR { p }
+params: LPAR; p = separated_list(COMMA, located(paramtype)); RPAR { p }
+
+paramtype:
+| p = param
+    { p, None }
+| p = param; COLON; t = typeterm
+    { p, Some t }
 
 param:
 | v = IDENT
@@ -184,8 +190,8 @@ term_r:
     { Var v }
 | LPAR; e = exp_r; RPAR
     { e }
-| LPAR; e = exp; ASC; t = typeterm; RPAR
-    { Ascription (e, t) }
+| LPAR; e = exp; COLON; t = typeterm; RPAR
+    { Typed (e, t) }
 | f = term; LPAR; x = separated_list(COMMA, located(argument)); RPAR
     { App (f, x) }
 | LPAR; RPAR
@@ -240,22 +246,44 @@ typearg:
 | t = typeterm { AUnspec t }
 
 typeparam:
-| PLUS; v = IDENT { PPos v }
-| MINUS; v = IDENT { PNeg v }
+| PLUS; v = IDENT { TParam (Some VPos,  v) }
+| MINUS; v = IDENT { TParam (Some VNeg, v) }
 | PLUS; MINUS; v = IDENT
-| MINUS; PLUS; v = IDENT { PPosNeg v }
+| MINUS; PLUS; v = IDENT { TParam (Some VNegPos, v) }
+| UNDER; v = IDENT { TParam (Some VNone, v) }
+| v = IDENT { TParam (None, v) }
+
+objtype:
+| v = IDENT; COLON; t = typeterm
+   { (v, fun _ -> t) }
+
+(* FIXME: detect duplicate parameters *)
+funtype:
+| RPAR; { [] }
+| t = typeterm; COMMA; ts = funtype { (None, t) ::  ts }
+| t = typeterm; RPAR { [None, t] }
+| v = IDENT; COLON; t = typeterm; COMMA; ts = funtype { (Some v, t) :: ts }
+| v = IDENT; COLON; t = typeterm; RPAR { [Some v, t] }
 
 typeterm:
-| v = IDENT { TNamed (Symbol.to_string v, []) }
-| v = IDENT; LBRACK; ps = separated_list(COMMA, typearg); RBRACK
-     { TNamed (Symbol.to_string v, ps) }
-(* | t1 = typeterm; ARROW ; t2 = typeterm  { ty_fun (fun _ -> t1) (fun _ -> t2) (L.pos ($startpos, $endpos)) } *)
+| v = IDENT { TNamed (v, []) }
+(* | v = IDENT (* ; LBRACK; ps = separated_list(COMMA, typearg); RBRACK *)
+     { TCons (ty_base v (L.pos ($startpos, $endpos))) } *)
+(* funtype includes its closing paren as a hack to avoid a conflict *)
+| LPAR; ts = funtype; ARROW; tr = typeterm 
+    { TCons (ty_fun
+        (ts |> List.filter (function (None, _) -> true | _ -> false) |> List.map (fun (_, t) -> fun _ -> t))
+        (ts |> List.fold_left (fun s (v, t) -> match v with Some v -> Typector.SMap.add v ((fun _ -> t), true) s | None -> s) Typector.SMap.empty)
+        (fun _ -> tr)
+        (L.pos ($startpos, $endpos))) }
 | ANY { TZero Neg }
 | NOTHING { TZero Pos }
 | LPAR; t = typeterm; LIST; RPAR { TCons (ty_list (fun _ -> t) (L.pos ($startpos, $endpos))) }
+| LBRACE; o = separated_list(COMMA, objtype); RBRACE 
+  { TCons (ty_obj_l o (L.pos ($startpos, $endpos))) }
 | UNIT { TCons (ty_base (Symbol.intern "unit") (L.pos ($startpos, $endpos))) }
 | t1 = typeterm; p = meetjoin; t2 = typeterm { TAdd (p, t1, t2)  } %prec AND
-| REC; v = IDENT; EQUALS; t = typeterm { TRec (Symbol.to_string v, t) }
+| REC; v = IDENT; EQUALS; t = typeterm { TRec (v, t) }
 | LPAR; t = typeterm; RPAR { t }
 
-%inline meetjoin : AND { Typector.Neg } | OR { Typector.Pos }
+%inline meetjoin : AND { Variance.Neg } | OR { Variance.Pos }

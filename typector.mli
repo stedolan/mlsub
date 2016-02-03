@@ -1,17 +1,13 @@
-type polarity = Pos | Neg
+open Variance
+
 type 'a printer = Format.formatter -> 'a -> unit
-
-val polneg : polarity -> polarity
-val polmul : polarity -> polarity -> polarity
-val pol_flip : ('a -> 'a -> 'b) -> polarity -> 'a -> 'a -> 'b
-
 
 (* FIXME *)
 module SMap : Map.S with type key = int
 
 
 module Components : sig
-  type 'a t
+  type +'a t
 
   val cmp_component : 'a t -> 'b t -> bool
 
@@ -38,6 +34,9 @@ val ty_fun :
   (Location.LocSet.elt -> 'a) -> Location.LocSet.elt -> 'a Components.t
 val ty_obj :
   (Location.LocSet.elt -> 'a) SMap.t ->
+  Location.LocSet.elt -> 'a Components.t
+val ty_obj_l :
+  (Symbol.t * (Location.LocSet.elt -> 'a)) list ->
   Location.LocSet.elt -> 'a Components.t
 val ty_base : Symbol.t -> Location.LocSet.elt -> 'a Components.t
 

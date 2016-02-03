@@ -106,7 +106,7 @@ let process file =
       |> infer_module print_err
       |> print_signature Format.std_formatter
   with
-  | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg
+(*  | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg*)
   | Match_failure (file, line, col) -> Format.printf "Match failure in typechecker at %s:%d%d\n%!" file line col
 
 ;;

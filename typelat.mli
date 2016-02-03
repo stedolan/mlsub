@@ -1,7 +1,7 @@
+open Variance
 open Typector
 
 val ty_add : polarity -> Exp.typeterm list -> Exp.typeterm
-val ty_var : Exp.tyvar -> Location.t -> Exp.typeterm
 
 
 module TypeLat : sig

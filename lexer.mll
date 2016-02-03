@@ -62,7 +62,7 @@ rule lex s =
   | "."      { tok DOT }
   | "|"      { tok OR }
   | "&"      { tok AND }
-  | ":"      { tok ASC }
+  | ":"      { tok COLON }
   | "<:"     { tok SUBSUME }
   | "rec"    { tok REC }
   | "="      { tok EQUALS }

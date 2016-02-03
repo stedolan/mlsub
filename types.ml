@@ -1,13 +1,69 @@
 open Typelat
 open Typector
+open Variance
 open Exp
 
-
-(*
 type tybody =
-  | BParam of Symbol.t
-  | BCons of tybody Typector.Components.t
-*)
+| BParam of Symbol.t
+| BCons of tybody Typector.Components.t
+
+type typedef =
+| TAlias of variance SMap.t * tybody
+| TOpaque of variance SMap.t
+
+
+type context = typedef SMap.t
+
+let empty_context = SMap.empty
+
+let add_to_context err ctx name ty =
+  if SMap.mem name ctx then
+    failwith "reused name"
+  else
+    SMap.add name ty ctx
+
+
+let add_type_alias err name param_list term ctx =
+  let rec mk_params s = function
+    | [] -> s
+    | TParam (v, p) :: ps ->
+       mk_params (if SMap.mem p s then failwith "duplicate param" else SMap.add p v s) ps in
+  let params = mk_params SMap.empty param_list in
+  let rec inferred_variances = ref (SMap.map (fun _ -> VNone) params) in
+  let use param pol =
+    inferred_variances := 
+      SMap.add param (vjoin 
+        (SMap.find param !inferred_variances)
+        (variance_of_pol pol)) !inferred_variances in
+
+  let rec check pol = function
+    | TNamed (t, args) when SMap.mem t params ->
+       (match args with [] -> (use t pol; BParam t) | _ -> failwith "nope")
+    | TNamed (t, args) ->
+       (match SMap.find t ctx with
+       | TOpaque params ->
+          BCons (ty_base t Location.internal)
+       | _ -> failwith "unimplemented named type")
+    | TCons cons -> BCons (Typector.Components.pmap check pol cons) 
+    | TZero _ -> failwith "nzero"
+    | TAdd _ -> failwith "nadd"
+    | TRec _ -> failwith "nrec" in
+
+  let param_variances = SMap.merge (fun p asc infer -> match asc, infer with
+    | None, _ | _, None -> assert false (* maps have same keys *)
+    | Some (Some asc), Some infer -> assert (vlte infer asc); Some asc
+    | Some None, Some infer -> Some infer) params !inferred_variances in
+
+  add_to_context err ctx name (TAlias (param_variances, check Pos term))
+
+let add_opaque_type err name param_list ctx =
+  let rec check_params s = function
+    | [] -> s
+    | TParam (v, p) :: ps ->
+       if SMap.mem p s then (failwith "duplicate param"; check_params s ps) else
+         let s' = match v with Some v -> SMap.add p v s | None -> failwith "variance required"; s in
+         check_params s' ps in
+  add_to_context err ctx name (TOpaque (check_params SMap.empty param_list))
 
 let print_to_string (pr : 'a printer) (x : 'a) : string =
   let buf = Buffer.create 100 in
@@ -18,7 +74,7 @@ let print_to_string (pr : 'a printer) (x : 'a) : string =
 let cons_name pol = print_to_string (TypeLat.print (fun pol ppf x -> ()) pol)
 
 
-let string_of_var v = v
+let string_of_var v = Symbol.to_string v
 
 open Format
 
@@ -72,7 +128,11 @@ and StateSet : Intmap.S with type elt = State.state =
 open State
 type state = State.state
 
-module StateHash = struct type t = state let equal x y = x == y let hash x = x.id end
+type pos = PosBrand and neg = NegBrand
+type rawstate = State.state
+
+
+module StateHash = struct type t = State.state let equal x y = x == y let hash x = x.id end
 module StateTbl = Hashtbl.Make (StateHash)
 
 
@@ -97,97 +157,99 @@ let fresh_id_counter = ref 0
 let fresh_id () =
   let n = !fresh_id_counter in incr fresh_id_counter; n
 
+let cons pol (t : rawstate Components.t) : rawstate =
+  { id = fresh_id ();
+    pol;
+    cons = TypeLat.lift (Components.pmap (fun p s -> assert (s.pol = p); StateSet.singleton s) pol t);
+    flow = StateSet.empty }
+
+let flow_pair () =
+  let pos =
+    { id = fresh_id (); pol = Pos; cons = TypeLat.join_ident; flow = StateSet.empty } in
+  let neg =
+    { id = fresh_id (); pol = Neg; cons = TypeLat.join_ident; flow = StateSet.empty } in
+  pos.flow <- StateSet.singleton neg;
+  neg.flow <- StateSet.singleton pos;
+  (neg, pos)
+
+let zero p =
+  { id = fresh_id (); pol = p; cons = TypeLat.join_ident; flow = StateSet.empty }
+
+
 (* FIXME: Does not detect negative recursion *)
-let compile_terms (map : (polarity -> typeterm -> state) -> 'a) : 'a =
+let compile_type (ctx : context) (pol : polarity) (t : typeterm) : rawstate =
   let states = ref [] in
-  let mkstate pol cons = 
-    let r = { id = fresh_id (); pol; cons; flow = StateSet.empty } in
-    (states := r :: !states; r) in
-  let state_vars = StateTbl.create 20 in
   let epsilon_trans = StateTbl.create 20 in
   let rec compile r p = function
     | TZero p' ->
        (* FIXME *) assert (p = p');
-       mkstate p TypeLat.join_ident
-    | TNamed (v, []) -> (
-      try VarMap.find v r
-      with Not_found ->
-        (let s = mkstate p TypeLat.join_ident in
-         StateTbl.add state_vars s v; s))
+       zero p
+    | TNamed (v, []) -> 
+      (try VarMap.find v r
+       with Not_found ->
+         (match SMap.find v ctx with
+         | TAlias (params, body) -> failwith "unsupported type alias"
+         | TOpaque params -> cons p (Typector.ty_base v Location.internal (* FIXME loc *))
+         | exception Not_found -> failwith ("unknown type " ^ Symbol.to_string v)))
     | TNamed (v, args) -> failwith "unsupported parameterised type"
-    | TCons c -> mkstate p (TypeLat.pmap (fun p t -> StateSet.singleton (compile r p t)) p (TypeLat.lift c)) 
+    | TCons c -> cons p (Components.pmap (compile r) p c)
     | TAdd (p', t1, t2) ->
       (* FIXME *) assert (p = p');
       let s1, s2 = compile r p t1, compile r p t2 in
-      let s = mkstate p TypeLat.join_ident in
+      let s = zero p in
       StateTbl.add epsilon_trans s s1;
       StateTbl.add epsilon_trans s s2;
+      states := s :: !states;
       s
     | TRec (v, t) ->
-      let s = mkstate p TypeLat.join_ident in
+      let s = zero p in
       let s' = compile (VarMap.add v s r) p t in
       StateTbl.add epsilon_trans s s';
+      states := s :: !states;
       s in
-  let root = map (compile VarMap.empty) in
-
-  (* FIXME: would it be cleaner to remove eps-trans after adding flow constraints? *)
+  let root = compile VarMap.empty pol t in
 
   (* Remove epsilon transitions *)
   let rec epsilon_closure set s =
     if StateSet.mem set s then set
     else List.fold_left epsilon_closure (StateSet.add set s) (StateTbl.find_all epsilon_trans s) in
   let epsilon_merge s states =
-    s.cons <- List.fold_left (state_cons_join s.pol) s.cons (List.map (fun s -> s.cons) states);
-    List.iter (fun s' -> 
-      List.iter 
-        (fun v -> StateTbl.add state_vars s v)
-        (StateTbl.find_all state_vars s')) states in
+    s.cons <- List.fold_left (state_cons_join s.pol) s.cons (List.map (fun s -> s.cons) states) in
   List.iter (fun s -> epsilon_merge s (StateSet.to_list (epsilon_closure StateSet.empty s))) !states;
-
-
-  (* Add flow constraints *)
-  let collect_constraint s v (vn, vp) =
-    let ins map st var = 
-      VarMap.add var (StateSet.add (try VarMap.find var map with Not_found -> StateSet.empty) st) map in
-    match s.pol with Pos -> (vn, ins vp s v) | Neg -> (ins vn s v, vp) in
-  let var_state_neg, var_state_pos = 
-    StateTbl.fold collect_constraint state_vars (VarMap.empty, VarMap.empty) in
-  let add_constraints s v = 
-    let map = (match s.pol with Pos -> var_state_neg | Neg -> var_state_pos) in
-    let states = try VarMap.find v map with Not_found -> StateSet.empty in
-    s.flow <- StateSet.union s.flow states in
-  StateTbl.iter add_constraints state_vars; 
 
   root
 
-let print_automaton diagram_name id ppf (map : (string -> state -> unit) -> unit) =
+let print_automaton diagram_name ppf (map : (string -> rawstate -> unit) -> unit) =
+  let names = StateTbl.create 20 in
+  map (fun n s -> StateTbl.add names s n);
+
   let dumped = StateTbl.create 20 in
   let pstate ppf s = fprintf ppf "n%d" s.id in
-  let rec dump s name =
+  let rec dump s =
+    let name = try Some (StateTbl.find names s) with Not_found -> None in
     if StateTbl.mem dumped s then () else begin
       StateTbl.add dumped s s;
       let name = (match name with None -> "" | Some n -> n ^ ": ") ^ cons_name s.pol s.cons in
-      fprintf ppf "%a [label=\"%s (%d)\"];\n" pstate s name (id s);
+      fprintf ppf "%a [label=\"%s (%d)\"];\n" pstate s name s.id;
       List.iter (fun (f, ss') -> 
         StateSet.iter ss'
           (fun s' -> 
             fprintf ppf "%a -> %a [label=\"%s\"];\n" pstate s pstate s' f;
-            dump s' None))
-        (TypeLat.list_fields s.cons)
+            dump s'))
+        (TypeLat.list_fields s.cons);
+      StateSet.iter s.flow (fun s' -> dump s')
     end in
   fprintf ppf "digraph %s{\n" diagram_name;
   (* dump structural constraints *)
-  map (fun n s -> dump s (Some n); ());
+  StateTbl.iter (fun s n -> dump s) names;
   (* dump dataflow constraints *)
   StateTbl.iter (fun s _ ->
     if s.pol = Neg then StateSet.iter s.flow (fun s' -> 
-      try
-        let s' = StateTbl.find dumped s' in
         fprintf ppf "%a -> %a [style=dashed, constraint=false]\n" pstate s pstate s'
-      with Not_found -> ())) dumped;
+      )) dumped;
   fprintf ppf "}\n"
 
-let find_reachable (roots : state list) =
+let find_reachable (roots : rawstate list) =
   let states = StateTbl.create 20 in
   let rec search s acc =
     if StateTbl.mem states s then acc else begin
@@ -197,7 +259,7 @@ let find_reachable (roots : state list) =
     end in
   List.fold_right search roots []
 
-let garbage_collect (root : state) =
+let garbage_collect (root : rawstate) =
   let states = find_reachable [root] in
   let state_set = List.fold_left StateSet.add StateSet.empty states in
   List.iter (fun s -> s.flow <- StateSet.inter s.flow state_set) states
@@ -208,7 +270,7 @@ let make_table s f =
   t
 
 (* FIXME: deterministic? ID-dependent? *)
-let decompile_automaton (roots : state list) : typeterm list =
+let decompile_automaton (roots : rawstate list) : typeterm list =
   let state_list = find_reachable roots in
   let states = List.fold_left StateSet.add StateSet.empty state_list in
   let state_flow = make_table states (fun s -> StateSet.inter s.flow states) in
@@ -264,7 +326,7 @@ let decompile_automaton (roots : state list) : typeterm list =
 
   (* Each biclique in the decomposition corresponds to a variable *)
   let name_var id =
-    if id < 26 then String.make 1 (Char.chr (Char.code 'A' + id)) else Printf.sprintf "T_%d" (id - 26) in
+    Symbol.intern (if id < 26 then String.make 1 (Char.chr (Char.code 'A' + id)) else Printf.sprintf "T_%d" (id - 26)) in
   let fresh_var = let var_id = ref (-1) in fun () -> incr var_id; name_var !var_id in
   let state_vars = StateTbl.create 20 in
   List.iter (fun (ss, ss') -> 
@@ -292,8 +354,7 @@ let decompile_automaton (roots : state list) : typeterm list =
   List.map decompile roots
   
 
-
-let contraction sp_orig sn_orig =
+let constrain sp_orig sn_orig =
   assert (sp_orig.pol = Pos);
   assert (sn_orig.pol = Neg);
   let seen = Hashtbl.create 20 in

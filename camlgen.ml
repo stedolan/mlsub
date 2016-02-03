@@ -38,7 +38,7 @@ let rec lower g (loc, Some exp) = match exp with
   | App (fn, args) ->
      assert false
     (* CApp (lower g fn, [lower g args]) *)
-  | Ascription (exp, ty) ->
+  | Typed (exp, ty) ->
      lower g exp
   | Unit ->
      CRaw "()"

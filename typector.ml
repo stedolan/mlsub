@@ -1,18 +1,12 @@
-type polarity = Pos | Neg
-
-let polneg = function Pos -> Neg | Neg -> Pos
-let polmul = function Pos -> (fun p -> p) | Neg -> polneg
-
-let pol_flip f pol x y = match pol with Pos -> f x y | Neg -> f y x
+open Variance
 
 type 'a printer = Format.formatter -> 'a -> unit
-
 
 (* FIXME *)
 module SMap = Map.Make (struct type t = int let compare = compare end)
   
 module Components = struct
-  type 'a t =
+  type +'a t =
     | Func of (Location.set * 'a) list * (Location.set * 'a) SMap.t * unit SMap.t * (Location.set * 'a)
     | Object of (Location.set * 'a) SMap.t
     | List of Location.set * 'a
@@ -202,4 +196,7 @@ let ty_fun pos kwargs res loc = Components.Func (
   SMap.filter (fun k (a, req) -> req) kwargs |> SMap.map (fun _ -> ()),
   (Location.one loc, res loc))
 let ty_obj o loc = Components.Object (SMap.map (fun x -> (Location.one loc, x loc)) o)
+let ty_obj_l o loc =
+  let o = List.fold_left (fun o (v, t) -> SMap.add v t o) SMap.empty o in
+  ty_obj o loc
 let ty_base s loc = Components.Base (Location.one loc, s)

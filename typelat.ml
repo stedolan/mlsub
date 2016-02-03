@@ -1,10 +1,5 @@
-
+open Variance
 open Typector
-
-type 'a printer = Format.formatter -> 'a -> unit
-
-
-
 open Exp
 
 let rec ty_add p ts = ts
@@ -15,11 +10,6 @@ let rec ty_add p ts = ts
     | [] -> TZero p
     | [t] -> t
     | (t :: ts) -> TAdd (p, t, ty_add p ts)
-
-let ty_var v loc = TNamed (v, [])
-
-
-
 
 module TypeLat = struct
   type 'a t = 'a Components.t list
