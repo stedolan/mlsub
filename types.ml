@@ -1,7 +1,8 @@
-open Typelat
 open Typector
 open Variance
 open Exp
+
+(* Typing contexts *)
 
 type tybody =
 | BParam of Symbol.t
@@ -65,13 +66,15 @@ let add_opaque_type err name param_list ctx =
          check_params s' ps in
   add_to_context err ctx name (TOpaque (check_params SMap.empty param_list))
 
+
+
+(* Debugging *)
+
 let print_to_string (pr : 'a printer) (x : 'a) : string =
   let buf = Buffer.create 100 in
   let ppf = Format.formatter_of_buffer buf in
   Format.fprintf ppf "%a%!" pr x;
   Buffer.contents buf
-
-let cons_name pol = print_to_string (TypeLat.print (fun pol ppf x -> ()) pol)
 
 
 let string_of_var v = Symbol.to_string v
@@ -104,6 +107,87 @@ let rec print_typeterm ppf = function
     fprintf ppf "@[%a %s@ %a@]" print_typeterm t1 op print_typeterm t2
   | TRec (v, t) ->
     fprintf ppf "rec %s = %a" (string_of_var v) print_typeterm t
+
+
+(* Lattice of types as coproduct *)
+
+let rec ty_add p ts = ts
+  |> List.filter (function
+     | TZero p' when p = p' -> false
+     | _ -> true)
+  |> function
+    | [] -> TZero p
+    | [t] -> t
+    | (t :: ts) -> TAdd (p, t, ty_add p ts)
+
+module TypeLat = struct
+  type 'a t = 'a Components.t list
+  let lift t = [t]
+  let pmap f pol ty = List.map (Components.pmap f pol) ty
+  let rec pfold f pol ty x = match ty with
+    | [] -> x
+    | t :: ts -> Components.pfold f pol t (pfold f pol ts x)
+
+  let iter f p x = pfold (fun pol x r -> f pol x) p x ()
+
+  let rec join pol f xs ys = match xs with
+    | [] -> ys
+    | x :: xs ->
+       match List.partition (Components.cmp_component x) ys with
+       | [], ys -> x :: join pol f xs ys
+       | [y], ys -> Components.join pol f x y :: join pol f xs ys
+       | y1 :: y2 :: _, _ -> failwith "two terms in same component"
+
+  let join_ident = []
+
+  let lte_pn f xs ys =
+    (* lub X <= glb Y *)
+    (* i.e. forall i,j, Xi <= Yj *)
+    List.fold_right (fun x rs -> 
+      List.fold_right (fun y rs -> 
+        Components.lte (pol_flip f) x y @ rs) ys rs) xs []
+
+  let lte_np f xs ys =
+    (* glb X <= lub Y *)
+    (* i.e. exists i,j, Xi <= Yj *)
+    List.exists (fun x -> List.exists (fun y ->
+      Components.lte (fun p x y -> if pol_flip f p x y then [] else [Error.excuse]) x y = []) ys) xs
+
+  let rec subs pol f xs ys =
+    (* lub X <= lub Y or glb X >= glb Y *)
+    match xs with
+    | [] -> true
+    | x :: xs -> match List.partition (Components.cmp_component x) ys with
+      | [], ys -> false
+      | [y], ys ->
+         (match pol with
+         | Pos -> Components.lte (fun p x y -> if f p x y then [] else [Error.excuse]) x y = []
+         | Neg -> Components.lte (fun p y x -> if f (polneg p) x y then [] else [Error.excuse]) y x = [])
+         && subs pol f xs ys
+      | y1 :: y2 :: _, _ -> failwith "two terms in same component"
+
+  let list_fields x =
+    x |> List.map Components.list_fields |> List.concat
+
+  let to_typeterm pol x =
+    ty_add pol (List.map (fun t -> TCons t) x)
+
+  let print pr pol ppf = function
+    | [] -> Format.fprintf ppf "%s" (match pol with Pos -> "Bot" | Neg -> "Top")
+    | ty ->
+       let pp_sep ppf () = Format.fprintf ppf "@ %s@ " (match pol with Pos -> "|" | Neg -> "&") in
+       Format.pp_print_list ~pp_sep (Components.print pr pol) ppf ty
+
+  let change_locations l = List.map (Components.change_locations l)
+end
+
+
+
+  
+
+
+
+(* Automata *)
 
 
 type state_id = int
@@ -139,18 +223,15 @@ module StateTbl = Hashtbl.Make (StateHash)
 module VarOrd = struct type t = tyvar let compare = compare end
 module VarMap = Map.Make (VarOrd)
 
-let state_cons_join p x y =
-  let merge p x y = 
-    StateSet.iter x (fun s -> assert (s.pol = p));
-    StateSet.iter y (fun s -> assert (s.pol = p));
-    StateSet.union x y in
-  TypeLat.join p merge x y
+let check_polarity s =
+  StateSet.iter s.flow (fun s' -> assert (s'.pol <> s.pol));
+  TypeLat.iter (fun p ss -> StateSet.iter ss (fun s -> assert (p = s.pol))) s.pol s.cons
 
 let merge s s' =
   assert (s.pol = s'.pol);
-  s.cons <- state_cons_join s.pol s.cons s'.cons;
+  s.cons <- TypeLat.join s.pol (fun p -> StateSet.union) s.cons s'.cons;
   s.flow <- StateSet.union s.flow s'.flow;
-  StateSet.iter s.flow (fun s' -> assert (s'.pol <> s.pol))
+  check_polarity s
 
 
 let fresh_id_counter = ref 0
@@ -213,11 +294,11 @@ let compile_type (ctx : context) (pol : polarity) (t : typeterm) : rawstate =
   let rec epsilon_closure set s =
     if StateSet.mem set s then set
     else List.fold_left epsilon_closure (StateSet.add set s) (StateTbl.find_all epsilon_trans s) in
-  let epsilon_merge s states =
-    s.cons <- List.fold_left (state_cons_join s.pol) s.cons (List.map (fun s -> s.cons) states) in
-  List.iter (fun s -> epsilon_merge s (StateSet.to_list (epsilon_closure StateSet.empty s))) !states;
-
+  !states |> List.iter (fun s -> StateSet.iter (epsilon_closure StateSet.empty s) (merge s));
   root
+
+
+let cons_name pol = print_to_string (TypeLat.print (fun pol ppf x -> ()) pol)
 
 let print_automaton diagram_name ppf (map : (string -> rawstate -> unit) -> unit) =
   let names = StateTbl.create 20 in
@@ -547,7 +628,7 @@ let minimise dstates =
        | true, true -> assert false (* p should be nonempty *) in
 
   let rec partition_polarity p =
-    (List.hd (DStateSet.to_list p)).d_pol in
+    (DStateSet.min_elt p).d_pol in
 
   let rec refine ps =
     check_disjoint DStateSet.empty ps;
