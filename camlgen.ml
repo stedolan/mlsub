@@ -51,7 +51,7 @@ let rec lower g (loc, Some exp) = match exp with
   | Object fields ->
      let dict = add_global g "dict" (obj_shape 1 fields)
         (fun shape ->
-         let ((m, s), table) = Dictionary.generate shape in
+         let ((m, s), table) = Symbol.Dictionary.generate shape in
          CAlloc (Array.append [| CInt (m lsr 1); CInt s |]
                    (Array.map (function None -> CInt (-1) | Some n -> CInt n) table))) in
      CAlloc (Array.append [| CVar dict |] (Array.of_list (List.map (fun (s,x) -> lower g x) fields)))

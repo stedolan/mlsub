@@ -3,7 +3,7 @@ open Typector
 open Types
 open Exp
 
-module SMap = Map.Make (struct type t = int let compare = compare end)
+module SMap = Symbol.Map
 
 type scheme = 
   { environment : state SMap.t;
@@ -26,13 +26,13 @@ let to_dscheme s =
 let clone_scheme loc s =
   Types.clone (fun f -> { environment = SMap.map (f loc) s.d_environment; expr = f loc s.d_expr })
 
-let constrain' ctx err p n =
+let constrain' err p n =
   let success = ref true in
   List.iter (fun e -> success := false; err e) (Types.constrain p n);
   !success
 
-let dump_scheme title {environment; expr} =
-  Format.printf "%a\n%!" (print_automaton title) (fun f ->
+let dump_scheme ctx title {environment; expr} =
+  Format.printf "%a\n%!" (print_automaton ctx title) (fun f ->
     f "out" expr;
     SMap.iter (fun n s -> f (Symbol.to_string n) s) environment)
 
@@ -45,7 +45,7 @@ let constrain ctx err name (inputs : (state * state) list) output =
                  f (Printf.sprintf "t-%d" !id) t;
                  incr id) inputs;
       f "out" output in
-    Format.printf "%a\n%!" (print_automaton title) find_states in
+    Format.printf "%a\n%!" (print_automaton ctx title) find_states in
   let debug = false in
   if debug then dump (name ^ "_before");
   let errs = (List.fold_left (fun rs (p, n) -> rs @ constrain p n) [] inputs) in
@@ -73,7 +73,7 @@ let env_join err loc = SMap.merge (fun k a b -> match a, b with
   | (None, x) | (x, None) -> x
   | Some a, Some b ->
      let (jN, jP) = Types.flow_pair () in
-     Some (constrain Types.empty_context err "join" [jP, a; jP, b] jN))
+     Some (constrain empty_context err "join" [jP, a; jP, b] jN))
 (* Some (Types.join a b)) *) 
 
 let add_singleton v gamma loc =
@@ -91,9 +91,19 @@ let failure ctx err e loc =
   err e;
   { environment = SMap.empty; expr = compile_type ctx Pos (TZero Pos) }
 
-let ty_int = ty_base (Symbol.intern "int")
-let ty_unit = ty_base (Symbol.intern "unit")
-let ty_bool = ty_base (Symbol.intern "bool")
+
+
+let ctx0 =
+  empty_context
+  |> add_opaque_type () (Symbol.intern "int") []
+  |> add_opaque_type () (Symbol.intern "unit") []
+  |> add_opaque_type () (Symbol.intern "bool") []
+
+let (ty_int, ty_unit, ty_bool) =
+  let f s = match (Typector.find_by_name ctx0 (Symbol.intern s)) with
+    | Some t -> ty_base ctx0 t
+    | None -> failwith "internal type not found" in
+  (f "int", f "unit", f "bool")
 
 
 let rec typecheck ctx err gamma = function
@@ -120,9 +130,9 @@ and typecheck' ctx err gamma loc exp = match exp with
             | Popt_keyword (arg, default) ->
                let {environment = envD; expr = exprD} = typecheck ctx err gamma default in
                let (defaultN, defaultP) = Types.flow_pair () in
-               let _ = constrain' ctx err exprD defaultN in
+               let _ = constrain' err exprD defaultN in
                (match SMap.find arg body_ty.environment with
-                | t -> let _ = constrain' ctx err defaultP t in ()
+                | t -> let _ = constrain' err defaultP t in ()
                 | exception Not_found -> ());
                env_join err loc envD body_ty.environment
             | _ -> body_ty.environment in
@@ -214,25 +224,24 @@ and typecheck' ctx err gamma loc exp = match exp with
        expr = constrain ctx err "seq" [(expr1, Types.cons Neg (ty_unit loc)); (expr2, expN)] expP }
 
   | Typed (e, ty) ->
-     (* FIXME *)
-     (* ascription (typecheck err gamma e) ty *)
-     typecheck ctx err gamma e
+     let {environment; expr} = typecheck ctx err gamma e in
+     { environment; expr = constrain ctx err "typed" [expr, compile_type ctx Neg ty] (compile_type ctx Pos ty) }
 
   | Unit -> 
-     { environment = SMap.empty; expr = Types.cons Pos (ty_base (Symbol.intern "unit") loc) }
+     { environment = SMap.empty; expr = Types.cons Pos (ty_unit loc) }
 
   | Int n ->
-     { environment = SMap.empty; expr = Types.cons Pos (ty_base (Symbol.intern "int") loc) }
+     { environment = SMap.empty; expr = Types.cons Pos (ty_int loc) }
 
   | Bool b ->
-     { environment = SMap.empty; expr = Types.cons Pos (ty_base (Symbol.intern "bool") loc) }
+     { environment = SMap.empty; expr = Types.cons Pos (ty_bool loc) }
 
   | If (cond, tcase, fcase) ->
      let {environment = envC; expr = exprC} = typecheck ctx err gamma cond in
      let {environment = envT; expr = exprT} = typecheck ctx err gamma tcase in
      let {environment = envF; expr = exprF} = typecheck ctx err gamma fcase in
      { environment = env_join err loc envC (env_join err loc envT envF);
-       expr = constrain ctx err "if" [exprC, Types.cons Neg (ty_base (Symbol.intern "bool") loc)]
+       expr = constrain ctx err "if" [exprC, Types.cons Neg (ty_bool loc)]
          (ty_join ctx err exprT exprF) }
   | Nil ->
      { environment = SMap.empty; expr = Types.cons Pos (ty_list (fun _ -> Types.zero Pos) loc) }
@@ -289,10 +298,6 @@ let predefined =
    "(-)", ty_binarith] 
   |> List.map (fun (n, t) -> (n, ty_cons t Location.internal))
 
-let ctx0 =
-  Types.empty_context
-  |> Types.add_opaque_type () (Symbol.intern "int") []
-
 let gamma0 =
   List.fold_right
     (fun (n, t) g ->
@@ -309,42 +314,44 @@ type result =
 type 'a sigitem =
   | SDef of Symbol.t * 'a
   | SLet of Symbol.t * 'a
-and signature = dstate sigitem list
+and signature = Typector.context * dstate sigitem list
 
 let rec infer_module err modl : signature =
   let rec infer tyctx gamma = function
-    | [] -> SMap.empty, []
+    | [] -> tyctx, SMap.empty, []
     | (loc, MType (t, p, body)) :: modl ->
        (* Type definition *)
-       infer (Types.add_type_alias err t p body tyctx) gamma modl
+       infer (add_type_alias err t p body tyctx) gamma modl
+    | (loc, MOpaqueType (t, p)) :: modl ->
+       infer (add_opaque_type err t p tyctx) gamma modl
     | (loc, MDef (f, p, body)) :: modl ->
        (* Possibly-recursive function *)
        let {environment = envF; expr = exprF} as tyF =
          typecheck' tyctx err gamma loc (Rec (f, (loc, Some (Lambda (p, body))))) in
-       let envM, sigM = infer tyctx (SMap.add f (to_dscheme tyF) gamma) modl in
-       env_join err loc envF envM, (SDef (f, exprF) :: sigM)
+       let ctxM, envM, sigM = infer tyctx (SMap.add f (to_dscheme tyF) gamma) modl in
+       ctxM, env_join err loc envF envM, (SDef (f, exprF) :: sigM)
     | (loc, MLet (v, e)) :: modl ->
        let {environment = envE; expr = exprE} = typecheck tyctx err gamma e in
-       let envM, sigM = infer tyctx (add_singleton v gamma loc) modl in
-       env_join err loc envE (SMap.remove v envM),
+       let ctxM, envM, sigM = infer tyctx (add_singleton v gamma loc) modl in
+       ctxM, env_join err loc envE (SMap.remove v envM),
        let (expN, expP) = Types.flow_pair () in
        (SLet (v, constrain tyctx err "let" ((exprE, expN) :: var envM v expP)
          expP) :: sigM) in
-  let envM, sigM = infer ctx0 gamma0 modl in
+  let ctxM, envM, sigM = infer ctx0 gamma0 modl in
   assert (SMap.is_empty envM);
   let states = List.map (function SDef (f, t) -> t | SLet (v, t) -> t) sigM in
   let remap, dstates = Types.determinise states in
   Types.optimise_flow dstates;
   let minim = Types.minimise dstates in
-  List.map (function SDef (f, t) -> SDef (f, minim (remap t)) | SLet (v, t) -> SLet (v, minim (remap t))) sigM
+  ctxM, List.map (function SDef (f, t) -> SDef (f, minim (remap t)) | SLet (v, t) -> SLet (v, minim (remap t))) sigM
 
-let rec print_signature ppf (sigm : signature) =
+let rec print_signature ppf ((ctx, sigm) : signature) =
   let elems = sigm
      |> Types.clone (fun f -> List.map (function SLet (_, t) | SDef (_, t) -> f (Location.one Location.internal) t))
      |> decompile_automaton in
   let print s t = match s with
     | SLet (v, _) ->
-       Format.fprintf ppf "val %s : %a\n%!" (Symbol.to_string v) print_typeterm t
+       Format.fprintf ppf "val %s : %a\n%!" (Symbol.to_string v) (print_typeterm ctx) t
     | SDef (f, _) ->
-       Format.fprintf ppf "def %s : %a\n%!" (Symbol.to_string f) print_typeterm t in
+       Format.fprintf ppf "def %s : %a\n%!" (Symbol.to_string f) (print_typeterm ctx) t in
   List.iter2 print sigm elems

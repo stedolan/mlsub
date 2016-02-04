@@ -2,31 +2,12 @@ type 'a located = Location.t * 'a
 
 
 
-type tyvar = Symbol.t
-
-type typaram =
-| TParam of Variance.variance option * Symbol.t
-
-type tyarg =
-| APos of typeterm
-| ANeg of typeterm
-| AUnspec of typeterm
-| ANegPos of typeterm * typeterm
-
-and typeterm =
-| TZero of Variance.polarity
-| TNamed of tyvar * tyarg list
-| TCons of typeterm Typector.Components.t
-| TAdd of Variance.polarity * typeterm * typeterm
-| TRec of tyvar * typeterm
-
-
 
 type rparam =
 | Ppositional of Symbol.t
 | Preq_keyword of Symbol.t
 | Popt_keyword of Symbol.t * exp
-and param = (rparam * typeterm option) located
+and param = (rparam * Typector.typeterm option) located
 
 and rargument =
 | Apositional of exp
@@ -40,7 +21,7 @@ and rexp =
   | Rec of Symbol.t * exp
   | App of exp * argument list
   | Seq of exp * exp
-  | Typed of exp * typeterm
+  | Typed of exp * Typector.typeterm
   | Unit
   | Int of int
   | Bool of bool
@@ -54,7 +35,8 @@ and rexp =
 and exp = rexp option located
 
 and moditem =
-  | MType of Symbol.t * typaram list * typeterm
+  | MType of Symbol.t * Typector.typaram list * Typector.typeterm
+  | MOpaqueType of Symbol.t * Typector.typaram list
   | MDef of Symbol.t * param list * exp
   | MLet of Symbol.t * exp
 

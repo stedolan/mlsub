@@ -2,113 +2,6 @@ open Typector
 open Variance
 open Exp
 
-(* Typing contexts *)
-
-type tybody =
-| BParam of Symbol.t
-| BCons of tybody Typector.Components.t
-
-type typedef =
-| TAlias of variance SMap.t * tybody
-| TOpaque of variance SMap.t
-
-
-type context = typedef SMap.t
-
-let empty_context = SMap.empty
-
-let add_to_context err ctx name ty =
-  if SMap.mem name ctx then
-    failwith "reused name"
-  else
-    SMap.add name ty ctx
-
-
-let add_type_alias err name param_list term ctx =
-  let rec mk_params s = function
-    | [] -> s
-    | TParam (v, p) :: ps ->
-       mk_params (if SMap.mem p s then failwith "duplicate param" else SMap.add p v s) ps in
-  let params = mk_params SMap.empty param_list in
-  let rec inferred_variances = ref (SMap.map (fun _ -> VNone) params) in
-  let use param pol =
-    inferred_variances := 
-      SMap.add param (vjoin 
-        (SMap.find param !inferred_variances)
-        (variance_of_pol pol)) !inferred_variances in
-
-  let rec check pol = function
-    | TNamed (t, args) when SMap.mem t params ->
-       (match args with [] -> (use t pol; BParam t) | _ -> failwith "nope")
-    | TNamed (t, args) ->
-       (match SMap.find t ctx with
-       | TOpaque params ->
-          BCons (ty_base t Location.internal)
-       | _ -> failwith "unimplemented named type")
-    | TCons cons -> BCons (Typector.Components.pmap check pol cons) 
-    | TZero _ -> failwith "nzero"
-    | TAdd _ -> failwith "nadd"
-    | TRec _ -> failwith "nrec" in
-
-  let param_variances = SMap.merge (fun p asc infer -> match asc, infer with
-    | None, _ | _, None -> assert false (* maps have same keys *)
-    | Some (Some asc), Some infer -> assert (vlte infer asc); Some asc
-    | Some None, Some infer -> Some infer) params !inferred_variances in
-
-  add_to_context err ctx name (TAlias (param_variances, check Pos term))
-
-let add_opaque_type err name param_list ctx =
-  let rec check_params s = function
-    | [] -> s
-    | TParam (v, p) :: ps ->
-       if SMap.mem p s then (failwith "duplicate param"; check_params s ps) else
-         let s' = match v with Some v -> SMap.add p v s | None -> failwith "variance required"; s in
-         check_params s' ps in
-  add_to_context err ctx name (TOpaque (check_params SMap.empty param_list))
-
-
-
-(* Debugging *)
-
-let print_to_string (pr : 'a printer) (x : 'a) : string =
-  let buf = Buffer.create 100 in
-  let ppf = Format.formatter_of_buffer buf in
-  Format.fprintf ppf "%a%!" pr x;
-  Buffer.contents buf
-
-
-let string_of_var v = Symbol.to_string v
-
-open Format
-
-let printp paren ppf fmt =
-  let openbox ppf = if paren then fprintf ppf "@[(" else fprintf ppf "@[" in
-  let closebox ppf = if paren then fprintf ppf "@])" else fprintf ppf "@]" in
-  openbox ppf;
-  kfprintf closebox ppf fmt
-
-
-let rec print_typeterm ppf = function
-  | TZero Pos -> fprintf ppf "nothing"
-  | TZero Neg -> fprintf ppf "any"
-  | TNamed (v, []) -> fprintf ppf "%s" (string_of_var v)
-  | TNamed (v, args) -> 
-     let print_arg ppf = function
-       | APos t -> fprintf ppf "+%a" print_typeterm t
-       | ANeg t -> fprintf ppf "-%a" print_typeterm t
-       | AUnspec t -> fprintf ppf "%a" print_typeterm t
-       | ANegPos (s, t) -> fprintf ppf "-%a +%a" print_typeterm s print_typeterm t in
-     let comma ppf () = Format.fprintf ppf ",@ " in
-     fprintf ppf "%s[%a]" (string_of_var v) (Format.pp_print_list ~pp_sep:comma print_arg) args
-  | TCons cons ->
-     fprintf ppf "@[%a@]" (Components.print (fun pol -> print_typeterm) Pos) cons
-  | TAdd (p, t1, t2) -> 
-    let op = match p with Pos -> "|" | Neg -> "&" in
-    fprintf ppf "@[%a %s@ %a@]" print_typeterm t1 op print_typeterm t2
-  | TRec (v, t) ->
-    fprintf ppf "rec %s = %a" (string_of_var v) print_typeterm t
-
-
 (* Lattice of types as coproduct *)
 
 let rec ty_add p ts = ts
@@ -121,39 +14,60 @@ let rec ty_add p ts = ts
     | (t :: ts) -> TAdd (p, t, ty_add p ts)
 
 module TypeLat = struct
-  type 'a t = 'a Components.t list
-  let lift t = [t]
-  let pmap f pol ty = List.map (Components.pmap f pol) ty
+  type 'a t =
+    | LZero
+    | LUnexpanded of 'a Components.t    (* must be a type alias *)
+    | LExpanded of 'a Components.t list (* nonempty list, never includes type aliases *)
+
+  let lift t =
+    if get_stamp t = builtin_stamp then
+      LExpanded [t]
+    else
+      LUnexpanded t
+
+  let as_list = function
+    | LZero -> []
+    | LUnexpanded t -> [t]
+    | LExpanded ts -> ts
+
+  let of_list = function
+    | [] -> LZero
+    | [t] -> 
+       if Typector.get_stamp t = builtin_stamp
+       then LExpanded [t]
+       else LUnexpanded t
+    | ts -> 
+       (List.iter (fun t -> 
+         assert (Typector.get_stamp t = builtin_stamp)) ts;
+        LExpanded ts)
+
+  let pmap f pol = function
+    | LZero -> LZero
+    | LUnexpanded t -> LUnexpanded (Components.pmap f pol t)
+    | LExpanded t -> LExpanded (List.map (Components.pmap f pol) t)
+
+  let pfold_comps f pol t x =
+    List.fold_right (Components.pfold f pol) t x
+      
   let rec pfold f pol ty x = match ty with
-    | [] -> x
-    | t :: ts -> Components.pfold f pol t (pfold f pol ts x)
+    | LZero -> x
+    | LUnexpanded t -> Components.pfold f pol t x
+    | LExpanded t -> pfold_comps f pol t x
 
   let iter f p x = pfold (fun pol x r -> f pol x) p x ()
 
-  let rec join pol f xs ys = match xs with
+  let rec join_comps pol f xs ys = match xs with
     | [] -> ys
     | x :: xs ->
        match List.partition (Components.cmp_component x) ys with
-       | [], ys -> x :: join pol f xs ys
-       | [y], ys -> Components.join pol f x y :: join pol f xs ys
+       | [], ys -> x :: join_comps pol f xs ys
+       | [y], ys -> Components.join pol f x y :: join_comps pol f xs ys
        | y1 :: y2 :: _, _ -> failwith "two terms in same component"
 
-  let join_ident = []
+  let join_ident = LZero
 
-  let lte_pn f xs ys =
-    (* lub X <= glb Y *)
-    (* i.e. forall i,j, Xi <= Yj *)
-    List.fold_right (fun x rs -> 
-      List.fold_right (fun y rs -> 
-        Components.lte (pol_flip f) x y @ rs) ys rs) xs []
 
-  let lte_np f xs ys =
-    (* glb X <= lub Y *)
-    (* i.e. exists i,j, Xi <= Yj *)
-    List.exists (fun x -> List.exists (fun y ->
-      Components.lte (fun p x y -> if pol_flip f p x y then [] else [Error.excuse]) x y = []) ys) xs
-
-  let rec subs pol f xs ys =
+  let rec subs_comps pol f xs ys =
     (* lub X <= lub Y or glb X >= glb Y *)
     match xs with
     | [] -> true
@@ -163,22 +77,23 @@ module TypeLat = struct
          (match pol with
          | Pos -> Components.lte (fun p x y -> if f p x y then [] else [Error.excuse]) x y = []
          | Neg -> Components.lte (fun p y x -> if f (polneg p) x y then [] else [Error.excuse]) y x = [])
-         && subs pol f xs ys
+         && subs_comps pol f xs ys
       | y1 :: y2 :: _, _ -> failwith "two terms in same component"
 
-  let list_fields x =
-    x |> List.map Components.list_fields |> List.concat
+  let list_fields = function
+    | LZero -> []
+    | LUnexpanded x -> Components.list_fields x
+    | LExpanded x -> x |> List.map Components.list_fields |> List.concat
 
-  let to_typeterm pol x =
-    ty_add pol (List.map (fun t -> TCons t) x)
+  let to_typeterm pol = function
+    | LZero -> TZero pol
+    | LUnexpanded t -> TCons t
+    | LExpanded t -> ty_add pol (List.map (fun t -> TCons t) t)
 
-  let print pr pol ppf = function
-    | [] -> Format.fprintf ppf "%s" (match pol with Pos -> "Bot" | Neg -> "Top")
-    | ty ->
-       let pp_sep ppf () = Format.fprintf ppf "@ %s@ " (match pol with Pos -> "|" | Neg -> "&") in
-       Format.pp_print_list ~pp_sep (Components.print pr pol) ppf ty
-
-  let change_locations l = List.map (Components.change_locations l)
+  let change_locations l = function
+    | LZero -> LZero
+    | LUnexpanded t -> LUnexpanded (Components.change_locations l t)
+    | LExpanded t -> LExpanded (List.map (Components.change_locations l) t)
 end
 
 
@@ -212,31 +127,25 @@ and StateSet : Intmap.S with type elt = State.state =
 open State
 type state = State.state
 
-type pos = PosBrand and neg = NegBrand
 type rawstate = State.state
-
 
 module StateHash = struct type t = State.state let equal x y = x == y let hash x = x.id end
 module StateTbl = Hashtbl.Make (StateHash)
 
-
 module VarOrd = struct type t = tyvar let compare = compare end
 module VarMap = Map.Make (VarOrd)
+
 
 let check_polarity s =
   StateSet.iter s.flow (fun s' -> assert (s'.pol <> s.pol));
   TypeLat.iter (fun p ss -> StateSet.iter ss (fun s -> assert (p = s.pol))) s.pol s.cons
 
-let merge s s' =
-  assert (s.pol = s'.pol);
-  s.cons <- TypeLat.join s.pol (fun p -> StateSet.union) s.cons s'.cons;
-  s.flow <- StateSet.union s.flow s'.flow;
-  check_polarity s
-
-
 let fresh_id_counter = ref 0
 let fresh_id () =
   let n = !fresh_id_counter in incr fresh_id_counter; n
+
+let mkstate pol cons flow =
+  { id = fresh_id (); pol; cons; flow }
 
 let cons pol (t : rawstate Components.t) : rawstate =
   { id = fresh_id ();
@@ -254,7 +163,50 @@ let flow_pair () =
   (neg, pos)
 
 let zero p =
-  { id = fresh_id (); pol = p; cons = TypeLat.join_ident; flow = StateSet.empty }
+  mkstate p TypeLat.join_ident StateSet.empty
+
+
+let rec expand_both expa (pa : polarity) ca expb (pb : polarity) cb = let open TypeLat in
+  match ca, cb with
+  | LZero, b -> LZero, b
+  | a, LZero -> a, LZero
+  | (LExpanded _ as a), (LExpanded _ as b) ->
+     a, b
+  | LUnexpanded a, LUnexpanded b ->
+     let sta = get_stamp a and stb = get_stamp b in
+     if sta = stb then
+       if sta = builtin_stamp then
+         LExpanded [a], LExpanded [b]
+       else
+         LUnexpanded a, LUnexpanded b
+     else
+       if sta < stb then
+         expand_both expa pa ca expb pb (b |> expand_alias |> expb pb)
+       else
+         expand_both expa pa (a |> expand_alias |> expa pa) expb pb cb
+  | (LExpanded _ as a), LUnexpanded b ->
+     expand_both expa pa a expb pb (b |> expand_alias |> expb pb)
+  | LUnexpanded a, (LExpanded _ as b) ->
+     expand_both expa pa (a |> expand_alias |> expa pa) expb pb b
+
+let rec expand_tybody pol = function
+  | BParam s -> s
+  | BCons b -> StateSet.singleton (mkstate pol (expand_comp pol b) StateSet.empty)
+and expand_comp pol t =
+  TypeLat.lift (Components.pmap expand_tybody pol t)
+
+
+let join p x y =
+  let tx, ty = expand_both expand_comp p x expand_comp p y in
+  TypeLat.(of_list (join_comps p (fun p -> StateSet.union) (as_list tx) (as_list ty)))
+
+
+let merge s s' =
+  assert (s.pol = s'.pol);
+  s.cons <- join s.pol s.cons s'.cons;
+  s.flow <- StateSet.union s.flow s'.flow;
+  check_polarity s
+
 
 
 (* FIXME: Does not detect negative recursion *)
@@ -265,14 +217,11 @@ let compile_type (ctx : context) (pol : polarity) (t : typeterm) : rawstate =
     | TZero p' ->
        (* FIXME *) assert (p = p');
        zero p
-    | TNamed (v, []) -> 
+    | TNamed v -> 
       (try VarMap.find v r
-       with Not_found ->
-         (match SMap.find v ctx with
-         | TAlias (params, body) -> failwith "unsupported type alias"
-         | TOpaque params -> cons p (Typector.ty_base v Location.internal (* FIXME loc *))
-         | exception Not_found -> failwith ("unknown type " ^ Symbol.to_string v)))
-    | TNamed (v, args) -> failwith "unsupported parameterised type"
+       with Not_found -> match find_by_name ctx v with
+       | None -> failwith ("undefined type " ^ (Symbol.to_string v))
+       | Some t -> cons p (ty_base ctx t Location.internal (* FIXME loc *)))
     | TCons c -> cons p (Components.pmap (compile r) p c)
     | TAdd (p', t1, t2) ->
       (* FIXME *) assert (p = p');
@@ -298,9 +247,8 @@ let compile_type (ctx : context) (pol : polarity) (t : typeterm) : rawstate =
   root
 
 
-let cons_name pol = print_to_string (TypeLat.print (fun pol ppf x -> ()) pol)
-
-let print_automaton diagram_name ppf (map : (string -> rawstate -> unit) -> unit) =
+let print_automaton ctx diagram_name ppf (map : (string -> rawstate -> unit) -> unit) =
+  let open Format in
   let names = StateTbl.create 20 in
   map (fun n s -> StateTbl.add names s n);
 
@@ -310,8 +258,9 @@ let print_automaton diagram_name ppf (map : (string -> rawstate -> unit) -> unit
     let name = try Some (StateTbl.find names s) with Not_found -> None in
     if StateTbl.mem dumped s then () else begin
       StateTbl.add dumped s s;
-      let name = (match name with None -> "" | Some n -> n ^ ": ") ^ cons_name s.pol s.cons in
-      fprintf ppf "%a [label=\"%s (%d)\"];\n" pstate s name s.id;
+      let name = (match name with None -> "" | Some n -> n ^ ": ") in
+      let ctor = s.cons |> TypeLat.pmap (fun _ _ -> TZero Neg) s.pol |> TypeLat.to_typeterm s.pol in
+      fprintf ppf "%a [label=\"%s%a (%d)\"];\n" pstate s name (Typector.print_typeterm ctx) ctor s.id;
       List.iter (fun (f, ss') -> 
         StateSet.iter ss'
           (fun s' -> 
@@ -329,6 +278,9 @@ let print_automaton diagram_name ppf (map : (string -> rawstate -> unit) -> unit
         fprintf ppf "%a -> %a [style=dashed, constraint=false]\n" pstate s pstate s'
       )) dumped;
   fprintf ppf "}\n"
+
+
+
 
 let find_reachable (roots : rawstate list) =
   let states = StateTbl.create 20 in
@@ -411,7 +363,7 @@ let decompile_automaton (roots : rawstate list) : typeterm list =
   let fresh_var = let var_id = ref (-1) in fun () -> incr var_id; name_var !var_id in
   let state_vars = StateTbl.create 20 in
   List.iter (fun (ss, ss') -> 
-    let v = TNamed (fresh_var (), []) in
+    let v = TNamed (fresh_var ()) in
     let iter ss = StateSet.iter ss (fun s -> StateTbl.add state_vars s v) in
     iter ss; iter ss') biclique_decomposition;
 
@@ -420,8 +372,8 @@ let decompile_automaton (roots : rawstate list) : typeterm list =
   let rec decompile s =
     if StateTbl.mem state_rec_var s then
       match StateTbl.find state_rec_var s with
-      | Some v -> TNamed (v, [])
-      | None -> let v = fresh_var () in (StateTbl.replace state_rec_var s (Some v); TNamed (v, []))
+      | Some v -> TNamed v
+      | None -> let v = fresh_var () in (StateTbl.replace state_rec_var s (Some v); TNamed v)
     else
       let vars = StateTbl.find_all state_vars s in
       StateTbl.add state_rec_var s None;
@@ -445,7 +397,13 @@ let constrain sp_orig sn_orig =
       Hashtbl.add seen (sp.id, sn.id) ();
       StateSet.iter sn.flow (fun s -> merge s sp);
       StateSet.iter sp.flow (fun s -> merge s sn);
-      TypeLat.lte_pn closure_l sp.cons sn.cons
+      let tp, tn = expand_both expand_comp sp.pol sp.cons expand_comp sn.pol sn.cons in
+      sp.cons <- tp; sn.cons <- tn;
+      (* lub X <= glb Y, i.e. forall i, j, X[i] <= Y[j] *)
+      let cp = TypeLat.as_list tp and cn = TypeLat.as_list tn in
+      List.fold_right (fun x rs -> 
+        List.fold_right (fun y rs -> 
+          Components.lte (pol_flip closure_l) x y @ rs) cn rs) cp []
     end
   and closure_l ssp ssn =
     StateSet.fold_left ssp [] (fun rs sp ->
@@ -481,15 +439,16 @@ and DStateSet : Intmap.S with type elt = DState.dstate =
 open DState
 
 type dstate = DState.dstate
-let fresh_dstate p =
+let mkdstate pol cons flow =
   DState.{ d_id = fresh_id ();
-           d_pol = p;
-           d_cons = TypeLat.join_ident;
-           d_flow = DStateSet.empty } 
+           d_pol = pol;
+           d_cons = cons;
+           d_flow = flow }
+let fresh_dstate p =
+  mkdstate p TypeLat.join_ident DStateSet.empty
 
 module DStateHash = struct type t = dstate let equal x y = x == y let hash x = x.d_id end
 module DStateTbl = Hashtbl.Make (DStateHash)
-
 
 (* Convert a DFA into an NFA *)
 let clone f =
@@ -522,8 +481,7 @@ let determinise old_states =
   let module M = Map.Make (StateSet) in
   let dstates = ref M.empty in
   let states_follow p (s : StateSet.t) : StateSet.t TypeLat.t =
-    StateSet.fold_left s TypeLat.join_ident (fun c s -> 
-      TypeLat.join p (fun p a b -> StateSet.union a b) c s.cons) in
+    StateSet.fold_left s TypeLat.join_ident (fun c s -> join p c s.cons) in
   let rec follow p s =
     if M.mem s !dstates then
       M.find s !dstates
@@ -584,7 +542,7 @@ let minimise dstates =
   let same_ctor d d' =
     let sub_ctor d1 d2 =
       assert (d1.d_pol = d2.d_pol);
-      TypeLat.subs d1.d_pol (fun pol x y -> true) d1.d_cons d2.d_cons in
+      TypeLat.(subs_comps d1.d_pol (fun pol x y -> true) (as_list d1.d_cons) (as_list d2.d_cons)) in
     sub_ctor d d' && sub_ctor d' d in
     
 
@@ -603,12 +561,12 @@ let minimise dstates =
   let pred_ctor p ds' =
     let ds = DStateSet.(fold_left ds' empty
       (fun ds d' -> union ds (of_list (DStateTbl.find_all predecessors d')))) in
-    DStateSet.fold_left ds TypeLat.join_ident (fun t d ->
-      TypeLat.join p (fun p x y -> DStateSet.union x y) t
-        (TypeLat.pmap (fun p d' -> 
+    DStateSet.fold_left ds [] (fun t d ->
+      TypeLat.join_comps p (fun p x y -> DStateSet.union x y) t
+        (TypeLat.as_list (TypeLat.pmap (fun p d' -> 
         if DStateSet.mem ds' d' then
           DStateSet.singleton d
-        else DStateSet.empty) d.d_pol d.d_cons)) in
+        else DStateSet.empty) d.d_pol d.d_cons))) in
 
   let active = ref initial_partition in
   let rec split pol ds = function
@@ -639,7 +597,7 @@ let minimise dstates =
     | (ds :: rest) ->
       active := rest;
       let pol = partition_polarity ds in
-      refine (TypeLat.pfold split pol (pred_ctor pol ds) ps) in
+      refine (TypeLat.pfold_comps split pol (pred_ctor pol ds) ps) in
 
   let remap_tbl = DStateTbl.create 20 in
   let new_dstates = initial_partition |> refine |> List.map (fun p ->
@@ -663,13 +621,24 @@ let add_flow dn dp =
   dn.d_flow <- DStateSet.add dn.d_flow dp;
   dp.d_flow <- DStateSet.add dp.d_flow dn
 
+let rec dexpand_tybody pol = function
+  | BParam s -> s
+  | BCons b -> mkdstate pol (dexpand_comp pol b) DStateSet.empty
+and dexpand_comp pol t =
+  TypeLat.lift (Components.pmap dexpand_tybody pol t)
 
 let rec entailed dn dp =
   assert (dn.d_pol = Neg && dp.d_pol = Pos);
   assert (DStateSet.mem dn.d_flow dp = DStateSet.mem dp.d_flow dn);
   if DStateSet.mem dn.d_flow dp then true else begin
     add_flow dn dp;
-    if TypeLat.lte_np entailed dn.d_cons dp.d_cons then
+    let tn, tp = expand_both dexpand_comp dn.d_pol dn.d_cons dexpand_comp dp.d_pol dp.d_cons in
+    (* glb X <= lub Y, i.e. exists i,j, X[i] <= Y[j] *)
+    let cn = TypeLat.as_list tn and cp = TypeLat.as_list tp in
+    let b = List.exists (fun x -> 
+      List.exists (fun y -> Components.lte (fun p x y -> 
+        if pol_flip entailed p x y then [] else [Error.excuse]) x y = []) cp) cn in
+    if b then
       true
     else begin
       dn.d_flow <- DStateSet.remove dn.d_flow dp;
@@ -700,7 +669,10 @@ let subsumed map =
     (* db is rigid.
        pol = Pos: sa <= db
        pol = Neg: sa >= db *)
-    if add sa db then true else TypeLat.subs pol subsume_all sa.cons db.d_cons 
+    if add sa db then true else begin
+      let ta, tb = expand_both expand_comp pol sa.cons dexpand_comp pol db.d_cons in
+      TypeLat.(subs_comps pol subsume_all (as_list ta) (as_list tb))
+    end
   and subsume_all pol ssa db =
     StateSet.fold_left ssa true (fun r sa -> r && subsume pol sa db) in
 

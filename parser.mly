@@ -78,8 +78,8 @@
 
 %start <Exp.exp> prog
 %start <Exp.modlist> modlist
-%start <Exp.typeterm> onlytype
-%start <Exp.typeterm * Exp.typeterm> subsumption
+%start <Typector.typeterm> onlytype
+%start <Typector.typeterm * Typector.typeterm> subsumption
 
 %parameter <L : Location.Locator>
 
@@ -104,10 +104,14 @@ moditem_nl: e = located(moditem); onl { e }
 moditem:
 | LET; v = IDENT; EQUALS; onl; e = exp { MLet (v, e) }
 | DEF; f = IDENT; p = params; onl; e = block; END { MDef (f, p, e) }
+| DEF; f = IDENT; p = params; COLON; t = typeterm; onl; e = block; END { MDef (f, p, (L.pos ($startpos(t), $endpos(e)), Some (Typed(e, t)))) }
 | TYPE; n = IDENT; args = loption(delimited(LBRACK, 
                             separated_nonempty_list(COMMA, typeparam), RBRACK));
   EQUALS; t = typeterm
     { MType (n, args, t) }
+| TYPE; n = IDENT; args = loption(delimited(LBRACK, 
+                            separated_nonempty_list(COMMA, typeparam), RBRACK));
+    { MOpaqueType (n, args) }
 
 
 block_r:
@@ -266,7 +270,7 @@ funtype:
 | v = IDENT; COLON; t = typeterm; RPAR { [Some v, t] }
 
 typeterm:
-| v = IDENT { TNamed (v, []) }
+| v = IDENT { TNamed v }
 (* | v = IDENT (* ; LBRACK; ps = separated_list(COMMA, typearg); RBRACK *)
      { TCons (ty_base v (L.pos ($startpos, $endpos))) } *)
 (* funtype includes its closing paren as a hack to avoid a conflict *)
@@ -281,7 +285,7 @@ typeterm:
 | LPAR; t = typeterm; LIST; RPAR { TCons (ty_list (fun _ -> t) (L.pos ($startpos, $endpos))) }
 | LBRACE; o = separated_list(COMMA, objtype); RBRACE 
   { TCons (ty_obj_l o (L.pos ($startpos, $endpos))) }
-| UNIT { TCons (ty_base (Symbol.intern "unit") (L.pos ($startpos, $endpos))) }
+(* | UNIT { TCons (ty_base (Symbol.intern "unit") (L.pos ($startpos, $endpos))) } *)
 | t1 = typeterm; p = meetjoin; t2 = typeterm { TAdd (p, t1, t2)  } %prec AND
 | REC; v = IDENT; EQUALS; t = typeterm { TRec (v, t) }
 | LPAR; t = typeterm; RPAR { t }
