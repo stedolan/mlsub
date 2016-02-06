@@ -4,35 +4,29 @@ type 'a printer = Format.formatter -> 'a -> unit
 
 module SMap = Symbol.Map
 
-(*
-  | TNamed (v, args) -> 
-     let print_arg ppf = function
-       | APos t -> fprintf ppf "+%a" print_typeterm t
-       | ANeg t -> fprintf ppf "-%a" print_typeterm t
-       | AUnspec t -> fprintf ppf "%a" print_typeterm t
-       | ANegPos (s, t) -> fprintf ppf "-%a +%a" print_typeterm s print_typeterm t in
-     let comma ppf () = Format.fprintf ppf ",@ " in
-     fprintf ppf "%s[%a]" (string_of_var v) (Format.pp_print_list ~pp_sep:comma print_arg) args
-*)
-
 type stamp = int
 
 
-  
+type +'a tyarg =
+| APos of 'a
+| ANeg of 'a
+| ANegPos of 'a * 'a
+| ANone
+
+
 module Components = struct
   type +'a t =
     | Func of (Location.set * 'a) list * (Location.set * 'a) SMap.t * unit SMap.t * (Location.set * 'a)
     | Object of (Location.set * 'a) SMap.t
-    | List of Location.set * 'a
-    | Base of Location.set * stamp * typedef
+    | Base of Location.set * stamp * typedef * 'a tyarg list
 
   and +'a tybody =
     | BParam of 'a
     | BCons of 'a tybody t
 
   and typedef =
-    | TAlias of variance SMap.t * Symbol.t tybody
-    | TOpaque of variance SMap.t
+    | TAlias of (variance * Symbol.t option) array * int tybody
+    | TOpaque of (variance * Symbol.t option) array
 
 
   let locations = function
@@ -40,8 +34,7 @@ module Components = struct
        List.fold_right (fun (l, a) r -> Location.join l r) pos 
          (SMap.fold (fun k (l, a) r -> Location.join l r) kwargs l)
     | Object o -> SMap.fold (fun _ (l, _) locs -> Location.join l locs) o Location.empty
-    | List (l, _) -> l
-    | Base (l, _, _) -> l
+    | Base (l, _, _, ts) -> l
 
   let change_locations l' = function
     | Func (pos, kwargs, reqs, (l, res)) -> 
@@ -50,8 +43,7 @@ module Components = struct
              reqs,
              (l', res))
     | Object o -> Object (SMap.map (fun (l, a) -> (l', a)) o)
-    | List (l, a) -> List (l', a)
-    | Base (l, s, td) -> Base (l', s, td)
+    | Base (l, s, td, args) -> Base (l', s, td, args)
 
   let pmap f pol = function
     | Func (pos, kwargs, reqs, (l, res)) -> 
@@ -60,8 +52,11 @@ module Components = struct
              reqs,
              (l, f pol res))
     | Object o -> Object (SMap.map (fun (l, x) -> (l, f pol x)) o)
-    | List (l, a) -> List (l, f pol a)
-    | Base (l, s, td) -> Base (l, s, td)
+    | Base (l, s, td, args) -> Base (l, s, td, List.map (function
+      | APos t -> APos (f pol t)
+      | ANeg t -> ANeg (f (polneg pol) t)
+      | ANegPos (s, t) -> ANegPos (f (polneg pol) s, f pol t)
+      | ANone -> ANone) args)
 
   let pfold f pol t x = match t with
     | Func (pos, kwargs, reqs, (l, res)) -> 
@@ -70,14 +65,16 @@ module Components = struct
             (f pol res x))
 
     | Object o -> SMap.fold (fun k (l, t) x -> f pol t x) o x
-    | List (l, a) -> f pol a x
-    | Base (l, s, td) -> x
+    | Base (l, s, td, args) -> List.fold_right (fun arg x -> match arg with
+      | APos t -> f pol t x
+      | ANeg t -> f (polneg pol) t x
+      | ANegPos (s, t) -> f (polneg pol) s (f pol t x)
+      | ANone -> x) args x
 
   let cmp_component (type a) (type b) (x : a t) (y : b t) = match x, y with
     | Func (pos, _, _, _), Func (pos', _, _, _) -> List.length pos = List.length pos'
     | Object _, Object _ -> true
-    | List _, List _ -> true
-    | Base (l, s, td), Base (l', s', td') -> s = s'
+    | Base (l, s, td, args), Base (l', s', td', args') -> s = s'
     | _, _ -> false
 
 
@@ -126,11 +123,13 @@ module Components = struct
          | None, Some a -> Some a
          | None, None -> None) x y)
 
-    | List (l, a), List (l', a'), pol ->
-       List (Location.join l l', f pol a a')
-
-    | Base (l, s, td), Base (l', s', td'), pol when s = s' ->
-       Base (Location.join l l', s, td)
+    | Base (l, s, td, args), Base (l', s', td', args'), pol when s = s' ->
+       Base (Location.join l l', s, td, List.map2 (fun a a' -> match a, a' with
+       | APos t, APos t' -> APos (f pol t t')
+       | ANeg t, ANeg t' -> ANeg (f (polneg pol) t t')
+       | ANegPos (s, t), ANegPos (s', t') -> ANegPos (f (polneg pol) s s', f pol t t')
+       | ANone, ANone -> ANone
+       | _, _ -> failwith "incompatible arguments to named type") args args')
 
     | _, _, _ ->
        assert (cmp_component x y); assert false
@@ -157,19 +156,20 @@ module Components = struct
            f Pos xk yk @ r
          else [Error.Conflict (locations x, "{}", yl, Symbol.to_string k)] @ r) oy []
 
-    | List (l, a), List (l', a') ->
-       f Pos a a'
-
-    | Base (l, s, td), Base (l', s', td') when s = s' ->
-       []
+    | Base (l, s, td, args), Base (l', s', td', args') when s = s' ->
+       List.fold_right2 (fun arg arg' r -> (match arg, arg' with
+       | APos t, APos t' -> f Pos t t'
+       | ANeg t, ANeg t' -> f Neg t t'
+       | ANegPos (s, t), ANegPos (s', t') -> f Neg s s' @ f Pos t t'
+       | ANone, ANone -> []
+       | _, _ -> failwith "incompatible arguments to named type") @ r) args args' []
 
     (* error cases *)
     | x, y ->
        let name = function
        | Func _ -> "function"
        | Object _ -> "object"
-       | List _ -> "list"
-       | Base (_, s, td) -> "base" in (* FIXME *)
+       | Base (_, s, td, args) -> "base" in (* FIXME *)
        [Error.Conflict (locations x, name x, locations y, name y)]
 
   let list_fields = function
@@ -178,8 +178,11 @@ module Components = struct
          (SMap.bindings kwargs |> List.map (fun (k, (l, a)) -> (Symbol.to_string k, a))) @
          ["res", res]
     | Object o -> List.map (fun (k, (_, v)) -> (Symbol.to_string k, v)) (SMap.bindings o)
-    | List (l, a) -> ["e", a]
-    | Base (l, s, td) -> []
+    | Base (l, s, td, args) -> args |> List.mapi (fun i arg -> match arg with
+      | APos t -> [string_of_int i ^ "+", t]
+      | ANeg t -> [string_of_int i ^ "-", t]
+      | ANegPos (s, t) -> [string_of_int i ^ "-", s; string_of_int i ^ "+", t]
+      | ANone -> []) |> List.concat
 end
 
 
@@ -188,19 +191,20 @@ type tyvar = Symbol.t
 
 type typaram =
 | TParam of Variance.variance option * Symbol.t
+| TNoParam
 
-type tyarg =
-| APos of typeterm
-| ANeg of typeterm
-| AUnspec of typeterm
-| ANegPos of typeterm * typeterm
 
-and typeterm =
+type +'a tyargterm =
+| VarSpec of 'a tyarg
+| VarUnspec of 'a
+
+type typeterm =
 | TZero of Variance.polarity
-| TNamed of tyvar
+| TNamed of tyvar * typeterm tyargterm list
 | TCons of typeterm Components.t
 | TAdd of Variance.polarity * typeterm * typeterm
 | TRec of tyvar * typeterm
+| TWildcard
 
 
 module StampMap = Map.Make (struct type t = stamp let compare = compare end)
@@ -233,7 +237,9 @@ let add_to_context err ctx name ty =
 
 let find_by_name ctx name =
   match SMap.find name ctx.by_name with
-  | (n, _) -> Some n
+  | (n, (TAlias (params, _) | TOpaque params)) ->
+     let params = params |> Array.to_list |> List.map (fun (v, n) -> v) in
+     Some (n, params)
   | exception Not_found -> None
 
 let name_of_stamp ctx stamp =
@@ -247,6 +253,8 @@ let printp paren ppf fmt = let open Format in
   let closebox ppf = if paren then fprintf ppf "@])" else fprintf ppf "@]" in
   openbox ppf;
   kfprintf closebox ppf fmt
+
+let comma ppf () = Format.fprintf ppf ",@ "
 
 let print_comp ctx pr pol ppf = let open Components in function
   | Func (pos, kwargs, reqs, (l, res)) ->
@@ -273,15 +281,30 @@ let print_comp ctx pr pol ppf = let open Components in function
        | (f, x) :: xs ->
           Format.fprintf ppf "%s :@ %a,@ %a" f (pr pol) x pfield xs in
      Format.fprintf ppf "{%a}" pfield (list_fields o)
-  | List (l, a) ->
-     Format.fprintf ppf "List[%a]" (pr pol) a
-  | Base (l, s, td) ->
+  | Base (l, s, td, []) ->
      Format.fprintf ppf "%s" (Symbol.to_string (name_of_stamp ctx s))
+  | Base (l, s, td, args) ->
+     let print_arg ppf = function
+       | APos t -> Format.fprintf ppf "+%a" (pr pol) t 
+       | ANeg t -> Format.fprintf ppf "-%a" (pr (polneg pol)) t
+       | ANegPos (s, t) -> Format.fprintf ppf "-%a +%a" (pr (polneg pol)) s (pr pol) t
+       | ANone -> Format.fprintf ppf "_" in
+     Format.fprintf ppf "%s[%a]" (Symbol.to_string (name_of_stamp ctx s)) 
+       (Format.pp_print_list ~pp_sep:comma print_arg) args
 
 let rec print_typeterm ctx ppf = let open Format in function
   | TZero Pos -> fprintf ppf "nothing"
   | TZero Neg -> fprintf ppf "any"
-  | TNamed v -> fprintf ppf "%s" (Symbol.to_string v)
+  | TNamed (v, []) ->
+     fprintf ppf "%s" (Symbol.to_string v)
+  | TNamed (v, args) -> 
+     let print_arg ppf = function
+       | VarSpec (APos t) -> fprintf ppf "+%a" (print_typeterm ctx) t
+       | VarSpec (ANeg t) -> fprintf ppf "-%a" (print_typeterm ctx) t
+       | VarSpec (ANegPos (s, t)) -> fprintf ppf "-%a +%a" (print_typeterm ctx) s (print_typeterm ctx) t 
+       | VarSpec (ANone) -> fprintf ppf "_"
+       | VarUnspec t -> fprintf ppf "%a" (print_typeterm ctx) t in
+     fprintf ppf "%s[%a]" (Symbol.to_string v) (Format.pp_print_list ~pp_sep:comma print_arg) args
   | TCons cons ->
      fprintf ppf "@[%a@]" (print_comp ctx (fun pol -> print_typeterm ctx) Pos) cons
   | TAdd (p, t1, t2) -> 
@@ -289,10 +312,11 @@ let rec print_typeterm ctx ppf = let open Format in function
     fprintf ppf "@[%a %s@ %a@]" (print_typeterm ctx) t1 op (print_typeterm ctx) t2
   | TRec (v, t) ->
     fprintf ppf "rec %s = %a" (Symbol.to_string v) (print_typeterm ctx) t
+  | TWildcard ->
+    fprintf ppf "_"
 
 
 
-let ty_list e loc = Components.List (Location.one loc, e loc)
 let ty_fun pos kwargs res loc = Components.Func (
   List.map (fun a -> (Location.one loc, a loc)) pos,
   SMap.map (fun (a, req) -> (Location.one loc, a loc)) kwargs,
@@ -302,21 +326,51 @@ let ty_obj o loc = Components.Object (SMap.map (fun x -> (Location.one loc, x lo
 let ty_obj_l o loc =
   let o = List.fold_left (fun o (v, t) -> SMap.add v t o) SMap.empty o in
   ty_obj o loc
-let ty_base ctx s loc =
-(*  Format.printf "Context has %d/%d elems\n%!" (SMap.cardinal ctx.by_name) (StampMap.cardinal ctx.by_stamp);
-  StampMap.iter (fun k (n, _) -> Format.printf "%d = %s\n" k (Symbol.to_string n)) ctx.by_stamp; *)
+
+let ty_base ctx s args loc =
   match StampMap.find s ctx.by_stamp with
-  | (name, td) -> Components.Base (Location.one loc, s, td)
+  | (name, td) -> Components.Base (Location.one loc, s, td, args)
   | exception Not_found -> failwith ("Unknown type with stamp " ^ string_of_int s)
 
+let ty_named ctx name args loc =
+  match find_by_name ctx name with
+  | None -> failwith "unknown type"
+  | Some (s, vars) -> begin
+    if List.length args <> List.length vars then failwith "wrong arity to type ctor";
+    let args = List.map2 (fun var arg -> match var, arg with
+      | VPos, VarSpec (APos t) -> APos t
+      | VNeg, VarSpec (ANeg t) -> ANeg t
+      | VNegPos, VarSpec (ANegPos (s, t)) -> ANegPos (s, t)
+      | VNegPos, VarSpec (APos t) -> ANegPos (TWildcard, t)
+      | VNegPos, VarSpec (ANeg t) -> ANegPos (t, TWildcard)
+      | VNone, VarSpec (ANone) -> ANone
+      | _, VarSpec _ -> failwith "bad variance spec"
+
+      | VPos, VarUnspec t -> APos t
+      | VNeg, VarUnspec t -> ANeg t
+      | VNegPos, VarUnspec t -> ANegPos (t, t)
+      | VNone, VarUnspec t -> ANone
+    ) vars args in
+    ty_base ctx s args loc
+  end
+
+let ty_named' ctx name args loc =
+  match find_by_name ctx name with
+  | None -> failwith "unknown type"
+  | Some (s, vars) -> begin
+    assert (List.length args = List.length vars);
+    ty_base ctx s args loc
+  end
 
 let add_type_alias err name param_list term ctx =
-  let rec mk_params s = function
+  let rec mk_params i s = function
     | [] -> s
+    | TNoParam :: ps ->
+       mk_params (i+1) s ps
     | TParam (v, p) :: ps ->
-       mk_params (if SMap.mem p s then failwith "duplicate param" else SMap.add p v s) ps in
-  let params = mk_params SMap.empty param_list in
-  let rec inferred_variances = ref (SMap.map (fun _ -> VNone) params) in
+       mk_params (i+1) (if SMap.mem p s then failwith "duplicate param" else SMap.add p i s) ps in
+  let param_idx = mk_params 0 SMap.empty param_list in
+  let rec inferred_variances = ref (SMap.map (fun _ -> VNone) param_idx) in
   let use param pol =
     inferred_variances := 
       SMap.add param (vjoin 
@@ -324,45 +378,66 @@ let add_type_alias err name param_list term ctx =
         (variance_of_pol pol)) !inferred_variances in
 
   let rec check pol = function
-    | TNamed t when SMap.mem t params ->
-       (use t pol; BParam t)
-    | TNamed t ->
-       (match find_by_name ctx t with
-       | Some s -> BCons (ty_base ctx s Location.internal)
-       | None -> failwith "unknown type")
+    | TNamed (t, []) when SMap.mem t param_idx ->
+       (use t pol; BParam (SMap.find t param_idx))
+    | TNamed (t, args) ->
+       BCons (ty_named ctx t args Location.internal
+                 |> Components.pmap check pol)
     | TCons cons -> BCons (Components.pmap check pol cons) 
     | TZero _ -> failwith "nzero"
     | TAdd _ -> failwith "nadd"
-    | TRec _ -> failwith "nrec" in
+    | TRec _ -> failwith "nrec"  (* FIXME *)
+    | TWildcard -> failwith "nwild" in
 
-  let param_variances = SMap.merge (fun p asc infer -> match asc, infer with
-    | None, _ | _, None -> assert false (* maps have same keys *)
-    | Some (Some asc), Some infer -> assert (vlte infer asc); Some asc
-    | Some None, Some infer -> Some infer) params !inferred_variances in
+  let body = check Pos term in
 
-  add_to_context err ctx name (TAlias (param_variances, check Pos term))
+  let param_variances = param_list
+    |> List.map (function
+      | TNoParam ->
+         (VNone, None)
+      | (TParam (v, p)) ->
+         let v = match v, SMap.find p !inferred_variances with
+           | None, infer -> infer
+           | Some asc, infer -> 
+              if not (vlte infer asc) then failwith ("incorrect variance annotation on " ^ Symbol.to_string p);
+             asc in
+         (v, Some p))
+    |> Array.of_list in
+
+  add_to_context err ctx name (TAlias (param_variances, body))
 
 let add_opaque_type err name param_list ctx =
-  let rec check_params s = function
-    | [] -> s
+  let rec check_params acc seen = function
+    | [] -> Array.of_list (List.rev acc)
+    | TNoParam :: ps ->
+       check_params ((VNone, None) :: acc) seen ps
     | TParam (v, p) :: ps ->
-       if SMap.mem p s then (failwith "duplicate param"; check_params s ps) else
-         let s' = match v with Some v -> SMap.add p v s | None -> failwith "variance required"; s in
-         check_params s' ps in
-  add_to_context err ctx name (TOpaque (check_params SMap.empty param_list))
+       if SMap.mem p seen then failwith "duplicate param" else
+         match v with
+         | None -> failwith "variance required"
+         | Some v ->
+            check_params ((v, Some p) :: acc) (SMap.add p () seen) ps in
+  add_to_context err ctx name (TOpaque (check_params [] SMap.empty param_list))
 
 
 let get_stamp = function
-  | Components.Base (_, s, TAlias _) -> s
+  | Components.Base (_, s, TAlias _, _) -> s
   | _ -> builtin_stamp
 
-let rec expand p = function
-| BParam _ -> failwith "type alias parameters unsupported"
-| BCons c -> BCons (pmap expand p c)
+let rec expand args pol = function
+| BParam p -> BParam
+   (match pol, args.(p) with
+   | Pos, APos t -> t
+   | Pos, ANegPos (_, t) -> t
+   | Neg, ANeg t -> t
+   | Neg, ANegPos (t, _) -> t
+   | _, _ ->  failwith "internal error: variance mismatch")
+| BCons c -> BCons (pmap (expand args) pol c)
 
 let expand_alias = function
-  | Components.Base (_, s, TAlias (params, body)) ->
+  | Components.Base (_, s, TAlias (params, body), args) ->
      (match body with
      | BParam _ -> failwith "Non-contractive type alias"
-     | BCons c -> pmap expand Pos c)
+     | BCons c ->
+        pmap (expand (Array.of_list args)) Pos c)
   | _ -> failwith "Attempt to expand a type which is not an alias"

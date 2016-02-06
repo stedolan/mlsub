@@ -67,7 +67,6 @@ rule lex s =
   | "rec"    { tok REC }
   | "="      { tok EQUALS }
   | "fun"    { tok FUN }
-  | "unit"   { tok UNIT }
   | "let"    { tok LET }
   | "in"     { tok IN }
   | "true"   { tok TRUE }
@@ -90,7 +89,6 @@ rule lex s =
   | "-"      { tok MINUS }
   | "_"      { tok UNDER }
 
-  | "list"   { tok LIST }
   | "::"     { tok CONS }
   | "match"  { tok MATCH }
   | "with"   { tok WITH }

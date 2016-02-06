@@ -207,44 +207,59 @@ let merge s s' =
   s.flow <- StateSet.union s.flow s'.flow;
   check_polarity s
 
+(* FIXME: parsing recursive types needs more testing *)
+let rec compile_set ctx r pol = function
+| TNamed (v, args) ->
+   (match VarMap.mem v r, args with
+   | true, [] -> StateSet.singleton (VarMap.find v r)
+   | true, _ -> failwith "unexpected args to rectype"
+   | false, args ->
+      Typector.ty_named ctx v args Location.internal 
+      |> compile_cons ctx r pol)
+| TCons c -> compile_cons ctx r pol c
+| TRec (v, t) ->
+   let s = zero pol in
+   let ss' = (compile_set ctx (VarMap.add v s r) pol t) in
+   assert (not (StateSet.mem ss' s)); (* guardedness check *)
+   StateSet.iter ss' (merge s);
+   StateSet.singleton s
+| TZero p' ->
+   if pol <> p' then failwith "zero of wrong polarity"; (* FIXME *)
+   StateSet.empty
+| TAdd (p', s, t) ->
+   if pol <> p' then failwith "wrong add"; (* FIXME *)
+   StateSet.union (compile_set ctx r pol s) (compile_set ctx r pol t)
+| TWildcard -> failwith "no wildcard allowed here"
+and compile_cons ctx r pol c = StateSet.singleton
+  { id = fresh_id (); 
+    pol; 
+    cons = TypeLat.lift (Components.pmap (compile_set ctx r) pol c);
+    flow = StateSet.empty }
+
+let compile_type ctx pol t =
+  (* FIXME: special-case one-element sets *)
+  let s = zero pol in
+  StateSet.iter (compile_set ctx VarMap.empty pol t) (merge s);
+  s
 
 
-(* FIXME: Does not detect negative recursion *)
-let compile_type (ctx : context) (pol : polarity) (t : typeterm) : rawstate =
-  let states = ref [] in
-  let epsilon_trans = StateTbl.create 20 in
-  let rec compile r p = function
-    | TZero p' ->
-       (* FIXME *) assert (p = p');
-       zero p
-    | TNamed v -> 
-      (try VarMap.find v r
-       with Not_found -> match find_by_name ctx v with
-       | None -> failwith ("undefined type " ^ (Symbol.to_string v))
-       | Some t -> cons p (ty_base ctx t Location.internal (* FIXME loc *)))
-    | TCons c -> cons p (Components.pmap (compile r) p c)
-    | TAdd (p', t1, t2) ->
-      (* FIXME *) assert (p = p');
-      let s1, s2 = compile r p t1, compile r p t2 in
-      let s = zero p in
-      StateTbl.add epsilon_trans s s1;
-      StateTbl.add epsilon_trans s s2;
-      states := s :: !states;
-      s
-    | TRec (v, t) ->
-      let s = zero p in
-      let s' = compile (VarMap.add v s r) p t in
-      StateTbl.add epsilon_trans s s';
-      states := s :: !states;
-      s in
-  let root = compile VarMap.empty pol t in
 
-  (* Remove epsilon transitions *)
-  let rec epsilon_closure set s =
-    if StateSet.mem set s then set
-    else List.fold_left epsilon_closure (StateSet.add set s) (StateTbl.find_all epsilon_trans s) in
-  !states |> List.iter (fun s -> StateSet.iter (epsilon_closure StateSet.empty s) (merge s));
-  root
+let rec compile_type_pair ctx r = function
+| TWildcard -> flow_pair ()
+| TNamed (v, args) ->
+   Typector.ty_named ctx v args Location.internal
+      |> cons_pair ctx r
+| TCons c ->
+   cons_pair ctx r c
+| TRec (v, t) -> failwith "rec?"
+| TZero _ -> failwith "zero not allowed"
+| TAdd _ -> failwith "add not allowed"
+and cons_pair ctx r c =
+  let ct = Components.pmap (fun p t -> compile_type_pair ctx r t) Pos c in
+  let pol_swap p (x, y) = match p with Neg -> x | Pos -> y in
+  cons Neg (Components.pmap pol_swap Neg ct), cons Pos (Components.pmap pol_swap Pos ct)
+
+let compile_type_pair ctx t = compile_type_pair ctx VarMap.empty t
 
 
 let print_automaton ctx diagram_name ppf (map : (string -> rawstate -> unit) -> unit) =
@@ -363,7 +378,7 @@ let decompile_automaton (roots : rawstate list) : typeterm list =
   let fresh_var = let var_id = ref (-1) in fun () -> incr var_id; name_var !var_id in
   let state_vars = StateTbl.create 20 in
   List.iter (fun (ss, ss') -> 
-    let v = TNamed (fresh_var ()) in
+    let v = TNamed (fresh_var (), []) in
     let iter ss = StateSet.iter ss (fun s -> StateTbl.add state_vars s v) in
     iter ss; iter ss') biclique_decomposition;
 
@@ -372,8 +387,8 @@ let decompile_automaton (roots : rawstate list) : typeterm list =
   let rec decompile s =
     if StateTbl.mem state_rec_var s then
       match StateTbl.find state_rec_var s with
-      | Some v -> TNamed v
-      | None -> let v = fresh_var () in (StateTbl.replace state_rec_var s (Some v); TNamed v)
+      | Some v -> TNamed (v, [])
+      | None -> let v = fresh_var () in (StateTbl.replace state_rec_var s (Some v); TNamed (v, []))
     else
       let vars = StateTbl.find_all state_vars s in
       StateTbl.add state_rec_var s None;

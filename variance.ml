@@ -10,7 +10,7 @@ type variance =
 
 let vjoin a b = match a, b with
   | VNone, x
-  | x, VNone -> a
+  | x, VNone -> x
   | VPos, VPos -> VPos
   | VNeg, VNeg -> VNeg
   | VNeg, VPos
@@ -21,3 +21,7 @@ let vjoin a b = match a, b with
 let variance_of_pol = function Pos -> VPos | Neg -> VNeg
 
 let vlte a b = (vjoin a b = b)
+
+let p ppf v =
+  Format.fprintf ppf "%s" (match v with
+  | VNone -> "_" | VPos -> "+" | VNeg -> "-" | VNegPos -> "-+")

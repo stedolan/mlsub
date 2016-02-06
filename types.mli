@@ -11,6 +11,9 @@ val cons : polarity -> state Typector.Components.t -> state
 val compile_type :
   context -> polarity -> typeterm -> state
 
+val compile_type_pair :
+  context -> typeterm -> state * state
+
 val print_automaton :
   context -> (* FIXME should not need this *)
   string ->

@@ -98,12 +98,15 @@ let ctx0 =
   |> add_opaque_type () (Symbol.intern "int") []
   |> add_opaque_type () (Symbol.intern "unit") []
   |> add_opaque_type () (Symbol.intern "bool") []
+  |> add_opaque_type () (Symbol.intern "list") [TParam (Some VPos, Symbol.intern "A")]
 
 let (ty_int, ty_unit, ty_bool) =
-  let f s = match (Typector.find_by_name ctx0 (Symbol.intern s)) with
-    | Some t -> ty_base ctx0 t
-    | None -> failwith "internal type not found" in
+  let f s loc = Typector.ty_named' ctx0 (Symbol.intern s) [] loc in
   (f "int", f "unit", f "bool")
+
+let ty_list t loc =
+  Typector.ty_named' ctx0 (Symbol.intern "list") [APos (t loc)] loc
+  
 
 
 let rec typecheck ctx err gamma = function
@@ -121,9 +124,11 @@ and typecheck' ctx err gamma loc exp = match exp with
        | [] -> typecheck ctx err gamma body
        | (loc, (((Ppositional arg | Preq_keyword arg | Popt_keyword(arg, _)) as param), asc)) :: params ->
           let gamma = match asc with
-            | Some t -> SMap.add arg (to_dscheme {
-              environment = SMap.singleton arg (compile_type ctx Neg t);
-              expr = compile_type ctx Pos t}) gamma
+            | Some t ->
+               let (n, p) = Types.compile_type_pair ctx t in
+               SMap.add arg (to_dscheme {
+                 environment = SMap.singleton arg n;
+                 expr = p}) gamma
             | None -> add_singleton arg gamma loc in
           let body_ty = check_params gamma params in
           let env = match param with

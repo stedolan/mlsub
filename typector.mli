@@ -32,19 +32,26 @@ type tyvar = Symbol.t
 
 type typaram =
 | TParam of Variance.variance option * Symbol.t
+| TNoParam
 
-type tyarg =
-| APos of typeterm
-| ANeg of typeterm
-| AUnspec of typeterm
-| ANegPos of typeterm * typeterm
 
-and typeterm =
+type +'a tyarg =
+| APos of 'a
+| ANeg of 'a
+| ANegPos of 'a * 'a
+| ANone
+
+type +'a tyargterm =
+| VarSpec of 'a tyarg
+| VarUnspec of 'a
+
+type typeterm =
 | TZero of Variance.polarity
-| TNamed of tyvar
+| TNamed of tyvar * typeterm tyargterm list
 | TCons of typeterm Components.t
 | TAdd of Variance.polarity * typeterm * typeterm
 | TRec of tyvar * typeterm
+| TWildcard
 
 
 
@@ -84,7 +91,7 @@ val expand_alias :
   'a Components.t -> 'a tybody Components.t
 
 val find_by_name :
-  context -> Symbol.t -> stamp option
+  context -> Symbol.t -> (stamp * variance list) option
 
 val name_of_stamp :
   context -> stamp -> Symbol.t
@@ -93,8 +100,6 @@ val print_typeterm : context -> typeterm printer
 
 (* Constructing types *)
 
-val ty_list :
-  (Location.LocSet.elt -> 'a) -> Location.LocSet.elt -> 'a Components.t
 val ty_fun :
   (Location.LocSet.elt -> 'a) list ->
   ((Location.LocSet.elt -> 'a) * bool) SMap.t ->
@@ -105,5 +110,13 @@ val ty_obj :
 val ty_obj_l :
   (Symbol.t * (Location.LocSet.elt -> 'a)) list ->
   Location.LocSet.elt -> 'a Components.t
-val ty_base : context -> stamp -> Location.LocSet.elt -> 'a Components.t
+
+val ty_named :
+  context ->
+  Symbol.t ->
+  typeterm tyargterm list -> 
+  Location.LocSet.elt -> typeterm Components.t
+val ty_named' :
+  context -> Symbol.t -> 'b tyarg list -> Location.t -> 'b Components.t
+val ty_base : context -> stamp -> 'a tyarg list -> Location.t -> 'a Components.t
 

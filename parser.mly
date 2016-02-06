@@ -18,7 +18,6 @@
 
 %token COMMA
 %token SEMI
-%token UNIT
 %token AND
 %token OR
 %token EQUALS
@@ -47,7 +46,6 @@
 %token CONS
 %token MATCH
 %token WITH
-%token LIST
 
 %token SUBSUME
 
@@ -241,21 +239,22 @@ subsumption:
 onlytype:
 | t = typeterm; EOF { t }
 
+variance:
+| PLUS { VPos }
+| MINUS { VNeg }
+| PLUS; MINUS { VNegPos }
+| MINUS; PLUS { VNegPos }
 
 typearg:
-| PLUS; t = typeterm { APos t }
-| MINUS; t = typeterm { ANeg t }
+| PLUS; t = typeterm { VarSpec (APos t) }
+| MINUS; t = typeterm { VarSpec (ANeg t) }
 | MINUS; s = typeterm; PLUS; t = typeterm
-| PLUS; t = typeterm; MINUS; s = typeterm { ANegPos (s, t) }
-| t = typeterm { AUnspec t }
+| PLUS; t = typeterm; MINUS; s = typeterm { VarSpec (ANegPos (s, t)) }
+| t = typeterm { VarUnspec t }
 
 typeparam:
-| PLUS; v = IDENT { TParam (Some VPos,  v) }
-| MINUS; v = IDENT { TParam (Some VNeg, v) }
-| PLUS; MINUS; v = IDENT
-| MINUS; PLUS; v = IDENT { TParam (Some VNegPos, v) }
-| UNDER; v = IDENT { TParam (Some VNone, v) }
-| v = IDENT { TParam (None, v) }
+| v = option(variance); x = IDENT { TParam (v, x) }
+| UNDER { TNoParam }
 
 objtype:
 | v = IDENT; COLON; t = typeterm
@@ -270,9 +269,10 @@ funtype:
 | v = IDENT; COLON; t = typeterm; RPAR { [Some v, t] }
 
 typeterm:
-| v = IDENT { TNamed v }
-(* | v = IDENT (* ; LBRACK; ps = separated_list(COMMA, typearg); RBRACK *)
-     { TCons (ty_base v (L.pos ($startpos, $endpos))) } *)
+| v = IDENT; LBRACK; ps = separated_nonempty_list(COMMA, typearg); RBRACK
+     { TNamed (v, ps) }
+| v = IDENT
+     { TNamed (v, []) }
 (* funtype includes its closing paren as a hack to avoid a conflict *)
 | LPAR; ts = funtype; ARROW; tr = typeterm 
     { TCons (ty_fun
@@ -282,12 +282,11 @@ typeterm:
         (L.pos ($startpos, $endpos))) }
 | ANY { TZero Neg }
 | NOTHING { TZero Pos }
-| LPAR; t = typeterm; LIST; RPAR { TCons (ty_list (fun _ -> t) (L.pos ($startpos, $endpos))) }
 | LBRACE; o = separated_list(COMMA, objtype); RBRACE 
   { TCons (ty_obj_l o (L.pos ($startpos, $endpos))) }
-(* | UNIT { TCons (ty_base (Symbol.intern "unit") (L.pos ($startpos, $endpos))) } *)
 | t1 = typeterm; p = meetjoin; t2 = typeterm { TAdd (p, t1, t2)  } %prec AND
 | REC; v = IDENT; EQUALS; t = typeterm { TRec (v, t) }
+| UNDER { TWildcard }
 | LPAR; t = typeterm; RPAR { t }
 
 %inline meetjoin : AND { Variance.Neg } | OR { Variance.Pos }
