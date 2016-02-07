@@ -102,10 +102,11 @@ let process file =
   try
     file
       |> Location.of_file
-      |> Source.parse_modlist
+      |> Source.parse_modlist print_err
       |> infer_module print_err
       |> print_signature Format.std_formatter
   with
+  | Error.Fatal e -> print_err e
 (*  | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg*)
   | Match_failure (file, line, col) -> Format.printf "Match failure in typechecker at %s:%d%d\n%!" file line col
 

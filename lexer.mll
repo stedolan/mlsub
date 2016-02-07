@@ -5,7 +5,6 @@ module Make (L : Location.Locator) = struct
 module P = Parser.Make (L)
 open P
 
-
 type state =
   | Toplevel
   | Block
@@ -18,13 +17,7 @@ type action =
   | Push of state
   | Pop of state
 
-
-let terminator = function
-| Toplevel -> EOF
-| Block -> END
-| Paren -> RPAR
-| Bracket -> RBRACK
-| Brace -> RBRACE
+exception Bad_token
 
 let tok t = (t, Nop, [])
 let bopen t s = (t, Push s, [])
@@ -95,7 +88,9 @@ rule lex s =
 
   | id       { tok (IDENT (Symbol.intern (Lexing.lexeme lexbuf))) }
   | int      { tok (INT (int_of_string (Lexing.lexeme lexbuf))) }
-  | eof      { bclose EOF Toplevel}
+  | eof      { tok EOF }
+
+  | _        { raise Bad_token }
 
 {
 end

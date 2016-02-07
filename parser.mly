@@ -93,11 +93,23 @@ prog:
 nl: NL+ { () }
 onl: NL* { () }
 
-modlist:
-| onl; e = nonempty_list(moditem_nl); EOF { e}
-| onl; EOF { [] }
+snl:
+| NL; onl { () }
+| onl; SEMI; onl { () }
 
-moditem_nl: e = located(moditem); onl { e } 
+(* List with optional trailing seperator and error handling *)
+sep_list(Sep, Item):
+|
+  { [] }
+| x = Item { [x] }
+| x = Item; Sep; xs = sep_list(Sep, Item) { x :: xs }
+| error; Sep; xs = sep_list(Sep, Item) { xs }
+
+
+modlist:
+| onl; e = sep_list(snl, located(moditem));  EOF { e }
+
+
 
 moditem:
 | LET; v = IDENT; EQUALS; onl; e = exp { MLet (v, e) }

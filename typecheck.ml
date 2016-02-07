@@ -87,9 +87,8 @@ let add_singleton v gamma loc =
 open Exp
 let var env arg t = try [t, SMap.find arg env] with Not_found -> []
 
-let failure ctx err e loc =
-  err e;
-  { environment = SMap.empty; expr = compile_type ctx Pos (TZero Pos) }
+let failure () =
+  { environment = SMap.empty; expr = compile_type Typector.empty_context Pos (TZero Pos) }
 
 
 
@@ -111,11 +110,13 @@ let ty_list t loc =
 
 let rec typecheck ctx err gamma = function
 | (loc, Some exp) -> typecheck' ctx err gamma loc exp
-| (loc, None) -> failure ctx err (Error.SyntaxErr loc) loc
+| (loc, None) -> 
+   (* syntax error already logged by parser *)
+   failure ()
 and typecheck' ctx err gamma loc exp = match exp with
   | Var v ->
      (try clone_scheme (Location.one loc) (SMap.find v gamma)
-      with Not_found -> failure ctx err (Error.Unbound (loc, v)) loc)
+      with Not_found -> (err (Error.Unbound (`Value, loc, v)); failure ()))
 
   | Lambda (params, body) ->
      let rec check_params gamma = function
