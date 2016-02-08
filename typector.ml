@@ -162,7 +162,7 @@ module Components = struct
        | ANeg t, ANeg t' -> f Neg t t'
        | ANegPos (s, t), ANegPos (s', t') -> f Neg s s' @ f Pos t t'
        | ANone, ANone -> []
-       | _, _ -> failwith "incompatible arguments to named type") @ r) args args' []
+       | _, _ -> Error.internal "incompatible arguments to named type") @ r) args args' []
 
     (* error cases *)
     | x, y ->
@@ -248,11 +248,6 @@ let name_of_stamp ctx stamp =
   | exception Not_found -> failwith "unbound stamp"
 
 
-let printp paren ppf fmt = let open Format in
-  let openbox ppf = if paren then fprintf ppf "@[(" else fprintf ppf "@[" in
-  let closebox ppf = if paren then fprintf ppf "@])" else fprintf ppf "@]" in
-  openbox ppf;
-  kfprintf closebox ppf fmt
 
 let comma ppf () = Format.fprintf ppf ",@ "
 
@@ -292,6 +287,19 @@ let print_comp ctx pr pol ppf = let open Components in function
      Format.fprintf ppf "%s[%a]" (Symbol.to_string (name_of_stamp ctx s)) 
        (Format.pp_print_list ~pp_sep:comma print_arg) args
 
+
+let printp paren pr ppf = let open Format in
+  let openbox ppf = if paren then fprintf ppf "@[(" else fprintf ppf "@[" in
+  let closebox ppf = if paren then fprintf ppf "@])" else fprintf ppf "@]" in
+  openbox ppf;
+  kfprintf closebox ppf "%a" pr
+
+let needs_paren p = function
+  | TRec _ -> true
+  | TAdd (p', t1, t2) -> not (p = p')
+  | TCons (Func _) -> true
+  | _ -> false
+
 let rec print_typeterm ctx ppf = let open Format in function
   | TZero Pos -> fprintf ppf "nothing"
   | TZero Neg -> fprintf ppf "any"
@@ -309,7 +317,10 @@ let rec print_typeterm ctx ppf = let open Format in function
      fprintf ppf "@[%a@]" (print_comp ctx (fun pol -> print_typeterm ctx) Pos) cons
   | TAdd (p, t1, t2) -> 
     let op = match p with Pos -> "|" | Neg -> "&" in
-    fprintf ppf "@[%a %s@ %a@]" (print_typeterm ctx) t1 op (print_typeterm ctx) t2
+    fprintf ppf "@[%a %s@ %a@]"
+      (printp (needs_paren p t1) (print_typeterm ctx)) t1
+      op
+      (printp (needs_paren p t2) (print_typeterm ctx)) t2
   | TRec (v, t) ->
     fprintf ppf "rec %s = %a" (Symbol.to_string v) (print_typeterm ctx) t
   | TWildcard ->
