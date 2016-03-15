@@ -5,6 +5,9 @@ type 'a printer = Format.formatter -> 'a -> unit
 module SMap = Symbol.Map
 
 
+type conflict =
+  Location.set * Location.set * Error.conflict_reason
+
 module Components : sig
   type +'a t
 
@@ -13,14 +16,15 @@ module Components : sig
   (* join Pos is least-upper-bound, join Neg is greatest-lower-bound. *)
   val join : polarity -> (polarity -> 'a -> 'a -> 'a) -> 'a t -> 'a t -> 'a t
   (* lte Pos f a b is a <= b, lte Neg f a b is a >= b. f works the same way *)
-  val lte : (polarity -> 'a -> 'b -> Error.t list) -> 'a t -> 'b t -> Error.t list
+  val lte : (polarity -> 'a -> 'b -> conflict list) -> 'a t -> 'b t -> conflict list
+  (* same as lte, but returns only a boolean success rather than a list of errors *)
+  val lte' : (polarity -> 'a -> 'b -> bool) -> 'a t -> 'b t -> bool
     
   val pmap : (polarity -> 'a -> 'b) -> polarity -> 'a t -> 'b t
   val pfold : (polarity -> 'a -> 'r -> 'r) -> polarity -> 'a t -> 'r -> 'r
 
   val list_fields : 'a t -> (string * 'a) list
 
-  val locations : 'a t -> Location.set
   val change_locations : Location.set -> 'a t -> 'a t
 end
 

@@ -63,7 +63,6 @@
 %left PLUS
 %left MINUS
 %right CONS
-%right SEMI
 
 %{
   open Variance
@@ -90,7 +89,6 @@
 prog:
  e = exp; EOF { e }
 
-nl: NL+ { () }
 onl: NL* { () }
 
 snl:
@@ -114,7 +112,7 @@ modlist:
 moditem:
 | LET; v = IDENT; EQUALS; onl; e = exp { MLet (v, e) }
 | DEF; f = IDENT; p = params; onl; e = block; END { MDef (f, p, e) }
-| DEF; f = IDENT; p = params; COLON; t = typeterm; onl; e = block; END { MDef (f, p, (L.pos ($startpos(t), $endpos(e)), Some (Typed(e, t)))) }
+| DEF; f = IDENT; p = params; COLON; t = typeterm; snl; e = block; END { MDef (f, p, (L.pos ($startpos(t), $endpos(e)), Some (Typed(e, t)))) }
 | TYPE; n = IDENT; args = loption(delimited(LBRACK, 
                             separated_nonempty_list(COMMA, typeparam), RBRACK));
   EQUALS; t = typeterm
@@ -127,7 +125,7 @@ moditem:
 block_r:
 | e = exp_r; onl
     { e }
-| e1 = located(mayfail(exp_r)); nl; e2 = block
+| e1 = located(mayfail(exp_r)); snl; e2 = block
     { Seq (e1, e2) }
 
 block:

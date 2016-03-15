@@ -28,7 +28,7 @@ val flow_pair : unit -> state * state
 
 val zero : polarity -> state
 
-val constrain : state -> state -> Error.t list
+val constrain : Location.t -> state -> state -> Error.t list
 
 type dstate
 

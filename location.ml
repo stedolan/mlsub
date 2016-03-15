@@ -116,15 +116,14 @@ let psource ppf loc =
     
 
 
+(* contains a b -> a contains or is equal to b *)
+let contains (Loc (s1, p, q)) (Loc (s2, p', q')) =
+  s1 = s2 && p <= p' && q' <= q
 
-(*
-let contains (Pos (s1, p, p')) (Pos (s2, q, q')) =
-  s1 = s2 && p.pos_fname = q.pos_fname && p.pos_bol <= q.pos_bol && p'.pos_bol >= q'.pos_bol
-*)
 
 let internal =
   let loc = { name = "<internal>"; contents = "?"; lines = [(0,1)] } in
-  Loc (loc, 0, 0)
+  Loc (loc, 0, 1)
 
 
 type location = t

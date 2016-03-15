@@ -98,13 +98,14 @@ let to_dscheme name s =
 
 
 let process file =
-  let print_err e = Error.print Format.err_formatter e; Format.fprintf Format.err_formatter "%!" in
+  let errs = ref false in
+  let print_err e = errs := true; Error.print Format.err_formatter e; Format.fprintf Format.err_formatter "\n%!" in
   try
     file
       |> Location.of_file
       |> Source.parse_modlist print_err
       |> infer_module print_err
-      |> print_signature Format.std_formatter
+      |> (fun s -> if not !errs then print_signature Format.std_formatter s)
   with
   | Error.Fatal e -> print_err e
 (*  | Failure msg -> Format.printf "Typechecking failed: %s\n%!" msg*)

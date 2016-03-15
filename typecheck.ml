@@ -26,9 +26,9 @@ let to_dscheme s =
 let clone_scheme loc s =
   Types.clone (fun f -> { environment = SMap.map (f loc) s.d_environment; expr = f loc s.d_expr })
 
-let constrain' err p n =
+let constrain' loc err p n =
   let success = ref true in
-  List.iter (fun e -> success := false; err e) (Types.constrain p n);
+  List.iter (fun e -> success := false; err e) (Types.constrain loc p n);
   !success
 
 let dump_scheme ctx title {environment; expr} =
@@ -36,7 +36,7 @@ let dump_scheme ctx title {environment; expr} =
     f "out" expr;
     SMap.iter (fun n s -> f (Symbol.to_string n) s) environment)
 
-let constrain ctx err name (inputs : (state * state) list) output =
+let constrain loc ctx err name (inputs : (state * state) list) output =
   let dump title =
     let find_states f =
       let id = ref 0 in
@@ -48,7 +48,7 @@ let constrain ctx err name (inputs : (state * state) list) output =
     Format.printf "%a\n%!" (print_automaton ctx title) find_states in
   let debug = false in
   if debug then dump (name ^ "_before");
-  let errs = (List.fold_left (fun rs (p, n) -> rs @ constrain p n) [] inputs) in
+  let errs = (List.fold_left (fun rs (p, n) -> rs @ constrain loc p n) [] inputs) in
   List.iter err errs;
   if debug then dump (name ^ "_after");
   match errs with
@@ -57,7 +57,7 @@ let constrain ctx err name (inputs : (state * state) list) output =
 
 let ty_join ctx err a b =
   let (jN, jP) = Types.flow_pair () in
-  constrain ctx err "join" [a, jN; b, jN] jP
+  constrain Location.internal ctx err "join" [a, jN; b, jN] jP
 
 let ascription ctx scheme typeterm =
   let s = compile_type ctx Pos typeterm in
@@ -73,7 +73,7 @@ let env_join err loc = SMap.merge (fun k a b -> match a, b with
   | (None, x) | (x, None) -> x
   | Some a, Some b ->
      let (jN, jP) = Types.flow_pair () in
-     Some (constrain empty_context err "join" [jP, a; jP, b] jN))
+     Some (constrain Location.internal empty_context err "join" [jP, a; jP, b] jN))
 (* Some (Types.join a b)) *) 
 
 let add_singleton v gamma loc =
@@ -136,9 +136,9 @@ and typecheck' ctx err gamma loc exp = match exp with
             | Popt_keyword (arg, default) ->
                let {environment = envD; expr = exprD} = typecheck ctx err gamma default in
                let (defaultN, defaultP) = Types.flow_pair () in
-               let _ = constrain' err exprD defaultN in
+               let _ = constrain' loc err exprD defaultN in
                (match SMap.find arg body_ty.environment with
-                | t -> let _ = constrain' err defaultP t in ()
+                | t -> let _ = constrain' loc err defaultP t in ()
                 | exception Not_found -> ());
                env_join err loc envD body_ty.environment
             | _ -> body_ty.environment in
@@ -200,7 +200,7 @@ and typecheck' ctx err gamma loc exp = match exp with
      let (recN, recP) = Types.flow_pair () in
      let var = try [recP, SMap.find v exp_ty.environment] with Not_found -> [] in
      { environment = SMap.remove v exp_ty.environment;
-       expr = constrain ctx err "rec" ((exp_ty.expr, recN) :: var) recP }
+       expr = constrain loc ctx err "rec" ((exp_ty.expr, recN) :: var) recP }
 
   | App (fn, args) ->
      let { environment = envF; expr = exprF } = typecheck ctx err gamma fn in
@@ -208,7 +208,7 @@ and typecheck' ctx err gamma loc exp = match exp with
        | [] ->
           let (resN, resP) = Types.flow_pair () in
           { environment = env;
-            expr = constrain ctx err "app" 
+            expr = constrain loc ctx err "app" 
               ((exprF, Types.cons Neg (ty_fun (List.rev pos) kwargs (fun _ -> resN) loc))
                :: constraints) 
               resP }
@@ -227,11 +227,12 @@ and typecheck' ctx err gamma loc exp = match exp with
      let {environment = env2; expr = expr2 } = typecheck ctx err gamma e2 in
      let (expN, expP) = Types.flow_pair () in
      { environment = env_join err loc env1 env2;
-       expr = constrain ctx err "seq" [(expr1, Types.cons Neg (ty_unit loc)); (expr2, expN)] expP }
+       expr = constrain loc ctx err "seq" [(expr1, Types.cons Neg (ty_unit loc)); (expr2, expN)] expP }
 
   | Typed (e, ty) ->
      let {environment; expr} = typecheck ctx err gamma e in
-     { environment; expr = constrain ctx err "typed" [expr, compile_type ctx Neg ty] (compile_type ctx Pos ty) }
+     let (n, p) = Types.compile_type_pair ctx ty in
+     { environment; expr = constrain loc ctx err "typed" [expr, n] p }
 
   | Unit -> 
      { environment = SMap.empty; expr = Types.cons Pos (ty_unit loc) }
@@ -247,7 +248,7 @@ and typecheck' ctx err gamma loc exp = match exp with
      let {environment = envT; expr = exprT} = typecheck ctx err gamma tcase in
      let {environment = envF; expr = exprF} = typecheck ctx err gamma fcase in
      { environment = env_join err loc envC (env_join err loc envT envF);
-       expr = constrain ctx err "if" [exprC, Types.cons Neg (ty_bool loc)]
+       expr = constrain loc ctx err "if" [exprC, Types.cons Neg (ty_bool loc)]
          (ty_join ctx err exprT exprF) }
   | Nil ->
      { environment = SMap.empty; expr = Types.cons Pos (ty_list (fun _ -> Types.zero Pos) loc) }
@@ -256,7 +257,7 @@ and typecheck' ctx err gamma loc exp = match exp with
      let xs_ty = typecheck ctx err gamma xs in
      let (xN, xP) = Types.flow_pair () and (xsN, xsP) = Types.flow_pair () in
      { environment = env_join err loc x_ty.environment xs_ty.environment;
-       expr = constrain ctx err "cons" [x_ty.expr, xN;
+       expr = constrain loc ctx err "cons" [x_ty.expr, xN;
                                 xs_ty.expr, Types.cons Neg (ty_list (fun _ -> xsN) loc)] (Types.cons Pos (ty_list (fun _ -> ty_join ctx err xP xsP) loc)) }
   | Match (e, nil, x, xs, cons) ->
      let e_ty = typecheck ctx err gamma e in
@@ -267,7 +268,7 @@ and typecheck' ctx err gamma loc exp = match exp with
        (try [xP, SMap.find x cons_ty.environment] with Not_found -> []) @
        (try [Types.cons Pos (ty_list (fun _ -> xP) loc), SMap.find xs cons_ty.environment] with Not_found -> []) in
      { environment = env_join err loc e_ty.environment (env_join err loc nil_ty.environment (SMap.remove x (SMap.remove xs cons_ty.environment)));
-       expr = constrain ctx err "match" ([e_ty.expr, Types.cons Neg (ty_list (fun _ -> xN) loc)] @ vars)
+       expr = constrain loc ctx err "match" ([e_ty.expr, Types.cons Neg (ty_list (fun _ -> xN) loc)] @ vars)
          (ty_join ctx err nil_ty.expr cons_ty.expr) }
 
   | Object o ->
@@ -281,7 +282,7 @@ and typecheck' ctx err gamma loc exp = match exp with
      let e_ty = typecheck ctx err gamma e in
      let (xN, xP) = Types.flow_pair () in
      { environment = e_ty.environment;
-       expr = constrain ctx err "field" [e_ty.expr,
+       expr = constrain loc ctx err "field" [e_ty.expr,
                                      Types.cons Neg (ty_obj (Typector.SMap.singleton field (fun _ -> xN)) loc)]
                         xP }
 
@@ -341,7 +342,7 @@ let rec infer_module err modl : signature =
        let ctxM, envM, sigM = infer tyctx (add_singleton v gamma loc) modl in
        ctxM, env_join err loc envE (SMap.remove v envM),
        let (expN, expP) = Types.flow_pair () in
-       (SLet (v, constrain tyctx err "let" ((exprE, expN) :: var envM v expP)
+       (SLet (v, constrain loc tyctx err "let" ((exprE, expN) :: var envM v expP)
          expP) :: sigM) in
   let ctxM, envM, sigM = infer ctx0 gamma0 modl in
   assert (SMap.is_empty envM);

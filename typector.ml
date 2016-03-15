@@ -13,6 +13,9 @@ type +'a tyarg =
 | ANegPos of 'a * 'a
 | ANone
 
+type conflict =
+  Location.set * Location.set * Error.conflict_reason
+
 
 module Components = struct
   type +'a t =
@@ -25,8 +28,8 @@ module Components = struct
     | BCons of 'a tybody t
 
   and typedef =
-    | TAlias of (variance * Symbol.t option) array * int tybody
-    | TOpaque of (variance * Symbol.t option) array
+    | TAlias of Symbol.t * (variance * Symbol.t option) array * int tybody
+    | TOpaque of Symbol.t * (variance * Symbol.t option) array
 
 
   let locations = function
@@ -134,18 +137,18 @@ module Components = struct
     | _, _, _ ->
        assert (cmp_component x y); assert false
 
-  let lte (type a) (type b) f (x : a t) (y : b t) = match x, y with
+  let lte (type a) (type b) f (x : a t) (y : b t) = let open Error in match x, y with
     | Func (pos, kwargs, reqs, (l, res)), Func (pos', kwargs', reqs', (l', res')) when cmp_component x y ->
        let kw_cmp r =
          SMap.fold (fun k (l', t') r ->
            if SMap.mem k kwargs then
              let (l, t) = SMap.find k kwargs in
              f Neg t t' @ r
-           else [Error.Conflict (locations x, "keyword", l', Symbol.to_string k)] @ r) kwargs' r in
+           else [locations x, l', Unknown_kwarg k] @ r) kwargs' r in
        let req_cmp r =
          SMap.fold (fun k () r ->
            if SMap.mem k reqs' then r else
-             [Error.Conflict (locations x, "required+", locations y, Symbol.to_string k)] @ r) reqs r in
+             [locations x, locations y, Missing_req_kwarg k] @ r) reqs r in
        f Pos res res' |> req_cmp |> kw_cmp |>
            List.fold_right2 (fun (l, x) (l, y) r -> f Neg x y @ r) pos pos'
 
@@ -154,7 +157,7 @@ module Components = struct
          if SMap.mem k ox then
            let (xl, xk) = SMap.find k ox in
            f Pos xk yk @ r
-         else [Error.Conflict (locations x, "{}", yl, Symbol.to_string k)] @ r) oy []
+         else [locations x, yl, Missing_field k] @ r) oy []
 
     | Base (l, s, td, args), Base (l', s', td', args') when s = s' ->
        List.fold_right2 (fun arg arg' r -> (match arg, arg' with
@@ -165,12 +168,19 @@ module Components = struct
        | _, _ -> Error.internal "incompatible arguments to named type") @ r) args args' []
 
     (* error cases *)
+    | Func (pos, _, _, _), Func (pos', _, _, _) when List.length pos <> List.length pos' ->
+       [locations x, locations y, Wrong_arity (List.length pos, List.length pos')]
+
     | x, y ->
        let name = function
-       | Func _ -> "function"
-       | Object _ -> "object"
-       | Base (_, s, td, args) -> "base" in (* FIXME *)
-       [Error.Conflict (locations x, name x, locations y, name y)]
+       | Func _ -> `Func
+       | Object _ -> `Obj
+       | Base (_, s, td, args) -> `Base (match td with TAlias (name, _, _) | TOpaque (name, _) -> name) in
+       [locations x, locations y, Incompatible_type (name x, name y)]
+
+  let lte' f x y =
+    let excuse = Error.Wrong_arity (0, 1) in
+    lte (fun p x y -> if f p x y then [] else [Location.empty, Location.empty, excuse]) x y = []
 
   let list_fields = function
     | Func (pos, kwargs, reqs, (l, res)) -> 
@@ -237,7 +247,7 @@ let add_to_context err ctx name ty =
 
 let find_by_name ctx name =
   match SMap.find name ctx.by_name with
-  | (n, (TAlias (params, _) | TOpaque params)) ->
+  | (n, (TAlias (_, params, _) | TOpaque (_, params))) ->
      let params = params |> Array.to_list |> List.map (fun (v, n) -> v) in
      Some (n, params)
   | exception Not_found -> None
@@ -278,14 +288,17 @@ let print_comp ctx pr pol ppf = let open Components in function
      Format.fprintf ppf "{%a}" pfield (list_fields o)
   | Base (l, s, td, []) ->
      Format.fprintf ppf "%s" (Symbol.to_string (name_of_stamp ctx s))
-  | Base (l, s, td, args) ->
+  | Base (l, s, (TAlias (_, params, _) | TOpaque (_, params)), args) ->
      let print_arg ppf = function
-       | APos t -> Format.fprintf ppf "+%a" (pr pol) t 
-       | ANeg t -> Format.fprintf ppf "-%a" (pr (polneg pol)) t
-       | ANegPos (s, t) -> Format.fprintf ppf "-%a +%a" (pr (polneg pol)) s (pr pol) t
-       | ANone -> Format.fprintf ppf "_" in
+       | VPos, APos t -> Format.fprintf ppf "%a" (pr pol) t
+       | _, APos t -> Format.fprintf ppf "+%a" (pr pol) t 
+       | VNeg, ANeg t -> Format.fprintf ppf "%a" (pr (polneg pol)) t
+       | _, ANeg t -> Format.fprintf ppf "-%a" (pr (polneg pol)) t
+       | _, ANegPos (s, t) -> Format.fprintf ppf "-%a +%a" (pr (polneg pol)) s (pr pol) t
+       | _, ANone -> Format.fprintf ppf "_" in
      Format.fprintf ppf "%s[%a]" (Symbol.to_string (name_of_stamp ctx s)) 
-       (Format.pp_print_list ~pp_sep:comma print_arg) args
+       (Format.pp_print_list ~pp_sep:comma print_arg) 
+       (List.map2 (fun (v, _) b -> v , b) (Array.to_list params) args)
 
 
 let printp paren pr ppf = let open Format in
@@ -415,7 +428,7 @@ let add_type_alias err name param_list term ctx =
          (v, Some p))
     |> Array.of_list in
 
-  add_to_context err ctx name (TAlias (param_variances, body))
+  add_to_context err ctx name (TAlias (name, param_variances, body))
 
 let add_opaque_type err name param_list ctx =
   let rec check_params acc seen = function
@@ -428,7 +441,7 @@ let add_opaque_type err name param_list ctx =
          | None -> failwith "variance required"
          | Some v ->
             check_params ((v, Some p) :: acc) (SMap.add p () seen) ps in
-  add_to_context err ctx name (TOpaque (check_params [] SMap.empty param_list))
+  add_to_context err ctx name (TOpaque (name, check_params [] SMap.empty param_list))
 
 
 let get_stamp = function
@@ -446,7 +459,7 @@ let rec expand args pol = function
 | BCons c -> BCons (pmap (expand args) pol c)
 
 let expand_alias = function
-  | Components.Base (_, s, TAlias (params, body), args) ->
+  | Components.Base (_, s, TAlias (_, params, body), args) ->
      (match body with
      | BParam _ -> failwith "Non-contractive type alias"
      | BCons c ->

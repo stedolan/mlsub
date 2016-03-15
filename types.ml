@@ -75,8 +75,8 @@ module TypeLat = struct
       | [], ys -> false
       | [y], ys ->
          (match pol with
-         | Pos -> Components.lte (fun p x y -> if f p x y then [] else [Error.excuse]) x y = []
-         | Neg -> Components.lte (fun p y x -> if f (polneg p) x y then [] else [Error.excuse]) y x = [])
+         | Pos -> Components.lte' (fun p x y -> f p x y) x y
+         | Neg -> Components.lte' (fun p y x -> f (polneg p) x y) y x)
          && subs_comps pol f xs ys
       | y1 :: y2 :: _, _ -> failwith "two terms in same component"
 
@@ -402,7 +402,7 @@ let decompile_automaton (roots : rawstate list) : typeterm list =
   List.map decompile roots
   
 
-let constrain sp_orig sn_orig =
+let constrain loc sp_orig sn_orig =
   assert (sp_orig.pol = Pos);
   assert (sn_orig.pol = Neg);
   let seen = Hashtbl.create 20 in
@@ -424,7 +424,9 @@ let constrain sp_orig sn_orig =
     StateSet.fold_left ssp [] (fun rs sp ->
       rs @ StateSet.fold_left ssn rs (fun rs sn ->
         rs @ closure sp sn)) in
-  closure sp_orig sn_orig
+  let as_error (la, lb, reason) =
+    Error.Conflict (loc, la, lb, reason) in
+  closure sp_orig sn_orig |> List.map as_error
 
 
 
@@ -651,8 +653,7 @@ let rec entailed dn dp =
     (* glb X <= lub Y, i.e. exists i,j, X[i] <= Y[j] *)
     let cn = TypeLat.as_list tn and cp = TypeLat.as_list tp in
     let b = List.exists (fun x -> 
-      List.exists (fun y -> Components.lte (fun p x y -> 
-        if pol_flip entailed p x y then [] else [Error.excuse]) x y = []) cp) cn in
+      List.exists (fun y -> Components.lte' (pol_flip entailed) x y) cp) cn in
     if b then
       true
     else begin
