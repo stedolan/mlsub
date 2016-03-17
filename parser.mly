@@ -136,6 +136,8 @@ block:
 exp_r:
 | FUN; p = params; ARROW; onl; e = exp 
     { Lambda (p, e) }
+| FUN; v = IDENT; ARROW; onl; e = exp
+    { Lambda ([(L.pos ($startpos(v), $endpos(v))), (Ppositional v, None)], e) }
 | LET; v = IDENT; EQUALS; e1 = exp; IN; e2 = exp
     { Let (v, e1, e2) }
 | IF; cond = exp; THEN; tcase = exp; ELSE; fcase = exp
