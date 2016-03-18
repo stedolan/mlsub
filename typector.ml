@@ -261,7 +261,14 @@ let name_of_stamp ctx stamp =
 
 let comma ppf () = Format.fprintf ppf ",@ "
 
-let print_comp ctx pr pol ppf = let open Components in function
+let printp paren pr ppf = let open Format in
+  let openbox ppf = if paren then fprintf ppf "@[(" else fprintf ppf "@[" in
+  let closebox ppf = if paren then fprintf ppf "@])" else fprintf ppf "@]" in
+  openbox ppf;
+  kfprintf closebox ppf "%a" pr
+
+
+let print_comp pb ctx pr ppf = let open Components in function
   | Func (pos, kwargs, reqs, (l, res)) ->
      let args = List.map (fun (l, a) -> (None, Some a)) pos @
        (SMap.merge (fun k arg req -> match arg, req with
@@ -271,41 +278,37 @@ let print_comp ctx pr pol ppf = let open Components in function
         | None, None -> None) kwargs reqs |> SMap.bindings |> List.map (fun (a, b) -> b)) in
      let pr_arg ppf = function
        | None, None -> ()
-       | None, Some t -> Format.fprintf ppf "%a" (pr (polneg pol)) t
-       | Some name, Some t -> Format.fprintf ppf "%s : %a" name (pr (polneg pol)) t
+       | None, Some t -> Format.fprintf ppf "%a" (pr false) t
+       | Some name, Some t -> Format.fprintf ppf "%s : %a" name (pr false) t
        | Some name, None -> Format.fprintf ppf "%s : <err>" name in
      let comma ppf () = Format.fprintf ppf ",@ " in
-     Format.fprintf ppf "(%a) -> %a"
-       (Format.pp_print_list ~pp_sep:comma pr_arg) args
-       (pr pol) res
+     let need_paren = match args with [None, Some _] -> false | _ -> true in
+     Format.fprintf ppf (if pb then "%a -> %a" else "(%a -> %a)")
+       (printp need_paren (Format.pp_print_list ~pp_sep:comma pr_arg)) args
+       (pr false) res
   | Object _ as o ->
      let rec pfield ppf = function
        | [] -> ()
        | [f, x] ->
-          Format.fprintf ppf "%s :@ %a" f (pr pol) x
+          Format.fprintf ppf "%s :@ %a" f (pr false) x
        | (f, x) :: xs ->
-          Format.fprintf ppf "%s :@ %a,@ %a" f (pr pol) x pfield xs in
+          Format.fprintf ppf "%s :@ %a,@ %a" f (pr false) x pfield xs in
      Format.fprintf ppf "{%a}" pfield (list_fields o)
   | Base (l, s, td, []) ->
      Format.fprintf ppf "%s" (Symbol.to_string (name_of_stamp ctx s))
   | Base (l, s, (TAlias (_, params, _) | TOpaque (_, params)), args) ->
+     let pb = match args with [_] -> true | _ -> false in
      let print_arg ppf = function
-       | VPos, APos t -> Format.fprintf ppf "%a" (pr pol) t
-       | _, APos t -> Format.fprintf ppf "+%a" (pr pol) t 
-       | VNeg, ANeg t -> Format.fprintf ppf "%a" (pr (polneg pol)) t
-       | _, ANeg t -> Format.fprintf ppf "-%a" (pr (polneg pol)) t
-       | _, ANegPos (s, t) -> Format.fprintf ppf "-%a +%a" (pr (polneg pol)) s (pr pol) t
+       | VPos, APos t -> Format.fprintf ppf "%a" (pr pb) t
+       | _, APos t -> Format.fprintf ppf "+%a" (pr pb) t 
+       | VNeg, ANeg t -> Format.fprintf ppf "%a" (pr pb) t
+       | _, ANeg t -> Format.fprintf ppf "-%a" (pr pb) t
+       | _, ANegPos (s, t) -> Format.fprintf ppf "-%a +%a" (pr false) s (pr false) t
        | _, ANone -> Format.fprintf ppf "_" in
      Format.fprintf ppf "%s[%a]" (Symbol.to_string (name_of_stamp ctx s)) 
        (Format.pp_print_list ~pp_sep:comma print_arg) 
        (List.map2 (fun (v, _) b -> v , b) (Array.to_list params) args)
 
-
-let printp paren pr ppf = let open Format in
-  let openbox ppf = if paren then fprintf ppf "@[(" else fprintf ppf "@[" in
-  let closebox ppf = if paren then fprintf ppf "@])" else fprintf ppf "@]" in
-  openbox ppf;
-  kfprintf closebox ppf "%a" pr
 
 let needs_paren p = function
   | TRec _ -> true
@@ -313,33 +316,45 @@ let needs_paren p = function
   | TCons (Func _) -> true
   | _ -> false
 
-let rec print_typeterm ctx ppf = let open Format in function
+(* pb is true: delimited by context
+   pb is false: this should this be self-delimiting. *)
+let rec print_typeterm ctx pb ppf = let open Format in function
   | TZero Pos -> fprintf ppf "nothing"
   | TZero Neg -> fprintf ppf "any"
   | TNamed (v, []) ->
      fprintf ppf "%s" (Symbol.to_string v)
   | TNamed (v, args) -> 
+     let pb' = match args with [_] -> true | _ -> false in
      let print_arg ppf = function
-       | VarSpec (APos t) -> fprintf ppf "+%a" (print_typeterm ctx) t
-       | VarSpec (ANeg t) -> fprintf ppf "-%a" (print_typeterm ctx) t
-       | VarSpec (ANegPos (s, t)) -> fprintf ppf "-%a +%a" (print_typeterm ctx) s (print_typeterm ctx) t 
+       | VarSpec (APos t) -> fprintf ppf "+%a" (print_typeterm ctx pb') t
+       | VarSpec (ANeg t) -> fprintf ppf "-%a" (print_typeterm ctx pb') t
+       | VarSpec (ANegPos (s, t)) -> fprintf ppf "-%a +%a"
+          (print_typeterm ctx false) s (print_typeterm ctx false) t
        | VarSpec (ANone) -> fprintf ppf "_"
-       | VarUnspec t -> fprintf ppf "%a" (print_typeterm ctx) t in
+       | VarUnspec t -> fprintf ppf "%a" (print_typeterm ctx pb') t in
      fprintf ppf "%s[%a]" (Symbol.to_string v) (Format.pp_print_list ~pp_sep:comma print_arg) args
   | TCons cons ->
-     fprintf ppf "@[%a@]" (print_comp ctx (fun pol -> print_typeterm ctx) Pos) cons
-  | TAdd (p, t1, t2) -> 
-    let op = match p with Pos -> "|" | Neg -> "&" in
-    fprintf ppf "@[%a %s@ %a@]"
-      (printp (needs_paren p t1) (print_typeterm ctx)) t1
-      op
-      (printp (needs_paren p t2) (print_typeterm ctx)) t2
+     fprintf ppf "@[%a@]" (print_comp pb ctx (print_typeterm ctx)) cons
+  | TAdd (p, _, _) as t ->
+     if pb then
+       fprintf ppf "@[%a@]" (print_sum p ctx) t
+     else
+       fprintf ppf "@[(%a)@]" (print_sum p ctx) t
   | TRec (v, t) ->
-    fprintf ppf "rec %s = %a" (Symbol.to_string v) (print_typeterm ctx) t
+    (* FIXME paren placement ok? *)
+    fprintf ppf "rec %s = %a" (Symbol.to_string v) (print_typeterm ctx false) t
   | TWildcard ->
     fprintf ppf "_"
+and print_sum p ctx ppf = let open Format in function
+| TAdd (p', t1, t2) when p' = p ->
+   fprintf ppf "%a %s@ %a"
+     (print_sum p ctx) t1
+     (match p with Pos -> "|" | Neg -> "&")
+     (print_sum p ctx) t2
+| t -> print_typeterm ctx false ppf t
 
 
+let print_typeterm ctx = print_typeterm ctx true
 
 let ty_fun pos kwargs res loc = Components.Func (
   List.map (fun a -> (Location.one loc, a loc)) pos,
