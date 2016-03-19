@@ -1,52 +1,13 @@
 %token <Symbol.t> IDENT
 %token <int> INT
-%token ARROW
-%token FUN
 
-%token EOF
-%token NL
-%token LPAR
-%token RPAR
-%token LBRACE
-%token RBRACE
-%token LBRACK
-%token RBRACK
-
-%token DEF
-%token TYPE
-%token END
-
-%token COMMA
-%token SEMI
-%token AND
-%token OR
-%token EQUALS
-%token REC
-%token LET
-%token IN
-%token COLON
-%token DOT
-%token TRUE
-%token FALSE
-%token IF
-%token THEN
-%token ELSE
-
-%token EQEQUALS
-%token CMP_LT
-%token CMP_GT
-%token CMP_LTE
-%token CMP_GTE
-%token PLUS
-%token MINUS
-%token UNDER
-%token ANY
-%token NOTHING
-
-%token CONS
-%token MATCH
-%token WITH
-
+%token EOF NL
+%token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
+%token DEF DO END CONS MATCH WITH
+%token TYPE REC ANY NOTHING FUN ARROW
+%token COMMA SEMI COLON DOT AND OR EQUALS UNDER
+%token LET TRUE FALSE IF THEN ELSE
+%token EQEQUALS CMP_LT CMP_GT CMP_LTE CMP_GTE PLUS MINUS
 %token SUBSUME
 
 
@@ -54,7 +15,6 @@
 %right ARROW
 %right AND
 %right OR
-
 %nonassoc EQEQUALS
 %nonassoc CMP_LT
 %nonassoc CMP_GT
@@ -87,9 +47,9 @@
 %inline nofail(X): e = X { Some e }
 
 prog:
- e = exp; EOF { e }
+ e = lambda_exp; EOF { e }
 
-onl: NL* { () }
+%inline onl: NL* { () }
 
 snl:
 | NL; onl { () }
@@ -107,12 +67,9 @@ sep_list(Sep, Item):
 modlist:
 | onl; e = sep_list(snl, located(moditem));  EOF { e }
 
-
-
 moditem:
-| LET; v = IDENT; EQUALS; onl; e = exp { MLet (v, e) }
-| DEF; f = IDENT; p = params; onl; e = block; END { MDef (f, p, e) }
-| DEF; f = IDENT; p = params; COLON; t = typeterm; snl; e = block; END { MDef (f, p, (L.pos ($startpos(t), $endpos(e)), Some (Typed(e, t)))) }
+| LET; v = IDENT; EQUALS; onl; e = lambda_exp { MLet (v, e) }
+| DEF; f = IDENT; p = params; e = funbody(EQUALS) { MDef (f, p, e) }
 | TYPE; n = IDENT; args = loption(delimited(LBRACK, 
                             separated_nonempty_list(COMMA, typeparam), RBRACK));
   EQUALS; t = typeterm
@@ -121,41 +78,47 @@ moditem:
                             separated_nonempty_list(COMMA, typeparam), RBRACK));
     { MOpaqueType (n, args) }
 
+funbody(sep): e = located(mayfail(funbody_r(sep))) { e }
+funbody_r(sep):
+| e = funbody_code_r(sep) { e }
+| COLON; t = typeterm; e = funbody_code(sep) { Typed (e, t) }
 
+%inline funbody_code(sep): e = located(mayfail(funbody_code_r(sep))) { e }
+funbody_code_r(sep):
+| sep; onl; e = lambda_exp_r { e }
+| DO; e = block_r; END { e }
+
+(* blocks contain at least one expression and eat surrounding newlines *)
+block: e = located(mayfail(block_r)) { e }
 block_r:
-| e = exp_r; onl
+| onl; e = block_exp_r
     { e }
-| e1 = located(mayfail(exp_r)); snl; e2 = block
-    { Seq (e1, e2) }
 
-block:
-| b = located(mayfail(block_r))
-    { b }
-
-
-exp_r:
-| FUN; p = params; ARROW; onl; e = exp 
-    { Lambda (p, e) }
-| FUN; v = IDENT; ARROW; onl; e = exp
-    { Lambda ([(L.pos ($startpos(v), $endpos(v))), (Ppositional v, None)], e) }
-| LET; v = IDENT; EQUALS; e1 = exp; IN; e2 = exp
+%inline block_exp: e = located(nofail(block_exp_r)) { e }
+block_exp_r:
+| LET; v = IDENT; EQUALS; onl; e1 = lambda_exp; snl; e2 = block_exp
     { Let (v, e1, e2) }
-| IF; cond = exp; THEN; tcase = exp; ELSE; fcase = exp
-    { If (cond, tcase, fcase) }
-| MATCH; e = term; WITH; 
-    LBRACK; RBRACK; ARROW; n = exp; 
-    OR; x = IDENT; CONS; xs = IDENT; ARROW; c = exp
-    { Match (e, n, x, xs, c) }
-(*| e1 = exp; SEMI; e2 = exp
-    { Seq (e1, e2) }*)
+| e1 = lambda_exp; snl; e2 = block_exp
+    { Seq (e1, e2) }
+| e = lambda_exp_r; onl
+    { e }
+
+
+%inline lambda_exp: e = located(nofail(lambda_exp_r)) { e }
+lambda_exp_r:
+| FUN; p = params_or_ident; e = funbody_code(ARROW)
+    { Lambda (p, e) }
+| DO; e = block_r; END
+    { e }
 | e = simple_exp_r
     { e }
 
-exp:
-| e = located(mayfail(exp_r))
-    { e }
+
 
 params: LPAR; p = separated_list(COMMA, located(paramtype)); RPAR { p }
+params_or_ident:
+| p = params { p }
+| v = IDENT { [(L.pos ($startpos(v), $endpos(v))), (Ppositional v, None)] }
 
 paramtype:
 | p = param
@@ -168,13 +131,13 @@ param:
     { Ppositional v }
 | v = IDENT; EQUALS; UNDER
     { Preq_keyword v }
-| v = IDENT; EQUALS; e = exp
+| v = IDENT; EQUALS; e = lambda_exp
     { Popt_keyword (v, e) }
 
 argument:
-| e = exp
+| e = lambda_exp
     { Apositional e }
-| v = IDENT; EQUALS; e = exp
+| v = IDENT; EQUALS; e = lambda_exp
     { Akeyword (v, e) }
 
 
@@ -187,7 +150,7 @@ simple_exp_r:
     { e }
 
 simple_exp:
-| e = located(mayfail(simple_exp_r))
+| e = located(nofail(simple_exp_r))
     { e }
 
 %inline binop:
@@ -200,11 +163,17 @@ simple_exp:
 | MINUS    { "(-)" }
 
 term_r:
+| IF; cond = simple_exp; THEN; tcase = block; ELSE; fcase = block; END
+    { If (cond, tcase, fcase) }
+| MATCH; e = simple_exp; WITH; onl;
+    LBRACK; RBRACK; ARROW; onl; n = lambda_exp; onl;
+    OR; x = IDENT; CONS; xs = IDENT; ARROW; onl; c = lambda_exp; onl; END
+    { Match (e, n, x, xs, c) }
 | v = IDENT 
     { Var v }
-| LPAR; e = exp_r; RPAR
+| LPAR; e = lambda_exp_r; RPAR
     { e }
-| LPAR; e = exp; COLON; t = typeterm; RPAR
+| LPAR; e = lambda_exp; COLON; t = typeterm; RPAR
     { Typed (e, t) }
 | f = term; LPAR; x = separated_list(COMMA, located(argument)); RPAR
     { App (f, x) }
@@ -226,19 +195,19 @@ term_r:
     { Bool false }
 
 term:
-| t = located(mayfail(term_r))
+| t = located(nofail(term_r))
     { t }
 
 obj:
-| v = IDENT; EQUALS; e = exp
+| v = IDENT; EQUALS; e = lambda_exp
     { [v, e] }
-| v = IDENT; EQUALS; e = exp; SEMI; o = obj
+| v = IDENT; EQUALS; e = lambda_exp; COMMA; o = obj
     { (v, e) :: o }
 
 nonemptylist_r:
-| x = exp
+| x = lambda_exp
     { Cons(x, (let (l, _) = x in l, Some Nil)) }
-| x = exp; COMMA; xs = nonemptylist
+| x = lambda_exp; COMMA; xs = nonemptylist
     { Cons(x, xs) }
 
 %inline nonemptylist:

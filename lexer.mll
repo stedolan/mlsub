@@ -61,13 +61,13 @@ rule lex s =
   | "="      { tok EQUALS }
   | "fun"    { tok FUN }
   | "let"    { tok LET }
-  | "in"     { tok IN }
   | "true"   { tok TRUE }
   | "false"  { tok FALSE }
-  | "if"     { tok IF }
+  | "if"     { bopen IF Block }
   | "then"   { tok THEN }
   | "else"   { tok ELSE }
-  | "def"    { bopen DEF Block }
+  | "def"    { tok DEF }
+  | "do"     { bopen DO Block }
   | "end"    { bclose END Block }
   | "type"   { tok TYPE }
   | "any"    { tok ANY }
@@ -83,7 +83,7 @@ rule lex s =
   | "_"      { tok UNDER }
 
   | "::"     { tok CONS }
-  | "match"  { tok MATCH }
+  | "match"  { bopen MATCH Block }
   | "with"   { tok WITH }
 
   | id       { tok (IDENT (Symbol.intern (Lexing.lexeme lexbuf))) }
