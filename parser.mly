@@ -100,8 +100,12 @@ block_exp_r:
     { Let (v, e1, e2) }
 | e1 = lambda_exp; snl; e2 = block_exp
     { Seq (e1, e2) }
+| e1 = lambda_exp; onl; e2 = located(nofail(terminating_semi)); onl
+    { Seq (e1, e2) }
 | e = lambda_exp_r; onl
     { e }
+
+%inline terminating_semi: SEMI { Unit }
 
 
 %inline lambda_exp: e = located(nofail(lambda_exp_r)) { e }
