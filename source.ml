@@ -69,27 +69,29 @@ let finish_lexer v = function
 let rec run_parser err lstack tok = function
   | I.Accepted v -> finish_lexer v lstack
   | I.Rejected -> Error.(raise (Fatal (Syntax (tokloc tok)))) 
-  | I.InputNeeded env ->
+  | I.InputNeeded _ as chk ->
      let lstack = accept_token lstack tok in
      let (Token (t, startpos, endpos, _) as tok) = read_token lstack in
-     run_parser err lstack tok (I.offer env (t, startpos, endpos))
-  | I.HandlingError env ->
+     run_parser err lstack tok (I.offer chk (t, startpos, endpos))
+  | (I.Shifting _ | I.AboutToReduce _) as chk ->
+     run_parser err lstack tok (I.resume chk)
+  | I.HandlingError _ as chk ->
      err (skip_bad_tokens tok);
 
-     let rec handle henv = match I.handle henv with
-       | I.HandlingError henv' -> handle henv'
-       | I.InputNeeded env ->
+     let rec handle henv = match I.resume henv with
+       | (I.HandlingError _ | I.Shifting _ | I.AboutToReduce _) as chk -> handle chk
+       | I.InputNeeded _ as chk ->
           let (Token (t, startpos, endpos, _) as tok) = read_token lstack in
-          run_parser err lstack tok (I.offer env (t, startpos, endpos))
+          run_parser err lstack tok (I.offer chk (t, startpos, endpos))
        | I.Accepted v -> finish_lexer v lstack
        | I.Rejected -> Error.(raise (Fatal (Syntax (tokloc tok)))) in
-     handle env
+     handle chk
 
 let parse err =
   let lstate = Empty in
   let (Token (t, s, e, _) as tok) = read_token lstate in
-  let p = match P.modlist_incremental () with 
-    | I.InputNeeded env -> I.offer env (t, s, e)
+  let p = match P.Incremental.modlist s with 
+    | I.InputNeeded _ as chk -> I.offer chk (t, s, e)
     | _ -> Error.internal "parser initialisation error" in
   run_parser err Empty tok p 
 end
