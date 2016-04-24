@@ -4,10 +4,10 @@
 %token EOF NL
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
 %token DEF DO END CONS MATCH WITH
-%token TYPE REC ANY NOTHING FUN ARROW
+%token TYPE REC ANY NOTHING ARROW
 %token COMMA SEMI COLON DOT AND OR EQUALS UNDER
 %token LET TRUE FALSE IF THEN ELSE
-%token EQEQUALS CMP_LT CMP_GT CMP_LTE CMP_GTE PLUS MINUS
+%token EQEQUALS LT GT LTE GTE PLUS MINUS
 %token SUBSUME
 
 
@@ -16,10 +16,10 @@
 %right AND
 %right OR
 %nonassoc EQEQUALS
-%nonassoc CMP_LT
-%nonassoc CMP_GT
-%nonassoc CMP_LTE
-%nonassoc CMP_GTE
+%nonassoc LT
+%nonassoc GT
+%nonassoc LTE
+%nonassoc GTE
 %left PLUS
 %left MINUS
 %right CONS
@@ -69,7 +69,7 @@ modlist:
 
 moditem:
 | LET; v = IDENT; EQUALS; onl; e = lambda_exp { MLet (v, e) }
-| DEF; f = IDENT; p = params; e = funbody(EQUALS) { MDef (f, p, e) }
+| DEF; f = IDENT; LPAR; p = params; RPAR; e = funbody { MDef (f, p, e) }
 | TYPE; n = IDENT; args = loption(delimited(LBRACK, 
                             separated_nonempty_list(COMMA, typeparam), RBRACK));
   EQUALS; t = typeterm
@@ -78,14 +78,14 @@ moditem:
                             separated_nonempty_list(COMMA, typeparam), RBRACK));
     { MOpaqueType (n, args) }
 
-funbody(sep): e = located(mayfail(funbody_r(sep))) { e }
-funbody_r(sep):
-| e = funbody_code_r(sep) { e }
-| COLON; t = typeterm; e = funbody_code(sep) { Typed (e, t) }
+funbody: e = located(mayfail(funbody_r)) { e }
+funbody_r:
+| e = funbody_code_r { e }
+| COLON; t = typeterm; e = funbody_code { Typed (e, t) }
 
-%inline funbody_code(sep): e = located(mayfail(funbody_code_r(sep))) { e }
-funbody_code_r(sep):
-| sep; onl; e = lambda_exp_r { e }
+%inline funbody_code: e = located(mayfail(funbody_code_r)) { e }
+funbody_code_r:
+| EQUALS; onl; e = lambda_exp_r { e }
 | DO; e = block_r; END { e }
 
 (* blocks contain at least one expression and eat surrounding newlines *)
@@ -110,8 +110,8 @@ block_exp_r:
 
 %inline lambda_exp: e = located(nofail(lambda_exp_r)) { e }
 lambda_exp_r:
-| FUN; p = params_or_ident; e = funbody_code(ARROW)
-    { Lambda (p, e) }
+| LT; ps = params; GT; e = lambda_exp
+    { Lambda (ps, e) }
 | DO; e = block_r; END
     { e }
 | e = simple_exp_r
@@ -119,10 +119,7 @@ lambda_exp_r:
 
 
 
-params: LPAR; p = separated_list(COMMA, located(paramtype)); RPAR { p }
-params_or_ident:
-| p = params { p }
-| v = IDENT { [(L.pos ($startpos(v), $endpos(v))), (Ppositional v, None)] }
+params: p = separated_list(COMMA, located(paramtype)) { p }
 
 paramtype:
 | p = param
@@ -159,10 +156,10 @@ simple_exp:
 
 %inline binop:
 | EQEQUALS { "(==)" }
-| CMP_LT   { "(<)" }
-| CMP_GT   { "(>)" }
-| CMP_LTE  { "(<=)" }
-| CMP_GTE  { "(>=)" }
+| LT   { "(<)" }
+| GT   { "(>)" }
+| LTE  { "(<=)" }
+| GTE  { "(>=)" }
 | PLUS     { "(+)" }
 | MINUS    { "(-)" }
 

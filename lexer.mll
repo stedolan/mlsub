@@ -59,7 +59,6 @@ rule lex s =
   | "<:"     { tok SUBSUME }
   | "rec"    { tok REC }
   | "="      { tok EQUALS }
-  | "fun"    { tok FUN }
   | "let"    { tok LET }
   | "true"   { tok TRUE }
   | "false"  { tok FALSE }
@@ -74,10 +73,10 @@ rule lex s =
   | "nothing"{ tok NOTHING }
 
   | "=="     { tok EQEQUALS }
-  | "<"      { tok CMP_LT }
-  | ">"      { tok CMP_GT }
-  | "<="     { tok CMP_LTE }
-  | ">="     { tok CMP_GTE }
+  | "<"      { tok LT }
+  | ">"      { tok GT }
+  | "<="     { tok LTE }
+  | ">="     { tok GTE }
   | "+"      { tok PLUS }
   | "-"      { tok MINUS }
   | "_"      { tok UNDER }
