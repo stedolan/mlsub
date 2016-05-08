@@ -110,7 +110,7 @@ block_exp_r:
 
 %inline lambda_exp: e = located(nofail(lambda_exp_r)) { e }
 lambda_exp_r:
-| LT; ps = params; GT; e = lambda_exp
+| LT; ps = params; GT; onl; e = lambda_exp
     { Lambda (ps, e) }
 | DO; e = block_r; END
     { e }
@@ -130,9 +130,9 @@ paramtype:
 param:
 | v = IDENT
     { Ppositional v }
-| v = IDENT; EQUALS; UNDER
+| v = IDENT; EQUALS;
     { Preq_keyword v }
-| v = IDENT; EQUALS; e = lambda_exp
+| v = IDENT; EQUALS; e = term
     { Popt_keyword (v, e) }
 
 argument:
@@ -140,6 +140,8 @@ argument:
     { Apositional e }
 | v = IDENT; EQUALS; e = lambda_exp
     { Akeyword (v, e) }
+| v = IDENT; EQUALS;
+    { Akeyword (v, (L.pos ($startpos(v), $endpos(v)), Some (Var v))) }
 
 
 simple_exp_r:
@@ -180,7 +182,7 @@ term_r:
     { App (f, x) }
 | LPAR; RPAR
     { Unit }
-| LBRACE; o = obj; RBRACE
+| LBRACE; o = separated_list(COMMA, objfield); RBRACE
     { Object o }
 | LBRACK; RBRACK
     { Nil }
@@ -199,11 +201,11 @@ term:
 | t = located(nofail(term_r))
     { t }
 
-obj:
+objfield:
+| v = IDENT; EQUALS
+    { v, (L.pos ($startpos(v), $endpos(v)), Some (Var v)) }
 | v = IDENT; EQUALS; e = lambda_exp
-    { [v, e] }
-| v = IDENT; EQUALS; e = lambda_exp; COMMA; o = obj
-    { (v, e) :: o }
+    { v, e }
 
 nonemptylist_r:
 | x = lambda_exp
