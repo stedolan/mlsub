@@ -3,7 +3,10 @@ type conflict_reason =
 | Unknown_kwarg of Symbol.t
 | Missing_req_kwarg of Symbol.t
 | Missing_field of Symbol.t
+| Missing_case of Symbol.t option
 | Incompatible_type of [`Func | `Obj | `Base of Symbol.t] * [`Func | `Obj | `Base of Symbol.t]
+
+type binding_sort = [`Value | `Type]
 
 type t = 
   | Syntax of Location.t
@@ -12,7 +15,9 @@ type t =
   | Unexpected_eof of Location.t
 
   | Conflict of Location.t * Location.set * Location.set * conflict_reason
-  | Unbound of [`Value | `Type] * Location.t * Symbol.t
+  | Unbound of binding_sort * Location.t * Symbol.t
+  | Rebound of binding_sort * Location.t * Symbol.t * Location.t
+  | Partially_bound of binding_sort * Location.t * Symbol.t
   | Internal of string
   | Unknown
   | TooMany
@@ -26,6 +31,7 @@ let print ppf =
   let open Location in
   let p fmt = 
     Format.kfprintf (fun ppf -> Format.fprintf ppf "\n") ppf fmt in
+  let psort = function `Value -> "value" | `Type -> "type" in
   function
   | Syntax l ->
      p "%a: Syntax error" ploc l;
@@ -48,11 +54,11 @@ let print ppf =
        | `Base s -> Format.fprintf ppf "'%s'" (Symbol.to_string s) in
      let found = match reason with
        | Wrong_arity _ | Unknown_kwarg _ | Missing_req_kwarg _ -> `Func
-       | Missing_field _ -> `Obj
+       | Missing_field _ | Missing_case _ -> `Obj
        | Incompatible_type (a, b) -> a in
      let required = match reason with
        | Wrong_arity _ | Unknown_kwarg _ | Missing_req_kwarg _ -> `Func
-       | Missing_field _ -> `Obj
+       | Missing_field _ | Missing_case _ -> `Obj
        | Incompatible_type (a, b) -> b in
      (match reason with
      | Wrong_arity (n, m) ->
@@ -70,6 +76,10 @@ let print ppf =
         p "%a: This function requires an argument called '%s', missing here" ploc l (Symbol.to_string k)
      | Missing_field k ->
         p "%a: This object does not have a field '%s'" ploc l (Symbol.to_string k)
+     | Missing_case (Some k) ->
+        p "%a: The case '%s' is not handled" ploc l (Symbol.to_string k)
+     | Missing_case None ->
+        p "%a: The case of untagged objects is not handled" ploc l
      | Incompatible_type (a, b) ->
         p "%a: This is a %a, but a %a is needed" ploc l psort a psort b);
      psource ppf l;
@@ -91,6 +101,11 @@ let print ppf =
      p "%a: The %s '%s' is not in scope" ploc l 
        (match sort with `Value -> "value" | `Type -> "type") (Symbol.to_string v);
      psource ppf l
+  | Rebound (sort, l, v, l') ->
+     p "%a: Duplicate definition of %s '%s'" ploc l' (psort sort) (Symbol.to_string v);
+     p "%a: previous definition of %s" ploc l (Symbol.to_string v)
+  | Partially_bound (sort, l, v) ->
+     p "%a: The %s '%s' is not bound in all cases" ploc l (psort sort) (Symbol.to_string v)
   | Internal s ->
      p "Internal error: %s" s
   | Unknown ->

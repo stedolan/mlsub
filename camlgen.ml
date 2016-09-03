@@ -48,7 +48,7 @@ let rec lower g (loc, Some exp) = match exp with
      CRaw (string_of_bool b)
   | If (c, t, f) ->
      CIf (lower g c, lower g t, lower g f)
-  | Object fields ->
+  | Object (tag, fields) ->
      let dict = add_global g "dict" (obj_shape 1 fields)
         (fun shape ->
          let ((m, s), table) = Symbol.Dictionary.generate shape in

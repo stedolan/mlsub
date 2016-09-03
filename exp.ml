@@ -28,11 +28,21 @@ and rexp =
   | If of exp * exp * exp
   | Nil
   | Cons of exp * exp
-  | Match of exp * exp * Symbol.t * Symbol.t * exp
-  | Object of (Symbol.t * exp) list
+  | Match of exp list * (pat list * exp) list
+  | Object of Symbol.t option * (Symbol.t * exp) list
   | GetField of exp * Symbol.t
 
 and exp = rexp option located
+
+and rpat =
+  | PWildcard
+  | PVar of Symbol.t
+  | PObject of Symbol.t option * (Symbol.t * pat) list
+  | PInt of int
+  | PAlt of pat * pat
+
+and pat = rpat option located
+
 
 and moditem =
   | MType of Symbol.t * Typector.typaram list * Typector.typeterm
@@ -41,5 +51,3 @@ and moditem =
   | MLet of Symbol.t * exp
 
 and modlist = moditem located list
-
-

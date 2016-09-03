@@ -83,7 +83,7 @@ rule lex s =
 
   | "::"     { tok CONS }
   | "match"  { bopen MATCH Block }
-  | "with"   { tok WITH }
+  | "case"   { tok CASE }
 
   | id       { tok (IDENT (Symbol.intern (Lexing.lexeme lexbuf))) }
   | int      { tok (INT (int_of_string (Lexing.lexeme lexbuf))) }

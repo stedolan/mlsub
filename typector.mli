@@ -108,6 +108,14 @@ val ty_fun :
   (Location.LocSet.elt -> 'a) list ->
   ((Location.LocSet.elt -> 'a) * bool) SMap.t ->
   (Location.LocSet.elt -> 'a) -> Location.LocSet.elt -> 'a Components.t
+val ty_obj_cases :
+  (Location.LocSet.elt -> 'a) SMap.t SMap.t ->
+  (Location.LocSet.elt -> 'a) SMap.t option ->
+  Location.LocSet.elt -> 'a Components.t
+val ty_obj_tag :
+  Symbol.t option ->
+  (Location.LocSet.elt -> 'a) SMap.t ->
+  Location.LocSet.elt -> 'a Components.t
 val ty_obj :
   (Location.LocSet.elt -> 'a) SMap.t ->
   Location.LocSet.elt -> 'a Components.t

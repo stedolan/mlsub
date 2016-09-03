@@ -3,7 +3,7 @@
 
 %token EOF NL
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
-%token DEF DO END CONS MATCH WITH
+%token DEF DO END CONS MATCH CASE
 %token TYPE REC ANY NOTHING ARROW
 %token COMMA SEMI COLON DOT AND OR EQUALS UNDER
 %token LET TRUE FALSE IF THEN ELSE
@@ -165,13 +165,17 @@ simple_exp:
 | PLUS     { "(+)" }
 | MINUS    { "(-)" }
 
+tag: DOT; t = IDENT { t }
+
 term_r:
 | IF; cond = simple_exp; THEN; tcase = block; ELSE; fcase = block; END
     { If (cond, tcase, fcase) }
-| MATCH; e = simple_exp; WITH; onl;
+(*| MATCH; e = simple_exp; WITH; onl;
     LBRACK; RBRACK; ARROW; onl; n = lambda_exp; onl;
     OR; x = IDENT; CONS; xs = IDENT; ARROW; onl; c = lambda_exp; onl; END
-    { Match (e, n, x, xs, c) }
+    { Match (e, n, x, xs, c) }*)
+| MATCH; e = separated_nonempty_list(COMMA, simple_exp); onl; c = separated_list(snl, case); END
+    { Match (e, c) }
 | v = IDENT 
     { Var v }
 | LPAR; e = lambda_exp_r; RPAR
@@ -182,8 +186,6 @@ term_r:
     { App (f, x) }
 | LPAR; RPAR
     { Unit }
-| LBRACE; o = separated_list(COMMA, objfield); RBRACE
-    { Object o }
 | LBRACK; RBRACK
     { Nil }
 | LBRACK; e = nonemptylist_r; RBRACK
@@ -192,6 +194,12 @@ term_r:
     { GetField (e, f) }
 | i = INT
     { Int i }
+| t = tag
+    { Object (Some t, []) }
+| t = tag; LBRACE; o = separated_list(COMMA, objfield(lambda_exp)); RBRACE
+    { Object (Some t, o) }
+| LBRACE; o = separated_list(COMMA, objfield(lambda_exp)); RBRACE
+    { Object (None, o) }
 | TRUE
     { Bool true }
 | FALSE
@@ -201,11 +209,19 @@ term:
 | t = located(nofail(term_r))
     { t }
 
-objfield:
+%inline objfield(body):
 | v = IDENT; EQUALS
     { v, (L.pos ($startpos(v), $endpos(v)), Some (Var v)) }
-| v = IDENT; EQUALS; e = lambda_exp
+| v = IDENT; EQUALS; e = body
     { v, e }
+
+
+%inline objfield_pat(body):
+| v = IDENT; EQUALS
+    { v, (L.pos ($startpos(v), $endpos(v)), Some (PVar v)) }
+| v = IDENT; EQUALS; e = body
+    { v, e }
+
 
 nonemptylist_r:
 | x = lambda_exp
@@ -216,6 +232,32 @@ nonemptylist_r:
 %inline nonemptylist:
 | e = located(nofail(nonemptylist_r))
     { e }
+
+(* Pattern matching *)
+
+pat_r:
+| UNDER
+    { PWildcard }
+| v = IDENT
+    { PVar v }
+| t = tag
+    { PObject(Some t, []) }
+| t = tag; LBRACE; o = separated_list(COMMA, objfield_pat(pat)); RBRACE
+    { PObject(Some t, o) }
+| LBRACE; o = separated_list(COMMA, objfield_pat(pat)); RBRACE
+    { PObject(None, o) }
+| p1 = pat; OR; p2 = pat
+    { PAlt (p1, p2) }
+| n = INT
+    { PInt n }
+
+pat:
+| p = located(nofail(pat_r)) { p }
+
+case: (* what's a good syntax here? snl for onl? *)
+| CASE; p = separated_nonempty_list(COMMA, pat); snl; e = lambda_exp
+    { p, e }
+
 
 subsumption:
 | t1 = typeterm; SUBSUME; t2 = typeterm; EOF { (t1, t2) }

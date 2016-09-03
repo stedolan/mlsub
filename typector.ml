@@ -18,9 +18,10 @@ type conflict =
 
 
 module Components = struct
+  type +'a objfields = (Location.set * 'a) SMap.t
   type +'a t =
     | Func of (Location.set * 'a) list * (Location.set * 'a) SMap.t * unit SMap.t * (Location.set * 'a)
-    | Object of (Location.set * 'a) SMap.t
+    | Object of 'a objfields SMap.t * 'a objfields option
     | Base of Location.set * stamp * typedef * 'a tyarg list
 
   and +'a tybody =
@@ -36,7 +37,12 @@ module Components = struct
     | Func (pos, kwargs, reqs, (l, res)) -> 
        List.fold_right (fun (l, a) r -> Location.join l r) pos 
          (SMap.fold (fun k (l, a) r -> Location.join l r) kwargs l)
-    | Object o -> SMap.fold (fun _ (l, _) locs -> Location.join l locs) o Location.empty
+    | Object (tagged, untagged) -> 
+       let locfields _ o fs =
+         SMap.fold (fun _ (l, _) locs -> Location.join l locs) o fs in
+       SMap.fold locfields tagged (match untagged with
+       | Some o -> locfields () o Location.empty
+       | None -> Location.empty)
     | Base (l, _, _, ts) -> l
 
   let change_locations l' = function
@@ -45,7 +51,10 @@ module Components = struct
              SMap.map (fun (l, a) -> (l', a)) kwargs,
              reqs,
              (l', res))
-    | Object o -> Object (SMap.map (fun (l, a) -> (l', a)) o)
+    | Object (tagged, untagged) -> 
+       let mapfields o = SMap.map (fun (l, a) -> (l', a)) o in
+       Object (SMap.map mapfields tagged, 
+               match untagged with Some o -> Some (mapfields o) | None -> None)
     | Base (l, s, td, args) -> Base (l', s, td, args)
 
   let pmap f pol = function
@@ -54,7 +63,10 @@ module Components = struct
              SMap.map (fun (l, a) -> (l, f (polneg pol) a)) kwargs,
              reqs,
              (l, f pol res))
-    | Object o -> Object (SMap.map (fun (l, x) -> (l, f pol x)) o)
+    | Object (tagged, untagged) -> 
+       let mapobj o = SMap.map (fun (l, x) -> (l, f pol x)) o in
+       Object (SMap.map mapobj tagged,
+               match untagged with Some o -> Some (mapobj o) | None -> None)
     | Base (l, s, td, args) -> Base (l, s, td, List.map (function
       | APos t -> APos (f pol t)
       | ANeg t -> ANeg (f (polneg pol) t)
@@ -67,7 +79,11 @@ module Components = struct
          (SMap.fold (fun k (l, a) r -> f (polneg pol) a r) kwargs
             (f pol res x))
 
-    | Object o -> SMap.fold (fun k (l, t) x -> f pol t x) o x
+    | Object (tagged, untagged) -> 
+       let foldobj _ o x = SMap.fold (fun k (l, t) x -> f pol t x) o x in
+       SMap.fold foldobj tagged (match untagged with
+       | Some o -> foldobj () o x
+       | None -> x)
     | Base (l, s, td, args) -> List.fold_right (fun arg x -> match arg with
       | APos t -> f pol t x
       | ANeg t -> f (polneg pol) t x
@@ -113,18 +129,41 @@ module Components = struct
              SMap.merge req_merge reqs reqs',
              (Location.join l l', f pol res res'))
 
-    | Object x, Object y, Pos ->
-       Object (SMap.merge (fun k x y ->
+    | Object (xtagged, xuntagged), Object (ytagged, yuntagged), Pos ->
+       let join_objs x y = SMap.merge (fun k x y ->
          match x, y with (* lub takes intersection of fields *)
          | Some (lx, x), Some (ly, y) -> Some (Location.join lx ly, f Pos x y)
-         | _, _ -> None) x y)
-    | Object x, Object y, Neg ->
-       Object (SMap.merge (fun k x y ->
+         | _, _ -> None) x y in
+       let tagged = SMap.merge (fun k x y ->
+         match x, y with (* lub takes union of tags *)
+         | Some x, Some y -> Some (join_objs x y)
+         | None, a | a, None -> a) xtagged ytagged in
+       let untagged = match xuntagged, yuntagged with
+         | Some x, Some y -> Some (join_objs x y)
+         | None, a | a, None -> a in
+       Object (tagged, untagged)
+
+    | Object (xtagged, xuntagged), Object (ytagged, yuntagged), Neg ->
+       let meet_objs x y = SMap.merge (fun k x y ->
          match x, y with (* glb takes union of fields *)
          | Some (lx, x), Some (ly, y) -> Some (Location.join lx ly, f Neg x y)
          | Some a, None
          | None, Some a -> Some a
-         | None, None -> None) x y)
+         | None, None -> None) x y in
+       let tagged = SMap.merge (fun k x y ->
+         match x, y with (* glb takes intersection of tags *)
+         | None, _ | _, None -> None
+         | Some x, Some y -> Some (meet_objs x y)) xtagged ytagged in
+       let untagged = match xuntagged, yuntagged with
+         | None, _ | _, None -> None
+         | Some x, Some y -> Some (
+            (* should be the glb of all tags that were removed *)
+            meet_objs x y
+            |> SMap.fold (fun tag a o ->
+              if SMap.mem tag tagged then o else meet_objs a o) xtagged
+            |> SMap.fold (fun tag a o ->
+              if SMap.mem tag tagged then o else meet_objs a o) ytagged) in
+       Object (tagged, untagged)
 
     | Base (l, s, td, args), Base (l', s', td', args'), pol when s = s' ->
        Base (Location.join l l', s, td, List.map2 (fun a a' -> match a, a' with
@@ -152,12 +191,25 @@ module Components = struct
        f Pos res res' |> req_cmp |> kw_cmp |>
            List.fold_right2 (fun (l, x) (l, y) r -> f Neg x y @ r) pos pos'
 
-    | Object ox, Object oy -> 
-       SMap.fold (fun k (yl, yk) r -> 
-         if SMap.mem k ox then
-           let (xl, xk) = SMap.find k ox in
-           f Pos xk yk @ r
-         else [locations x, yl, Missing_field k] @ r) oy []
+    | Object (xtagged, xuntagged), Object (ytagged, yuntagged) -> 
+       let lte_obj ox oy r =
+         SMap.fold (fun k (yl, yk) r -> 
+           if SMap.mem k ox then
+             let (xl, xk) = SMap.find k ox in
+             f Pos xk yk @ r
+           else [locations x, yl, Missing_field k] @ r) oy r in
+       []
+       |> SMap.fold (fun tag ox r ->
+         match SMap.find tag ytagged with
+         | oy -> lte_obj ox oy r
+         | exception Not_found ->
+            match yuntagged with
+            | Some oy -> lte_obj ox oy r
+            | None -> [locations x, locations y, Missing_case (Some tag)] @ r) xtagged
+       |> (fun r -> match xuntagged, yuntagged with
+         | Some ox, Some oy -> lte_obj ox oy r
+         | None, _ -> r
+         | Some ox, None -> [locations x, locations y, Missing_case None] @ r)
 
     | Base (l, s, td, args), Base (l', s', td', args') when s = s' ->
        List.fold_right2 (fun arg arg' r -> (match arg, arg' with
@@ -187,7 +239,14 @@ module Components = struct
        List.mapi (fun i (l, a) -> (string_of_int i, a)) pos @
          (SMap.bindings kwargs |> List.map (fun (k, (l, a)) -> (Symbol.to_string k, a))) @
          ["res", res]
-    | Object o -> List.map (fun (k, (_, v)) -> (Symbol.to_string k, v)) (SMap.bindings o)
+    | Object (tagged, untagged) -> 
+       let list_obj p o r =
+         List.map (fun (k, (_, v)) -> (p ^ Symbol.to_string k, v)) (SMap.bindings o) @ r in
+       SMap.fold (fun tag o r ->
+         list_obj (Symbol.to_string tag ^ "/") o r) tagged
+         (match untagged with
+         | None -> []
+         | Some o -> list_obj "" o [])
     | Base (l, s, td, args) -> args |> List.mapi (fun i arg -> match arg with
       | APos t -> [string_of_int i ^ "+", t]
       | ANeg t -> [string_of_int i ^ "-", t]
@@ -361,7 +420,17 @@ let ty_fun pos kwargs res loc = Components.Func (
   SMap.map (fun (a, req) -> (Location.one loc, a loc)) kwargs,
   SMap.filter (fun k (a, req) -> req) kwargs |> SMap.map (fun _ -> ()),
   (Location.one loc, res loc))
-let ty_obj o loc = Components.Object (SMap.map (fun x -> (Location.one loc, x loc)) o)
+let ty_obj_cases tag def loc =
+  let obj o = SMap.map (fun x -> (Location.one loc, x loc)) o in
+  Components.Object (
+    SMap.map obj tag,
+    match def with Some o -> Some (obj o) | None -> None)
+let ty_obj_tag t o loc =
+  let obj = SMap.map (fun x -> (Location.one loc, x loc)) o in
+  match t with
+  | Some t -> Components.Object (SMap.singleton t obj, None)
+  | None -> Components.Object (SMap.empty, Some obj)
+let ty_obj o loc = ty_obj_tag None o loc
 let ty_obj_l o loc =
   let o = List.fold_left (fun o (v, t) -> SMap.add v t o) SMap.empty o in
   ty_obj o loc
