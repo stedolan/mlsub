@@ -18,6 +18,7 @@ type t =
   | Unbound of binding_sort * Location.t * Symbol.t
   | Rebound of binding_sort * Location.t * Symbol.t * Location.t
   | Partially_bound of binding_sort * Location.t * Symbol.t
+  | Unused_case of Location.t
   | Internal of string
   | Unknown
   | TooMany
@@ -106,6 +107,9 @@ let print ppf =
      p "%a: previous definition of %s" ploc l (Symbol.to_string v)
   | Partially_bound (sort, l, v) ->
      p "%a: The %s '%s' is not bound in all cases" ploc l (psort sort) (Symbol.to_string v)
+  | Unused_case l ->
+     p "%a: This case never matches" ploc l;
+     psource ppf l
   | Internal s ->
      p "Internal error: %s" s
   | Unknown ->

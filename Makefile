@@ -1,6 +1,6 @@
 .PHONY: all
 all:
-	ocamlbuild -r -cflag -bin-annot -cflag -g -lflag -g -pkg menhirLib -pkg str -use-menhir -yaccflag --explain -yaccflag --table main.byte
+	ocamlbuild -no-hygiene -r -cflag -bin-annot -cflag -g -lflag -g -pkg menhirLib -pkg str -use-menhir -yaccflag --explain -yaccflag --table main.byte
 
 
 build-js:

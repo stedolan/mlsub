@@ -28,7 +28,7 @@ and rexp =
   | If of exp * exp * exp
   | Nil
   | Cons of exp * exp
-  | Match of exp list * (pat list * exp) list
+  | Match of exp list * (pat list located * exp) list
   | Object of Symbol.t option * (Symbol.t * exp) list
   | GetField of exp * Symbol.t
 

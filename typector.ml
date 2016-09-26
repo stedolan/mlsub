@@ -151,18 +151,14 @@ module Components = struct
          | None, Some a -> Some a
          | None, None -> None) x y in
        let tagged = SMap.merge (fun k x y ->
-         match x, y with (* glb takes intersection of tags *)
-         | None, _ | _, None -> None
-         | Some x, Some y -> Some (meet_objs x y)) xtagged ytagged in
+         match (x, xuntagged), (y, yuntagged) with (* glb takes intersection of tags *)
+         | ((Some x, _) | (None, Some x)),
+           ((Some y, _) | (None, Some y)) ->
+            Some (meet_objs x y)
+         | ((None, None), _) | (_, (None, None)) -> None) xtagged ytagged in
        let untagged = match xuntagged, yuntagged with
          | None, _ | _, None -> None
-         | Some x, Some y -> Some (
-            (* should be the glb of all tags that were removed *)
-            meet_objs x y
-            |> SMap.fold (fun tag a o ->
-              if SMap.mem tag tagged then o else meet_objs a o) xtagged
-            |> SMap.fold (fun tag a o ->
-              if SMap.mem tag tagged then o else meet_objs a o) ytagged) in
+         | Some x, Some y -> Some (meet_objs x y) in
        Object (tagged, untagged)
 
     | Base (l, s, td, args), Base (l', s', td', args'), pol when s = s' ->
@@ -335,24 +331,35 @@ let print_comp pb ctx pr ppf = let open Components in function
         | Some (l, a), Some () -> Some (Some (Symbol.to_string k), Some a)
         | None, Some () -> Some (Some (Symbol.to_string k), None)
         | None, None -> None) kwargs reqs |> SMap.bindings |> List.map (fun (a, b) -> b)) in
+     let need_paren = match args with [None, Some _] -> false | _ -> true in
      let pr_arg ppf = function
        | None, None -> ()
-       | None, Some t -> Format.fprintf ppf "%a" (pr false) t
-       | Some name, Some t -> Format.fprintf ppf "%s : %a" name (pr false) t
+       | None, Some t -> Format.fprintf ppf "%a" (pr need_paren) t
+       | Some name, Some t -> Format.fprintf ppf "%s : %a" name (pr need_paren) t
        | Some name, None -> Format.fprintf ppf "%s : <err>" name in
      let comma ppf () = Format.fprintf ppf ",@ " in
-     let need_paren = match args with [None, Some _] -> false | _ -> true in
      Format.fprintf ppf (if pb then "%a -> %a" else "(%a -> %a)")
        (printp need_paren (Format.pp_print_list ~pp_sep:comma pr_arg)) args
        (pr false) res
-  | Object _ as o ->
+  | Object (tagged, untagged) ->
      let rec pfield ppf = function
        | [] -> ()
-       | [f, x] ->
-          Format.fprintf ppf "%s :@ %a" f (pr false) x
-       | (f, x) :: xs ->
-          Format.fprintf ppf "%s :@ %a,@ %a" f (pr false) x pfield xs in
-     Format.fprintf ppf "{%a}" pfield (list_fields o)
+       | [f, (_,x)] ->
+          Format.fprintf ppf "%s :@ %a" (Symbol.to_string f) (pr false) x
+       | (f, (_,x)) :: xs ->
+          Format.fprintf ppf "%s :@ %a,@ %a" (Symbol.to_string f) (pr false) x pfield xs in
+     let ptagged etag ppf (tag, o) =
+       let tag = match tag with None -> etag | Some t -> "." ^ Symbol.to_string t in
+       match SMap.bindings o with
+       | [] -> Format.fprintf ppf "%s" tag
+       | bs -> Format.fprintf ppf "%s{%a}" tag pfield bs in
+     let cases =
+       (SMap.bindings tagged |> List.map (fun (tag, o) -> (Some tag, o))) @
+       (match untagged with Some o -> [None, o] | None -> []) in
+     (match cases with
+     | [] -> Format.fprintf ppf "nothing_obj"
+     | [c] -> ptagged "" ppf c
+     | cs -> Format.fprintf ppf (if pb then "%a" else "(%a)") (Format.pp_print_list ~pp_sep:(fun ppf () -> Format.fprintf ppf "%s" " | ") (ptagged "..")) cs)
   | Base (l, s, td, []) ->
      Format.fprintf ppf "%s" (Symbol.to_string (name_of_stamp ctx s))
   | Base (l, s, (TAlias (_, params, _) | TOpaque (_, params)), args) ->

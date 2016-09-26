@@ -174,7 +174,7 @@ term_r:
     LBRACK; RBRACK; ARROW; onl; n = lambda_exp; onl;
     OR; x = IDENT; CONS; xs = IDENT; ARROW; onl; c = lambda_exp; onl; END
     { Match (e, n, x, xs, c) }*)
-| MATCH; e = separated_nonempty_list(COMMA, simple_exp); onl; c = separated_list(snl, case); END
+| MATCH; e = separated_nonempty_list(COMMA, simple_exp); snl; c = nonempty_list(case); END
     { Match (e, c) }
 | v = IDENT 
     { Var v }
@@ -248,16 +248,19 @@ pat_r:
     { PObject(None, o) }
 | p1 = pat; OR; p2 = pat
     { PAlt (p1, p2) }
+| LPAR; p = pat_r; RPAR
+    { p }
 | n = INT
     { PInt n }
 
 pat:
 | p = located(nofail(pat_r)) { p }
 
-case: (* what's a good syntax here? snl for onl? *)
-| CASE; p = separated_nonempty_list(COMMA, pat); snl; e = lambda_exp
-    { p, e }
+case_r: (* what's a good syntax here? snl for onl? *)
+| p = separated_nonempty_list(COMMA, pat); 
+    { p }
 
+case: CASE; ps = located(case_r); snl; e = lambda_exp; snl { ps, e }
 
 subsumption:
 | t1 = typeterm; SUBSUME; t2 = typeterm; EOF { (t1, t2) }
