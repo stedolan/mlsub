@@ -156,6 +156,7 @@ let ty_binarith = ty_fun2 ty_int ty_int ty_int
 let predefined =
   ["p", ty_fun ty_int ty_unit;
    "error", ty_fun ty_unit ty_zero;
+   "assert", ty_fun ty_bool ty_zero;
    "(=)", ty_polycmp;
    "(==)", ty_polycmp;
    "(<)", ty_polycmp;
