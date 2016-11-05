@@ -1,14 +1,13 @@
 module type Locator = sig
-  val pos : Lexing.position * Lexing.position -> Location.t
+  val pos : int * int -> Location.t
 end
 
-open Lexing
 open Location
 
 module ReadSource (Src : sig val src : Location.source end) = struct
 
 module Loc : Location.Locator = struct
-  let pos (p, p') = Location.Loc (Src.src, 
+  let pos (p, p') = Location.Loc (Src.src,
      p.Lexing.pos_cnum, p'.Lexing.pos_cnum)
 end
 
@@ -17,13 +16,13 @@ module P = Parser.Make(Loc)
 module I = P.MenhirInterpreter
 
 type token =
-| Token of P.token * Lexing.position * Lexing.position * L.action
+| Token of P.token * int * int * L.action
 
 type lstack =
 | Empty
 | Nest of L.state * P.token * Location.t * lstack
 
-let buf = Lexing.from_string Src.src.contents
+let buf = Sedlexing.Utf8.from_string Src.src.contents
 
 let get_state = function
 | Empty -> L.Toplevel
@@ -32,16 +31,18 @@ let get_state = function
 let read_token state =
   match L.lex (get_state state) buf with
   | (token, action, errs') ->
-     Token (token, buf.lex_start_p, buf.lex_curr_p, action)
+     Token (token, Sedlexing.lexeme_start buf, Sedlexing.lexeme_end buf, action)
   | exception L.Bad_token ->
-     raise (Error.Fatal (Error.Syntax (Loc.pos (buf.lex_start_p, buf.lex_curr_p))))
+     raise (Error.Fatal (Error.Syntax (Location.Loc (Src.src, Sedlexing.lexeme_start buf, Sedlexing.lexeme_end buf))))
 
-let tokloc (Token (_, s, e, _)) = Loc.pos (s, e)
+let tokloc (Token (_, s, e, _)) = Location.Loc (Src.src, s, e)
+
+let pos s e = Location.Loc (Src.src, s, e)
 
 let accept_token lstack (Token (tok, startpos, endpos, action) as fulltok) =
   match action, lstack with
   | L.Nop, lstack -> lstack
-  | L.Push s, lstack -> Nest (s, tok, Loc.pos (startpos, endpos), lstack)
+  | L.Push s, lstack -> Nest (s, tok, pos startpos endpos, lstack)
   | L.Pop s', Nest (s, _, _, lstack) when s = s' -> lstack
   | L.Pop s', Empty ->
      Error.(fatal (Unmatched_closing_delim (tokloc fulltok)))
@@ -50,11 +51,11 @@ let accept_token lstack (Token (tok, startpos, endpos, action) as fulltok) =
 
 
 let rec skip_bad_tokens startpos lstack = function
-  | Token (P.EOF, _, endpos, _) -> Error.(fatal (Syntax (Loc.pos (startpos, endpos))))
+  | Token (P.EOF, _, endpos, _) -> Error.(fatal (Syntax (Location.Loc (Src.src, startpos, endpos))))
   | tok -> match accept_token lstack tok with
     | Empty ->
        let endpos = match tok with Token (_, _, endpos, _) -> endpos in
-       Error.(Syntax (Loc.pos (startpos, endpos)))
+       Error.(Syntax (pos startpos endpos))
     | lstack -> skip_bad_tokens startpos lstack (read_token lstack)
 
 let skip_bad_tokens tok =
@@ -65,6 +66,7 @@ let finish_lexer v = function
 | _ -> Error.internal "lexer stack nonempty after parser completed"
 
 
+let to_lexpos n = Lexing.{ pos_fname = ""; pos_cnum = n; pos_lnum = 0; pos_bol = 0  }
 
 let rec run_parser err lstack tok = function
   | I.Accepted v -> finish_lexer v lstack
@@ -72,7 +74,7 @@ let rec run_parser err lstack tok = function
   | I.InputNeeded _ as chk ->
      let lstack = accept_token lstack tok in
      let (Token (t, startpos, endpos, _) as tok) = read_token lstack in
-     run_parser err lstack tok (I.offer chk (t, startpos, endpos))
+     run_parser err lstack tok (I.offer chk (t, to_lexpos startpos, to_lexpos endpos))
   | (I.Shifting _ | I.AboutToReduce _) as chk ->
      run_parser err lstack tok (I.resume chk)
   | I.HandlingError _ as chk ->
@@ -82,7 +84,7 @@ let rec run_parser err lstack tok = function
        | (I.HandlingError _ | I.Shifting _ | I.AboutToReduce _) as chk -> handle chk
        | I.InputNeeded _ as chk ->
           let (Token (t, startpos, endpos, _) as tok) = read_token lstack in
-          run_parser err lstack tok (I.offer chk (t, startpos, endpos))
+          run_parser err lstack tok (I.offer chk (t, to_lexpos startpos, to_lexpos endpos))
        | I.Accepted v -> finish_lexer v lstack
        | I.Rejected -> Error.(raise (Fatal (Syntax (tokloc tok)))) in
      handle chk
@@ -90,12 +92,11 @@ let rec run_parser err lstack tok = function
 let parse err =
   let lstate = Empty in
   let (Token (t, s, e, _) as tok) = read_token lstate in
-  let p = match P.Incremental.modlist s with 
-    | I.InputNeeded _ as chk -> I.offer chk (t, s, e)
+  let p = match P.Incremental.modlist (to_lexpos s) with 
+    | I.InputNeeded _ as chk -> I.offer chk (t, to_lexpos s, to_lexpos e)
     | _ -> Error.internal "parser initialisation error" in
   run_parser err Empty tok p 
 end
-
 
 let parse_modlist err src =
   let module R = ReadSource (struct let src = src end) in
