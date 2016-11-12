@@ -349,10 +349,10 @@ let print_comp pb ctx pr ppf = let open Components in function
        | (f, (_,x)) :: xs ->
           Format.fprintf ppf "%s :@ %a,@ %a" (Symbol.to_string f) (pr false) x pfield xs in
      let ptagged etag ppf (tag, o) =
-       let tag = match tag with None -> etag | Some t -> "." ^ Symbol.to_string t in
+       let tag = match tag with None -> etag | Some t -> "'" ^ Symbol.to_string t in
        match SMap.bindings o with
        | [] -> Format.fprintf ppf "%s" tag
-       | bs -> Format.fprintf ppf "%s{%a}" tag pfield bs in
+       | bs -> Format.fprintf ppf "%s(%a)" tag pfield bs in
      let cases =
        (SMap.bindings tagged |> List.map (fun (tag, o) -> (Some tag, o))) @
        (match untagged with Some o -> [None, o] | None -> []) in

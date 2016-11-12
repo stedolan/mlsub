@@ -473,11 +473,12 @@ let ctx0 =
   |> add_opaque_type () (Symbol.intern "int") []
   |> add_opaque_type () (Symbol.intern "unit") []
   |> add_opaque_type () (Symbol.intern "bool") []
+  |> add_opaque_type () (Symbol.intern "string") []
   |> add_opaque_type () (Symbol.intern "list") [TParam (Some VPos, Symbol.intern "A")]
 
-let (ty_int, ty_unit, ty_bool) =
+let (ty_int, ty_unit, ty_bool, ty_string) =
   let f s loc = Typector.ty_named' ctx0 (Symbol.intern s) [] loc in
-  (f "int", f "unit", f "bool")
+  (f "int", f "unit", f "bool", f "string")
 
 let ty_list t loc =
   Typector.ty_named' ctx0 (Symbol.intern "list") [APos (t loc)] loc
@@ -629,6 +630,9 @@ and typecheck' ctx err gamma loc exp = match exp with
 
   | Int n ->
      { environment = SMap.empty; expr = Types.cons Pos (ty_int loc) }
+
+  | String s ->
+     { environment = SMap.empty; expr = Types.cons Pos (ty_string loc) }
 
   | Bool b ->
      { environment = SMap.empty; expr = Types.cons Pos (ty_bool loc) }

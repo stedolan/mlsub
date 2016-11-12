@@ -90,10 +90,10 @@ module TypeLat = struct
     | LUnexpanded t -> TCons t
     | LExpanded t -> ty_add pol (List.map (fun t -> TCons t) t)
 
-  let change_locations l = function
+  let change_locations l = fun x -> x (* function
     | LZero -> LZero
     | LUnexpanded t -> LUnexpanded (Components.change_locations l t)
-    | LExpanded t -> LExpanded (List.map (Components.change_locations l) t)
+    | LExpanded t -> LExpanded (List.map (Components.change_locations l) t)*)
 end
 
 

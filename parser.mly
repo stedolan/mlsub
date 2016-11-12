@@ -1,12 +1,13 @@
 %token <Symbol.t> IDENT
 %token <int> INT
+%token <string> STRING
 
 %token EOF NL
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
-%token DEF DO END CONS MATCH CASE
-%token TYPE REC ANY NOTHING ARROW
-%token COMMA SEMI COLON DOT AND OR EQUALS UNDER
-%token LET TRUE FALSE IF THEN ELSE
+%token DEF CONS MATCH
+%token TYPE REC ANY NOTHING ARROW DARROW
+%token COMMA SEMI COLON DOT AND OR EQUALS UNDER SQUOT
+%token LET TRUE FALSE IF ELSE
 %token EQEQUALS LT GT LTE GTE PLUS MINUS
 %token SUBSUME
 
@@ -23,6 +24,10 @@
 %left PLUS
 %left MINUS
 %right CONS
+
+
+%right LPAR
+
 
 %{
   open Variance
@@ -47,7 +52,7 @@
 %inline nofail(X): e = X { Some e }
 
 prog:
- e = lambda_exp; EOF { e }
+ e = exp; EOF { e }
 
 %inline onl: NL* { () }
 
@@ -68,7 +73,7 @@ modlist:
 | onl; e = sep_list(snl, located(moditem));  EOF { e }
 
 moditem:
-| LET; v = IDENT; EQUALS; onl; e = lambda_exp { MLet (v, e) }
+| LET; v = IDENT; EQUALS; onl; e = exp { MLet (v, e) }
 | DEF; f = IDENT; LPAR; p = params; RPAR; e = funbody { MDef (f, p, e) }
 | TYPE; n = IDENT; args = loption(delimited(LBRACK, 
                             separated_nonempty_list(COMMA, typeparam), RBRACK));
@@ -78,46 +83,47 @@ moditem:
                             separated_nonempty_list(COMMA, typeparam), RBRACK));
     { MOpaqueType (n, args) }
 
-funbody: e = located(mayfail(funbody_r)) { e }
-funbody_r:
-| e = funbody_code_r { e }
-| COLON; t = typeterm; e = funbody_code { Typed (e, t) }
+(*
+FIXME: allow def f(x) { e }
 
 %inline funbody_code: e = located(mayfail(funbody_code_r)) { e }
 funbody_code_r:
 | EQUALS; onl; e = lambda_exp_r { e }
 | DO; e = block_r; END { e }
+*)
 
-(* blocks contain at least one expression and eat surrounding newlines *)
-block: e = located(mayfail(block_r)) { e }
-block_r:
-| onl; e = block_exp_r
-    { e }
-
-%inline block_exp: e = located(nofail(block_exp_r)) { e }
-block_exp_r:
-| LET; v = IDENT; EQUALS; onl; e1 = lambda_exp; snl; e2 = block_exp
-    { Let (v, e1, e2) }
-| e1 = lambda_exp; snl; e2 = block_exp
-    { Seq (e1, e2) }
-| e1 = lambda_exp; onl; e2 = located(nofail(terminating_semi)); onl
-    { Seq (e1, e2) }
-| e = lambda_exp_r; onl
-    { e }
-
-%inline terminating_semi: SEMI { Unit }
+funbody: e = located(mayfail(funbody_r)) { e }
+funbody_r:
+| EQUALS; onl; e = exp_r { e }
+| COLON; t = typeterm; EQUALS; onl; e = exp { Typed (e, t) }
 
 
-%inline lambda_exp: e = located(nofail(lambda_exp_r)) { e }
-lambda_exp_r:
-| LT; ps = params; GT; onl; e = lambda_exp
+%inline exp: e = located(mayfail(exp_r)) { e }
+exp_r:
+| LT; ps = params; GT; onl; e = exp
     { Lambda (ps, e) }
-| DO; e = block_r; END
-    { e }
 | e = simple_exp_r
     { e }
 
 
+
+
+
+block: e = located(mayfail(block_r)) { e }
+block_r: LBRACE; onl; e = block_body_r; RBRACE { e }
+
+%inline terminating_semi: SEMI { Unit }
+(* block bodies contain at least one expression and eat trailing newlines *)
+block_body: e = located(mayfail(block_body_r)) { e }
+block_body_r:
+| LET; v = IDENT; EQUALS; onl; e1 = exp; snl; e2 = block_body
+    { Let (v, e1, e2) }
+| e1 = exp; snl; e2 = block_body
+    { Seq (e1, e2) }
+| e1 = exp; onl; e2 = located(nofail(terminating_semi)); onl
+    { Seq (e1, e2) }
+| e = exp_r; onl
+    { e }
 
 params: p = separated_list(COMMA, located(paramtype)) { p }
 
@@ -136,9 +142,9 @@ param:
     { Popt_keyword (v, e) }
 
 argument:
-| e = lambda_exp
+| e = exp
     { Apositional e }
-| v = IDENT; EQUALS; e = lambda_exp
+| v = IDENT; EQUALS; e = exp
     { Akeyword (v, e) }
 | v = IDENT; EQUALS;
     { Akeyword (v, (L.pos ($startpos(v), $endpos(v)), Some (Var v))) }
@@ -165,27 +171,23 @@ simple_exp:
 | PLUS     { "(+)" }
 | MINUS    { "(-)" }
 
-tag: DOT; t = IDENT { t }
+tag: SQUOT; t = IDENT { t }
 
 term_r:
-| IF; cond = simple_exp; THEN; tcase = block; ELSE; fcase = block; END
+| e = block_r
+    { e }
+| IF; cond = simple_exp; tcase = block; ELSE; fcase = block
     { If (cond, tcase, fcase) }
-(*| MATCH; e = simple_exp; WITH; onl;
-    LBRACK; RBRACK; ARROW; onl; n = lambda_exp; onl;
-    OR; x = IDENT; CONS; xs = IDENT; ARROW; onl; c = lambda_exp; onl; END
-    { Match (e, n, x, xs, c) }*)
-| MATCH; e = separated_nonempty_list(COMMA, simple_exp); snl; c = nonempty_list(case); END
+| MATCH; e = separated_nonempty_list(COMMA, simple_exp); LBRACE; onl; c = nonempty_list(case); RBRACE
     { Match (e, c) }
 | v = IDENT 
     { Var v }
-| LPAR; e = lambda_exp_r; RPAR
+(*| LPAR; e = lambda_exp_r; RPAR
     { e }
 | LPAR; e = lambda_exp; COLON; t = typeterm; RPAR
-    { Typed (e, t) }
+    { Typed (e, t) }*)
 | f = term; LPAR; x = separated_list(COMMA, located(argument)); RPAR
     { App (f, x) }
-| LPAR; RPAR
-    { Unit }
 | LBRACK; RBRACK
     { Nil }
 | LBRACK; e = nonemptylist_r; RBRACK
@@ -194,12 +196,12 @@ term_r:
     { GetField (e, f) }
 | i = INT
     { Int i }
-| t = tag
+| s = STRING
+    { String s }
+| t = tag %prec LPAR
     { Object (Some t, []) }
-| t = tag; LBRACE; o = separated_list(COMMA, objfield(lambda_exp)); RBRACE
-    { Object (Some t, o) }
-| LBRACE; o = separated_list(COMMA, objfield(lambda_exp)); RBRACE
-    { Object (None, o) }
+| t = ioption(tag); LPAR; o = separated_list(COMMA, objfield(exp)); RPAR
+    { Object (t, o) }
 | TRUE
     { Bool true }
 | FALSE
@@ -224,9 +226,9 @@ term:
 
 
 nonemptylist_r:
-| x = lambda_exp
+| x = exp
     { Cons(x, (let (l, _) = x in l, Some Nil)) }
-| x = lambda_exp; COMMA; xs = nonemptylist
+| x = exp; COMMA; xs = nonemptylist
     { Cons(x, xs) }
 
 %inline nonemptylist:
@@ -242,25 +244,21 @@ pat_r:
     { PVar v }
 | t = tag
     { PObject(Some t, []) }
-| t = tag; LBRACE; o = separated_list(COMMA, objfield_pat(pat)); RBRACE
+| t = tag; LPAR; o = separated_list(COMMA, objfield_pat(pat)); RPAR
     { PObject(Some t, o) }
-| LBRACE; o = separated_list(COMMA, objfield_pat(pat)); RBRACE
+| LPAR; o = separated_list(COMMA, objfield_pat(pat)); RPAR
     { PObject(None, o) }
 | p1 = pat; OR; p2 = pat
     { PAlt (p1, p2) }
-| LPAR; p = pat_r; RPAR
-    { p }
+(*| LPAR; p = pat_r; RPAR
+    { p }*)
 | n = INT
     { PInt n }
 
 pat:
 | p = located(nofail(pat_r)) { p }
 
-case_r: (* what's a good syntax here? snl for onl? *)
-| p = separated_nonempty_list(COMMA, pat); 
-    { p }
-
-case: CASE; ps = located(case_r); snl; e = lambda_exp; snl { ps, e }
+case: ps = located(separated_nonempty_list(COMMA, pat)); onl; DARROW; onl; e = exp; snl { ps, e }
 
 subsumption:
 | t1 = typeterm; SUBSUME; t2 = typeterm; EOF { (t1, t2) }

@@ -24,6 +24,7 @@ and rexp =
   | Typed of exp * Typector.typeterm
   | Unit
   | Int of int
+  | String of string
   | Bool of bool
   | If of exp * exp * exp
   | Nil
