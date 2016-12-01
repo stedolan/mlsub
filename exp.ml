@@ -36,6 +36,7 @@ and rexp =
 and exp = rexp option located
 
 and rpat =
+  | PNone
   | PWildcard
   | PVar of Symbol.t
   | PObject of Symbol.t option * (Symbol.t * pat) list

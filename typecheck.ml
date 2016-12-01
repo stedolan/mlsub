@@ -197,7 +197,7 @@ let combine_splits (vp, (p : pat_split)) (vq, (q : pat_split)) : state * pat_spl
   | PSObj _, PSInt _ -> failwith "incompatible patterns" in
   (ty_join_neg vp vq, split)
 
-
+(* FIXME: break into two functions? Maybe not because of PAlt? *)
 let rec split_cases (cases : case_matrix) : state * pat_split =
   match cases with
   | [] -> (Types.zero Neg, PSNone)
@@ -207,6 +207,8 @@ let rec split_cases (cases : case_matrix) : state * pat_split =
      failwith "internal error: split but no columns"
   | ((loc, Some p) :: ps, vars, e) :: cases ->
      match p with
+     | PNone ->
+        split_cases cases
      | PWildcard ->
         combine_splits (Types.zero Neg, PSAny [ps, vars, e]) (split_cases cases)
      | PVar x ->
@@ -277,46 +279,69 @@ let rec dump_decision_tree pfx cases =
 
 type pat_desc =
  { pvar : state;
-   pcases : pat_type }
+   pcases : pat_type;
+   unhandled : pat }
 and fields = pat_desc SMap.t
 and pat_type =
   | PTAny
   | PTInt
-  | PTObj of fields SMap.t * fields option Lazy.t
+  | PTObj of fields SMap.t * fields option
 
 (* IDEA: separate PTObj into two cases:
      PTObj of fields
      PTVar of fields SMap.t * fields option Lazy.t
    PTVar's default case is never opened, but may be used in merge_desc.
    pat_desc_to_type always ignores it *)
-   
+
+
+let mk_pat : rpat -> pat =
+  fun p -> Location.internal, Some p
+
+let rec rpat_is_empty = function
+  | PNone -> true
+  | PWildcard
+  | PVar _
+  | PInt _ -> false
+  | PAlt (p1, p2) -> pat_is_empty p1 && pat_is_empty p2
+  | PObject (_, fields) ->
+     List.exists (fun (_, p) -> pat_is_empty p) fields
+and pat_is_empty = function
+  | _, Some p -> rpat_is_empty p
+  | loc, None -> failwith "undefined pattern"
 
 (* take the meet of two pat_descs,
    but with extra error checking
-   (e.g. complain about int ⊓ { foo : int } rather than producing a meet type) *)
-let rec merge_desc s { pvar ; pcases } { pvar = pvar'; pcases = pcases' } =
-  { pvar = ty_join_neg pvar pvar';
-    pcases = merge_desctypes s pcases pcases' }
-and merge_desctypes s pcases pcases' = match pcases, pcases' with
-  | PTAny, PTAny -> PTAny
-  | PTAny, t | t, PTAny -> t
-  | PTInt, PTInt -> PTInt
-  | PTInt, PTObj _ | PTObj _, PTInt -> failwith "obj/int mismatch"
-  | PTObj (tags, def), PTObj (tags', def') ->
-     let tags = SMap.merge (fun tag pat pat' -> match pat, def, pat', def' with
-       | Some obj, _, Some obj', _ -> Some (merge_fields (s ^ ", tag: " ^ Symbol.to_string tag) obj obj')
+   (e.g. complain about int ⊓ { foo : int } rather than producing a meet type) 
+*)
+let rec merge_desc s desc desc' =
+  let pcases, unhandled = match 
+      desc.pcases, desc.unhandled, 
+      desc'.pcases, desc'.unhandled with
+    (* FIXME: is it possible to have PTAny, ~PNone ? *)
+  | PTAny, u, PTAny, u' -> PTAny, mk_pat (PAlt (u, u')) 
+  | PTAny, u, t', u' -> t', mk_pat (PAlt (u, u')) 
+  | t, u, PTAny, u' -> t, mk_pat (PAlt (u, u'))
+  | PTInt, u, PTInt, u' -> PTInt, mk_pat (PAlt (u, u'))
+  | PTInt, _, PTObj _, _ | PTObj _, _, PTInt, _ -> failwith "obj/int mismatch"
+  | PTObj (tags, def), u, PTObj (tags', def'), u' ->
+     let tags = SMap.merge (fun tag pat pat' -> 
+       match pat, def, pat', def' with
+       | Some obj, _, Some obj', _ ->
+          Some (merge_fields (s ^ ", tag: " ^ Symbol.to_string tag) obj obj')
        | None, def, Some obj, _
        | Some obj, _, None, def ->
-          (match Lazy.force def with
+          (match def with
           | Some def ->
              Some (merge_fields (s ^ ", dtag: " ^ Symbol.to_string tag) obj def)
           | None ->
              failwith ("nonexhaustive because tag " ^ Symbol.to_string tag ^ " unmatched in " ^ s))
        | None, _, None, _ -> None) tags tags' in
-     let def = lazy (match Lazy.force def, Lazy.force def' with
+     let def = (match def, def' with
        | d, None | None, d -> None
-       | Some def, Some def' -> Some (merge_fields s def def')) in
-     PTObj (tags, def)
+       | Some def, Some def' -> Some (merge_fields (s ^ ", def") def def')) in
+     PTObj (tags, def), mk_pat PNone in
+  { pvar = ty_join_neg desc.pvar desc'.pvar;
+    pcases; unhandled }
 and merge_fields s obj obj' =
   SMap.merge (fun field pat pat' -> match pat, pat' with
     | Some pat, Some pat' -> Some (merge_desc (s ^ ", field: " ^ Symbol.to_string field) pat pat')
@@ -330,17 +355,17 @@ and merge_fields s obj obj' =
   [(ps, e); ...] = more matching *)
 
 type match_desc = pat_desc list * scheme
-let rec merge_match_descs (desc : match_desc) (desc' : match_desc) : match_desc = match desc, desc' with
+let rec merge_match_descs s (desc : match_desc) (desc' : match_desc) : match_desc = match desc, desc' with
   | ([], e), ([], e') ->
      [], join_scheme e e'
   | ([], _), (_ :: _, _)
   | (_ :: _, _), ([], _) -> failwith "bad match length" (* FIXME impossible? checked where? *)
   | (p :: ps, e), (p' :: ps', e') ->
-     let (rs, re) = merge_match_descs (ps, e) (ps', e') in
-     (merge_desc "adsf" p p' :: rs), re
+     let (rs, re) = merge_match_descs (s ^ "/") (ps, e) (ps', e') in
+     (merge_desc (s ^ ":") p p' :: rs), re
 
 (* For what sort of values is this case matrix exhaustive, and what is the result type? *)
-let rec describe_cases (cases : case_matrix) : match_desc =
+let rec describe_cases s (cases : case_matrix) : match_desc =
   match cases with
   | [] -> failwith "nonexhaustive"
   | ([], vars, case) :: rest ->
@@ -353,15 +378,18 @@ let rec describe_cases (cases : case_matrix) : match_desc =
      | PSNone ->
         failwith "nonexhaustive2"
      | PSAny cases ->
-        let (rest, result) = describe_cases cases in
-        ({ pvar; pcases = PTAny} :: rest), result
+        let (rest, result) = describe_cases (s ^ "; _") cases in
+        ({ pvar; pcases = PTAny; unhandled = mk_pat PNone} :: rest), result
      | PSInt (ints, def) ->
         let (rest, result) =
           IntMap.fold (fun i cases desc ->
-            merge_match_descs (describe_cases cases) desc)
-            ints (describe_cases def) in
-        ({ pvar; pcases = PTInt} :: rest), result
+            merge_match_descs s (describe_cases (s ^ "; " ^ string_of_int i) cases) desc)
+            ints (describe_cases (s ^ "; i_") def) in
+        ({ pvar; pcases = PTInt; unhandled = mk_pat PNone} :: rest), result
      | PSObj (tags, def) ->
+        SMap.iter (fun k _ -> Printf.printf " %s" (Symbol.to_string k)) tags;
+        (match def with None -> () | Some _ -> Printf.printf " _");
+        Printf.printf "\n%!";
         (* FIXME: probably unsound *)
 
 (*
@@ -393,12 +421,12 @@ let rec describe_cases (cases : case_matrix) : match_desc =
           
           
 
-        let tags = SMap.map (fun (cases, fields) ->
-          describe_fields SMap.empty fields (describe_cases cases)) tags in
+        let tags = SMap.mapi (fun tag (cases, fields) ->
+          describe_fields SMap.empty fields (describe_cases (s ^ "; " ^ Symbol.to_string tag) cases)) tags in
         let def = match def with
           | None -> None
           | Some (cases, fields) ->
-             Some (describe_fields SMap.empty fields (describe_cases cases)) in
+             Some (describe_fields SMap.empty fields (describe_cases (s ^ "; _") cases)) in
         let (rest, result) =
           let res = 
             (* FIXME: is this sound? *)
@@ -409,11 +437,12 @@ let rec describe_cases (cases : case_matrix) : match_desc =
             else
               SMap.fold (fun tag (_, desc) acc ->
                 match acc with
-                | Some acc -> Some (merge_match_descs desc acc)
+                | Some acc -> Some (merge_match_descs (s ^ "." ^ Symbol.to_string tag) desc acc)
                 | None -> Some desc) tags None in
           match res with Some r -> r | None -> failwith "internal error: empty PSObj" in
         let def = match def with None -> None | Some (def, _) -> Some def in
-        ({ pvar; pcases = PTObj (SMap.map fst tags, lazy def)} :: rest), result
+        Printf.printf "done\n%!";
+        ({ pvar; pcases = PTObj (SMap.map fst tags, def); unhandled = mk_pat PNone} :: rest), result
 
 and describe_fields (acc : fields) fields (desc : match_desc) : fields * match_desc = match fields, desc with
   | [], d -> acc, d
@@ -427,6 +456,7 @@ let rec variables_bound_in_pat err : pat list -> Location.t SMap.t = function
   | (l, None) :: ps -> variables_bound_in_pat err ps
   | (l, Some p) :: ps -> 
      match p with
+     | PNone
      | PWildcard -> 
         variables_bound_in_pat err ps
      | PVar v ->
@@ -493,7 +523,7 @@ let rec pat_desc_to_type { pvar; pcases } =
      let t = 
        (* FIXME: laziness about def tag case *)
        if SMap.is_empty tags then
-         ty_obj_cases (SMap.map obj tags) (match Lazy.force def with Some o -> Some (obj o) | None -> None) Location.internal
+         ty_obj_cases (SMap.map obj tags) (match def with Some o -> Some (obj o) | None -> None) Location.internal
        else
          ty_obj_cases (SMap.map obj tags) None Location.internal in
      Types.cons Neg t)
@@ -689,7 +719,7 @@ and typecheck' ctx err gamma loc exp = match exp with
        pats, vars, case) in
      dump_decision_tree "" cases;
      Printf.printf "%!";
-     let (pats, result) = describe_cases cases in
+     let (pats, result) = describe_cases "" cases in
      cases |> List.iter (fun (_, _, { case_loc; case_used }) ->
        if not case_used then err (Error.Unused_case case_loc));
      let rec bind_pats scrs pats = match scrs, pats with
