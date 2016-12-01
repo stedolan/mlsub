@@ -176,7 +176,7 @@ tag: SQUOT; t = IDENT { t }
 term_r:
 | e = block_r
     { e }
-| IF; cond = simple_exp; tcase = block; ELSE; fcase = block
+| IF; cond = simple_exp; tcase = block; onl; ELSE; fcase = block
     { If (cond, tcase, fcase) }
 | MATCH; e = separated_nonempty_list(COMMA, simple_exp); LBRACE; onl; c = nonempty_list(case); RBRACE
     { Match (e, c) }
