@@ -250,6 +250,10 @@ pat_r:
     { PObject(None, o) }
 | p1 = pat; OR; p2 = pat
     { PAlt (p1, p2) }
+| p1 = pat; CONS; p2 = pat
+    { PCons (p1, p2) }
+| LBRACK; RBRACK
+    { PNil }
 (*| LPAR; p = pat_r; RPAR
     { p }*)
 | n = INT

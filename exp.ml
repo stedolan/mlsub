@@ -40,6 +40,8 @@ and rpat =
   | PWildcard
   | PVar of Symbol.t
   | PObject of Symbol.t option * (Symbol.t * pat) list
+  | PCons of pat * pat
+  | PNil
   | PInt of int
   | PAlt of pat * pat
 
