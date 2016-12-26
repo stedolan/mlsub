@@ -99,16 +99,6 @@ funbody_r:
 | e = block_r { e }
 | COLON; t = typeterm; e = block { Typed (e, t) }
 
-
-%inline exp: e = located(mayfail(exp_r)) { e }
-exp_r:
-| e = simple_exp_r
-    { e }
-
-
-
-
-
 block: e = located(mayfail(block_r)) { e }
 block_r: LBRACE; onl; e = block_body_r; RBRACE { e }
 
@@ -149,18 +139,16 @@ argument:
 | v = IDENT; EQUALS;
     { Akeyword (v, (L.pos ($startpos(v), $endpos(v)), Some (Var v))) }
 
-
-simple_exp_r:
-| e1 = simple_exp; op = binop; e2 = simple_exp
+%inline exp: e = located(nofail(exp_r)) { e }
+exp_r:
+| e1 = exp; op = binop; e2 = exp
     { App((L.pos ($startpos(op), $endpos(op)), Some (Var (Symbol.intern op))), [(L.pos ($startpos(e1), $endpos(e1)), Apositional e1); (L.pos ($startpos(e1), $endpos(e2)), Apositional e2)]) }
-| x = term; CONS; xs = simple_exp
+| x = term; CONS; xs = exp
     { Cons(x, xs) }
 | e = term_r
     { e }
 
-simple_exp:
-| e = located(nofail(simple_exp_r))
-    { e }
+
 
 %inline binop:
 | EQEQUALS { "(==)" }
@@ -177,9 +165,9 @@ term_r:
 (* ditch the LPAR; RPAR below? *)
 | LBRACE; LPAR; ps = params; RPAR; DARROW; onl; e = block_body; RBRACE
     { Lambda (ps, e) }
-| IF; cond = simple_exp; tcase = block; onl; ELSE; fcase = block
+| IF; cond = exp; tcase = block; onl; ELSE; fcase = block
     { If (cond, tcase, fcase) }
-| MATCH; e = separated_nonempty_list(COMMA, simple_exp); LBRACE; onl; c = nonempty_list(case); RBRACE
+| MATCH; e = separated_nonempty_list(COMMA, exp); LBRACE; onl; c = nonempty_list(case); RBRACE
     { Match (e, c) }
 | v = IDENT 
     { Var v }
