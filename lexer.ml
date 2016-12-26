@@ -87,6 +87,7 @@ let rec lex s buf =
 
   | "::"     -> tok CONS
   | "match"  -> tok MATCH
+  | "case"   -> tok CASE
 
   | id       -> tok (IDENT (Symbol.intern (lexeme buf)))
   | int      -> tok (INT (int_of_string (lexeme buf)))

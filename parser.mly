@@ -4,7 +4,7 @@
 
 %token EOF NL
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
-%token DEF CONS MATCH
+%token DEF CONS MATCH CASE
 %token TYPE REC ANY NOTHING ARROW DARROW
 %token COMMA SEMI COLON DOT AND OR EQUALS UNDER SQUOT
 %token LET TRUE FALSE IF ELSE
@@ -96,12 +96,12 @@ funbody: e = located(mayfail(funbody_r)) { e }
 funbody_r:
 | EQUALS; onl; e = exp_r { e }
 | COLON; t = typeterm; EQUALS; onl; e = exp { Typed (e, t) }
+| e = block_r { e }
+| COLON; t = typeterm; e = block { Typed (e, t) }
 
 
 %inline exp: e = located(mayfail(exp_r)) { e }
 exp_r:
-| LT; ps = params; GT; onl; e = exp
-    { Lambda (ps, e) }
 | e = simple_exp_r
     { e }
 
@@ -174,8 +174,9 @@ simple_exp:
 tag: SQUOT; t = IDENT { t }
 
 term_r:
-| e = block_r
-    { e }
+(* ditch the LPAR; RPAR below? *)
+| LBRACE; LPAR; ps = params; RPAR; DARROW; onl; e = block_body; RBRACE
+    { Lambda (ps, e) }
 | IF; cond = simple_exp; tcase = block; onl; ELSE; fcase = block
     { If (cond, tcase, fcase) }
 | MATCH; e = separated_nonempty_list(COMMA, simple_exp); LBRACE; onl; c = nonempty_list(case); RBRACE
@@ -262,7 +263,7 @@ pat_r:
 pat:
 | p = located(nofail(pat_r)) { p }
 
-case: ps = located(separated_nonempty_list(COMMA, pat)); onl; DARROW; onl; e = exp; snl { ps, e }
+case: CASE; ps = located(separated_nonempty_list(COMMA, pat)); onl; DARROW; onl; e = block_body { ps, e }
 
 subsumption:
 | t1 = typeterm; SUBSUME; t2 = typeterm; EOF { (t1, t2) }

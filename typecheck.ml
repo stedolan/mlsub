@@ -420,9 +420,9 @@ let rec describe_cases s (cases : case_matrix) : match_desc =
            merge_match_descs s (pd :: rest_nil, result_nil) (pd :: rest_cons, result_cons)
         | _ -> failwith "internal error on cons" end
      | PSObj (tags, def) ->
-        SMap.iter (fun k _ -> Printf.printf " %s" (Symbol.to_string k)) tags;
+        (*SMap.iter (fun k _ -> Printf.printf " %s" (Symbol.to_string k)) tags;
         (match def with None -> () | Some _ -> Printf.printf " _");
-        Printf.printf "\n%!";
+        Printf.printf "\n%!";*)
         (* FIXME: probably unsound *)
 
 (*
@@ -474,7 +474,7 @@ let rec describe_cases s (cases : case_matrix) : match_desc =
                 | None -> Some desc) tags None in
           match res with Some r -> r | None -> failwith "internal error: empty PSObj" in
         let def = match def with None -> None | Some (def, _) -> Some def in
-        Printf.printf "done\n%!";
+        (*Printf.printf "done\n%!";*)
         ({ pvar; pcases = PTObj (SMap.map fst tags, def); unhandled = mk_pat PNone} :: rest), result
 
 and describe_fields (acc : fields) fields (desc : match_desc) : fields * match_desc = match fields, desc with
