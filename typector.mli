@@ -1,15 +1,42 @@
 open Variance
 
-type 'a printer = Format.formatter -> 'a -> unit
-
 module SMap = Symbol.Map
 
+type conflict_reason =
+| Wrong_arity of int * int
+| Unknown_kwarg of Symbol.t
+| Missing_req_kwarg of Symbol.t
+| Missing_field of Symbol.t
+| Missing_case of Symbol.t option
+| Incompatible_type of [`Func | `Obj | `Base of Symbol.t] * [`Func | `Obj | `Base of Symbol.t]
 
 type conflict =
-  Location.set * Location.set * Error.conflict_reason
+  Location.set * Location.set * conflict_reason
+
+(* Types are defined only in terms of types
+   with lower stamps *)
+type stamp = private int
+
+type +'a tyarg =
+| APos of 'a
+| ANeg of 'a
+| ANegPos of 'a * 'a
+| ANone
 
 module Components : sig
-  type +'a t
+  type +'a objfields = (Location.set * 'a) SMap.t
+  type +'a t = private
+    | Func of (Location.set * 'a) list * (Location.set * 'a) SMap.t * unit SMap.t * (Location.set * 'a)
+    | Object of 'a objfields SMap.t * 'a objfields option
+    | Base of Location.set * stamp * typedef * 'a tyarg list
+
+  and +'a tybody =
+    | BParam of 'a
+    | BCons of 'a tybody t
+
+  and typedef =
+    | TAlias of Symbol.t * (variance * Symbol.t option) array * int tybody
+    | TOpaque of Symbol.t * (variance * Symbol.t option) array
 
   val cmp_component : 'a t -> 'b t -> bool
 
@@ -39,12 +66,6 @@ type typaram =
 | TNoParam
 
 
-type +'a tyarg =
-| APos of 'a
-| ANeg of 'a
-| ANegPos of 'a * 'a
-| ANone
-
 type +'a tyargterm =
 | VarSpec of 'a tyarg
 | VarUnspec of 'a
@@ -64,10 +85,6 @@ type typeterm =
 type +'a tybody =
 | BParam of 'a
 | BCons of 'a tybody Components.t
-
-(* Types are defined only in terms of types
-   with lower stamps *)
-type stamp = private int
 
 (* Stamp of builtin/fully-expanded types.
    Less than any other stamp. *)
@@ -99,8 +116,6 @@ val find_by_name :
 
 val name_of_stamp :
   context -> stamp -> Symbol.t
-
-val print_typeterm : context -> typeterm printer
 
 (* Constructing types *)
 

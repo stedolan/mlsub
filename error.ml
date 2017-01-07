@@ -1,10 +1,3 @@
-type conflict_reason =
-| Wrong_arity of int * int
-| Unknown_kwarg of Symbol.t
-| Missing_req_kwarg of Symbol.t
-| Missing_field of Symbol.t
-| Missing_case of Symbol.t option
-| Incompatible_type of [`Func | `Obj | `Base of Symbol.t] * [`Func | `Obj | `Base of Symbol.t]
 
 type binding_sort = [`Value | `Type]
 
@@ -14,11 +7,12 @@ type t =
   | Mismatched_closing_delim of Location.t * Location.t
   | Unexpected_eof of Location.t
 
-  | Conflict of Location.t * Location.set * Location.set * conflict_reason
+  | Conflict of Location.t * Location.set * Location.set * Typector.conflict_reason
   | Unbound of binding_sort * Location.t * Symbol.t
   | Rebound of binding_sort * Location.t * Symbol.t * Location.t
   | Partially_bound of binding_sort * Location.t * Symbol.t
   | Unused_case of Location.t
+  | Nonexhaustive_match of Location.t * Exp.pat list list
   | Internal of string
   | Unknown
   | TooMany
@@ -49,6 +43,7 @@ let print ppf =
      psource ppf l
 
   | Conflict (l, la, lb, reason) ->
+     let open Typector in
      let psort ppf = function
        | `Func -> Format.fprintf ppf "function"
        | `Obj -> Format.fprintf ppf "object"
@@ -110,6 +105,14 @@ let print ppf =
   | Unused_case l ->
      p "%a: This case never matches" ploc l;
      psource ppf l
+  | Nonexhaustive_match (l, cases) ->
+     let print_pats ppf pats =
+       Format.pp_print_list ~pp_sep:Printers.pp_comma Printers.pp_pat ppf pats in
+     let msg = match cases with
+       | [_] -> "This case is not handled:"
+       | _ -> "These cases are not handled:" in
+     p "%a: %s" ploc l msg;
+     List.iter (p "%a: @[%a@]" ploc l print_pats) cases
   | Internal s ->
      p "Internal error: %s" s
   | Unknown ->

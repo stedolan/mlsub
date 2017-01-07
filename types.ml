@@ -275,7 +275,7 @@ let print_automaton ctx diagram_name ppf (map : (string -> rawstate -> unit) -> 
       StateTbl.add dumped s s;
       let name = (match name with None -> "" | Some n -> n ^ ": ") in
       let ctor = s.cons |> TypeLat.pmap (fun _ _ -> TZero Neg) s.pol |> TypeLat.to_typeterm s.pol in
-      fprintf ppf "%a [label=\"%s%a (%d)\"];\n" pstate s name (Typector.print_typeterm ctx) ctor s.id;
+      fprintf ppf "%a [label=\"%s%a (%d)\"];\n" pstate s name (Printers.pp_typeterm ctx) ctor s.id;
       List.iter (fun (f, ss') -> 
         StateSet.iter ss'
           (fun s' -> 
