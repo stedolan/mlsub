@@ -17,9 +17,9 @@ let rec pp_pat ppf : Exp.pat -> unit = function
   | (_, Some pat) -> pp_rpat ppf pat
 
 and pp_rpat ppf = let open Exp in function
-  | PNone -> p ppf "??" (* FIXME *)
   | PWildcard -> p ppf "_"
-  | PVar v -> pp_sym ppf v
+  | PBind (v, (_, Some PWildcard)) -> pp_sym ppf v
+  | PBind (v, pat) -> p ppf "??" (* FIXME *)
   | PObject (tag, fields) ->
      let pp_tag ppf = function
        | None -> ()

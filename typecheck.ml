@@ -98,6 +98,25 @@ let env_join err loc = SMap.merge (fun k a b -> match a, b with
 let failure () =
   { environment = SMap.empty; expr = compile_type Typector.empty_context Pos (TZero Pos) }
 
+let unused _ =
+  compile_type Typector.empty_context Neg (TZero Neg)
+
+let ctx0 =
+  empty_context
+  |> add_opaque_type () (Symbol.intern "int") []
+  |> add_opaque_type () (Symbol.intern "unit") []
+  |> add_opaque_type () (Symbol.intern "bool") []
+  |> add_opaque_type () (Symbol.intern "string") []
+  |> add_opaque_type () (Symbol.intern "list") [TParam (Some VPos, Symbol.intern "A")]
+
+
+let (ty_int, ty_unit, ty_bool, ty_string) =
+  let f s loc = Typector.ty_named' ctx0 (Symbol.intern s) [] loc in
+  (f "int", f "unit", f "bool", f "string")
+
+let ty_list t loc =
+  Typector.ty_named' ctx0 (Symbol.intern "list") [APos (t loc)] loc
+
 
 
 
@@ -107,16 +126,17 @@ type field_list = Symbol.t list (* sorted by hash order, no collisions *)
 
 
 type case_code = { case_scheme : scheme ; mutable case_used : bool ; case_loc : Location.t }
-type 'n case_matrix = ((Exp.pat, 'n) Vec.t * Types.state SMap.t * case_code) list
+type ('a, 'n) case_matrix = 
+  ((Exp.pat, 'n) Vec.t * 'a) list
 
-type 'n pat_split =
+type ('a, 'n) pat_split =
   | PSNone
-  | PSAny of 'n case_matrix
-  | PSInt of 'n case_matrix IntMap.t * 'n case_matrix
-  | PSList of { ps_nil : 'n case_matrix; ps_cons : 'n Vec.s Vec.s case_matrix }
-  | PSObj of 'n field_split SMap.t * 'n field_split option (* nonempty *)
-and 'n field_split =
-  Fields : (Symbol.t, 'n, 'm) Vec.Prefix.t * 'm case_matrix -> 'n field_split
+  | PSAny of ('a, 'n) case_matrix
+  | PSInt of ('a, 'n) case_matrix IntMap.t * ('a, 'n) case_matrix
+  | PSList of { ps_nil : ('a, 'n) case_matrix; ps_cons : ('a, 'n Vec.s Vec.s) case_matrix }
+  | PSObj of ('a, 'n) field_split SMap.t * ('a, 'n) field_split option (* nonempty *)
+and ('a, 'n) field_split =
+  Fields : (Symbol.t, 'n, 'm) Vec.Prefix.t * ('a, 'm) case_matrix -> ('a, 'n) field_split
 
 type 'a s = 'a Vec.s
 type ('m,'r) expansion =
@@ -168,14 +188,14 @@ let rec expand_fields :
 let combine_fields (Fields (pfs, pm)) (Fields (qfs, qm)) =
   let Merge (fs, pexp, qexp) = mk_fields_merge pfs qfs in
   let expand_matrix m exp =
-    m |> List.map (fun (pats, vars, code) -> 
-             expand_fields exp pats, vars, code) in
+    m |> List.map (fun (pats, case) -> 
+             expand_fields exp pats, case) in
   let pm' = expand_matrix pm pexp in
   let qm' = expand_matrix qm qexp in
   Fields (fs, pm' @ qm')
 
 (* union of cases *)
-let combine_splits (type n) (vp, (p : n pat_split)) (vq, (q : n pat_split)) : state * n pat_split =
+let combine_splits (type n) (p : ('a, n) pat_split) (q : ('a, n) pat_split) : ('a, n) pat_split =
   let combine_ints (pis, pdef) (qis, qdef) =
     PSInt (IntMap.merge (fun i pi qi -> match pi, qi with
     | Some pi, Some qi -> Some (pi @ qi)
@@ -195,7 +215,7 @@ let combine_splits (type n) (vp, (p : n pat_split)) (vq, (q : n pat_split)) : st
            | Some pdef, Some qdef -> Some (combine_fields pdef qdef)
            | x, None | None, x -> x) in
 
-  let split = match p, q with
+  match p, q with
   | PSNone, x | x, PSNone -> x
 
   | PSAny ps, PSAny qs -> PSAny (ps @ qs)
@@ -224,64 +244,56 @@ let combine_splits (type n) (vp, (p : n pat_split)) (vq, (q : n pat_split)) : st
 
   | PSInt _, (PSObj _ | PSList _)
   | PSObj _, (PSInt _ | PSList _)
-  | PSList _, (PSObj _ | PSInt _) -> failwith "incompatible patterns" in
-  (ty_join_neg vp vq, split)
+  | PSList _, (PSObj _ | PSInt _) -> failwith "incompatible patterns"
 
-let rec split_cases : type n . n s case_matrix -> state * n pat_split =
+let rec split_cases : type n . (Symbol.t -> 'a -> 'a) -> ('a, n s) case_matrix -> ('a, n) pat_split =
   let open Vec in
-  fun cases -> match cases with
-  | [] -> (Types.zero Neg, PSNone)
-  | ((loc, None) :: _, _, _) :: _ ->
+  fun bind cases -> match cases with
+  | [] -> PSNone
+  | ((loc, None) :: _, _) :: _ ->
      failwith "parse error?"
-  | ((loc, Some p) :: ps, vars, e) :: cases ->
+  | ((loc, Some p) :: ps, case) :: cases ->
      match p with
-     | PNone ->
-        split_cases cases
      | PWildcard ->
-        combine_splits (Types.zero Neg, PSAny [ps, vars, e]) (split_cases cases)
-     | PVar x ->
-        (* FIXME: check binding properly *)
-        assert (SMap.mem x vars);
-        let ty = SMap.find x vars in
-        combine_splits
-          (ty, PSAny [ps, SMap.remove x vars, e])
-          (split_cases cases)
+        combine_splits (PSAny [ps, case]) (split_cases bind cases)
+     | PBind (v, p) ->
+        split_cases bind ((p :: ps, bind v case) :: cases)
      | PObject (tag, unsorted_subpats) ->
         let open List in
         let sorted = List.sort (fun (t, p) (t', p') ->
           compare (Symbol.hash t) (Symbol.hash t')) unsorted_subpats in
         let rec to_fields = function
-          | [] -> Fields(Vec.Prefix.[], [ps, vars, e])
+          | [] -> Fields(Vec.Prefix.[], [ps, case])
           | (f, p) :: rest ->
              (match rest with
               | (f', p') :: _ when Symbol.hash f = Symbol.hash f' ->
                  failwith "duplicate labels"
               | _ -> ());
              let Fields(fs, m) = to_fields rest in
-             Fields(Vec.Prefix.(f :: fs), List.map (fun (ps, v, e) -> Vec.(p :: ps), v, e) m) in
+             Fields(Vec.Prefix.(f :: fs), List.map (fun (ps, case) -> Vec.(p :: ps), case) m) in
         let fields = to_fields sorted in
         let split = match tag with
           | None -> PSObj (SMap.empty, Some fields)
           | Some t -> PSObj (SMap.singleton t fields, None) in
-        combine_splits (Types.zero Neg, split) (split_cases cases)
+        combine_splits split (split_cases bind cases)
      | PInt n ->
-        combine_splits (Types.zero Neg, PSInt (IntMap.singleton n List.[ps, vars, e], [])) (split_cases cases)
+        combine_splits (PSInt (IntMap.singleton n List.[ps, case], [])) (split_cases bind cases)
      | PNil ->
-        combine_splits (Types.zero Neg, PSList {ps_cons = []; ps_nil = [ps, vars, e]}) (split_cases cases)
+        combine_splits (PSList {ps_cons = []; ps_nil = [ps, case]}) (split_cases bind cases)
      | PCons (px, pxs) ->
-        combine_splits (Types.zero Neg, PSList {ps_cons = [px :: pxs :: ps, vars, e]; ps_nil = []}) (split_cases cases)
+        combine_splits (PSList {ps_cons = [px :: pxs :: ps, case]; ps_nil = []}) (split_cases bind cases)
      | PAlt (p1, p2) ->
-        split_cases ((p1 :: ps, vars, e) :: (p2 :: ps, vars, e) :: cases)
+        split_cases bind ((p1 :: ps, case) :: (p2 :: ps, case) :: cases)
 
 
-let rec dump_decision_tree : type n . string -> n case_matrix -> unit = fun pfx cases ->
+let rec dump_decision_tree : type n . string -> ('a, n) case_matrix -> unit = fun pfx cases ->
   let open Vec in
   match cases with
   | [] -> Printf.printf "%s nonexhuastive!\n" pfx;
-  | ([], vars, case) :: rest ->
+  | ([], _) :: rest ->
      Printf.printf "%s done\n" pfx;
-  | ((_::_), _, _) :: _ as cases ->
-     let (pvar, split) = split_cases cases in
+  | ((_::_), _) :: _ as cases ->
+     let split = split_cases (fun _ x -> x) cases in
      match split with
      | PSNone ->
         Printf.printf "%s nonexhaustive2\n" pfx;
@@ -318,14 +330,11 @@ let rec dump_decision_tree : type n . string -> n case_matrix -> unit = fun pfx 
 
 
 type pat_desc =
- { pvar : state;
-   pcases : pat_type }
-and fields = pat_desc SMap.t
-and pat_type =
   | PTAny
   | PTInt
   | PTList of pat_desc
   | PTObj of fields SMap.t * fields option
+and fields = pat_desc SMap.t
 
 (* IDEA: separate PTObj into two cases:
      PTObj of fields
@@ -338,10 +347,9 @@ let mk_pat : rpat -> pat =
   fun p -> Location.internal, Some p
 
 let rec rpat_is_empty = function
-  | PNone -> true
   | PWildcard
-  | PVar _
   | PInt _ -> false
+  | PBind (v, pat) -> pat_is_empty pat
   | PNil -> false
   | PCons (px, pxs) -> pat_is_empty px || pat_is_empty pxs
   | PAlt (p1, p2) -> pat_is_empty p1 && pat_is_empty p2
@@ -356,10 +364,7 @@ and pat_is_empty = function
    (e.g. complain about int ⊓ { foo : int } rather than producing a meet type)
 *)
 let rec merge_desc s desc desc' =
-  let pcases = match
-      desc.pcases,
-      desc'.pcases with
-    (* FIXME: is it possible to have PTAny, ~PNone ? *)
+  match desc, desc' with
   | PTAny, PTAny -> PTAny
   | PTAny, t' -> t'
   | t, PTAny -> t
@@ -385,9 +390,7 @@ let rec merge_desc s desc desc' =
      let def = (match def, def' with
        | d, None | None, d -> None
        | Some def, Some def' -> Some (merge_fields (s ^ ", def") def def')) in
-     PTObj (tags, def) in
-  { pvar = ty_join_neg desc.pvar desc'.pvar;
-    pcases }
+     PTObj (tags, def)
 and merge_fields s obj obj' =
   SMap.merge (fun field pat pat' -> match pat, pat' with
     | Some pat, Some pat' -> Some (merge_desc (s ^ ", field: " ^ Symbol.to_string field) pat pat')
@@ -400,129 +403,180 @@ and merge_fields s obj obj' =
   [([], e); ...] = success, handle e
   [(ps, e); ...] = more matching *)
 
-type 'n match_desc = (pat_desc, 'n) Vec.t * scheme
+type 'n match_desc = (pat_desc, 'n) Vec.t
 let rec merge_match_descs :
   type n . string -> n match_desc -> n match_desc -> n match_desc = 
   fun s desc desc' ->
   let open Vec in
   match desc, desc' with
-  | ([], e), ([], e') ->
-     [], join_scheme e e'
-  | (p :: ps, e), (p' :: ps', e') ->
-     let (rs, re) = merge_match_descs (s ^ "/") (ps, e) (ps', e') in
-     (merge_desc (s ^ ":") p p' :: rs), re
+  | [], [] ->
+     []
+  | (p :: ps), (p' :: ps') ->
+     let rs = merge_match_descs (s ^ "/") ps ps' in
+     (merge_desc (s ^ ":") p p' :: rs)
 
 let rec fields_of_pfx fdesc =
   List.fold_left (fun m (f, x) -> SMap.add f x m) SMap.empty (Vec.Prefix.to_list fdesc)
 
-
 let rec infer_match_desc :
-  type n . n Vec.num -> string -> n case_matrix -> n match_desc =
+  type n . n Vec.num -> string -> (_, n) case_matrix -> n match_desc =
   fun width s cases ->
   let open Vec in
   match width with
-  | Same ->
-     begin match cases with
-     | [] ->
-        ([], failure ())
-     | ([], vars, case) :: _ ->
-        case.case_used <- true;
-        ([], case.case_scheme)
-     end
+  | Same -> []
   | Inc width' ->
-     let (pvar, split) = split_cases cases in
-     match split with
+     match split_cases (fun _ x -> x) cases with
      | PSNone ->
-        repeat width { pvar; pcases = PTAny }, failure ()
+        repeat width PTAny
      | PSAny cases ->
-        let (rest, result) = 
+        let rest = 
           infer_match_desc width' (s ^ "; _") cases in
-        { pvar; pcases = PTAny } :: rest, result
+        PTAny :: rest
      | PSInt (ints, def) ->
-        let (rest, result) =
+        let rest =
           let defdesc = infer_match_desc width' (s ^ "; i_") def in
           IntMap.fold (fun i cases desc ->
             let desc' = infer_match_desc width' (s ^ "; " ^ string_of_int i) cases in
             merge_match_descs s desc desc')
             ints defdesc in
-        ({ pvar; pcases = PTInt } :: rest, result)
+        PTInt :: rest
      | PSList { ps_nil; ps_cons } ->
-        let (rest_nil, result_nil) =
+        let rest_nil =
           infer_match_desc width' (s ^ "; nil") ps_nil in
-        let (ty_x :: ty_xs :: rest_cons, result_cons) =
+        let (ty_x :: ty_xs :: rest_cons) =
           infer_match_desc (Inc (Inc width')) (s ^ "; cons") ps_cons in
-        let (rest, result) = merge_match_descs s (rest_nil, result_nil) (rest_cons, result_cons) in
-        let list = merge_desc s { pvar; pcases = PTList ty_x } ty_xs in
-        (list :: rest, result)
+        let rest = merge_match_descs s rest_nil rest_cons in
+        let list = merge_desc s (PTList ty_x) ty_xs in
+        list :: rest
      | PSObj (tags, def) ->
         let add_len fs = Vec.add width' (Vec.Prefix.length fs) in
         let desc = match def with
           | Some (Fields (fs, m)) ->
-             let (tys, result) = infer_match_desc (add_len fs) (s ^ "; def") m in
+             let tys = infer_match_desc (add_len fs) (s ^ "; def") m in
              let (fdesc, rest) = Vec.Prefix.zip fs tys in
-             { pvar; pcases = PTObj (SMap.empty, Some (fields_of_pfx fdesc)) } :: rest, result
-          | None -> repeat (Inc width') { pvar; pcases = PTAny }, failure () (* FIXME correct? *) in
+             (PTObj (SMap.empty, Some (fields_of_pfx fdesc))) :: rest
+          | None -> repeat (Inc width') PTAny (* FIXME correct? *) in
         SMap.fold (fun tag (Fields (fs, m)) desc ->
             let s = (s ^ "; '" ^ Symbol.to_string tag) in
-            let (tys, result) = infer_match_desc (add_len fs) s m in
+            let tys = infer_match_desc (add_len fs) s m in
             let (fdesc, rest) = Vec.Prefix.zip fs tys in
-            let desc' = { pvar; pcases = PTObj (SMap.singleton tag (fields_of_pfx fdesc), None) } :: rest, result in
+            let desc' = (PTObj (SMap.singleton tag (fields_of_pfx fdesc), None)) :: rest in
             merge_match_descs s desc desc') tags desc
 
-let rec unmatched :
-  type n . (pat_desc, n) Vec.t -> n case_matrix -> (Exp.pat, n) Vec.t list =
+type 'n match_type = {
+  columns : (Types.state, 'n) Vec.t;
+  result : scheme;
+  unhandled : (Exp.pat, 'n) Vec.t list
+}
+
+let join_match_types a b =
+  { columns = Vec.zip a.columns b.columns |> Vec.map (fun (a, b) -> ty_join_neg a b);
+    result = join_scheme a.result b.result;
+    unhandled = a.unhandled @ b.unhandled }
+
+let rec typecheck_match :
+  type n . _ -> (pat_desc, n) Vec.t -> (_, n) case_matrix -> n match_type =
+  fun err desc cases -> 
   let open Vec in
-  fun desc cases -> match desc with
+  match desc with
   | [] ->
-     begin match cases with
-     | [] ->
-        (* nonexhaustive *)
-        [[]]
-     | ([], vars, case) :: _ ->
-        (* case matched *)
-        []
-     end
-  | { pvar; pcases } as curr :: rest ->
-     let cons_missing p missing =
-       let pat = mk_pat p in
-       List.map (fun pats -> pat :: pats) missing in
-     let (pvar, split) = split_cases cases in
-     match split with
-     | PSNone ->
-        (* repeat or recurse? *)
-        [repeat (Inc (length rest)) (mk_pat PWildcard)]
-     | PSAny cases ->
-        cons_missing PWildcard (unmatched rest cases)
-     | PSInt (ints, def) ->
-        IntMap.fold (fun n mat missing ->
-            cons_missing (PInt n) (unmatched rest mat) @ missing)
-         ints (cons_missing PWildcard (unmatched rest def)) (*FIXME: pick repr *)
-     | PSList { ps_nil; ps_cons } ->
-        let missing_nil = unmatched rest ps_nil in
-        let (PTList ty_xs) = pcases in
-        let missing_cons =
-          unmatched (ty_xs :: curr :: rest) ps_cons in
-        cons_missing PNil missing_nil @
-          List.map (fun (m_x :: m_xs :: missing) ->
-              mk_pat (PCons (m_x, m_xs)) :: missing) missing_cons
-     | PSObj (tags, def) ->
-        let unmatched_fields tag fdesc (Fields (fs, m)) =
+    begin match cases with
+    | [] ->
+       (* nonexhaustive *)
+       { columns = []; result = failure (); unhandled = [[]] }
+    | ([], (bound, case)) :: _ ->
+       case.case_used <- true;
+       let env = SMap.fold (fun v tyP env ->
+         match SMap.find v env with
+         | tyN ->
+            Types.constrain Location.internal tyP tyN |> List.iter err;
+            SMap.remove v env
+         | exception Not_found ->
+            env) bound case.case_scheme.environment in
+       { columns = []; 
+         result = { case.case_scheme with environment = env }; 
+         unhandled = [] }
+    end
+  | curr :: rest ->
+     let cons_col ty pat mty = {
+         columns = ty :: mty.columns;
+         result = mty.result;
+         unhandled = List.map (fun ps -> mk_pat pat :: ps) mty.unhandled
+       } in
+     let flow = ref (Types.zero Neg) in
+     let bind v (bound, case) =
+       if SMap.mem v bound then
+         failwith ("Duplicate binding of " ^ Symbol.to_string v)
+       else begin
+         let (fN, fP) = Types.flow_pair () in
+         flow := ty_join_neg !flow fN;
+         SMap.add v fP bound, case
+       end in
+     let mty = match split_cases bind cases, curr with
+     | PSNone, desc ->
+        (* FIXME: should this constrain according to desc? *)
+        cons_col (Types.zero Neg) PWildcard (typecheck_match err rest [])
+
+     | PSAny cases, desc ->
+        (* FIXME: should this constrain according to desc? *)
+        cons_col (Types.zero Neg) PWildcard (typecheck_match err rest cases)
+
+     | PSInt (ints, def), PTInt ->
+        let def_mty = typecheck_match err rest def in
+        let def_mty = cons_col (Types.cons Neg (ty_int Location.internal)) PWildcard def_mty in
+        IntMap.fold (fun n mat acc ->
+            let ty = typecheck_match err rest mat in
+            join_match_types (cons_col (Types.cons Neg (ty_int Location.internal)) (PInt n) ty) acc) ints def_mty
+     | PSInt _, _ -> Error.internal "Wrong match desc for PSInt"
+
+     | PSList { ps_nil; ps_cons }, PTList desc_x ->
+        let nil_mty = typecheck_match err rest ps_nil in
+        let nil_mty = cons_col (Types.cons Neg (ty_list unused Location.internal)) PNil nil_mty in
+        let cons_mty = typecheck_match err (desc_x :: curr :: rest) ps_cons in
+        let cons_mty =
+          let ty_x :: ty_xs :: columns' = cons_mty.columns in
+          let ty = ty_join_neg ty_xs (Types.cons Neg (ty_list (fun _ -> ty_x) Location.internal)) in
+          { columns = ty :: columns';
+            result = cons_mty.result;
+            unhandled = List.map (fun (m_x :: m_xs :: missing) ->
+                            mk_pat (PCons (m_x, m_xs)) :: missing) cons_mty.unhandled } in
+        join_match_types nil_mty cons_mty
+     | PSList _, _ -> Error.internal "Wrong match desc for PSList"
+
+     | PSObj (tags, def), PTObj (desc_tags, desc_def) ->
+        let typecheck_fields tag fdesc (Fields (fs, m)) =
           let open Vec.Prefix in
           (* FIXME: finds are dodgy here *)
           let desc' = prepend (map (fun f -> SMap.find f fdesc) fs) rest in
-          unmatched desc' m
-          |> List.map (fun missing ->
-               let (missing_fs, missing_rest) = zip fs missing in
-               Vec.(mk_pat (PObject (tag, Prefix.to_list missing_fs)) ::
-                      missing_rest)) in
-        let PTObj (ptags, pdef) = pcases in
-        if SMap.is_empty ptags then
+          let mty = typecheck_match err desc' m in
+          let fields, columns = zip fs mty.columns in
+          let to_smap f = f 
+            |> to_list
+            |> List.fold_left (fun m (f, x) -> SMap.add f (fun _ -> x) m) SMap.empty in
+          let ty = match tag with
+            | None ->
+               ty_obj_cases
+                 (SMap.map (fun fs -> SMap.empty) desc_tags)
+                 (Some (to_smap fields))
+            | Some tag ->
+               ty_obj_cases
+                 (SMap.add tag (to_smap fields) (SMap.map (fun fs -> SMap.empty) desc_tags))
+                 None in
+          { columns = Types.cons Neg (ty Location.internal) :: columns;
+            result = mty.result;
+            unhandled = List.map (fun missing ->
+                            let (missing_fs, missing_rest) = zip fs missing in
+                            Vec.(mk_pat (PObject (tag, Prefix.to_list missing_fs)) ::
+                                   missing_rest)) mty.unhandled } in
+        if SMap.is_empty desc_tags then
           (* FIXME split up psobj *)
-          let (Some fdesc, Some fs) = pdef, def in
-          unmatched_fields None fdesc fs
+          let (Some fdesc, Some fs) = desc_def, def in
+          typecheck_fields None fdesc fs
         else
-        let missing_tags =
-          SMap.fold (fun tag fdesc acc ->
+          (* ignore def for now *)
+          let join_match_types' a b =
+            match b with None -> Some a | Some b -> Some (join_match_types a b) in
+          let Some mty = SMap.fold (fun tag fdesc acc ->
               let tag_fields =
                 match SMap.find tag tags with
                 | fs -> Some fs
@@ -533,17 +587,18 @@ let rec unmatched :
                 | None, None -> None in
               match fields with
               | Some fs ->
-                 unmatched_fields (Some tag) fdesc fs @ acc
+                 join_match_types' (typecheck_fields (Some tag) fdesc fs) acc
               | None ->
-                 [mk_pat (PObject (Some tag, [])) :: repeat (Vec.length rest) (mk_pat PWildcard)]
-                 @ acc) ptags [] in
-        (* ignore def for now *)
-        missing_tags
-
-
-
-
-
+                 (* FIXME: should probably constrain by desc *)
+                 let mty = typecheck_match err rest [] in
+                 join_match_types' (cons_col (Types.cons Neg (ty_obj_cases (SMap.add tag SMap.empty (SMap.map (fun fs -> SMap.empty) desc_tags)) None Location.internal))
+                                             (PObject (Some tag, [])) mty)
+                                   acc)
+              desc_tags None in
+          mty
+     | PSObj _, _ -> Error.internal "Wrong match desc for PSObj" in
+     let (curr :: rest) = mty.columns in
+     { mty with columns = ty_join_neg !flow curr :: rest }
 
 
 let rec variables_bound_in_pat err : pat list -> Location.t SMap.t = function
@@ -551,11 +606,10 @@ let rec variables_bound_in_pat err : pat list -> Location.t SMap.t = function
   | (l, None) :: ps -> variables_bound_in_pat err ps
   | (l, Some p) :: ps ->
      match p with
-     | PNone
      | PWildcard ->
         variables_bound_in_pat err ps
-     | PVar v ->
-        let vs = variables_bound_in_pat err ps in
+     | PBind (v, p) ->
+        let vs = variables_bound_in_pat err (p :: ps) in
         (match SMap.find v vs with
         | l' -> err (Error.Rebound (`Value, l, v, l')); vs
         | exception Not_found -> SMap.add v l vs)
@@ -595,36 +649,8 @@ let var env arg t = try [t, SMap.find arg env] with Not_found -> []
 
 
 
-let ctx0 =
-  empty_context
-  |> add_opaque_type () (Symbol.intern "int") []
-  |> add_opaque_type () (Symbol.intern "unit") []
-  |> add_opaque_type () (Symbol.intern "bool") []
-  |> add_opaque_type () (Symbol.intern "string") []
-  |> add_opaque_type () (Symbol.intern "list") [TParam (Some VPos, Symbol.intern "A")]
-
-let (ty_int, ty_unit, ty_bool, ty_string) =
-  let f s loc = Typector.ty_named' ctx0 (Symbol.intern s) [] loc in
-  (f "int", f "unit", f "bool", f "string")
-
-let ty_list t loc =
-  Typector.ty_named' ctx0 (Symbol.intern "list") [APos (t loc)] loc
 
 
-let rec pat_desc_to_type { pvar; pcases } =
-  ty_join_neg pvar (match pcases with
-  | PTAny -> Types.zero Neg
-  | PTInt -> Types.cons Neg (ty_int Location.internal) (* FIXME loc *)
-  | PTList e -> Types.cons Neg (ty_list (fun loc -> pat_desc_to_type e) Location.internal) (* FIXME loc *)
-  | PTObj (tags, def) ->
-     let obj fs = SMap.map (fun p -> fun loc -> pat_desc_to_type p) fs in
-     let t =
-       (* FIXME: laziness about def tag case *)
-       if SMap.is_empty tags then
-         ty_obj_cases (SMap.map obj tags) (match def with Some o -> Some (obj o) | None -> None) Location.internal
-       else
-         ty_obj_cases (SMap.map obj tags) None Location.internal in
-     Types.cons Neg t)
 
 
 let rec typecheck ctx err gamma = function
@@ -782,21 +808,8 @@ and typecheck' ctx err gamma loc exp = match exp with
        expr = constrain loc ctx err "cons" [x_ty.expr, xN;
                                 xs_ty.expr, Types.cons Neg (ty_list (fun _ -> xsN) loc)] (Types.cons Pos (ty_list (fun _ -> ty_join xP xsP) loc)) }
 
-(*
-  | Match (e, nil, x, xs, cons) ->
-     let e_ty = typecheck ctx err gamma e in
-     let nil_ty = typecheck ctx err gamma nil in
-     let cons_ty = typecheck ctx err (add_singleton x (add_singleton xs gamma loc) loc) cons in
-     let (xN, xP) = Types.flow_pair () in
-     let vars =
-       (try [xP, SMap.find x cons_ty.environment] with Not_found -> []) @
-       (try [Types.cons Pos (ty_list (fun _ -> xP) loc), SMap.find xs cons_ty.environment] with Not_found -> []) in
-     { environment = env_join err loc e_ty.environment (env_join err loc nil_ty.environment (SMap.remove x (SMap.remove xs cons_ty.environment)));
-       expr = constrain loc ctx err "match" ([e_ty.expr, Types.cons Neg (ty_list (fun _ -> xN) loc)] @ vars)
-         (ty_join ctx err nil_ty.expr cons_ty.expr) }
-*)
   | Match (scr, []) ->
-     failwith "empty match"
+     Error.internal "empty match unsupported"
   | Match (scr, ((((_, ps), e) :: _) as cases)) ->
      let scr_schemes = List.map (typecheck ctx err gamma) scr in
      let scr_env = List.fold_left (fun e s -> env_join err loc e s.environment) SMap.empty scr_schemes in
@@ -808,39 +821,30 @@ and typecheck' ctx err gamma loc exp = match exp with
          bound |> SMap.bindings |> List.map fst |>
              List.fold_left (fun gamma var -> add_singleton var gamma loc) gamma in
        let sch = typecheck ctx err gamma e in
-       let vars = SMap.mapi (fun v loc ->
-         match SMap.find v sch.environment with
-         | ty -> ty
-         | exception Not_found -> Types.zero Neg) bound in
-       let sch = {sch with environment = SMap.merge (fun v schenv bvar ->
-         match schenv, bvar with
-         | Some _, Some _ -> assert (SMap.mem v vars); None
-         | Some v, None -> schenv
-         | None, _ -> None) sch.environment bound} in
        let case = { case_scheme = sch; case_loc = loc; case_used = false } in
        match Vec.(as_length npats (Vec.of_list pats)) with
        | None -> failwith "wrong lengths"
-       | Some pats -> pats, vars, case) in
+       | Some pats -> pats, (SMap.empty, case)) in
      (* dump_decision_tree "" cases; *)
      Printf.printf "%!";
-     let (desc, result) = infer_match_desc npats "" cases in
-     let unmatched = unmatched desc cases in
-     cases |> List.iter (fun (_, _, { case_loc; case_used }) ->
+     let desc = infer_match_desc npats "" cases in
+     let mty = typecheck_match err desc cases in
+     cases |> List.iter (fun (_, (_, { case_loc; case_used })) ->
        if not case_used then err (Error.Unused_case case_loc));
-     begin match unmatched with
+     begin match mty.unhandled with
      | [] -> ()
-     | _ -> err (Error.Nonexhaustive_match (loc, List.map Vec.to_list unmatched))
+     | u -> err (Error.Nonexhaustive_match (loc, List.map Vec.to_list u))
      end;
      let rec bind_pats scrs pats = match scrs, pats with
        | [], [] -> ()
        | [], _ -> failwith "too many patterns"
        | _, [] -> failwith "not enough patterns"
        | scr :: scrs, pat :: pats ->
-          Types.constrain loc scr.expr (pat_desc_to_type pat)
+          Types.constrain loc scr.expr pat
           |> List.iter err;
           bind_pats scrs pats in
-     bind_pats scr_schemes (Vec.to_list desc);
-     { expr = result.expr; environment = env_join err loc scr_env result.environment }
+     bind_pats scr_schemes (Vec.to_list mty.columns);
+     { expr = mty.result.expr; environment = env_join err loc scr_env mty.result.environment }
 
   | Object (tag, o) ->
      let (env, fields) = List.fold_right (fun (s, e) (env, fields) ->

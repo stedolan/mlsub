@@ -208,8 +208,8 @@ term:
 
 
 %inline objfield_pat(body):
-| v = IDENT; EQUALS
-    { v, (L.pos ($startpos(v), $endpos(v)), Some (PVar v)) }
+(*| v = IDENT; EQUALS
+    { v, (L.pos ($startpos(v), $endpos(v)), Some (PVar v)) }*)
 | v = IDENT; EQUALS; e = body
     { v, e }
 
@@ -230,7 +230,7 @@ pat_r:
 | UNDER
     { PWildcard }
 | v = IDENT
-    { PVar v }
+    { PBind (v, (L.pos ($startpos(v), $endpos(v)), Some PWildcard)) }
 | t = tag
     { PObject(Some t, []) }
 | t = tag; LPAR; o = separated_list(COMMA, objfield_pat(pat)); RPAR
