@@ -1,0 +1,15 @@
+(jbuild_version 1)
+
+(menhir
+ ((modules (parser))
+  (flags (--table))))
+
+(rule
+ ((targets (lexer.ml))
+  (deps    (lexer.sedlex.ml))
+  (action  (run ${lib:sedlex:ppx_sedlex} ${<} -o ${@}))))
+
+
+(library
+ ((name polytope)
+  (libraries (menhirLib sedlex str))))

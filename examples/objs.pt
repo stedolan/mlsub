@@ -1,0 +1,33 @@
+let empty = 'nil
+let full = 'cons(head = 1, tail = empty)
+
+let l = if true { empty } else { full }
+
+def map(f, xs) = match xs {
+  case 'nil => 'nil
+  case 'cons(head = h, tail = t) => 'cons(head = f(h), tail = map(f, t))
+}
+
+
+def increase(xs) = map({ x => x + 1}, xs)
+
+let asdf = 'cons(head = 1, tail = empty)
+
+let asdijfoa = map({x => x + 1}, asdf)
+
+
+let a = 'foo(x = 1, y = 2)
+let b = 'bar(x = 1, z = 2)
+let ab = if true { a } else { b }
+
+let z = ab.x
+
+type ref[A] = { get : () -> A, set : (A) -> unit }
+
+
+
+
+def use(x) {
+  let asdf = x.foo
+  x
+}

@@ -1,0 +1,47 @@
+def f(x) = { (x, y) => 42 }
+
+let x = 'B(foo = 1)
+
+
+
+let x = { (c) => if c { 'A } else { 'B(x=1) } }
+
+def f(x) = x
+
+def opt_map(f, x) = match x {
+  case 'Some(val=x) => 'Some(val=f(x))
+  case 'None => 'None
+}
+
+let obj = ( foo = 1 )
+
+def f(x) {
+  x.foo(42)
+  x.bar(17)
+  match (fst = x, snd = x.a) {
+    case (fst = 'A(k='P) , snd = 'B) => 42
+    case (fst = 'A(k='P) , snd = 'C) => 17
+  }
+}
+
+
+def maj1(x) = 
+  match x {
+    case (a='T, b='T) | (a='T) | (a='F,b='F) | (b='T) => 1
+  }
+
+// def maj(x) =
+//   match x {
+//     case (a='T, b='T) | (b='T, c='T) | (a='T, c='T) => 'T
+//     case (a='F, b='F) | (b='F, c='F) | (a='F, c='F) => 'F
+//   }
+
+// // def f(x, y) do
+// //   match x, y
+// //     case (.A{foo=y} | .B{foo=y}), (.B | .C); y
+// //     case (.A{foo=y} | y | .B{foo=y}), .B | .C; y
+// // //    case x, y; 10
+// //   end
+// // end
+
+// let x = 1

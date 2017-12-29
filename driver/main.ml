@@ -1,3 +1,4 @@
+open Polytope
 open Lexer
 open Lexing
 

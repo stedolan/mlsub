@@ -1,0 +1,144 @@
+// asfd
+
+
+def twice(f, x) = f(f(x))
+let asdf = twice( { x => x :: [] }, 1)
+
+def select(p, v, d) =
+  if p(v) { v } else { d }
+
+
+
+def is_good(x) = x.good
+
+let x = select(is_good, 
+    (good = true, x = 10),
+    (x = 20))
+
+let foo = 'foo(x = 42, y = 10)
+
+let x = match 1 { case 1 => 2 case _ => 4 }
+
+def match2(x, y) = match x, y {
+  case 'foo, 'bar =>
+    let x = 1
+    "a"
+  case 'bar, 'foo => 2
+  case 'foo, 'foo => 3
+  case 'bar, 'bar => 4
+}
+
+def either(x, y) = match x, y {
+  case 'yes, _ => 'yes
+  case _, 'yes => 'yes
+  case 'no, 'no => 'no
+}
+
+// let ob = { x => match x {
+// //  case (a=x, b=x) => x
+// }}
+
+let one = { x => match x {
+  case 'foo => 1
+//  case _ => 2
+}}
+
+let maj = { x => match x {
+  case (a='y, c='y) | (a='y, b='y) | (b='y,c='y) => 'y
+  case (a='n, c='n) | (a='n, b='n) | (b='n,c='n) => 'n
+}}
+
+
+def map(f, list) = match list {
+  case 'nil => 'nil
+  case 'cons(hd = x, tl = xs) => 'cons(hd = f(x), tl = map(f, xs))
+}
+
+def twice(f, x) = f(f(x))
+
+def const(x) = "hello"
+
+def foo(x) = twice(const, x)
+
+def filter(p, xs) = match xs {
+  case [] => []
+  case x :: xs =>
+    if p(x) { x :: filter(p, xs) }
+    else { filter(p, xs) }
+}
+
+def is_good(x) = x.is_good
+
+let things =
+  [(is_good = true, x = 5),
+   (is_good = false, x = 10),
+   (is_good = true, x = 8)]
+
+let x = filter(is_good, things)
+
+
+def filter_good(xs) = filter(is_good, xs)
+
+let y = filter_good(things)
+
+let id1 = { x => x }
+
+def mkr(b) = id1(b)
+
+def f(x, y) = (a = mkr(x), b = mkr(y))
+
+def f(x, y) {
+  x()
+  y(42)
+}
+
+def f(x=, y=) = (x=, y=)
+
+let add = { x, y => x + y }
+
+def addcurried(x) = { y => x + y }
+
+
+def twice(f, x) = f(f(x))
+def twiced(x) = twice({ a => 5}, x)
+
+
+
+
+type ref[A] = { get : () -> A, set : (A) -> unit }
+
+
+def read_twice(x : ref[_]) : list[_] =
+  [x.get(), x.get()]
+
+
+let f = { x : int => x }
+
+def recursive(x) =
+  ( thing = x,
+    self = recursive(x) )
+
+
+
+def self(x) = x(x)
+
+let bottom = self(self)
+
+def y_combinator(f) {
+  let omega = { x => f(x(x)) }
+  omega(omega)
+}
+
+def do(x) = x()
+
+
+def z_combinator(f) {
+  // Z = λf.(λx.f (λv.((x x) v))) (λx.f (λv.((x x) v)))
+  let omega = { x => f({v => x(x)(v)}) }
+  omega(omega)
+}
+
+def idid() {
+  let id = { x => x }
+  id(id)
+}

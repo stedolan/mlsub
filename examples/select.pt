@@ -1,0 +1,57 @@
+def select(p, v, d) =
+    if p(v) { v } else { d }
+
+
+def id(x) = x
+
+
+let self_app_id = id(id)
+
+def app(x,y) = x(y)
+
+let app_id = app(id, id)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// def is_good(x) = x.good
+
+// let x = select(is_good, 
+//     (good = true, x = 10),
+//     (x = 20))

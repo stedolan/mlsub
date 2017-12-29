@@ -1,0 +1,6 @@
+B ../_build/default/src
+FLG -open Polytope -w -40
+PKG gen
+PKG menhirLib
+PKG sedlex
+PKG str

@@ -1,0 +1,4 @@
+def f(x) = match x {
+  case 'foo(x = a) => a
+  case 'bar(x = b) => b
+}

@@ -1,0 +1,50 @@
+def f(x) = x + 1
+
+def go(a, b, c = 1) = {
+  let foo = a + b
+  c + foo
+}
+
+
+def twice(f, x) = f(f(x))
+
+def wat(f) = twice(f, f)
+
+def add1(x) = x + 1
+
+def self(x) = x(x)
+
+let bot = self(self)
+
+
+def m(x) = {
+  match x {
+    'Foo(y=y) => "hello"
+    'Bar => "asdf"
+  }
+}
+
+
+def cond(b, n) = {
+  (foo = if b { 1 } else { 2 }, bar = if n == 5 { 42 } else { 43 })
+}
+
+// x ? a : b
+// if x {a} else {b}
+// if (x) a else b
+// a if x else b
+// if x then a else b
+
+// match x { true => a; false => b }
+
+// # semi or | above?
+
+
+
+let customer = 'Customer(name = "Stephen", location = "Home")
+let employee = 'Employee(name = "Jerkface", dept = "Wherever")
+let people = [customer, employee]
+
+def loc(x) = x.location
+
+//let x = loc(employee)
