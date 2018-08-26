@@ -41,7 +41,7 @@ let slurp chan =
     match (input chan buf 0 (Bytes.length buf)) with
     | 0 -> Bytes.concat (Bytes.of_string "") (List.rev chunks)
     | n -> read_all (Bytes.sub buf 0 n :: chunks) in
-  read_all []
+  read_all [] |> Bytes.to_string
 
 let of_file fname =
   source fname (slurp (open_in fname))
