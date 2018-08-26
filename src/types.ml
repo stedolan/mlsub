@@ -402,23 +402,30 @@ let decompile_automaton (roots : rawstate list) : typeterm list =
   List.map decompile roots
   
 
+type constraint_state = Proved | Proving
 let constrain loc sp_orig sn_orig =
   assert (sp_orig.pol = Pos);
   assert (sn_orig.pol = Neg);
   let seen = Hashtbl.create 20 in
   let rec closure sp sn =
-    if Hashtbl.mem seen (sp.id, sn.id) then []
+    if Hashtbl.mem seen (sp.id, sn.id) then
+      match Hashtbl.find seen (sp.id, sn.id) with
+      | Proved -> []
+      | Proving -> [Location.empty,Location.empty,Typector.Wrong_arity (42,42)]
     else begin
-      Hashtbl.add seen (sp.id, sn.id) ();
+      Hashtbl.add seen (sp.id, sn.id) Proving;
       StateSet.iter sn.flow (fun s -> merge s sp);
       StateSet.iter sp.flow (fun s -> merge s sn);
       let tp, tn = expand_both expand_comp sp.pol sp.cons expand_comp sn.pol sn.cons in
       sp.cons <- tp; sn.cons <- tn;
       (* lub X <= glb Y, i.e. forall i, j, X[i] <= Y[j] *)
       let cp = TypeLat.as_list tp and cn = TypeLat.as_list tn in
-      List.fold_right (fun x rs -> 
-        List.fold_right (fun y rs -> 
-          Components.lte (pol_flip closure_l) x y @ rs) cn rs) cp []
+      let r = 
+        List.fold_right (fun x rs -> 
+          List.fold_right (fun y rs -> 
+            Components.lte (pol_flip closure_l) x y @ rs) cn rs) cp [] in
+      Hashtbl.replace seen (sp.id, sn.id) Proved;
+      r
     end
   and closure_l ssp ssn =
     StateSet.fold_left ssp [] (fun rs sp ->
