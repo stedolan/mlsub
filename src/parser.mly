@@ -131,6 +131,10 @@ param:
 | v = IDENT; EQUALS; e = term
     { Popt_keyword (v, e) }
 
+lambda_params:
+| LPAR; ps = params; RPAR { ps }
+| p = located(paramtype) { [p] }
+
 argument:
 | e = exp
     { Apositional e }
@@ -162,8 +166,7 @@ exp_r:
 tag: SQUOT; t = IDENT { t }
 
 term_r:
-(* ditch the LPAR; RPAR below? *)
-| LBRACE; LPAR; ps = params; RPAR; DARROW; onl; e = block_body; RBRACE
+| LBRACE; ps = lambda_params; DARROW; onl; e = block_body; RBRACE
     { Lambda (ps, e) }
 | IF; cond = exp; tcase = block; onl; ELSE; fcase = block
     { If (cond, tcase, fcase) }
