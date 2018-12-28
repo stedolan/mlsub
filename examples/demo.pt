@@ -56,6 +56,8 @@ def map(f, list) = match list {
 
 def twice(f, x) = f(f(x))
 
+def maptwice(f, list) = twice({x => map(f, x)}, list)
+
 def const(x) = "hello"
 
 def foo(x) = twice(const, x)
@@ -94,7 +96,7 @@ def f(x, y) {
 
 def f(x=, y=) = (x=, y=)
 
-let add = { x, y => x + y }
+let add = { (x, y) => x + y }
 
 def addcurried(x) = { y => x + y }
 
@@ -120,25 +122,25 @@ def recursive(x) =
 
 
 
-def self(x) = x(x)
+// def self(x) = x(x)
 
-let bottom = self(self)
+// let bottom = self(self)
 
-def y_combinator(f) {
-  let omega = { x => f(x(x)) }
-  omega(omega)
-}
+// def y_combinator(f) {
+//   let omega = { x => f(x(x)) }
+//   omega(omega)
+// }
 
-def do(x) = x()
+// def do(x) = x()
 
 
-def z_combinator(f) {
-  // Z = λf.(λx.f (λv.((x x) v))) (λx.f (λv.((x x) v)))
-  let omega = { x => f({v => x(x)(v)}) }
-  omega(omega)
-}
+// def z_combinator(f) {
+//   // Z = λf.(λx.f (λv.((x x) v))) (λx.f (λv.((x x) v)))
+//   let omega = { x => f({v => x(x)(v)}) }
+//   omega(omega)
+// }
 
-def idid() {
-  let id = { x => x }
-  id(id)
-}
+// def idid() {
+//   let id = { x => x }
+//   id(id)
+// }
