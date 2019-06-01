@@ -43,8 +43,11 @@ let slurp chan =
     | n -> read_all (Bytes.sub buf 0 n :: chunks) in
   read_all []
 
+let slurp_string chan =
+  Bytes.to_string (slurp chan)
+
 let of_file fname =
-  source fname (slurp (open_in fname))
+  source fname (slurp_string (open_in fname))
 
 let of_string str =
   source "<input>" str
