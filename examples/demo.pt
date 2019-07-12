@@ -56,7 +56,7 @@ def map(f, list) = match list {
 
 def twice(f, x) = f(f(x))
 
-def maptwice(f, list) = twice({x => map(f, x)}, list)
+//def maptwice(f, list) = twice({x => map(f, x)}, list)
 
 def const(x) = "hello"
 

@@ -271,6 +271,7 @@ type +'a tyargterm =
 
 type typeterm =
 | TZero of Variance.polarity
+| TOne of Variance.polarity
 | TNamed of tyvar * typeterm tyargterm list
 | TCons of typeterm Components.t
 | TAdd of Variance.polarity * typeterm * typeterm
@@ -397,6 +398,7 @@ let add_type_alias err name param_list term ctx =
                  |> Components.pmap check pol)
     | TCons cons -> BCons (Components.pmap check pol cons) 
     | TZero _ -> failwith "nzero"
+    | TOne _ -> failwith "none"
     | TAdd _ -> failwith "nadd"
     | TRec _ -> failwith "nrec"  (* FIXME *)
     | TWildcard -> failwith "nwild" in

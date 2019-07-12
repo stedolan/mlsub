@@ -16,43 +16,21 @@ let rec ty_add p ts = ts
 module TypeLat = struct
   type 'a t =
     | LZero
-    | LUnexpanded of 'a Components.t    (* must be a type alias *)
-    | LExpanded of 'a Components.t list (* nonempty list, never includes type aliases *)
+    | LComp of 'a Components.t
+    | LOne
 
-  let lift t =
-    if get_stamp t = builtin_stamp then
-      LExpanded [t]
-    else
-      LUnexpanded t
-
-  let as_list = function
-    | LZero -> []
-    | LUnexpanded t -> [t]
-    | LExpanded ts -> ts
-
-  let of_list = function
-    | [] -> LZero
-    | [t] -> 
-       if Typector.get_stamp t = builtin_stamp
-       then LExpanded [t]
-       else LUnexpanded t
-    | ts -> 
-       (List.iter (fun t -> 
-         assert (Typector.get_stamp t = builtin_stamp)) ts;
-        LExpanded ts)
+  let lift t = LComp t
 
   let pmap f pol = function
-    | LZero -> LZero
-    | LUnexpanded t -> LUnexpanded (Components.pmap f pol t)
-    | LExpanded t -> LExpanded (List.map (Components.pmap f pol) t)
+    | LComp t -> LComp (Components.pmap f pol t)
+    | (LZero | LOne) as x -> x
 
   let pfold_comps f pol t x =
     List.fold_right (Components.pfold f pol) t x
       
   let rec pfold f pol ty x = match ty with
-    | LZero -> x
-    | LUnexpanded t -> Components.pfold f pol t x
-    | LExpanded t -> pfold_comps f pol t x
+    | LComp t -> Components.pfold f pol t x
+    | LZero | LOne -> x
 
   let iter f p x = pfold (fun pol x r -> f pol x) p x ()
 
@@ -81,14 +59,13 @@ module TypeLat = struct
       | y1 :: y2 :: _, _ -> failwith "two terms in same component"
 
   let list_fields = function
-    | LZero -> []
-    | LUnexpanded x -> Components.list_fields x
-    | LExpanded x -> x |> List.map Components.list_fields |> List.concat
+    | LZero | LOne -> []
+    | LComp t -> Components.list_fields t
 
   let to_typeterm pol = function
     | LZero -> TZero pol
-    | LUnexpanded t -> TCons t
-    | LExpanded t -> ty_add pol (List.map (fun t -> TCons t) t)
+    | LOne -> TOne pol
+    | LComp t -> TCons t
 
   let change_locations l = fun x -> x (* function
     | LZero -> LZero

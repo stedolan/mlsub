@@ -72,6 +72,7 @@ type +'a tyargterm =
 
 type typeterm =
 | TZero of Variance.polarity
+| TOne of Variance.polarity
 | TNamed of tyvar * typeterm tyargterm list
 | TCons of typeterm Components.t
 | TAdd of Variance.polarity * typeterm * typeterm
