@@ -1,0 +1,11 @@
+(menhir
+ (modules parser)
+ (flags (--table --explain --unused-tokens)))
+
+(env (dev (flags (:standard -warn-error -A))))
+
+(executable
+ (name main)
+ (libraries pprint menhirLib sedlex xdg-basedir linenoise)
+ ; sedlex only needed for sedlex.ppx, but per_module breaks Merlin
+ (preprocess (pps sedlex.ppx)))
