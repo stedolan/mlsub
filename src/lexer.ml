@@ -19,6 +19,9 @@ let lex buf =
   | ';' -> SEMI
   | '_' -> UNDER
   | '?' -> QUESTION
+  | '&' -> AMPER
+  | '|' -> VBAR
+  | "->" -> ARROW
 
   | "fn" -> FN
   | "let" -> LET
@@ -64,3 +67,6 @@ let token_name = function
   | COMMENT -> "COMMENT"
   | COMMA -> "COMMA"
   | COLON -> "COLON"
+  | ARROW -> "ARROW"
+  | AMPER -> "AMPER"
+  | VBAR -> "VBAR"

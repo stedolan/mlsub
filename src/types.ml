@@ -1,66 +1,16 @@
-module IntMap = Map.Make (struct type t = int let compare = compare end)
-module StrMap = Map.Make (struct type t = string let compare = compare end)
+open Typedefs
 
-(* Later, maybe intern these? *)
-type symbol = string
-module SymMap = Map.Make (struct type t = symbol let compare = compare end)
+let polneg = function Pos -> Neg | Neg -> Pos
 
+let intfail s = failwith ("internal error: " ^ s)
 
 let fresh_id =
   let next = ref 0 in
   fun () -> let r = !next in incr next; r
 
-type polarity = Pos | Neg
-let polneg = function Pos -> Neg | Neg -> Pos
 
-type generalisation_status = Polytype | Monotype
 
-(* Head type constructors *)
-type 'a cons_head =
-  (* Underconstrained. Might be anything. Identity of meet/join.
-     (⊤ if Neg, ⊥ if Pos *)
-  | Ident
-  (* Overconstrained. Must be everything. Annihilator of meet/join.
-     (⊥ if Neg, ⊤ if Pos *)
-  | Annih
-  | Func of 'a * 'a
-  | Record of 'a StrMap.t
-  | Abs of symbol * env (* must refer to the most recent addition *)
-  (* ... abstract type constructors ... *)
-
-(* Possibly-nested type constructors. FIXME: optimise cons when it has no subterms? *)
-and constr =
-  { stypes: vset; cons: constr cons_head }
-
-(* Typing environment *)
-and env =
-  | Env_empty
-  | Env_cons of { entry : env_entry; level : int; rest : env }
-
-(* Entries in the typing environment *)
-and env_entry =
-  (* Binding x : τ *)
-  | EVal of symbol * constr
-  (* Abstract type α : [σ, τ] (e.g. from ∀ or local type defn).
-     FIXME: allow type parameters here (not inferred in σ, τ, though) *)
-  | EType of symbol * constr * constr
-  (* Marker for scope of generalisation (let binding) *)
-  | EGen
-
-(* Type variables, subject to inference.
-   These are mutable: during inference, they become more constrained *)
-and tyvar = {
-  v_id : int;
-  v_pol : polarity;
-  mutable v_flow : vset;
-  mutable v_cons : constr cons_head;
-  v_env : env;
-}
-
-(* keyed by ID *)
-and vset = tyvar IntMap.t
-
-let flow_union (a : vset) (b : vset) : vset =
+let vset_union (a : vset) (b : vset) : vset =
   IntMap.union (fun _ a' b' -> assert (a' == b'); Some a') a b
 
 let rec assert_env_prefix env ext =
@@ -83,9 +33,13 @@ let env_max e1 e2 =
      else
        (assert_env_prefix e2 e1; e1)
 
-let cons_head_env = function
-  | Abs (_, env) -> env
-  | _ -> Env_empty
+let env_level = function
+  | Env_empty -> 0
+  | Env_cons { level; _ } -> level
+
+let env_cons env entry =
+  Env_cons { entry; level = env_level env + 1; rest = env }
+
 (*
 let cons (t : stype constr cons_head) : stype constr = match t with
   | (Ident|Annih) as cons -> Cons' { cons; env = Env_empty }
@@ -104,7 +58,7 @@ let cons (t : stype constr cons_head) : stype constr = match t with
        Cons { cons; env }
  *)
 let cons t =
-  { stypes = IntMap.empty; cons = t }
+  { tyvars = IntMap.empty; cons = t }
 (*
 let rec cons_map (f : 'a -> 'b) pol (t : 'a constr) : 'b constr =
   match t with
@@ -118,7 +72,7 @@ let rec cons_map (f : 'a -> 'b) pol (t : 'a constr) : 'b constr =
      Cons { cons = Record (StrMap.map (cons_map f pol) fields); env }
   | Cons' _ as x -> x
  *)
-
+(*
 let flow env =
   let p =
     { v_id = fresh_id ();
@@ -135,50 +89,98 @@ let flow env =
   p.v_flow <- IntMap.singleton n.v_id n;
   n.v_flow <- IntMap.singleton p.v_id p;
   (n,p)
+ *)
 
-let rec join pol (s : constr) (t : constr) =
-  { stypes = flow_union s.stypes t.stypes;
+let fresh_var env =
+  let v =
+    { v_id = fresh_id ();
+      v_env = env;
+      v_pos = { tyvars = IntMap.empty; cons = Ident };
+      v_neg = { tyvars = IntMap.empty; cons = Ident } } in
+  let rec add_to_gen_point = function
+    | Env_empty ->
+       intfail "inference variable created outside generalisation scope"
+    | Env_cons { entry; rest; _ } ->
+       match entry with
+       | Eval _ | Etype _ -> add_to_gen_point rest
+       | Egen gen ->
+          gen.vars <- v :: gen.vars in
+  add_to_gen_point env;
+  v
+
+let rec join pol (s : styp) (t : styp) =
+  { tyvars = vset_union s.tyvars t.tyvars;
     cons = join_cons pol s.cons t.cons }
 and join_cons pol s t =
-  match s, t, pol with
+  match s, t with
   (* top/bottom *)
-  | Ident, x, _ | x, Ident, _ -> x
-  | Annih, _, _ | _, Annih, _ -> Annih
+  | Ident, x | x, Ident -> x
+  | Annih, _ | _, Annih -> Annih
   (* incompatible types *)
-  | Record _, Func _, _
-  | Func _, Record _, _ ->
+  | Record _, Func _
+  | Func _, Record _ ->
      Annih
   (* FIXME not implemented *)
-  | Abs _, _, _ | _, Abs _, _ -> failwith "unimplemented"
+  | Abs _, _ | _, Abs _ -> failwith "unimplemented"
   (* Functions *)
-  | Func (sd, sr), Func (td, tr), pol ->
-     Func (join (polneg pol) sd td, join pol sr tr)
+  | Func (sd, sr), Func (td, tr) ->
+     Func (join_fields (polneg pol) sd td, join pol sr tr)
   (* Records *)
-  | Record sf, Record tf, Pos ->
-     (* upper bound - intersection of fields *)
-     Record (StrMap.merge (fun _ s t ->
-       match s, t with
-       | Some s, Some t -> Some (join pol s t)
-       | _ -> None) sf tf)
-  | Record sf, Record tf, Neg ->
+  | Record sf, Record tf ->
+     Record (join_fields pol sf tf)
+and join_fields pol ss tt =
+  match pol with
+  | Neg ->
      (* lower bound - union of fields *)
-     Record (StrMap.merge (fun _ s t ->
+     StrMap.merge (fun _ s t ->
        match s, t with
        | Some s, Some t -> Some (join pol s t)
        | (Some _ as x), None | None, (Some _ as x) -> x
-       | None, None -> None) sf tf)
+       | None, None -> None) ss tt
+  | Pos ->
+     (* upper bound - intersection of fields *)
+     StrMap.merge (fun _ s t ->
+       match s, t with
+       | Some s, Some t -> Some (join pol s t)
+       | _ -> None) ss tt
 
+
+let bound pol v =
+  match pol with
+  | Pos -> v.v_pos
+  | Neg -> v.v_neg
+
+(* Computes epsilon-closure of a type *)
+let rec closure pol t =
+  let rec go vars acc =
+    IntMap.fold (fun id v ({ tyvars; cons } as acc) ->
+      if IntMap.mem id tyvars then acc else
+        let tyvars = IntMap.add id v tyvars in
+        let {tyvars = v_tyvars; cons = v_cons} = bound pol v in
+        let cons = join_cons pol cons v_cons in
+        go v_tyvars {tyvars; cons}) vars acc in
+  let { tyvars; cons } = t in
+  go tyvars { tyvars = IntMap.empty; cons }
 
 
 (* FIXME rectypes :( :( :( *)
 let rec biunify p n =
-  p.stypes |> IntMap.iter (fun _ v ->
-    v.v_flow <- flow_union v.v_flow n.stypes;
+  (*
+  (* This does head-expansion! Arrrrghghghghgh! *)
+  p.tyvars |> IntMap.iter (fun _ v ->
+    v.v_flow <- flow_union v.v_flow n.tyvars;
     v.v_cons <- join_cons Neg v.v_cons n.cons);
-  n.stypes |> IntMap.iter (fun _ v ->
-    v.v_flow <- flow_union v.v_flow p.stypes;
+  n.tyvars |> IntMap.iter (fun _ v ->
+    v.v_flow <- flow_union v.v_flow p.tyvars;
     v.v_cons <- join_cons Pos v.v_cons p.cons);
-  match p.cons, n.cons with
+   *)
+  let { tyvars = p_vars; cons = p_cons } = closure Pos p in
+  let { tyvars = n_vars; cons = n_cons } = closure Neg n in
+  (* FIXME: optimisation: maintain the episilon-invariant between
+     type variables from the same EGen, then we can skip some of the below *)
+  p_vars |> IntMap.iter (fun _ v -> v.v_neg <- join Neg v.v_neg n);
+  n_vars |> IntMap.iter (fun _ v -> v.v_pos <- join Pos v.v_pos p);
+  match p_cons, n_cons with
   | Ident, _
   | _, Ident -> ()
   | Annih, Annih -> ()
@@ -188,21 +190,15 @@ let rec biunify p n =
   | Record _, Func _ -> failwith "type error"
   | Abs _, _ | _, Abs _ -> failwith "unimplemented"
   | Func (d1, r1), Func (d2, r2) ->
-     biunify d2 d1;
+     biunify_fields d2 d1;
      biunify r1 r2
   | Record f1, Record f2 ->
-     f2 |> StrMap.iter (fun k t2 ->
-       match StrMap.find k f1 with
-       | t1 -> biunify t1 t2
-       | exception Not_found -> failwith "type error on record")
-
-
-
-
-
-type tyexp =
-  | Tcons of vset * tyexp cons_head
-  | Tforall of tyexp * tyexp * tyexp
+     biunify_fields f1 f2
+and biunify_fields pf nf =
+  nf |> StrMap.iter (fun k n ->
+    match StrMap.find k pf with
+    | p -> biunify p n
+    | exception Not_found -> failwith ("type error on field " ^ k))
 
 
 (*
@@ -356,4 +352,127 @@ weaken to
  *)
 
 let flow () = (1,2)
+ *)
+
+(* FIXME: might need to be polarity-aware *)
+let map_head f = function
+  | Ident -> Ident
+  | Annih -> Annih
+  | Record fields ->
+     Record (StrMap.map f fields)
+  | Func (args, res) ->
+     Func (StrMap.map f args, f res)
+  | Abs (s, eref) -> Abs (s, eref)
+
+let rec open_cons ix env open_a = function
+  (* FIXME: this could be optimised with knowledge of type support *)
+  | Ident -> Ident
+  | Annih -> Annih
+  | Record fields ->
+     Record (StrMap.map (open_a ix env) fields)
+  | Func (args, res) ->
+     Func (StrMap.map (open_a ix env) args, open_a ix env res)
+  | Abs (_, Bound k) when k > ix ->
+     (* Can only open the outermost binder group *)
+     assert false
+  | Abs (s, Bound k) when k = ix ->
+     Abs (s, Free env)
+  | Abs _ as abs ->
+     abs
+
+let rec open_typ ix env = function
+  | Tcons (vset, cons) ->
+     Tcons (vset, open_cons ix env open_typ cons)
+  | Tforall (vars, body) ->
+     Tforall (vars, open_typ (ix+1) env body)
+
+
+(* FIXME: doing this lazily (via a Tsimple ctor) might make
+   generalisation / instantiation faster in the absence of bound vars *)
+let rec typ_of_styp { tyvars; cons } =
+  Tcons (tyvars, map_head typ_of_styp cons)
+
+let assert_wf_envref env = function
+  | Free env' ->
+     assert_env_prefix env' env;
+     env'
+  | Bound _ ->
+     assert false
+
+(* Also checks that the type is locally closed *)
+let assert_wf_cons env wf = function
+  | Ident | Annih -> ()
+  | Record fields ->
+     StrMap.iter (fun _ t -> wf env t) fields
+  | Func (args, res) ->
+     StrMap.iter (fun _ t -> wf env t) args;
+     wf env res
+  | Abs (s, eref) ->
+     let env' = assert_wf_envref env eref in
+     begin match env' with
+     | Env_cons { entry = Etype defs; _ } ->
+        assert (StrMap.mem s defs)
+     | _ -> assert false
+     end
+
+let rec assert_wf_typ env = function
+  | Tcons (tyvars, cons) ->
+     IntMap.iter (fun _ v -> assert_wf_tyvar env v) tyvars;
+     assert_wf_cons env assert_wf_typ cons
+  | Tforall (vars, body) ->
+     let ext = Etype (StrMap.map (fun (l, u) ->
+                   (typ_of_styp l, typ_of_styp u)) vars) in
+     let env = env_cons env ext in
+     let body = open_typ 0 env body in
+     assert_wf_typ env body
+
+and assert_wf_tyvar env v =
+  assert_env_prefix v.v_env env;
+  assert_wf_styp env v.v_pos;
+  assert_wf_styp env v.v_neg
+
+and assert_wf_styp env { tyvars; cons } =
+  IntMap.iter (fun _ v -> assert_wf_tyvar env v) tyvars;
+  assert_wf_cons env assert_wf_styp cons
+
+let rec assert_wf_env = function
+  | Env_empty -> ()
+  | Env_cons { entry; level; rest } as env ->
+     assert (level = env_level rest + 1);
+     assert_wf_env_entry env entry;
+     assert_wf_env rest
+
+and assert_wf_env_entry env = function
+  | Eval (_, typ) -> assert_wf_typ env typ
+  | Etype defs ->
+     (* FIXME should there be a strict positivity / contractivity check? *)
+     defs |> StrMap.iter (fun _ (l,u) ->
+       assert_wf_typ env l;
+       assert_wf_typ env u)
+  | Egen v ->
+     List.iter (assert_wf_tyvar env) v.vars
+
+  (* 
+
+What can go in the environment? This is the main problem.
+(This will eventually match what can go in records/ modules)
+
+  - Values with a simple type
+  - Values with a weird type
+  - Generalisation points (with list of tyvars)
+  - Abstract types with upper and lower bounds
+
+Are the upper and lower bounds simple types?
+In forall yes, in environments not necessarily.
+
+This allows abstract types, like from another module?
+Having a large type for one of those seems useful
+
+   type t <= { foo : [A](A) => A }
+   let f (x : t) = (x.foo)(42)
+
+This sounds like abstract type bounds should be general types.
+The forall is predicative, but the predicativity shows up only in instantiation.
+How does this affect smallness?
+
  *)

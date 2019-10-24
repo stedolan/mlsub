@@ -129,6 +129,7 @@ let rec run_repl ~histfile () =
        | Ok e ->
           PPrint.ToChannel.pretty 1. 80 stdout
             (Print.print_exp e);
+          Check.infer e;
           Printf.printf "\n%!"
        | Error _ -> raise (Fatal Unexpected_eof)
        end

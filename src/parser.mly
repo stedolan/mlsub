@@ -3,7 +3,7 @@
 %token <string> STRING
 %token EOF WS COMMENT NL ERROR
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
-%token COLON EQUALS DOT COMMA SEMI UNDER QUESTION
+%token COLON EQUALS DOT COMMA SEMI UNDER QUESTION ARROW AMPER VBAR
 %token FN LET TRUE FALSE IF ELSE
 
 %{ open Exp %}
@@ -32,51 +32,59 @@ exp_:
   { Var v }
 | k = literal
   { Lit k }
-| FN; params = tuple(pat, field); LBRACE; body = exp; RBRACE
+| FN; params = tuple(pat, field, field); LBRACE; body = exp; RBRACE
   { Fn (params, body) }
-| fn = exp; args = tuple(exp, field)
+| fn = exp; args = tuple(exp, field, field)
   { App (fn, args) }
-| t = tuple(exp, nfield)
+| t = tuple(exp, field, nfield)
   { Tuple t }
 | LPAR; e = exp; RPAR
   { Parens e }
 | e = exp; DOT; f = loc(IDENT)
   { Proj (e, f) }
+| LPAR; e = exp; COLON; t = tyexp; RPAR
+  { Typed (e, t) }
 
-tuple(X, field1): e = mayloc(tuple_(X, field1)) { e }
-tuple_(X, field1):
+tuple(X, field, field1): e = mayloc(tuple_(X, field, field1)) { e }
+tuple_(X, field, field1):
 (* 0-tuples: no commas *)
 | LPAR; RPAR
   { [] }
 (* n-tuples with at least one comma (possibly trailing) *)
-| LPAR; f = field(X); fs = tuple1(X); RPAR
+| LPAR; f = field(X); fs = tuple1(X, field); RPAR
   { f :: fs }
 (* 1-tuples with no comma *)
 | LPAR; f = field1(X); RPAR
   { [f] }
 
-tuple1(X):
+tuple1(X, field):
 | COMMA; { [] }
 | COMMA; f = field(X) { [f] }
-| COMMA; f = field(X); fs = tuple1(X)  { f :: fs }
+| COMMA; f = field(X); fs = tuple1(X, field)  { f :: fs }
 
 %inline field(X):
 | e = pfield(X) { e }
 | e = nfield(X) { e }
 pfield(X):
 | e = X
-  { { f_name = Fpositional; f_type = None; f_defn = Some e } }
+  { Fpositional (None, e) }
 | e = X; COLON; ty = tyexp
-  { { f_name = Fpositional; f_type = Some ty; f_defn = Some e } }
+  { Fpositional (Some ty, e) }
 nfield(X):
 | DOT; f = symbol; EQUALS; e = X
-  { { f_name = Fnamed f; f_type = None; f_defn = Some e } }
+  { Fnamed(f, None, Some e) }
+| DOT; f = symbol
+  { Fnamed(f, None, None) }
+| DOT; f = symbol; COLON; ty = tyexp; EQUALS; e = X
+  { Fnamed(f, Some ty, Some e) }
+| DOT; f = symbol; COLON; ty = tyexp
+  { Fnamed(f, Some ty, None) }
 
 pat: p = mayloc(pat_) { p }
 pat_:
 | v = symbol
   { Pvar v }
-| t = tuple(pat, nfield)
+| t = tuple(pat, field, nfield)
   { Ptuple t }
 | LPAR; t = pat; RPAR
   { Pparens t }
@@ -85,3 +93,22 @@ tyexp: t = mayloc(tyexp_) { t }
 tyexp_:
 | t = symbol
   { Tnamed t }
+| t = tuple(tyexp, tyexp_field, tyexp_nfield)
+  { Trecord(t, `Closed) }
+| t = tuple(tyexp, tyexp_field, tyexp_field); ARROW; r = tyexp
+  { Tfunc (t, r) }
+| LPAR; t = tyexp; RPAR
+  { Tparen (t) }
+| t1 = tyexp; VBAR; t2 = tyexp
+  { Tjoin(t1, t2) }
+| t1 = tyexp; AMPER; t2 = tyexp
+  { Tmeet(t1, t2) }
+
+%inline tyexp_field(X):
+| e = X
+  { TFpositional e }
+| e = tyexp_nfield(X)
+  { e }
+tyexp_nfield(X):
+| DOT; f = symbol; COLON; e = X
+  { TFnamed (f, e) }

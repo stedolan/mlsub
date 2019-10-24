@@ -10,9 +10,6 @@ type 'a mayloc = 'a option loc
 type literal = Int of int | String of string
 type symbol = string loc
 
-type field_name = Fpositional | Fnamed of symbol
-type empty
-
 (* Expressions *)
 
 type exp = exp' mayloc and exp' =
@@ -32,15 +29,14 @@ type exp = exp' mayloc and exp' =
   | Let of tuple_pat * exp * exp
   (* a.foo *)
   | Proj of exp * symbol
-  (* e : A *)
+  (* (e : A) *)
   | Typed of exp * tyexp
   (* (e) *)
   | Parens of exp
 
 and 'defn field =
-  { f_name: field_name;
-    f_type: tyexp option;
-    f_defn: 'defn option }
+  | Fpositional of tyexp option * 'defn
+  | Fnamed of symbol * tyexp option * 'defn option
 
 and tuple = tuple' mayloc and tuple' =
   exp field list
@@ -58,11 +54,17 @@ and tuple_pat = tuple_pat' mayloc and tuple_pat' =
 (* Type expressions *)
 
 and tyexp = tyexp' mayloc and tyexp' =
-  | Ttop
-  | Tbot
   | Tnamed of symbol
   | Tforall of (symbol * tyexp option * tyexp option) list * tyexp
-  | Trecord of record_tyexp * [`Open | `Closed]
-  | Tfunc of record_tyexp * tyexp
+  | Trecord of tuple_tyexp * [`Closed] (* FIXME: support `Open *)
+  | Tfunc of tuple_tyexp * tyexp
+  | Tparen of tyexp
+  | Tjoin of tyexp * tyexp
+  | Tmeet of tyexp * tyexp
 
-and record_tyexp = empty field list
+and 'defn field_tyexp =
+  | TFpositional of 'defn
+  | TFnamed of symbol * 'defn
+
+and tuple_tyexp = tuple_tyexp' mayloc and tuple_tyexp'=
+  tyexp field_tyexp list
