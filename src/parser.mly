@@ -1,6 +1,7 @@
-%token <string> IDENT
+%token <string> SYMBOL
 %token <int> INT
 %token <string> STRING
+%token SHIFT
 %token EOF WS COMMENT NL ERROR
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
 %token COLON EQUALS DOT COMMA SEMI UNDER QUESTION ARROW AMPER VBAR
@@ -17,7 +18,13 @@
 
 prog: e = exp; EOF { e }
 
-symbol: s = loc(IDENT) { s } 
+symbol: s = loc(SYMBOL) { s } 
+ident: v = loc(ident_) { v }
+ident_:
+| s = SYMBOL
+  { { label = s; shift = 0 } }
+| v = ident_; SHIFT
+  { { v with shift = v.shift + 1 } }
 
 literal: l = loc(literal_) { l }
 literal_:
@@ -28,7 +35,7 @@ literal_:
 
 exp: e = mayloc(exp_) { e }
 exp_:
-| v = symbol
+| v = ident
   { Var v }
 | k = literal
   { Lit k }
@@ -40,7 +47,7 @@ exp_:
   { Tuple t }
 | LPAR; e = exp; RPAR
   { Parens e }
-| e = exp; DOT; f = loc(IDENT)
+| e = exp; DOT; f = symbol
   { Proj (e, f) }
 | LPAR; e = exp; COLON; t = tyexp; RPAR
   { Typed (e, t) }
@@ -91,7 +98,7 @@ pat_:
 
 tyexp: t = mayloc(tyexp_) { t }
 tyexp_:
-| t = symbol
+| t = ident
   { Tnamed t }
 | t = tuple(tyexp, tyexp_field, tyexp_nfield)
   { Trecord(t, `Closed) }

@@ -9,6 +9,8 @@ type 'a mayloc = 'a option loc
 
 type literal = Int of int | String of string
 type symbol = string loc
+type ident = ident' loc and ident' =
+  { label : string; shift : int }
 
 (* Expressions *)
 
@@ -16,7 +18,7 @@ type exp = exp' mayloc and exp' =
   (* 42 or "hello" *)
   | Lit of literal loc
   (* x *)
-  | Var of symbol
+  | Var of ident
   (* fn (a, b, c) { ... } *)
   | Fn of tuple_pat * exp
   (* fn f(a, b, c) { .... }; ... *)
@@ -54,7 +56,7 @@ and tuple_pat = tuple_pat' mayloc and tuple_pat' =
 (* Type expressions *)
 
 and tyexp = tyexp' mayloc and tyexp' =
-  | Tnamed of symbol
+  | Tnamed of ident
   | Tforall of (symbol * tyexp option * tyexp option) list * tyexp
   | Trecord of tuple_tyexp * [`Closed] (* FIXME: support `Open *)
   | Tfunc of tuple_tyexp * tyexp

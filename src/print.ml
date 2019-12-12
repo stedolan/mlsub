@@ -1,6 +1,6 @@
 open PPrint
 open Exp
-open Typedefs
+(*open Typedefs*)
 
 (* FIXME: precedence is fucked here. Need to insert parens *)
 
@@ -15,6 +15,12 @@ let print_lit = function
   | String s -> char '"' ^^ string s ^^ char '"'
 
 let print_symbol (s, _) = string s
+let print_ident (l, _) =
+  let rec go =
+    function
+    | 0 -> empty
+    | n -> string "$outer" ^^ go (n-1) in
+  string l.label ^^ go l.shift
 
 let mayloc x f = match x with
   | (None, _) -> string "??"
@@ -22,7 +28,7 @@ let mayloc x f = match x with
 
 let rec print_exp e = mayloc e @@ function
   | Lit (l, _) -> print_lit l
-  | Var (s, _) -> string s
+  | Var s -> print_ident s
   | Fn (params, body) ->
      string "fn" ^^ space ^^
        print_tuple ~tcomma:false print_pat params ^^ space ^^
@@ -67,7 +73,7 @@ and print_pat p = mayloc p @@ function
   | Pparens p -> parens (print_pat p)
 
 and print_tyexp t = mayloc t @@ function
-  | Tnamed s -> print_symbol s
+  | Tnamed s -> print_ident s
   | Trecord (fields, `Closed) ->
      print_tuple_tyexp ~tcomma:true fields
   | Tfunc (args, ret) ->
@@ -112,7 +118,7 @@ and print_tuple_tyexp ~tcomma t = mayloc t @@ function
 
 (* These names are illegal in user-entered code, and used here only
    for debugging *)
-let tyvar_name v : symbol = "$" ^ string_of_int v.v_id
+(*let tyvar_name v : symbol = "$" ^ string_of_int v.v_id*)
 (*
 (* Not strictly a printing function, but only useful for printing so
    it goes here *)

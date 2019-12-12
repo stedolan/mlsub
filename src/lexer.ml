@@ -29,10 +29,11 @@ let lex buf =
   | "false" -> FALSE
   | "if" -> IF
   | "else" -> ELSE
+  | "$outer" -> SHIFT
 
   | Plus('0'..'9') -> INT (int_of_string (lexeme buf))
   | ('a'..'z'|'A'..'Z'|'_'), Star('a'..'z'|'A'..'Z'|'0'..'9') ->
-     IDENT (lexeme buf)
+     SYMBOL (lexeme buf)
   | eof -> EOF
 
   | any -> ERROR
@@ -56,7 +57,7 @@ let token_name = function
   | LBRACE -> "LBRACE"
   | INT _ -> "INT"
   | IF -> "IF"
-  | IDENT _ -> "IDENT"
+  | SYMBOL _ -> "SYMBOL"
   | FN -> "FN"
   | FALSE -> "FALSE"
   | ERROR -> "ERROR"
@@ -70,3 +71,4 @@ let token_name = function
   | ARROW -> "ARROW"
   | AMPER -> "AMPER"
   | VBAR -> "VBAR"
+  | SHIFT -> "SHIFT"

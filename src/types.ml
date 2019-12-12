@@ -4,41 +4,98 @@ let polneg = function Pos -> Neg | Neg -> Pos
 
 let intfail s = failwith ("internal error: " ^ s)
 
-let fresh_id =
-  let next = ref 0 in
-  fun () -> let r = !next in incr next; r
+
+
+let open_cons ix env open_a = function
+  (* FIXME: this could be optimised with knowledge of type support *)
+  | Ident -> Ident
+  | Annih -> Annih
+  | Record fields ->
+     Record (StrMap.map (open_a ix env) fields)
+  | Func (args, res) ->
+     Func (StrMap.map (open_a ix env) args, open_a ix env res)
+  | Abs (_, Bound k) when k > ix ->
+     (* Can only open the outermost binder group *)
+     assert false
+  | Abs (s, Bound k) when k = ix ->
+     Abs (s, Free env)
+  | Abs _ as abs ->
+     abs
+
+let rec open_typ ix env = function
+  | Tcons (vset, cons) ->
+     Tcons (vset, open_cons ix env open_typ cons)
+  | Tforall (vars, body) ->
+     Tforall (vars, open_typ (ix+1) env body)
+
+
+(* FIXME: doing this lazily (via a Tsimple ctor) might make
+   generalisation / instantiation faster in the absence of bound vars *)
+let rec typ_of_styp { tyvars; cons } =
+  Tcons (tyvars, map_head typ_of_styp cons)
+
+let assert_wf_envref env = function
+  | Free env' ->
+     assert_env_prefix env' env;
+     env'
+  | Bound _ ->
+     assert false
+
+(* Also checks that the type is locally closed *)
+let assert_wf_cons env wf = function
+  | Ident | Annih -> ()
+  | Record fields ->
+     StrMap.iter (fun _ t -> wf env t) fields
+  | Func (args, res) ->
+     StrMap.iter (fun _ t -> wf env t) args;
+     wf env res
+  | Abs (s, eref) ->
+     let env' = assert_wf_envref env eref in
+     begin match env' with
+     | Env_cons { entry = Etype defs; _ } ->
+        assert (StrMap.mem s defs)
+     | _ -> assert false
+     end
+
+let rec assert_wf_typ env = function
+  | Tcons (tyvars, cons) ->
+     IntMap.iter (fun _ v -> assert_wf_tyvar env v) tyvars;
+     assert_wf_cons env assert_wf_typ cons
+  | Tforall (vars, body) ->
+     let ext = Etype (StrMap.map (fun (l, u) ->
+                   (typ_of_styp l, typ_of_styp u)) vars) in
+     let env = env_cons env ext in
+     let body = open_typ 0 env body in
+     assert_wf_typ env body
+
+and assert_wf_tyvar env v =
+  assert_env_prefix v.v_env env;
+  assert_wf_styp env v.v_pos;
+  assert_wf_styp env v.v_neg
+
+and assert_wf_styp env { tyvars; cons } =
+  IntMap.iter (fun _ v -> assert_wf_tyvar env v) tyvars;
+  assert_wf_cons env assert_wf_styp cons
+
+let rec assert_wf_env = function
+  | Env_empty -> ()
+  | Env_cons { entry; level; rest } as env ->
+     assert (level = env_level rest + 1);
+     assert_wf_env_entry env entry;
+     assert_wf_env rest
+
+and assert_wf_env_entry env = function
+  | Eval (_, typ) -> assert_wf_typ env typ
+  | Etype defs ->
+     (* FIXME should there be a strict positivity / contractivity check? *)
+     defs |> StrMap.iter (fun _ (l,u) ->
+       assert_wf_typ env l;
+       assert_wf_typ env u)
+  | Egen v ->
+     List.iter (assert_wf_tyvar env) v.vars
 
 
 
-let vset_union (a : vset) (b : vset) : vset =
-  IntMap.union (fun _ a' b' -> assert (a' == b'); Some a') a b
-
-let rec assert_env_prefix env ext =
-  if env != ext then
-    match env, ext with
-    | Env_empty, _ -> ()
-    | Env_cons _, Env_empty -> assert false
-    | Env_cons _, Env_cons { rest; _ } ->
-       assert_env_prefix env rest
-
-(* Only defined if one environment is an extension of the other *)
-let env_max e1 e2 =
-  match e1, e2 with
-  | Env_empty, e | e, Env_empty -> e
-  | Env_cons { level = l1; _ }, Env_cons { level = l2; _ } ->
-     if l1 = l2 then
-       (assert (e1 == e2); e1)
-     else if l1 < l2 then
-       (assert_env_prefix e1 e2; e2)
-     else
-       (assert_env_prefix e2 e1; e1)
-
-let env_level = function
-  | Env_empty -> 0
-  | Env_cons { level; _ } -> level
-
-let env_cons env entry =
-  Env_cons { entry; level = env_level env + 1; rest = env }
 
 (*
 let cons (t : stype constr cons_head) : stype constr = match t with
@@ -59,6 +116,8 @@ let cons (t : stype constr cons_head) : stype constr = match t with
  *)
 let cons t =
   { tyvars = IntMap.empty; cons = t }
+let tcons t =
+  Tcons (IntMap.empty, t)
 (*
 let rec cons_map (f : 'a -> 'b) pol (t : 'a constr) : 'b constr =
   match t with
@@ -91,6 +150,12 @@ let flow env =
   (n,p)
  *)
 
+
+let fresh_id =
+  let next = ref 0 in
+  fun () -> let r = !next in incr next; r
+
+
 let fresh_var env =
   let v =
     { v_id = fresh_id ();
@@ -108,6 +173,7 @@ let fresh_var env =
   add_to_gen_point env;
   v
 
+(* join Pos = ⊔, join Neg = ⊓ (meet) *)
 let rec join pol (s : styp) (t : styp) =
   { tyvars = vset_union s.tyvars t.tyvars;
     cons = join_cons pol s.cons t.cons }
@@ -144,14 +210,13 @@ and join_fields pol ss tt =
        | Some s, Some t -> Some (join pol s t)
        | _ -> None) ss tt
 
-
 let bound pol v =
   match pol with
   | Pos -> v.v_pos
   | Neg -> v.v_neg
 
 (* Computes epsilon-closure of a type *)
-let rec closure pol t =
+let closure pol t =
   let rec go vars acc =
     IntMap.fold (fun id v ({ tyvars; cons } as acc) ->
       if IntMap.mem id tyvars then acc else
@@ -354,103 +419,6 @@ weaken to
 let flow () = (1,2)
  *)
 
-(* FIXME: might need to be polarity-aware *)
-let map_head f = function
-  | Ident -> Ident
-  | Annih -> Annih
-  | Record fields ->
-     Record (StrMap.map f fields)
-  | Func (args, res) ->
-     Func (StrMap.map f args, f res)
-  | Abs (s, eref) -> Abs (s, eref)
-
-let rec open_cons ix env open_a = function
-  (* FIXME: this could be optimised with knowledge of type support *)
-  | Ident -> Ident
-  | Annih -> Annih
-  | Record fields ->
-     Record (StrMap.map (open_a ix env) fields)
-  | Func (args, res) ->
-     Func (StrMap.map (open_a ix env) args, open_a ix env res)
-  | Abs (_, Bound k) when k > ix ->
-     (* Can only open the outermost binder group *)
-     assert false
-  | Abs (s, Bound k) when k = ix ->
-     Abs (s, Free env)
-  | Abs _ as abs ->
-     abs
-
-let rec open_typ ix env = function
-  | Tcons (vset, cons) ->
-     Tcons (vset, open_cons ix env open_typ cons)
-  | Tforall (vars, body) ->
-     Tforall (vars, open_typ (ix+1) env body)
-
-
-(* FIXME: doing this lazily (via a Tsimple ctor) might make
-   generalisation / instantiation faster in the absence of bound vars *)
-let rec typ_of_styp { tyvars; cons } =
-  Tcons (tyvars, map_head typ_of_styp cons)
-
-let assert_wf_envref env = function
-  | Free env' ->
-     assert_env_prefix env' env;
-     env'
-  | Bound _ ->
-     assert false
-
-(* Also checks that the type is locally closed *)
-let assert_wf_cons env wf = function
-  | Ident | Annih -> ()
-  | Record fields ->
-     StrMap.iter (fun _ t -> wf env t) fields
-  | Func (args, res) ->
-     StrMap.iter (fun _ t -> wf env t) args;
-     wf env res
-  | Abs (s, eref) ->
-     let env' = assert_wf_envref env eref in
-     begin match env' with
-     | Env_cons { entry = Etype defs; _ } ->
-        assert (StrMap.mem s defs)
-     | _ -> assert false
-     end
-
-let rec assert_wf_typ env = function
-  | Tcons (tyvars, cons) ->
-     IntMap.iter (fun _ v -> assert_wf_tyvar env v) tyvars;
-     assert_wf_cons env assert_wf_typ cons
-  | Tforall (vars, body) ->
-     let ext = Etype (StrMap.map (fun (l, u) ->
-                   (typ_of_styp l, typ_of_styp u)) vars) in
-     let env = env_cons env ext in
-     let body = open_typ 0 env body in
-     assert_wf_typ env body
-
-and assert_wf_tyvar env v =
-  assert_env_prefix v.v_env env;
-  assert_wf_styp env v.v_pos;
-  assert_wf_styp env v.v_neg
-
-and assert_wf_styp env { tyvars; cons } =
-  IntMap.iter (fun _ v -> assert_wf_tyvar env v) tyvars;
-  assert_wf_cons env assert_wf_styp cons
-
-let rec assert_wf_env = function
-  | Env_empty -> ()
-  | Env_cons { entry; level; rest } as env ->
-     assert (level = env_level rest + 1);
-     assert_wf_env_entry env entry;
-     assert_wf_env rest
-
-and assert_wf_env_entry env = function
-  | Eval (_, typ) -> assert_wf_typ env typ
-  | Etype defs ->
-     (* FIXME should there be a strict positivity / contractivity check? *)
-     defs |> StrMap.iter (fun _ (l,u) ->
-       assert_wf_typ env l;
-       assert_wf_typ env u)
-  | Egen v ->
-     List.iter (assert_wf_tyvar env) v.vars
 
   (* 
 
@@ -476,3 +444,9 @@ The forall is predicative, but the predicativity shows up only in instantiation.
 How does this affect smallness?
 
  *)
+
+let rec try_styp_of_typ = function
+  | Tforall _ ->
+     failwith "not a simple type"
+  | Tcons (tyvars, cons) ->
+     { tyvars; cons = map_head try_styp_of_typ cons }
