@@ -63,7 +63,7 @@ and rig_flow = (int * int, unit) Hashtbl.t
 (* Simple types (the result of inference)
    Each styp contains no bound type variables *)
 and styp =
-  { tyvars: vset; cons: styp cons_head }
+  { tyvars: vset; cons: styp cons_head; pol: polarity }
 
 (* Sets of type variables.
    Entries are ordered by environment (longest env first),
@@ -104,13 +104,16 @@ and typ =
       tyvars : vset;
       cons : typ cons_head;
       bvars : boundref list; (* in *descending* order by de Bruijn index *)
+      pol : polarity;
     }
   (* A Tsimp can always be expressed by expanding to Tcons, but using
      Tsimp implies that it contains no bound variables or binding
      structure, which means it can be skipped by opening / closing.
      FIXME: is this a good idea? *)
   | Tsimp of styp
-  (* Forall in a positive position *)
+  (* Forall in a positive position.
+     Bounds should not contain Tpoly.
+     FIXME: this is a horrible way to express that constraint *)
   | Tpoly_pos of (typ * typ) array * typ
   (* Forall in a negative position *)
   | Tpoly_neg of (typ * typ) array * rig_flow * typ
@@ -121,6 +124,10 @@ and boundref = {
   b_sort : var_sort;
   b_vars : int list;  (* IDs within binder group *)
 }
+
+
+
+let polneg = function Pos -> Neg | Neg -> Pos
 
 
 (*
@@ -185,6 +192,14 @@ let rec vset_union vars1 vars2 =
      else
        VScons { v2 with rest = vset_union vars1 v2.rest }
 
+let rec vset_lookup venv vsort = function
+  | VSnil -> []
+  | VScons { env; sort; vars; _ }
+       when env == venv && sort = vsort ->
+     vars
+  | VScons { env; rest; _ } ->
+     if env_level env < env_level venv then []
+     else vset_lookup venv vsort rest
 (*
  * Opening/closing of binders
  *)
@@ -198,42 +213,169 @@ let map_head f = function
   | Func (args, res) ->
      Func (StrMap.map f args, f res)
 
-let cons_typ (tyvars : vset) (t : typ cons_head) =
+let cons_typ pol (tyvars : vset) (t : typ cons_head) =
   match map_head (function Tsimp s -> s | _ -> raise_notrace Exit) t with
   | exception Exit ->
-     Tcons { tyvars; cons = t; bvars = [] }
+     Tcons { tyvars; cons = t; bvars = []; pol }
   | cons ->
      (* Entirely simple types *)
-     Tsimp { tyvars; cons }
+     Tsimp { tyvars; cons; pol }
 
+let cons_styp pol (tyvars : vset) (cons : styp cons_head) =
+  { pol; tyvars; cons }
 
-let rec open_typ env sort ix = function
-  | Tsimp _ as t -> t
-  | Tcons { tyvars; cons; bvars } ->
-     let cons = map_head (open_typ env sort ix) cons in
+let rec open_typ sort vars ix = function
+  | Tsimp _ as t ->
+     (* There is no binding under a Tsimp, so nothing to open *)
+     t
+  | Tcons { tyvars; cons; bvars; pol } ->
+     let cons = map_head (open_typ sort vars ix) cons in
+     (* We're opening the outermost binder,
+        so if it appears it must be at the head of bvars *)
      begin match bvars with
      | [] ->
-        cons_typ tyvars cons
+        cons_typ pol tyvars cons
      | { b_group_idx; b_sort; b_vars } :: bs
           when b_group_idx = ix ->
+        (* While there can be variables of different sorts attached
+           to the same environment, there can only be one sort of
+           variable bound by a given binder *)
         assert (b_sort = sort);
-        asdf
+        let tyvars =
+          List.fold_left (fun vs i -> vset_union vs vars.(i))
+            VSnil b_vars in
+        (match bs with
+         | [] -> cons_typ pol tyvars cons
+         | bvars -> Tcons { tyvars; cons; bvars; pol })
+     | bvars ->
+        (* Other bound variables *)
+        Tcons { tyvars; cons; bvars; pol }
      end
   | Tpoly_pos (bounds, body) ->
      let ix = ix + 1 in
-     Tpoly_pos (Array.map (fun (l,u) -> open_typ env sort ix l,
-                                        open_typ env sort ix u) bounds,
-                open_typ env sort ix body)
+     Tpoly_pos (Array.map (fun (l,u) -> open_typ sort vars ix l,
+                                        open_typ sort vars ix u) bounds,
+                open_typ sort vars ix body)
   | Tpoly_neg (bounds, flow, body) ->
      let ix = ix + 1 in
-     Tpoly_neg (Array.map (fun (l, u) -> open_typ env sort ix l,
-                                         open_typ env sort ix u) bounds,
+     Tpoly_neg (Array.map (fun (l, u) -> open_typ sort vars ix l,
+                                         open_typ sort vars ix u) bounds,
                 flow,
-                open_typ env sort ix body)
+                open_typ sort vars ix body)
   
 
+let is_styp = function
+  | Tsimp s -> s
+  | _ -> assert false
 
 (* Well-formedness checks.
    The wf_foo functions check for local closure also. *)
 
-let wf_cons env wf = function
+let rec wf_cons pol env wf = function
+  | Ident | Annih -> ()
+  | Record fields ->
+     wf_cons_fields pol env wf fields
+  | Func (args, res) ->
+     wf_cons_fields (polneg pol) env wf args;
+     wf pol env res
+and wf_cons_fields pol env wf =
+  StrMap.iter (fun _ t -> wf pol env t)
+
+let rec wf_env = function
+  | Env_empty -> ()
+  | Env_cons { entry; level; rest; tyvars } as env ->
+     assert (level = env_level rest + 1);
+     wf_env_entry env entry;
+     wf_flexvars env tyvars;
+     wf_env rest
+
+and wf_flexvars env vars =
+  Vector.iteri vars (fun i { pos; neg } ->
+    wf_styp Pos env pos;
+    wf_styp Neg env neg;
+    (* Check the ε-invariant *)
+    vset_lookup env Flexible pos.tyvars |> List.iter (fun j ->
+      assert (List.mem i (vset_lookup env Flexible
+          (Vector.get vars j).neg.tyvars)));
+    vset_lookup env Flexible neg.tyvars |> List.iter (fun j ->
+      assert (List.mem i (vset_lookup env Flexible
+          (Vector.get vars j).pos.tyvars))))
+  
+
+and wf_env_entry env = function
+  | Eval (_, typ) -> wf_typ Pos env typ
+  | Egen -> ()
+  | Erigid { vars; flow } ->
+     flow |> Hashtbl.iter (fun (i,j) () ->
+       assert (i <> j);         (* FIXME: unconvinced by this! *)
+       assert (0 <= i && i < Array.length vars);
+       assert (0 <= j && j < Array.length vars));
+     vars |> Array.iter (fun { rig_lower; rig_upper } ->
+       wf_styp Neg env rig_lower;
+       wf_styp Pos env rig_upper)
+
+and wf_styp pol' env { tyvars; cons; pol } =
+  assert (pol = pol');
+  wf_cons pol env wf_styp cons;
+  wf_vset pol env tyvars
+
+and wf_typ pol env = function
+  | Tcons { tyvars; cons; bvars; pol = pol' } ->
+     assert (pol = pol');
+     assert (bvars = []); (* locally closed *)
+     wf_vset pol env tyvars;
+     wf_cons pol env wf_typ cons
+  | Tsimp s ->
+     wf_styp pol env s
+  | Tpoly_pos (vars, body) ->
+     assert (pol = Pos);
+     (* create flexible variables *)
+     let env = env_cons env Egen in
+     let tyvars = match env with Env_cons { tyvars; _ } -> tyvars | _ -> assert false in (* uglllyyyy. *)
+     let nvars = Array.length vars in
+     for _i = 0 to nvars - 1 do
+       Vector.push tyvars { pos = cons_styp Pos VSnil Ident;
+                            neg = cons_styp Neg VSnil Ident }
+     done;
+     let vsets = Array.init nvars (fun i ->
+       VScons { env; sort = Flexible; vars = [i]; rest = VSnil }) in
+     for i = 0 to nvars - 1 do
+       let v = Vector.get tyvars i in
+       let (pos, neg) = vars.(i) in
+       v.pos <- is_styp (open_typ Flexible vsets 0 pos);
+       v.neg <- is_styp (open_typ Flexible vsets 0 neg);
+     done;
+     wf_flexvars env tyvars;    (* check ε-invariant *)
+     wf_typ Pos env (open_typ Flexible vsets 0 body)
+  | Tpoly_neg (bounds, flow, body) ->
+     assert (pol = Neg);
+     let nvars = Array.length bounds in
+     let vars = Array.init nvars (fun _ ->
+       { rig_lower = cons_styp Neg VSnil Annih;
+         rig_upper = cons_styp Pos VSnil Annih }) in
+     let env_entry = Erigid { vars; flow } in
+     let env = env_cons env env_entry in
+     let vsets = Array.init nvars (fun i ->
+       VScons { env; sort = Rigid; vars = [i]; rest = VSnil }) in
+     for i = 0 to nvars - 1 do
+       let (lower, upper) = bounds.(i) in
+       vars.(i) <- { rig_lower = is_styp (open_typ Rigid vsets 0 lower);
+                     rig_upper = is_styp (open_typ Rigid vsets 0 upper) }
+     done;
+     wf_env_entry env env_entry;
+     wf_typ Neg env (open_typ Rigid vsets 0 body)
+
+and wf_vset pol env_ext = function
+  | VSnil -> ()
+  | VScons { env; sort; vars; rest } ->
+     assert_env_prefix env env_ext;
+     let len, env' =
+       match sort, env with
+       | Flexible, Env_cons { tyvars; rest; _ } ->
+          Vector.length tyvars, rest
+       | Rigid, Env_cons { entry = Erigid { vars; _ }; rest; _} ->
+          Array.length vars, rest
+       | _ -> assert false in
+     vars |> List.iter (fun i -> assert (i < len));
+     assert (vars = List.sort_uniq compare vars);
+     wf_vset pol env' rest
