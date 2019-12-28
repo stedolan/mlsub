@@ -1,7 +1,7 @@
+(*
 open Exp
 open Typedefs
 open Types
-
 let env0_ext =
   Etype (StrMap.of_seq (List.to_seq [
       "any", (tcons Annih, tcons Ident);
@@ -100,3 +100,4 @@ let tyexp_of_typ env pol : typ -> tyexp = function
 
  *)
 let infer env = assert false
+ *)

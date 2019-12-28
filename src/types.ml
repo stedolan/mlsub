@@ -1,5 +1,233 @@
 open Typedefs
 
+(* join Pos = ⊔, join Neg = ⊓ (meet) *)
+let rec join pol (s : styp) (t : styp) =
+  assert (s.pol = pol && t.pol = pol);
+  { tyvars = vset_union s.tyvars t.tyvars;
+    cons = join_cons pol s.cons t.cons;
+    pol }
+and join_cons pol s t =
+  match s, t with
+  (* top/bottom *)
+  | Bot, x | x, Bot ->
+     (match pol with Pos -> x | Neg -> Bot)
+  | Top, x | x, Top ->
+     (match pol with Neg -> x | Pos -> Top)
+  (* incompatible types *)
+  | Record _, Func _
+  | Func _, Record _ ->
+     annih pol
+  (* Functions *)
+  | Func (sd, sr), Func (td, tr) ->
+     Func (join_fields (polneg pol) sd td, join pol sr tr)
+  (* Records *)
+  | Record sf, Record tf ->
+     Record (join_fields pol sf tf)
+and join_fields pol ss tt =
+  match pol with
+  | Neg ->
+     (* lower bound - union of fields *)
+     StrMap.merge (fun _ s t ->
+       match s, t with
+       | Some s, Some t -> Some (join pol s t)
+       | (Some _ as x), None | None, (Some _ as x) -> x
+       | None, None -> None) ss tt
+  | Pos ->
+     (* upper bound - intersection of fields *)
+     StrMap.merge (fun _ s t ->
+       match s, t with
+       | Some s, Some t -> Some (join pol s t)
+       | _ -> None) ss tt
+
+type conflict_reason =
+  | Incompatible
+  | Missing of string
+
+(* Always Pos <= Neg *)
+let rec subtype_cons a b f =
+  match a, b with
+  | Bot, _ | _, Top -> []
+  | _, Bot | Top, _ -> [Incompatible]
+  | (Record _, Func _) | (Func _, Record _) -> [Incompatible]
+  | Func (args, res), Func (args', res') ->
+     subtype_cons_fields args' args f @ f res res'
+  | Record fs, Record fs' ->
+     subtype_cons_fields fs fs' f
+and subtype_cons_fields a b f =
+  StrMap.fold (fun k b acc ->
+    match StrMap.find k a with
+    | exception Not_found -> Missing k :: acc
+    | a -> f a b @ acc) b []
+
+
+(* Computes epsilon-closure of a type *)
+let eps_closure env pol t =
+  let seen = Hashtbl.create 10 in
+  let rec accum_v acc i =
+    if Hashtbl.mem seen i then acc
+    else begin
+      Hashtbl.add seen i ();
+      let flexvar = env_flexvar env i in
+      let t =
+        match pol with Pos -> flexvar.pos | Neg -> flexvar.neg in
+      accum acc t
+    end
+  and accum acc { tyvars; cons; pol = pol' } =
+    assert (pol = pol');
+    List.fold_left accum_v
+      (join_cons pol acc cons)
+      (vset_lookup env Flexible tyvars) in
+  accum (ident pol) t
+  
+
+(* Given a styp well-formed in ext,
+   find the best approximation well-formed in the shorter environment env.
+
+   Pos types are approximated from above and Neg types from below. *)
+let rec approx_styp env ext pol' ({ tyvars; cons; pol } as orig) =
+  assert_env_prefix env ext;
+  wf_env ext;
+  wf_styp pol' ext orig;
+  assert (pol = pol');
+  if env_equal env ext then orig
+  else
+    failwith "approx unimplemented"
+(*
+    let cons = map_head pol (approx_styp env ext) cons in
+    let tyvars = asdf in
+    { tyvars; cons; pol }
+ *)
+
+
+(* 
+  flex_closure pol acc env vars, where
+    env ≤ venv
+    env ⊢pol acc, but acc has no vars before venv flex at toplevel
+    vars ⊆ venv.flex
+  returns a styp s, s.t. env ⊢pol s
+  where s is the join of acc and all of vars bounds
+  but s does not have toplevel refs to any flexible vars at level env
+  (wtf)
+ *)
+let flex_closure pol env acc venv vars =
+  assert_env_prefix venv env;
+  wf_styp pol env acc;
+  assert (snd (styp_uncons venv Flexible acc) = []);
+  let seen = Hashtbl.create 10 in
+  let rec go acc vars =
+    List.fold_left (fun acc v ->
+      if Hashtbl.mem seen v then acc else begin
+      Hashtbl.add seen v ();
+      let v = env_flexvar venv v in
+      let t = match pol with Pos -> v.pos | Neg -> v.neg in
+      let t, newvs = styp_uncons venv Flexible t in
+      join pol t (go acc newvs) end) acc vars in
+  let res = go acc vars in
+  wf_styp pol env res;
+  assert (snd (styp_uncons venv Flexible res) = []);
+  res
+     
+
+let rec subtype_styp env p n =
+  wf_env env;
+  wf_styp Pos env p;
+  wf_styp Neg env n;
+  match p.tyvars, n.tyvars with
+  | VSnil, VSnil ->
+     subtype_cons p.cons n.cons (subtype_styp env)
+  | VScons v, VSnil
+  | VSnil, VScons v ->
+     subtype_styp_vars env p n v.env v.sort
+  | VScons pv, VScons nv when
+       pv.env == nv.env ->
+     let vsort = min pv.sort nv.sort in (* i.e. Flex if either is *)
+     subtype_styp_vars env p n pv.env vsort
+  | VScons pv, VScons nv when
+      env_level pv.env > env_level nv.env ->
+     subtype_styp_vars env p n pv.env pv.sort
+  | VScons _pv, VScons nv
+      (* env_level pv.env < env_level nv.env *) ->
+     subtype_styp_vars env p n nv.env nv.sort
+
+and subtype_styp_vars env p n venv vsort =
+  wf_env env;
+  wf_styp Pos env p;
+  wf_styp Neg env n;
+  assert_env_prefix venv env;
+  let (prest, pvs) = styp_uncons venv vsort p in
+  let (nrest, nvs) = styp_uncons venv vsort n in
+  match vsort with
+  | Flexible ->
+     pvs |> List.iter (fun pvi ->
+       let v = env_flexvar venv pvi in
+       v.neg <- join Neg v.neg (approx_styp venv env Neg n));
+     nvs |> List.iter (fun nvi ->
+       let v = env_flexvar venv nvi in
+       v.pos <- join Pos v.pos (approx_styp venv env Pos p));
+     subtype_styp env
+       (flex_closure Pos env prest venv pvs)
+       (flex_closure Neg env nrest venv nvs)
+  | Rigid ->
+     (* this is a load of bollocks *)
+     begin match
+       pvs |> List.iter (fun pvi ->
+         nvs |> List.iter (fun nvi ->
+           (* FIXME!!: right way around? Is flow really +/-? *)
+           if env_rigid_flow venv pvi nvi then raise_notrace Exit))
+     with
+     | exception Exit -> []     (* true by flow relation *)
+     | () -> asdf
+     
+
+
+(* Give a typ well-formed in ext, approx in env.
+   Same as approx_styp *)
+let rec approx env ext pol t =
+  assert_env_prefix env ext;
+  wf_env ext;
+  wf_typ pol ext t;
+  match t with
+  | Tpoly_neg (bounds, flow, body) ->
+     assert (pol = Neg);
+     let (ext, vsets) = enter_poly_neg ext bounds flow in
+     approx env ext pol (open_typ Rigid vsets 0 Neg body)
+  | Tpoly_pos (vars, body) ->
+     assert (pol = Pos);
+     let (ext, vsets) = enter_poly_pos ext vars in
+     approx env ext pol (open_typ Flexible vsets 0 Pos body)
+  | Tsimple s ->
+     approx_styp env ext pol (is_styp s)
+  | Tcons cons ->
+     cons_styp pol VSnil (map_head pol (approx env ext) cons)
+
+
+let rec subtype env p n =
+  wf_env env;
+  wf_typ Pos env p;
+  wf_typ Neg env n;
+  match p, n with
+  (* FIXME: some sort of coherence check needed *)
+  | p, Tpoly_neg (bounds, flow, body) ->
+     let env, vsets = enter_poly_neg env bounds flow in
+     subtype env p (open_typ Rigid vsets 0 Neg body)
+  | Tpoly_neg _, _ -> assert false
+  | Tpoly_pos(vars, body), n ->
+     let env, vsets = enter_poly_pos env vars in
+     subtype env (open_typ Flexible vsets 0 Pos body) n
+  | _, Tpoly_pos _ -> assert false
+
+  | Tsimple p, Tsimple n ->
+     subtype_styp env (is_styp p) (is_styp n)
+  | _, Tsimple n ->
+     subtype_styp env (approx env env Pos p) (is_styp n)
+  | Tsimple p, _ ->
+     subtype_styp env (is_styp p) (approx env env Neg n)
+
+  | Tcons s, Tcons t ->
+     subtype_cons s t (subtype env)
+
+(*
+
 let intfail s = failwith ("internal error: " ^ s)
 
 let fresh_id =
@@ -23,61 +251,6 @@ let fresh_var env =
           gen.vars <- v :: gen.vars in
   add_to_gen_point env;
   v
-
-(* join Pos = ⊔, join Neg = ⊓ (meet) *)
-let rec join pol (s : styp) (t : styp) =
-  { tyvars = vset_union s.tyvars t.tyvars;
-    cons = join_cons pol s.cons t.cons }
-and join_cons pol s t =
-  match s, t with
-  (* top/bottom *)
-  | Ident, x | x, Ident -> x
-  | Annih, _ | _, Annih -> Annih
-  (* incompatible types *)
-  | Record _, Func _
-  | Func _, Record _ ->
-     Annih
-  (* FIXME not implemented *)
-  | Abs _, _ | _, Abs _ -> failwith "unimplemented"
-  (* Functions *)
-  | Func (sd, sr), Func (td, tr) ->
-     Func (join_fields (polneg pol) sd td, join pol sr tr)
-  (* Records *)
-  | Record sf, Record tf ->
-     Record (join_fields pol sf tf)
-and join_fields pol ss tt =
-  match pol with
-  | Neg ->
-     (* lower bound - union of fields *)
-     StrMap.merge (fun _ s t ->
-       match s, t with
-       | Some s, Some t -> Some (join pol s t)
-       | (Some _ as x), None | None, (Some _ as x) -> x
-       | None, None -> None) ss tt
-  | Pos ->
-     (* upper bound - intersection of fields *)
-     StrMap.merge (fun _ s t ->
-       match s, t with
-       | Some s, Some t -> Some (join pol s t)
-       | _ -> None) ss tt
-
-let bound pol v =
-  match pol with
-  | Pos -> v.v_pos
-  | Neg -> v.v_neg
-
-(* Computes epsilon-closure of a type *)
-let closure pol t =
-  let rec go vars acc =
-    IntMap.fold (fun id v ({ tyvars; cons } as acc) ->
-      if IntMap.mem id tyvars then acc else
-        let tyvars = IntMap.add id v tyvars in
-        let {tyvars = v_tyvars; cons = v_cons} = bound pol v in
-        let cons = join_cons pol cons v_cons in
-        go v_tyvars {tyvars; cons}) vars acc in
-  let { tyvars; cons } = t in
-  go tyvars { tyvars = IntMap.empty; cons }
-
 
 (* FIXME rectypes :( :( :( *)
 let rec biunify p n =
@@ -301,3 +474,4 @@ let rec try_styp_of_typ = function
      failwith "not a simple type"
   | Tcons (tyvars, cons) ->
      { tyvars; cons = map_head try_styp_of_typ cons }
+ *)

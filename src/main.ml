@@ -1,3 +1,6 @@
+let () = Typedefs.go ()
+
+(*
 type lexeme = {
   token: Parser.token;
   loc_start: Lexing.position;
@@ -146,3 +149,4 @@ let () =
     LNoise.history_load ~filename:histfile |> ignore;
     LNoise.history_set ~max_length:1000 |> ignore;
     run_repl ~histfile ())
+ *)
