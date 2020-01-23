@@ -16,13 +16,16 @@ type polarity = Pos | Neg
 type 'a cons_head =
   | Top
   | Bot
+  (* FIXME: maybe delete these once abstypes exist? *)
+  | Int
+  | String
   | Record of 'a cons_head_fields
   | Func of 'a cons_head_fields * 'a
 
 and 'a cons_head_fields =
   (* Positional elements are encoded as field names "0", "1", etc. *)
   (* FIXME: maybe preserve field order here? *)
-  'a StrMap.t
+  'a StrMap.t * [`Open|`Closed]
 
 type var_sort = Flexible | Rigid
 let () = assert (Flexible < Rigid) (* required for vset ordering *)
@@ -121,6 +124,14 @@ and typ =
   (* Forall in a negative position *)
   | Tpoly_neg of (styp_bound * styp_bound) array * rig_flow * typ
 
+
+(* Type templates, used for checking.
+   (cf. boxy types).
+   TODO: need to ensure linearity still holds with abs types *)
+type template =
+  | Tm_typ of typ
+  | Tm_cons of template cons_head
+  | Tm_unknown of typ ref
 
 
 let polneg = function Pos -> Neg | Neg -> Pos
@@ -244,14 +255,17 @@ let styp_uncons venv vsort ({ tyvars; cons; pol } as t) =
  *)
 
 
-(* FIXME: might need to be polarity-aware *)
+let map_head_cons pol f (fields, cl) =
+  StrMap.map (f pol) fields, cl
+
 let map_head pol f = function
   | Top -> Top
   | Bot -> Bot
-  | Record fields ->
-     Record (StrMap.map (f pol) fields)
+  | Int -> Int
+  | String -> String
+  | Record fields -> Record (map_head_cons pol f fields)
   | Func (args, res) ->
-     Func (StrMap.map (f (polneg pol)) args, f pol res)
+     Func (map_head_cons (polneg pol) f args, f pol res)
 
 let cons_styp pol (tyvars : vset) (cons : styp cons_head) =
   { pol; tyvars; cons }
@@ -322,24 +336,35 @@ let is_styp = function
   | Tstyp_simple s -> s
   | Tstyp_bound _ -> failwith "type scoping error"
 
+
+(* Create a single fresh variable with trivial bounds *)
+let fresh_flexible env =
+  let tyvars = match env with Env_cons { tyvars; _ } -> tyvars | _ -> assert false in
+  let ix = Vector.push tyvars { pos = cons_styp Pos VSnil Bot;
+                                neg = cons_styp Neg VSnil Top } in
+  VScons { env; sort = Flexible; vars = [ix]; rest = VSnil }
+
+(* Create flexible variables with bounds *)
+let instantiate_flexible env vars =
+  let tyvars = match env with Env_cons { tyvars; _ } -> tyvars | _ -> assert false in (* uglllyyyy. *)
+  let nvars = Array.length vars in
+  let ixs = Array.init nvars (fun _ ->
+    Vector.push tyvars
+      { pos = cons_styp Pos VSnil Bot;
+        neg = cons_styp Neg VSnil Top }) in
+  let vsets = ixs |> Array.map (fun ix ->
+    VScons { env; sort = Flexible; vars = [ix]; rest = VSnil }) in
+  ixs |> Array.iteri (fun i ix ->
+    let v = Vector.get tyvars ix in
+    let (pos, neg) = vars.(i) in
+    v.pos <- is_styp (open_styp Flexible vsets 0 Pos pos);
+    v.neg <- is_styp (open_styp Flexible vsets 0 Neg neg));
+  vsets
+
 (* Open a ∀⁺ binder, creating flexible variables *)
 let enter_poly_pos env vars =
   let env = env_cons env Egen in
-  let tyvars = match env with Env_cons { tyvars; _ } -> tyvars | _ -> assert false in (* uglllyyyy. *)
-  let nvars = Array.length vars in
-  for _i = 0 to nvars - 1 do
-    Vector.push tyvars { pos = cons_styp Pos VSnil Bot;
-                         neg = cons_styp Neg VSnil Top }
-  done;
-  let vsets = Array.init nvars (fun i ->
-    VScons { env; sort = Flexible; vars = [i]; rest = VSnil }) in
-  for i = 0 to nvars - 1 do
-    let v = Vector.get tyvars i in
-    let (pos, neg) = vars.(i) in
-    v.pos <- is_styp (open_styp Flexible vsets 0 Pos pos);
-    v.neg <- is_styp (open_styp Flexible vsets 0 Neg neg);
-  done;
-  env, vsets
+  env, instantiate_flexible env vars
 
 (* Open a ∀⁻ binder, creating rigid variables *)
 let enter_poly_neg env bounds flow =
@@ -366,14 +391,14 @@ let enter_poly_neg env bounds flow =
  *)
 
 let rec wf_cons pol env wf = function
-  | Bot | Top -> ()
+  | Bot | Top | Int | String -> ()
   | Record fields ->
      wf_cons_fields pol env wf fields
   | Func (args, res) ->
      wf_cons_fields (polneg pol) env wf args;
      wf pol env res
-and wf_cons_fields pol env wf =
-  StrMap.iter (fun _ t -> wf pol env t)
+and wf_cons_fields pol env wf (fields, _cl) =
+  StrMap.iter (fun _ t -> wf pol env t) fields
 
 let rec wf_env = function
   | Env_empty -> ()
@@ -446,6 +471,13 @@ and wf_vset pol env_ext = function
      assert (vars = List.sort_uniq compare vars);
      wf_vset pol env' rest
 
+let rec wf_template pol env = function
+  | Tm_typ t ->
+     wf_typ pol env t
+  | Tm_cons cons ->
+     wf_cons pol env wf_template cons
+  | Tm_unknown r ->
+     wf_typ (polneg pol) env !r
 
 (*
  * Printing of internal representations
@@ -457,17 +489,23 @@ let rec pr_cons pol pr t =
   match t with
   | Bot -> str "⊥"
   | Top -> str "⊤"
+  | Int -> str "int"
+  | String -> str "string"
   | Record fs -> pr_cons_fields pol pr fs
   | Func (args, res) ->
      pr_cons_fields (polneg pol) pr args ^^
        blank 1 ^^ str "→" ^^ blank 1 ^^
          pr pol res
-and pr_cons_fields pol pr fs =
+and pr_cons_fields pol pr (fs, cl) =
   let fields = StrMap.fold (fun k x acc -> (k,x)::acc) fs [] in
   let pr_field (k, v) =
     str k ^^ str ":" ^^ blank 1 ^^ pr pol v in
+  let cl = match cl with
+    | `Open -> comma ^^ str "..."
+    | `Closed -> empty in
   parens (group (nest 2 (break 0 ^^ separate_map (comma ^^ break 1)
-                                      pr_field fields))) 
+                                      pr_field fields
+                         ^^ cl))) 
 
 let rec pr_vset = function
   | VSnil -> []
@@ -509,8 +547,7 @@ let rec pr_styp_bound pol = function
 
 let rec pr_typ pol = function
   | Tsimple s -> pr_styp_bound pol s
-  | Tcons cons ->
-     pr_cons_tyvars pol [] cons (pr_cons pol pr_typ cons)
+  | Tcons cons -> pr_cons pol pr_typ cons
   | Tpoly_pos (bounds, body) ->
      str "∀⁺" ^^ blank 1 ^^
        separate_map (str "," ^^ blank 1) (pr_bound Pos) (Array.to_list bounds) ^^
@@ -527,7 +564,12 @@ and pr_bound pol (lower, upper) =
               str "," ^^
             pr_styp_bound (polneg pol) upper)
 
-let func a b = Func (StrMap.singleton "x" a, b)
+let rec pr_template pol = function
+  | Tm_typ t -> pr_typ pol t
+  | Tm_cons cons -> pr_cons pol pr_template cons
+  | Tm_unknown _ -> str "??"
+
+let func a b = Func ((StrMap.singleton "x" a, `Closed), b)
 
 let bvars pol idx sort vs =
   Tstyp_bound { tyvars = VSnil; cons = ident pol; pol;

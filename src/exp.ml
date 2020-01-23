@@ -7,7 +7,7 @@ type 'a loc = 'a * location
 
 type 'a mayloc = 'a option loc
 
-type literal = Int of int | String of string
+type literal = Int of int | String of string | Bool of bool
 type symbol = string loc
 type ident = ident' loc and ident' =
   { label : string; shift : int }
@@ -31,6 +31,8 @@ type exp = exp' mayloc and exp' =
   | Let of tuple_pat * exp * exp
   (* a.foo *)
   | Proj of exp * symbol
+  (* if a { foo } else { bar } *)
+  | If of exp * exp * exp
   (* (e : A) *)
   | Typed of exp * tyexp
   (* (e) *)

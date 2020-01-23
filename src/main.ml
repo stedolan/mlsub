@@ -1,6 +1,6 @@
 let () = Typedefs.go ()
 
-(*
+
 type lexeme = {
   token: Parser.token;
   loc_start: Lexing.position;
@@ -124,7 +124,7 @@ let rec run_repl ~histfile () =
     let startpos = fst (lexing_positions lexbuf) in
     let tokens = scan lexbuf [] in
     let source = { name = "<stdin>"; source = line; tokens } in
-    dump_tokens source;
+    if false then dump_tokens source;
     let p = Parser.Incremental.prog startpos in
     begin match parse [] p tokens with
     | [], p ->
@@ -132,7 +132,9 @@ let rec run_repl ~histfile () =
        | Ok e ->
           PPrint.ToChannel.pretty 1. 80 stdout
             (Print.print_exp e);
-          Check.infer e;
+          Printf.printf "\n: %!";
+          PPrint.ToChannel.pretty 1. 80 stdout
+            (Typedefs.pr_typ Pos (Check.infer Check.env0 e));
           Printf.printf "\n%!"
        | Error _ -> raise (Fatal Unexpected_eof)
        end
@@ -149,4 +151,4 @@ let () =
     LNoise.history_load ~filename:histfile |> ignore;
     LNoise.history_set ~max_length:1000 |> ignore;
     run_repl ~histfile ())
- *)
+

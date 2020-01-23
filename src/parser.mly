@@ -32,6 +32,10 @@ literal_:
   { Int n }
 | s = STRING
   { String s }
+| TRUE
+  { Bool true }
+| FALSE
+  { Bool false }
 
 exp: e = mayloc(exp_) { e }
 exp_:
@@ -49,6 +53,8 @@ exp_:
   { Parens e }
 | e = exp; DOT; f = symbol
   { Proj (e, f) }
+| IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; t = exp; RBRACE
+  { If (e, t, f) }
 | LPAR; e = exp; COLON; t = tyexp; RPAR
   { Typed (e, t) }
 

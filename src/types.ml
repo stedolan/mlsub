@@ -1,5 +1,7 @@
 open Typedefs
 
+let intfail s = failwith ("internal error: " ^ s)
+
 (* join Pos = ⊔, join Neg = ⊓ (meet) *)
 let rec join pol (s : styp) (t : styp) =
   assert (s.pol = pol && t.pol = pol);
@@ -13,51 +15,119 @@ and join_cons pol s t =
      (match pol with Pos -> x | Neg -> Bot)
   | Top, x | x, Top ->
      (match pol with Neg -> x | Pos -> Top)
+  (* equal base types *)
+  | Int, Int -> Int
+  | String, String -> String
   (* incompatible types *)
+  | Int, (Record _|Func _|String) | (Record _|Func _|String), Int
+  | String, (Record _|Func _) | (Record _|Func _), String
   | Record _, Func _
   | Func _, Record _ ->
      annih pol
   (* Functions *)
   | Func (sd, sr), Func (td, tr) ->
-     Func (join_fields (polneg pol) sd td, join pol sr tr)
+     begin match join_fields (polneg pol) sd td with
+     | Some args -> Func (args, join pol sr tr)
+     | None -> annih pol
+     end
   (* Records *)
   | Record sf, Record tf ->
-     Record (join_fields pol sf tf)
-and join_fields pol ss tt =
+     begin match join_fields pol sf tf with
+     | Some fs -> Record fs
+     | None -> annih pol
+     end
+and join_fields pol (sf,scl) (tf, tcl) =
   match pol with
   | Neg ->
      (* lower bound - union of fields *)
-     StrMap.merge (fun _ s t ->
+     let same = ref true in
+     let fields = StrMap.merge (fun _ s t ->
        match s, t with
        | Some s, Some t -> Some (join pol s t)
-       | (Some _ as x), None | None, (Some _ as x) -> x
-       | None, None -> None) ss tt
+       | (Some _ as x), None | None, (Some _ as x) ->
+          same := false;
+          x
+       | None, None -> None) sf tf in
+     begin match scl, tcl, !same with
+     | `Open, `Open, _ ->
+        Some (fields, `Open)
+     | _, _, true ->
+        (* Not both open, but same fields *)
+        Some (fields, `Closed)
+     | _, _, false ->
+        (* Neither both open nor same fields *)
+        None
+     end
   | Pos ->
      (* upper bound - intersection of fields *)
-     StrMap.merge (fun _ s t ->
+     let same = ref true in
+     let fields = StrMap.merge (fun _ s t ->
        match s, t with
        | Some s, Some t -> Some (join pol s t)
-       | _ -> None) ss tt
+       | None, Some _ | Some _, None ->
+          same := false;
+          None
+       | _ -> None) sf tf in
+     begin match scl, tcl, !same with
+     | `Closed, `Closed, true ->
+        Some (fields, `Closed)
+     | _, _, _ ->
+        Some (fields, `Open)
+     end
 
 type conflict_reason =
   | Incompatible
   | Missing of string
+  | Extra of string option
 
-(* Always Pos <= Neg *)
-let rec subtype_cons a b f =
-  match a, b with
-  | Bot, _ | _, Top -> []
-  | _, Bot | Top, _ -> [Incompatible]
-  | (Record _, Func _) | (Func _, Record _) -> [Incompatible]
-  | Func (args, res), Func (args', res') ->
-     subtype_cons_fields args' args f @ f res res'
-  | Record fs, Record fs' ->
-     subtype_cons_fields fs fs' f
-and subtype_cons_fields a b f =
-  StrMap.fold (fun k b acc ->
-    match StrMap.find k a with
-    | exception Not_found -> Missing k :: acc
-    | a -> f a b @ acc) b []
+
+(* pol = Pos: <=, pol = Neg: >= *)
+let subtype_cons_fields pol (af,acl) (bf,bcl) f =
+  let extra_errs =
+    match pol, acl, bcl with
+    | Pos, `Open, `Closed 
+    | Neg, `Closed, `Open -> [Extra None]
+    | _ -> [] in
+  let extra_errs =
+    match pol, acl, bcl with
+    | Pos, _, `Closed ->
+       (* check dom a ⊆ dom b *)
+       StrMap.fold (fun k _ acc ->
+         match StrMap.find k bf with
+         | exception Not_found -> Extra (Some k) :: acc
+         | _ -> acc) af extra_errs
+    | Neg, `Closed, _ ->
+       (* check dom b ⊆ dom a *)
+       StrMap.fold (fun k _ acc ->
+         match StrMap.find k af with
+         | exception Not_found -> Extra (Some k) :: acc
+         | _ -> acc) bf extra_errs
+    | _ -> extra_errs in
+  match pol with
+  | Pos ->
+    StrMap.fold (fun k b acc ->
+      match StrMap.find k af with
+      | exception Not_found -> Missing k :: acc
+      | a -> f pol a b @ acc) bf extra_errs
+  | Neg ->
+     StrMap.fold (fun k a acc ->
+      match StrMap.find k bf with
+      | exception Not_found -> Missing k :: acc
+      | b -> f pol a b @ acc) af extra_errs
+
+let subtype_cons pol a b f =
+  match pol, a, b with
+  | _, Int, Int -> []
+  | _, String, String -> []
+  | pol, Func (args, res), Func (args', res') ->
+     subtype_cons_fields (polneg pol) args args' f @ f pol res res'
+  | pol, Record fs, Record fs' ->
+     subtype_cons_fields pol fs fs' f
+  | Pos, Bot, _
+  | Neg, _, Bot
+  | Pos, _, Top
+  | Neg, Top, _ -> []
+  | _,_,_ -> [Incompatible]
 
 
 (* Computes epsilon-closure of a type *)
@@ -128,13 +198,17 @@ let flex_closure pol env acc venv vars =
   res
      
 
+let pol_flip f pol a b =
+  match pol with Pos -> f a b | Neg -> f b a
+
 let rec subtype_styp env p n =
   wf_env env;
   wf_styp Pos env p;
   wf_styp Neg env n;
   match p.tyvars, n.tyvars with
   | VSnil, VSnil ->
-     subtype_cons p.cons n.cons (subtype_styp env)
+     subtype_cons Pos p.cons n.cons
+       (pol_flip (subtype_styp env))
   | VScons v, VSnil
   | VSnil, VScons v ->
      subtype_styp_vars env p n v.env v.sort
@@ -169,15 +243,7 @@ and subtype_styp_vars env p n venv vsort =
        (flex_closure Neg env nrest venv nvs)
   | Rigid ->
      (* this is a load of bollocks *)
-     begin match
-       pvs |> List.iter (fun pvi ->
-         nvs |> List.iter (fun nvi ->
-           (* FIXME!!: right way around? Is flow really +/-? *)
-           if env_rigid_flow venv pvi nvi then raise_notrace Exit))
-     with
-     | exception Exit -> []     (* true by flow relation *)
-     | () -> asdf
-     
+     assert false
 
 
 (* Give a typ well-formed in ext, approx in env.
@@ -201,20 +267,22 @@ let rec approx env ext pol t =
      cons_styp pol VSnil (map_head pol (approx env ext) cons)
 
 
+(* Always Pos <= Neg *)
 let rec subtype env p n =
   wf_env env;
   wf_typ Pos env p;
   wf_typ Neg env n;
   match p, n with
+  | Tpoly_neg _, _
+  | _, Tpoly_pos _ -> intfail "malformed"
+
   (* FIXME: some sort of coherence check needed *)
   | p, Tpoly_neg (bounds, flow, body) ->
      let env, vsets = enter_poly_neg env bounds flow in
      subtype env p (open_typ Rigid vsets 0 Neg body)
-  | Tpoly_neg _, _ -> assert false
   | Tpoly_pos(vars, body), n ->
      let env, vsets = enter_poly_pos env vars in
      subtype env (open_typ Flexible vsets 0 Pos body) n
-  | _, Tpoly_pos _ -> assert false
 
   | Tsimple p, Tsimple n ->
      subtype_styp env (is_styp p) (is_styp n)
@@ -224,11 +292,81 @@ let rec subtype env p n =
      subtype_styp env (is_styp p) (approx env env Neg n)
 
   | Tcons s, Tcons t ->
-     subtype_cons s t (subtype env)
+     subtype_cons Pos s t 
+       (pol_flip (subtype env))
+
+let fill_template env pol s t =
+  wf_typ pol env s;
+  if !t <> cons_typ pol (ident pol) then
+    failwith "fill_template: nonlinear template";
+  t := s
+
+let rec freshen_template env pol (t : template) : styp =
+  wf_template pol env t;
+  match t with
+  | Tm_typ t ->
+     approx env env pol t
+  | Tm_cons t ->
+     cons_styp pol VSnil (map_head pol (freshen_template env) t)
+  | Tm_unknown t ->
+     let v = fresh_flexible env in
+     fill_template env (polneg pol)
+       (Tsimple (Tstyp_simple
+         (cons_styp (polneg pol) v (ident (polneg pol))))) t;
+     cons_styp pol v (ident pol)
+
+(* All callers use a Pos typ and a Neg template,
+   but recursive calls may swap them *)
+    
+let rec match_type env pol (p : typ) (t : template) =
+  wf_env env;
+  wf_typ pol env p;
+  wf_template (polneg pol) env t;
+  match t with
+  | Tm_typ t ->
+     pol_flip (subtype env) pol p t
+  | Tm_unknown t ->
+     fill_template env pol p t;
+     []
+  | Tm_cons t ->
+     match_type_cons env pol p t
+
+and match_type_cons env pol (p : typ) (t : template cons_head) =
+  match p with
+  | Tcons cons ->
+     subtype_cons pol cons t (match_type env)
+  | Tpoly_neg _ ->
+     (* Is this reachable? *)
+     assert false
+  | Tpoly_pos (vars, body) ->
+     (* t is not ∀, so we need to instantiate p *)
+     assert (pol = Pos);
+     let vsets = instantiate_flexible env vars in
+     let body = open_typ Flexible vsets 0 Pos body in
+     match_type_cons env pol body t
+  | Tsimple p ->
+     match_styp_cons env pol (is_styp p) t
+
+and match_styp env pol (p : styp) (t : template) =
+  match t with
+  | Tm_typ _
+  | Tm_unknown _ ->
+     match_type env pol (Tsimple (Tstyp_simple p)) t
+  | Tm_cons t ->
+     match_styp_cons env pol p t
+
+and match_styp_cons env pol (p : styp) (t : template cons_head) =
+  match p.tyvars with
+  | VSnil ->
+     (* Optimisation in the case of no flow *)
+     subtype_cons pol p.cons t (match_styp env)
+  | _ ->
+     let t = freshen_template env (polneg pol) (Tm_cons t) in
+     pol_flip (subtype_styp env) pol p t
 
 (*
 
-let intfail s = failwith ("internal error: " ^ s)
+
 
 let fresh_id =
   let next = ref 0 in

@@ -7,8 +7,9 @@ let create () =
   { contents = [| |]; length = 0 }
 
 let push v x =
-  assert (v.length <= Array.length v.contents);
-  if v.length = Array.length v.contents then begin
+  let pos = v.length in
+  assert (pos <= Array.length v.contents);
+  if pos = Array.length v.contents then begin
     let newlen =
       if v.length < 10 then 10 else v.length * 2 in
     let newcontents = Array.make newlen x in
@@ -16,10 +17,10 @@ let push v x =
     v.contents <- newcontents;
     v.length <- newlen
   end else begin
-    let l = v.length in
-    v.contents.(l) <- x;
-    v.length <- l + 1;
-  end
+    v.contents.(pos) <- x;
+    v.length <- pos + 1;
+  end;
+  pos
 
 let length { length; _ } = length
 let get v i = v.contents.(i)

@@ -26,6 +26,8 @@ let mayloc x f = match x with
   | (None, _) -> string "??"
   | (Some s, _) -> f s
 
+let parens x = parens (group x)
+
 let rec print_exp e = mayloc e @@ function
   | Lit (l, _) -> print_lit l
   | Var s -> print_ident s
@@ -36,6 +38,12 @@ let rec print_exp e = mayloc e @@ function
   | Tuple t -> print_tuple ~tcomma:true print_exp t
   | App (f, args) -> print_exp f ^^ print_tuple ~tcomma:false print_exp args
   | Proj (e, f) -> print_exp e ^^ char '.' ^^ print_symbol f
+  | If (e, t, f) ->
+     string "if" ^^ break 1 ^^ print_exp e ^^
+       braces (print_exp t) ^^ op (string "else") ^^
+         braces (print_exp f)
+  | Typed (e, t) -> parens (print_exp e ^^ op (char ':') ^^ print_tyexp t)
+  | Parens e -> parens (print_exp e)
   | _ -> assert false
 
 and print_field : 'defn . ('defn -> document) -> 'defn field -> document

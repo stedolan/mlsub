@@ -3,7 +3,7 @@ type 'a t
 val create : unit -> 'a t
 
 val length : 'a t -> int
-val push : 'a t -> 'a -> unit
+val push : 'a t -> 'a -> int
 (* raises Invalid_argument if >= length *)
 val get : 'a t -> int -> 'a
 
