@@ -17,6 +17,7 @@ type 'a cons_head =
   | Top
   | Bot
   (* FIXME: maybe delete these once abstypes exist? *)
+  | Bool
   | Int
   | String
   | Record of 'a cons_head_fields
@@ -261,6 +262,7 @@ let map_head_cons pol f (fields, cl) =
 let map_head pol f = function
   | Top -> Top
   | Bot -> Bot
+  | Bool -> Bool
   | Int -> Int
   | String -> String
   | Record fields -> Record (map_head_cons pol f fields)
@@ -391,7 +393,7 @@ let enter_poly_neg env bounds flow =
  *)
 
 let rec wf_cons pol env wf = function
-  | Bot | Top | Int | String -> ()
+  | Bot | Top | Bool | Int | String -> ()
   | Record fields ->
      wf_cons_fields pol env wf fields
   | Func (args, res) ->
@@ -489,6 +491,7 @@ let rec pr_cons pol pr t =
   match t with
   | Bot -> str "⊥"
   | Top -> str "⊤"
+  | Bool -> str "bool"
   | Int -> str "int"
   | String -> str "string"
   | Record fs -> pr_cons_fields pol pr fs

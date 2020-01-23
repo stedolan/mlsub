@@ -60,7 +60,7 @@ and tuple_pat = tuple_pat' mayloc and tuple_pat' =
 and tyexp = tyexp' mayloc and tyexp' =
   | Tnamed of ident
   | Tforall of (symbol * tyexp option * tyexp option) list * tyexp
-  | Trecord of tuple_tyexp * [`Closed] (* FIXME: support `Open *)
+  | Trecord of tuple_tyexp * [`Closed|`Open]
   | Tfunc of tuple_tyexp * tyexp
   | Tparen of tyexp
   | Tjoin of tyexp * tyexp

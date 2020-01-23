@@ -16,9 +16,11 @@ and join_cons pol s t =
   | Top, x | x, Top ->
      (match pol with Neg -> x | Pos -> Top)
   (* equal base types *)
+  | Bool, Bool -> Bool
   | Int, Int -> Int
   | String, String -> String
   (* incompatible types *)
+  | Bool, (Record _|Func _|Int|String) | (Record _|Func _|Int|String), Bool
   | Int, (Record _|Func _|String) | (Record _|Func _|String), Int
   | String, (Record _|Func _) | (Record _|Func _), String
   | Record _, Func _
@@ -117,6 +119,7 @@ let subtype_cons_fields pol (af,acl) (bf,bcl) f =
 
 let subtype_cons pol a b f =
   match pol, a, b with
+  | _, Bool, Bool -> []
   | _, Int, Int -> []
   | _, String, String -> []
   | pol, Func (args, res), Func (args', res') ->

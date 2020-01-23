@@ -10,6 +10,7 @@ let indent d = nest 2 d
 let op x = blank 1 ^^ x ^^ break 1
 
 let print_lit = function
+  | Bool b -> string (string_of_bool b)
   | Int n -> string (string_of_int n)
   (* FIXME escaping *)
   | String s -> char '"' ^^ string s ^^ char '"'

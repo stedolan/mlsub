@@ -7,6 +7,9 @@
 %token COLON EQUALS DOT COMMA SEMI UNDER QUESTION ARROW AMPER VBAR
 %token FN LET TRUE FALSE IF ELSE
 
+%left AMPER
+%left VBAR
+
 %{ open Exp %}
 %start <Exp.exp> prog
 %%
@@ -53,7 +56,7 @@ exp_:
   { Parens e }
 | e = exp; DOT; f = symbol
   { Proj (e, f) }
-| IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; t = exp; RBRACE
+| IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; f = exp; RBRACE
   { If (e, t, f) }
 | LPAR; e = exp; COLON; t = tyexp; RPAR
   { Typed (e, t) }
