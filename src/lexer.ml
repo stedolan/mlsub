@@ -1,4 +1,4 @@
-open Parser
+open Grammar
 open Sedlexing.Utf8
 let lex buf =
   match%sedlex buf with

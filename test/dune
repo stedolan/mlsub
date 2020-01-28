@@ -1,0 +1,12 @@
+(executable
+ (name test_runner)
+ (libraries lang))
+
+(rule
+ (target basic.t.out)
+ (deps (:run test_runner.exe) (:in basic.t))
+ (action (with-stdout-to %{target} (with-stdin-from %{in} (run %{run})))))
+
+(rule
+ (alias runtest)
+ (action (diff basic.t basic.t.out)))

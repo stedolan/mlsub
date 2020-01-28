@@ -1,8 +1,5 @@
-let () = Typedefs.go ()
-
-
 type lexeme = {
-  token: Parser.token;
+  token: Grammar.token;
   loc_start: Lexing.position;
   loc_end: Lexing.position;
 }
@@ -35,7 +32,7 @@ let dump_tokens { name; source; tokens } =
       (String.sub source loc_start.pos_cnum
          (loc_end.pos_cnum - loc_start.pos_cnum)))
 
-open Parser
+open Grammar
 let tok_matches s t =
   match s, t with
   | LPAR, RPAR
@@ -58,9 +55,9 @@ type checkpoint =
 type state =
   (lexeme * checkpoint) list
 
-module P = Parser.MenhirInterpreter
+module P = Grammar.MenhirInterpreter
 
-let feed_parser (p : checkpoint) tok =
+let feed_token (p : checkpoint) tok =
   assert (tok.token <> EOF);
   let rec go = function
     (* Should never see Rejected, as we do not resume on HandlingError *)
@@ -98,57 +95,26 @@ let advance (s : state) p (tok : lexeme) =
       (tok, p) :: s
   | s, _ -> s
 
-let rec parse (s : state) p (tokens : lexeme list) =
+let rec feed_parser (s : state) p (tokens : lexeme list) =
   match tokens with
   | [] -> s, p
   | tok :: tokens when not (tok_significant s tok.token) ->
-     parse s p tokens
+     feed_parser s p tokens
   | tok :: tokens ->
-     match feed_parser p tok with
+     match feed_token p tok with
      | Ok p ->
-        parse (advance s p tok) p tokens
+        feed_parser (advance s p tok) p tokens
      | Error _ ->
         failwith "plz recover"
 
-
-let app_name = "polytope"
-
-let rec run_repl ~histfile () =
-  Printf.printf "%!";
-  match LNoise.linenoise "> " with
-  | None -> ()
-  | Some line ->
-    LNoise.history_add line |> ignore;
-    LNoise.history_save ~filename:histfile |> ignore;
-    let lexbuf = Utf8.from_string line in
-    let startpos = fst (lexing_positions lexbuf) in
-    let tokens = scan lexbuf [] in
-    let source = { name = "<stdin>"; source = line; tokens } in
-    if false then dump_tokens source;
-    let p = Parser.Incremental.prog startpos in
-    begin match parse [] p tokens with
-    | [], p ->
-       begin match finish_parser p with
-       | Ok e ->
-          PPrint.ToChannel.pretty 1. 80 stdout
-            (Print.print_exp e);
-          Printf.printf "\n: %!";
-          PPrint.ToChannel.pretty 1. 80 stdout
-            (Typedefs.pr_typ Pos (Check.infer Check.env0 e));
-          Printf.printf "\n%!"
-       | Error _ -> raise (Fatal Unexpected_eof)
-       end
-    | _, _ -> Printf.printf "??\n"
-    end;
-    run_repl ~histfile ()
-  
-let () =
-  let histfile =
-    XDGBaseDir.default.data_home
-    ^ Filename.dir_sep ^ app_name
-    ^ Filename.dir_sep ^ "history" in
-  histfile |> XDGBaseDir.mkdir_openfile (fun histfile ->
-    LNoise.history_load ~filename:histfile |> ignore;
-    LNoise.history_set ~max_length:1000 |> ignore;
-    run_repl ~histfile ())
-
+let parse_string s =
+  let lexbuf = Utf8.from_string s in
+  let startpos = fst (lexing_positions lexbuf) in
+  let tokens = scan lexbuf [] in
+  let source = { name = "<stdin>"; source = s; tokens } in
+  if false then dump_tokens source;
+  let p = Grammar.Incremental.prog startpos in
+  begin match feed_parser [] p tokens with
+  | [], p -> finish_parser p
+  | _ -> failwith "??"
+  end

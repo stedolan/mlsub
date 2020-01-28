@@ -17,6 +17,8 @@ and typ_of_tyexp' env : tyexp' -> typ * typ = function
      cons_typ Neg Top, cons_typ Pos Top
   | Tnamed ({label="nothing";_}, _) ->
      cons_typ Neg Bot, cons_typ Pos Bot
+  | Tnamed ({label="bool";_}, _) ->
+     cons_typ Neg Bool, cons_typ Pos Bool
   | Tnamed ({label="int";_}, _) ->
      cons_typ Neg Int, cons_typ Pos Int
   | Tnamed ({label="string";_}, _) ->
@@ -148,6 +150,7 @@ and infer' env = function
   | Tuple fields ->
      cons_typ Pos (Record (infer_fields env fields, `Closed))
   | _ -> assert false
+
 
 and infer_lit = function
   | l, _ -> infer_lit' l
