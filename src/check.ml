@@ -6,8 +6,6 @@ let env0 = env_cons Env_empty Egen
 
 let unimp () = failwith "unimplemented"
 
-let pos_field_name i = "$" ^ string_of_int i
-
 (* Returns a A⁻ ≤ A⁺ pair *)
 let rec typ_of_tyexp env = function
   | None, _ -> failwith "bad type"
@@ -24,39 +22,35 @@ and typ_of_tyexp' env : tyexp' -> typ * typ = function
   | Tnamed ({label="string";_}, _) ->
      cons_typ Neg String, cons_typ Pos String
   | Tnamed _ -> assert false
-  | Tforall (vars, body) -> assert false
-  | Trecord (fields, cl) ->
-     let ns, ps = typs_of_tuple_tyexp env fields cl in
+  | Tforall (_vars, _body) -> unimp ()
+  | Trecord fields ->
+     let ns, ps = typs_of_tuple_tyexp env fields in
      cons_typ Neg (Record ns), cons_typ Pos (Record ps)
   | Tfunc (args, res) ->
-     let ans, aps = typs_of_tuple_tyexp env args `Closed in
+     let ans, aps = typs_of_tuple_tyexp env args in
      let rn, rp = typ_of_tyexp env res in
      cons_typ Neg (Func (aps, rn)), cons_typ Pos (Func (ans, rp))
   | Tparen t ->
      typ_of_tyexp env t
-  | Tjoin (s, t) ->
-     assert false
-  | Tmeet (s, t) ->
-     assert false
+  | Tjoin (_s, _t) -> unimp ()
+  | Tmeet (_s, _t) -> unimp ()
 
-and typs_of_tuple_tyexp env fields cl = match fields with
+(*and typs_of_tuple_tyexp env fields cl = match fields with
   | None, _ -> failwith "bad tuple of types"
-  | Some t, _ -> typs_of_tuple_tyexp' env t cl
-and typs_of_tuple_tyexp' env t cl =
-  let posid = ref 0 in
-  let fields = t |> List.fold_left (fun fields f ->
-    let s, d = match f with
-      | TFpositional d ->
-         let r = pos_field_name !posid in
-         incr posid;
-         (r, d)
-      | TFnamed ((s,_), d) ->
-         (s, d) in
-    if StrMap.mem s fields then
-      failwith ("duplicate field names " ^ s);
-    StrMap.add s (typ_of_tyexp env d) fields
-  ) StrMap.empty in
-  (StrMap.map fst fields, cl), (StrMap.map snd fields, cl)
+  | Some t, _ -> typs_of_tuple_tyexp' env t cl*)
+and typs_of_tuple_tyexp env t =
+  let fpos = t.tyfields_pos |> List.map (typ_of_tyexp env) in
+  let fnamed = t.tyfields_named |> List.fold_left (fun fields ((s,_), t) ->
+    if StrMap.mem s fields then failwith ("duplicate field names " ^ s);
+    StrMap.add s (typ_of_tyexp env t) fields) StrMap.empty in
+  let fnames = t.tyfields_named |> List.map (fun ((s,_),_) -> s) in
+  let fopen = t.tyfields_open in
+  { fpos = List.map fst fpos;
+    fnamed = StrMap.map fst fnamed;
+    fnames; fopen },
+  { fpos = List.map snd fpos;
+    fnamed = StrMap.map snd fnamed;
+    fnames; fopen }
 
 
 let rec env_lookup_var env v =
@@ -97,39 +91,41 @@ and check' env e ty =
      check env ifnot ty
   | Parens e, ty ->
      check env e ty
-  | Tuple fields, Tm_cons (Record (tfields, cl)) ->
-     let fields = match fields with Some f, _ -> f | _ -> failwith "bad" in
-     let remaining, _ =
-       List.fold_left (fun (remaining,npos) field ->
-       let (fname,ty,e,npos) =
-         match field with
-         | Fpositional (ty, e) ->
-            pos_field_name npos, ty, e, npos + 1
-         | Fnamed ((s,_sloc), ty, Some e) ->
-            s, ty, e, npos
-         | Fnamed (_s, _ty, None) ->
-            failwith "punning not supported yet" in
-       if not (StrMap.mem fname remaining) then begin
-         if StrMap.mem fname tfields then
-           failwith "duplicate fields"
-         else
-           failwith "unexpected field"
-       end else begin
-         check_or_check env e ty (StrMap.find fname remaining);
-         let remaining = StrMap.remove fname remaining in
-         (remaining, npos)
-       end) (tfields, 0) fields in
-     if not (StrMap.is_empty remaining) then
-       failwith "extra fields";
-     ()
+  | Tuple fields, Tm_cons (Record tf) ->
+     check_fields env fields tf
   | e, ty ->
      (* Default case: infer and subtype *)
      let ty' = infer' env e in
      match_type env Pos ty' ty |> report
 
+and check_fields env ef tf =
+  let rec check_pos es ts =
+    match es, ts with
+    | (e, ty) :: es, t :: ts ->
+       check_or_check env e ty t; check_pos es ts
+    | [], _::_ -> failwith "missing positional field"
+    | _::_, [] -> failwith "too many positional fields. FIXME open tuples"
+    | [], [] -> () in
+  check_pos ef.fields_pos tf.fpos;
+  let remaining = List.fold_left (fun remaining ((s, _), e, ty) ->
+    let e = match e with Some e -> e | None -> failwith "punning later" in
+    if not (StrMap.mem s remaining) then begin
+      if StrMap.mem s tf.fnamed then
+        failwith "duplicate fields"
+      else
+        failwith "unexpected field FIXME open tuples"
+    end else begin
+      check_or_check env e ty (StrMap.find s remaining);
+      StrMap.remove s remaining
+    end) tf.fnamed ef.fields_named in
+  (* FIXME: ignores open/closed *)
+  if not (StrMap.is_empty remaining) then
+    failwith "extra fields";
+  ()
+
 and infer env = function
   | None, _ -> failwith "bad exp"
-  | Some e, _ -> infer' env e
+  | Some e, _ -> let ty = infer' env e in wf_typ Pos env ty; ty
 and infer' env = function
   | Lit l -> infer_lit l
   | Var (id, _loc) -> env_lookup_var env id
@@ -145,10 +141,13 @@ and infer' env = function
   | Proj (e, (field,_loc)) ->
      let ty = infer env e in
      let res = ref (cons_typ Pos (ident Pos)) in
-     match_type env Pos ty (Tm_cons (Record (StrMap.singleton field (Tm_unknown res), `Open))) |> report;
+     let tmpl = Tm_cons (Record { fpos = [];
+                                  fnamed = StrMap.singleton field (Tm_unknown res);
+                                  fnames = [field]; fopen = `Open }) in
+     match_type env Pos ty tmpl |> report;
      !res
   | Tuple fields ->
-     cons_typ Pos (Record (infer_fields env fields, `Closed))
+     cons_typ Pos (Record (infer_fields env fields))
   | _ -> assert false
 
 
@@ -159,26 +158,16 @@ and infer_lit' = function
   | Int _ -> cons_typ Pos Int
   | String _ -> cons_typ Pos String
 
-and infer_fields env = function
-  | None, _ -> failwith "bad tuple"
-  | Some fs, _ -> infer_fields' env fs  
-and infer_fields' env fs =
-  let fields, _ = List.fold_left (fun (fields, npos) f ->
-    match f with
-    | Fpositional (ty, e) ->
-       let fields =
-         StrMap.add (pos_field_name npos) (infer_or_check env e ty) fields in
-       fields, npos+1
-    | Fnamed ((s,_sloc), ty, e) ->
-       if StrMap.mem s fields then
-         failwith "dup field name";
-       let e = match e with
-         | Some e -> e
-         | None -> failwith "punning later" in
-       let fields =
-         StrMap.add s (infer_or_check env e ty) fields in
-       fields, npos) (StrMap.empty, 0) fs in
-  fields
+and infer_fields env fs =
+  let fpos = fs.fields_pos |> List.map (fun (e, ty) ->
+    infer_or_check env e ty) in
+  let fnamed = fs.fields_named |> List.fold_left (fun fields ((s, _), e, ty) ->
+    let e = match e with Some e -> e | None -> failwith "punning unimplemented" in
+    if StrMap.mem s fields then failwith "duplicate key";
+    StrMap.add s (infer_or_check env e ty) fields) StrMap.empty in
+  let fnames = fs.fields_named |> List.map (fun ((s, _), _, _) -> s) in
+  let fopen = fs.fields_open in
+  { fpos; fnamed; fnames; fopen }
 
 and infer_or_check env e ty =
   match ty with

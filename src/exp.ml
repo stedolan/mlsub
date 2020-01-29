@@ -38,12 +38,12 @@ type exp = exp' mayloc and exp' =
   (* (e) *)
   | Parens of exp
 
-and 'defn field =
-  | Fpositional of tyexp option * 'defn
-  | Fnamed of symbol * tyexp option * 'defn option
+and 'defn fields =
+  { fields_pos : ('defn * tyexp option) list;
+    fields_named : (symbol * 'defn option * tyexp option) list;
+    fields_open : [`Open|`Closed] }
 
-and tuple = tuple' mayloc and tuple' =
-  exp field list
+and tuple = exp fields
 
 (* Patterns *)
 
@@ -52,16 +52,15 @@ and pat = pat' mayloc and pat' =
   | Pvar of symbol
   | Pparens of pat
 
-and tuple_pat = tuple_pat' mayloc and tuple_pat' =
-  pat field list
+and tuple_pat = pat fields
 
 (* Type expressions *)
 
 and tyexp = tyexp' mayloc and tyexp' =
   | Tnamed of ident
   | Tforall of (symbol * tyexp option * tyexp option) list * tyexp
-  | Trecord of tuple_tyexp * [`Closed|`Open]
-  | Tfunc of tuple_tyexp * tyexp
+  | Trecord of tyexp_fields
+  | Tfunc of tyexp_fields * tyexp
   | Tparen of tyexp
   | Tjoin of tyexp * tyexp
   | Tmeet of tyexp * tyexp
@@ -70,5 +69,7 @@ and 'defn field_tyexp =
   | TFpositional of 'defn
   | TFnamed of symbol * 'defn
 
-and tuple_tyexp = tuple_tyexp' mayloc and tuple_tyexp'=
-  tyexp field_tyexp list
+and tyexp_fields =
+  { tyfields_pos : tyexp list;
+    tyfields_named : (symbol * tyexp) list;
+    tyfields_open : [`Open|`Closed] }

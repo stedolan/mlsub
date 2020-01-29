@@ -39,6 +39,7 @@ let run_cmd s =
      | exception e ->
         "typechecking error: " ^ Printexc.to_string e)
   | Error _ -> "parse error"
+  | exception (Failure s) -> "parser failure: " ^ s
 
 let () =
   Printexc.record_backtrace true;

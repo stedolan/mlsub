@@ -4,9 +4,10 @@
 %token SHIFT
 %token EOF WS COMMENT NL ERROR
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
-%token COLON EQUALS DOT COMMA SEMI UNDER QUESTION ARROW AMPER VBAR
+%token COLON EQUALS DOT DOTS COMMA SEMI UNDER QUESTION ARROW AMPER VBAR
 %token FN LET TRUE FALSE IF ELSE
 
+%nonassoc ARROW
 %left AMPER
 %left VBAR
 
@@ -46,85 +47,113 @@ exp_:
   { Var v }
 | k = literal
   { Lit k }
-| FN; params = tuple(pat, field, field); LBRACE; body = exp; RBRACE
-  { Fn (params, body) }
-| fn = exp; args = tuple(exp, field, field)
-  { App (fn, args) }
-| t = tuple(exp, field, nfield)
-  { Tuple t }
-| LPAR; e = exp; RPAR
-  { Parens e }
+| FN; params = etuple(pat); LBRACE; body = exp; RBRACE
+  { Fn (fst params, body) }
+| fn = exp; args = etuple(exp)
+  { App (fn, fst args) }
+| t = etuple(exp)
+  { match t with
+    | (t, None) -> Tuple t
+    | (_, Some (e, None)) -> Parens e
+    | (_, Some (e, Some ty)) -> Typed (e, ty) }
 | e = exp; DOT; f = symbol
   { Proj (e, f) }
 | IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; f = exp; RBRACE
   { If (e, t, f) }
-| LPAR; e = exp; COLON; t = tyexp; RPAR
-  { Typed (e, t) }
 
-tuple(X, field, field1): e = mayloc(tuple_(X, field, field1)) { e }
-tuple_(X, field, field1):
-(* 0-tuples: no commas *)
-| LPAR; RPAR
-  { [] }
-(* n-tuples with at least one comma (possibly trailing) *)
-| LPAR; f = field(X); fs = tuple1(X, field); RPAR
-  { f :: fs }
-(* 1-tuples with no comma *)
-| LPAR; f = field1(X); RPAR
-  { [f] }
+%inline separated_opt_pair(X, sep, Y):
+| x = X { Some x, None }
+| y = Y { None, Some y }
+| x = X; sep; y = Y { Some x, Some y }
 
-tuple1(X, field):
-| COMMA; { [] }
-| COMMA; f = field(X) { [f] }
-| COMMA; f = field(X); fs = tuple1(X, field)  { f :: fs }
+tuple(X, pfield, nfield):
+| LPAR; t = tuple_positional(X, pfield, nfield)
+  { let (p,n,(e,t)) = t in (p,n,e,t) }
+| LPAR; t = tuple_named(X, pfield, nfield)
+  { let (n,(e,t)) = t in ([], n, e, t) }
+| LPAR; t = tuple_end
+  { let (e, t) = t in ([], [], e, t) }
+tuple_positional(X, pfield, nfield):
+| p = pfield(X); COMMA; xs = tuple_positional(X, pfield, nfield)
+  { let (ps,n,e) = xs in (p::ps,n,e) }
+| p = pfield(X); COMMA; xs = tuple_named(X,pfield,nfield)
+  { let (n,e) = xs in ([p],n,e) }
+| p = pfield(X); e = tuple_end
+  { [p], [], e }
+tuple_named(X,pfield,nfield):
+| n = nfield(X); COMMA; xs = tuple_named(X, pfield, nfield)
+  { let (ns, e) = xs in (n::ns, e) }
+| n = nfield(X); e = tuple_end
+  { [n], e }
+tuple_end:
+| RPAR { `Closed, false }
+| COMMA; RPAR { `Closed, true }
+| COMMA; DOTS; RPAR { `Open, true }
 
-%inline field(X):
-| e = pfield(X) { e }
-| e = nfield(X) { e }
-pfield(X):
+etuple(X): e = tuple(X, pos_field, named_field)
+{
+  let fields_pos, fields_named, fields_open, trail = e in
+  let fields = { fields_pos; fields_named; fields_open } in
+  let parens =
+    match fields with
+    | { fields_pos = [e]; fields_named = []; fields_open = `Closed }
+       when not trail -> Some e
+    | _ -> None in
+  fields, parens
+}
+
+pos_field(X):
 | e = X
-  { Fpositional (None, e) }
+  { (e, None) }
 | e = X; COLON; ty = tyexp
-  { Fpositional (Some ty, e) }
-nfield(X):
+  { (e, Some ty) }
+
+named_field(X):
 | DOT; f = symbol; EQUALS; e = X
-  { Fnamed(f, None, Some e) }
+  { (f, Some e, None) }
 | DOT; f = symbol
-  { Fnamed(f, None, None) }
+  { (f, None, None) }
 | DOT; f = symbol; COLON; ty = tyexp; EQUALS; e = X
-  { Fnamed(f, Some ty, Some e) }
+  { (f, Some e, Some ty) }
 | DOT; f = symbol; COLON; ty = tyexp
-  { Fnamed(f, Some ty, None) }
+  { (f, None, Some ty) }
+
+tytuple: e = tuple(tyexp, ty_pos_field, ty_named_field)
+{
+  let tyfields_pos, tyfields_named, tyfields_open, trail = e in
+  let fields = { tyfields_pos; tyfields_named; tyfields_open } in
+  let parens =
+    match fields with
+    | { tyfields_pos = [e]; tyfields_named = []; tyfields_open = `Closed}
+      when not trail -> Some e
+    | _ -> None in
+  fields, parens
+}
+
+ty_pos_field(X): e = X { e }
+ty_named_field(X): DOT; f = symbol; COLON; e = X { f, e }
 
 pat: p = mayloc(pat_) { p }
 pat_:
 | v = symbol
   { Pvar v }
-| t = tuple(pat, field, nfield)
-  { Ptuple t }
-| LPAR; t = pat; RPAR
-  { Pparens t }
+| t = etuple(pat)
+  { match t with
+    | t, None -> Ptuple t
+    | _, Some (t, None) -> Pparens t
+    | _, Some (_t, _ty) -> failwith "unimplemented" (* Ptyped? *) }
 
 tyexp: t = mayloc(tyexp_) { t }
 tyexp_:
 | t = ident
   { Tnamed t }
-| t = tuple(tyexp, tyexp_field, tyexp_nfield)
-  { Trecord(t, `Closed) }
-| t = tuple(tyexp, tyexp_field, tyexp_field); ARROW; r = tyexp
-  { Tfunc (t, r) }
-| LPAR; t = tyexp; RPAR
-  { Tparen (t) }
+| t = tytuple
+  { match t with fs, None -> Trecord fs | _, Some t -> Tparen t }
+
+(* FIXME: what does (...) -> a | b mean? (prec of -> and |) *)
+| t = tytuple; ARROW; r = tyexp
+  { Tfunc (fst t, r) }
 | t1 = tyexp; VBAR; t2 = tyexp
   { Tjoin(t1, t2) }
 | t1 = tyexp; AMPER; t2 = tyexp
   { Tmeet(t1, t2) }
-
-%inline tyexp_field(X):
-| e = X
-  { TFpositional e }
-| e = tyexp_nfield(X)
-  { e }
-tyexp_nfield(X):
-| DOT; f = symbol; COLON; e = X
-  { TFnamed (f, e) }

@@ -38,24 +38,32 @@ and join_cons pol s t =
      | Some fs -> Record fs
      | None -> annih pol
      end
-and join_fields pol (sf,scl) (tf, tcl) =
+and join_fields pol sf tf =
   match pol with
   | Neg ->
      (* lower bound - union of fields *)
      let same = ref true in
-     let fields = StrMap.merge (fun _ s t ->
+     let rec union_pos sps tps =
+       match sps, tps with
+       | [], [] -> []
+       | sp :: sps, tp :: tps -> join pol sp tp :: union_pos sps tps
+       | xs, [] | [], xs -> same := false; xs in
+     let fpos = union_pos sf.fpos sf.fpos in
+     let fnames = sf.fnames @ 
+       List.filter (fun k -> (*not FIXME*) (StrMap.mem k tf.fnamed)) tf.fnames in
+     let fnamed = StrMap.merge (fun _ s t ->
        match s, t with
        | Some s, Some t -> Some (join pol s t)
        | (Some _ as x), None | None, (Some _ as x) ->
           same := false;
           x
-       | None, None -> None) sf tf in
-     begin match scl, tcl, !same with
+       | None, None -> None) sf.fnamed tf.fnamed in
+     begin match sf.fopen, tf.fopen, !same with
      | `Open, `Open, _ ->
-        Some (fields, `Open)
+        Some {fpos; fnames; fnamed; fopen = `Open}
      | _, _, true ->
         (* Not both open, but same fields *)
-        Some (fields, `Closed)
+        Some {fpos; fnames; fnamed; fopen = `Closed}
      | _, _, false ->
         (* Neither both open nor same fields *)
         None
@@ -63,59 +71,76 @@ and join_fields pol (sf,scl) (tf, tcl) =
   | Pos ->
      (* upper bound - intersection of fields *)
      let same = ref true in
-     let fields = StrMap.merge (fun _ s t ->
+     let rec inter_pos sps tps =
+       match sps, tps with
+       | [], [] -> []
+       | sp :: sps, tp :: tps -> join pol sp tp :: inter_pos sps tps
+       | _, [] | [], _ -> same := false; [] in
+     let fpos = inter_pos sf.fpos tf.fpos in
+     let fnames = List.filter (fun k -> StrMap.mem k tf.fnamed) sf.fnames in
+     let fnamed = StrMap.merge (fun _ s t ->
        match s, t with
        | Some s, Some t -> Some (join pol s t)
        | None, Some _ | Some _, None ->
           same := false;
           None
-       | _ -> None) sf tf in
-     begin match scl, tcl, !same with
+       | _ -> None) sf.fnamed tf.fnamed in
+     begin match sf.fopen, tf.fopen, !same with
      | `Closed, `Closed, true ->
-        Some (fields, `Closed)
+        Some {fpos; fnames; fnamed; fopen = `Closed }
      | _, _, _ ->
-        Some (fields, `Open)
+        Some {fpos; fnames; fnamed; fopen = `Open }
      end
 
 type conflict_reason =
   | Incompatible
   | Missing of string
-  | Extra of string option
+  | Extra of [`Fields|`Named of string|`Positional]
 
 
 (* pol = Pos: <=, pol = Neg: >= *)
-let subtype_cons_fields pol (af,acl) (bf,bcl) f =
+let subtype_cons_fields pol af bf f =
   let extra_errs =
-    match pol, acl, bcl with
+    match pol, af.fopen, bf.fopen with
     | Pos, `Open, `Closed 
-    | Neg, `Closed, `Open -> [Extra None]
+    | Neg, `Closed, `Open -> [Extra `Fields]
     | _ -> [] in
   let extra_errs =
-    match pol, acl, bcl with
+    match pol, af.fopen, bf.fopen with
     | Pos, _, `Closed ->
        (* check dom a ⊆ dom b *)
-       StrMap.fold (fun k _ acc ->
-         match StrMap.find k bf with
-         | exception Not_found -> Extra (Some k) :: acc
-         | _ -> acc) af extra_errs
+       let extra_errs =
+         if List.length af.fpos > List.length bf.fpos then
+           Extra `Positional :: extra_errs else extra_errs in
+       List.fold_right (fun k acc ->
+         match StrMap.find k bf.fnamed with
+         | exception Not_found -> Extra (`Named k) :: acc
+         | _ -> acc) af.fnames extra_errs
     | Neg, `Closed, _ ->
        (* check dom b ⊆ dom a *)
-       StrMap.fold (fun k _ acc ->
-         match StrMap.find k af with
-         | exception Not_found -> Extra (Some k) :: acc
-         | _ -> acc) bf extra_errs
+       let extra_errs =
+         if List.length bf.fpos > List.length af.fpos then
+           Extra `Positional :: extra_errs else extra_errs in
+       List.fold_right (fun k acc ->
+         match StrMap.find k af.fnamed with
+         | exception Not_found -> Extra (`Named k) :: acc
+         | _ -> acc) bf.fnames extra_errs
     | _ -> extra_errs in
+  let rec subtype_pos aps bps acc = match aps, bps with
+    | [], _ | _, [] -> acc  (* extra fields handled above *)
+    | ap :: aps, bp :: bps -> f pol ap bp @ subtype_pos aps bps acc in
+  let errs = subtype_pos af.fpos bf.fpos extra_errs in
   match pol with
   | Pos ->
     StrMap.fold (fun k b acc ->
-      match StrMap.find k af with
+      match StrMap.find k af.fnamed with
       | exception Not_found -> Missing k :: acc
-      | a -> f pol a b @ acc) bf extra_errs
+      | a -> f pol a b @ acc) bf.fnamed errs
   | Neg ->
      StrMap.fold (fun k a acc ->
-      match StrMap.find k bf with
+      match StrMap.find k bf.fnamed with
       | exception Not_found -> Missing k :: acc
-      | b -> f pol a b @ acc) af extra_errs
+      | b -> f pol a b @ acc) af.fnamed errs
 
 let subtype_cons pol a b f =
   match pol, a, b with

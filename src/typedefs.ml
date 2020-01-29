@@ -23,10 +23,12 @@ type 'a cons_head =
   | Record of 'a cons_head_fields
   | Func of 'a cons_head_fields * 'a
 
-and 'a cons_head_fields =
-  (* Positional elements are encoded as field names "0", "1", etc. *)
-  (* FIXME: maybe preserve field order here? *)
-  'a StrMap.t * [`Open|`Closed]
+and 'a cons_head_fields = {
+  fpos : 'a list;
+  fnamed : 'a StrMap.t;
+  fnames : symbol list;  (* same elems as keys of fnamed *)
+  fopen : [`Open|`Closed]
+}
 
 type var_sort = Flexible | Rigid
 let () = assert (Flexible < Rigid) (* required for vset ordering *)
@@ -256,8 +258,10 @@ let styp_uncons venv vsort ({ tyvars; cons; pol } as t) =
  *)
 
 
-let map_head_cons pol f (fields, cl) =
-  StrMap.map (f pol) fields, cl
+let map_head_cons pol f fields =
+  { fields with
+    fpos = List.map (f pol) fields.fpos;
+    fnamed = StrMap.map (f pol) fields.fnamed }
 
 let map_head pol f = function
   | Top -> Top
@@ -399,8 +403,11 @@ let rec wf_cons pol env wf = function
   | Func (args, res) ->
      wf_cons_fields (polneg pol) env wf args;
      wf pol env res
-and wf_cons_fields pol env wf (fields, _cl) =
-  StrMap.iter (fun _ t -> wf pol env t) fields
+and wf_cons_fields pol env wf fields =
+  let fnames = StrMap.fold (fun k _ ks -> k::ks) fields.fnamed [] |> List.rev in
+  assert (fnames = List.sort compare fields.fnames);
+  List.iter (wf pol env) fields.fpos;
+  StrMap.iter (fun _k t -> wf pol env t) fields.fnamed
 
 let rec wf_env = function
   | Env_empty -> ()
@@ -499,16 +506,13 @@ let rec pr_cons pol pr t =
      pr_cons_fields (polneg pol) pr args ^^
        blank 1 ^^ str "→" ^^ blank 1 ^^
          pr pol res
-and pr_cons_fields pol pr (fs, cl) =
-  let fields = StrMap.fold (fun k x acc -> (k,x)::acc) fs [] in
-  let pr_field (k, v) =
-    str k ^^ str ":" ^^ blank 1 ^^ pr pol v in
-  let cl = match cl with
-    | `Open -> comma ^^ str "..."
-    | `Closed -> empty in
-  parens (group (nest 2 (break 0 ^^ separate_map (comma ^^ break 1)
-                                      pr_field fields
-                         ^^ cl))) 
+and pr_cons_fields pol pr fields =
+  let pos_fields = fields.fpos |> List.map (pr pol) in
+  let named_fields = fields.fnames |> List.map (fun k ->
+    str k ^^ str ":" ^^ blank 1 ^^ pr pol (StrMap.find k fields.fnamed)) in
+  let cl = match fields.fopen with `Closed -> [] | `Open -> [str "..."] in
+  parens (group (nest 2 (break 0 ^^ separate (comma ^^ break 1)
+                                      (pos_fields @ named_fields @ cl))))
 
 let rec pr_vset = function
   | VSnil -> []
@@ -572,7 +576,7 @@ let rec pr_template pol = function
   | Tm_cons cons -> pr_cons pol pr_template cons
   | Tm_unknown _ -> str "??"
 
-let func a b = Func ((StrMap.singleton "x" a, `Closed), b)
+let func a b = Func ({fpos=[a]; fnames=[]; fnamed=StrMap.empty; fopen=`Closed}, b)
 
 let bvars pol idx sort vs =
   Tstyp_bound { tyvars = VSnil; cons = ident pol; pol;

@@ -45,21 +45,17 @@ if (false) { 1 } else { false }
 #
 
 (1, 2)
-> ($1: int, $0: int)
+> (int, int)
 
 (true, 3, 4)
-> ($2: int, $1: int, $0: bool)
+> (bool, int, int)
 
 # python-style singleton tuples
 (4,)
-> ($0: int)
+> (int)
 
 ((1,),(2,3),(4,5,6),(7,8,9,10))
-> (
->   $3: ($3: int, $2: int, $1: int, $0: int),
->   $2: ($2: int, $1: int, $0: int),
->   $1: ($1: int, $0: int),
->   $0: ($0: int))
+> ((int), (int, int), (int, int, int), (int, int, int, int))
 
 # empty tuple (unit type)
 ()
@@ -67,19 +63,19 @@ if (false) { 1 } else { false }
 
 # named fields
 ((.foo=20, .bar=17), (.baz=1))
-> ($1: (baz: int), $0: (foo: int, bar: int))
+> ((foo: int, bar: int), (baz: int))
 
 # mixture of named and unnamed
-(1, 2, .bar=3, 4, .baz=true)
-> (baz: bool, bar: int, $2: int, $1: int, $0: int)
+(1, 2, .bar=3, .baz=true)
+> (int, int, bar: int, baz: bool)
 
 # joins
 
 if (true) { (1, 2) } else { (1, true, 3) }
-> ($1: ⊤, $0: int,...)
+> (int, ⊤, ...)
 
 if (false) { (.foo=1,.bar=2) } else { (.foo=1,.baz=()) }
-> (foo: int,...)
+> (foo: int, ...)
 
 true.foo
 > typechecking error: Failure("incompat")

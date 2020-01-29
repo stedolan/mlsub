@@ -34,10 +34,10 @@ let rec print_exp e = mayloc e @@ function
   | Var s -> print_ident s
   | Fn (params, body) ->
      string "fn" ^^ space ^^
-       print_tuple ~tcomma:false print_pat params ^^ space ^^
+       print_fields print_pat params ^^ space ^^
        braces (print_exp body)
-  | Tuple t -> print_tuple ~tcomma:true print_exp t
-  | App (f, args) -> print_exp f ^^ print_tuple ~tcomma:false print_exp args
+  | Tuple t -> print_tuple print_exp t
+  | App (f, args) -> print_exp f ^^ print_fields print_exp args
   | Proj (e, f) -> print_exp e ^^ char '.' ^^ print_symbol f
   | If (e, t, f) ->
      string "if" ^^ break 1 ^^ print_exp e ^^
@@ -47,63 +47,75 @@ let rec print_exp e = mayloc e @@ function
   | Parens e -> parens (print_exp e)
   | _ -> assert false
 
-and print_field : 'defn . ('defn -> document) -> 'defn field -> document
-  = fun print_defn field ->
-  match field with
-  | Fpositional (None, e) ->
-     print_defn e
-  | Fpositional (Some ty, e) ->
-     group (print_defn e ^^ blank 1 ^^ colon ^^ break 1 ^^ print_tyexp ty)
-  | Fnamed (s, None, None) ->
-     char '.' ^^ print_symbol s
-  | Fnamed (s, Some ty, None) ->
-     group (char '.' ^^ print_symbol s ^^
-            op colon ^^ print_tyexp ty)
-  | Fnamed (s, None, Some e) ->
-     group (char '.' ^^ print_symbol s ^^
-            op equals ^^ print_defn e)
-  | Fnamed (s, Some ty, Some e) ->
-     group (char '.' ^^ print_symbol s ^^
-            op colon ^^ print_tyexp ty ^^
-            op equals ^^ print_defn e)
+and print_pos_field : 'defn . ('defn -> document) -> 'defn * tyexp option -> document
+  = fun print_defn (e, ty) ->
+    match ty with
+    | None -> print_defn e
+    | Some ty -> 
+       group (print_defn e ^^ blank 1 ^^ colon ^^ break 1 ^^ print_tyexp ty)
 
-and print_tuple : 'defn . tcomma:bool -> ('defn -> document) -> 'defn field list mayloc -> document
-  = fun ~tcomma print_defn t -> mayloc t @@ function
-  | [(Fpositional _) as f] when tcomma ->
-     parens (print_field print_defn f ^^ comma)
-  | t ->
-     parens (group (indent (break 0 ^^ 
-      (separate_map (comma ^^ break 1) (print_field print_defn) t)) ^^
-        break 0))
+and print_fields' : 'defn . ('defn -> document) -> 'defn fields -> document
+  = fun print_defn {fields_pos; fields_named; fields_open} ->
+  let fields_pos = fields_pos |> List.map (print_pos_field print_defn) in
+  let fields_named = fields_named |> List.map (function
+    | (s, None, None) ->
+       char '.' ^^ print_symbol s
+    | (s, None, Some ty) ->
+       group (char '.' ^^ print_symbol s ^^
+                op colon ^^ print_tyexp ty)
+    | (s, Some e, None) ->
+       group (char '.' ^^ print_symbol s ^^
+                op equals ^^ print_defn e)
+    | (s, Some e, Some ty) ->
+       group (char '.' ^^ print_symbol s ^^
+              op colon ^^ print_tyexp ty ^^
+              op equals ^^ print_defn e)) in
+  let fields_open = match fields_open with `Open -> [string "..."] | `Closed -> [] in
+  parens (group (indent (break 0 ^^ 
+     (separate (comma ^^ break 1) (fields_pos @ fields_named @ fields_open))) ^^
+       break 0))
+
+and print_fields : 'defn . ('defn -> document) -> 'defn fields -> document
+  = fun print_defn t -> print_fields' print_defn t
+
+(* print_tuple: print a trailing comma on a single position elem *)
+and print_tuple : 'defn . ('defn -> document) -> 'defn fields -> document
+  = fun print_defn t -> match t with
+  | {fields_pos = [f]; fields_named = []; fields_open = `Closed} ->
+     parens (print_pos_field print_defn f ^^ comma)
+  | t -> print_fields' print_defn t
 
 and print_pat p = mayloc p @@ function
   | Pvar s -> print_symbol s
-  | Ptuple ts -> print_tuple ~tcomma:true print_pat ts
+  | Ptuple ts -> print_tuple print_pat ts
   | Pparens p -> parens (print_pat p)
 
 and print_tyexp t = mayloc t @@ function
   | Tnamed s -> print_ident s
-  | Trecord (fields, `Closed) ->
-     print_tuple_tyexp ~tcomma:true fields
+  | Trecord fields ->
+     print_tyexp_tuple fields
   | Tfunc (args, ret) ->
-     print_tuple_tyexp ~tcomma:false args ^^ op (string "->") ^^
+     print_tyexp_fields args ^^ op (string "->") ^^
        print_tyexp ret
   | Tforall _ -> assert false
   | Tparen t -> parens (print_tyexp t)
   | Tjoin (s, t) -> print_tyexp s ^^ op (string "|") ^^ print_tyexp t
   | Tmeet (s, t) -> print_tyexp s ^^ op (string "&") ^^ print_tyexp t
 
-and print_tuple_tyexp ~tcomma t = mayloc t @@ function
-  | [(TFpositional ty)] when tcomma ->
-     parens (print_tyexp ty ^^ comma)
-  | t ->
-     let print_field = function
-       | TFpositional ty ->
-          print_tyexp ty
-       | TFnamed (s, ty) ->
-          print_symbol s ^^ op colon ^^ print_tyexp ty in
-     parens (group (indent (break 0 ^^
-       (separate_map (comma ^^ break 1) print_field t) ^^ break 0)))
+and print_tyexp_fields' { tyfields_pos; tyfields_named; tyfields_open } =
+  let tyfields_pos = tyfields_pos |> List.map print_tyexp in
+  let tyfields_named = tyfields_named |> List.map (fun (s, ty) ->
+    print_symbol s ^^ op colon ^^ print_tyexp ty) in
+  let tyfields_open = match tyfields_open with `Open -> [string "..."] | `Closed -> [] in
+  parens (group (indent (break 0 ^^ separate (comma ^^ break 1)
+                  (tyfields_pos @ tyfields_named @ tyfields_open))))
+
+and print_tyexp_fields t = print_tyexp_fields' t
+and print_tyexp_tuple t = match t with
+  | {tyfields_pos = [f]; tyfields_named = []; tyfields_open = `Closed} ->
+    parens (print_tyexp f ^^ comma)
+  | t -> print_tyexp_fields' t
+
 (*
  tuple syntax:
   (f : T = e,)
