@@ -289,12 +289,16 @@ let cons_styp_bound pol (tyvars : vset) bvars (t : styp_bound cons_head) =
     | cons ->
        Tstyp_simple { tyvars; cons; pol }
 
+(* FIXME: styp vs typ for cons *)
 let cons_typ pol cons =
+  Tcons cons
+(*
   match map_head pol (fun _pol s ->
             match s with Tsimple s -> s | _ -> raise_notrace Exit) cons with
   | exception Exit ->
      Tcons cons
   | cons -> Tsimple (cons_styp_bound pol VSnil [] cons)
+ *)
 
 let rec open_styp sort vars ix pol' = function
   | Tstyp_simple _ as s -> s  (* No bound vars, so nothing to open  *)

@@ -1,4 +1,5 @@
 open Grammar
+open Sedlexing
 open Sedlexing.Utf8
 let lex buf =
   match%sedlex buf with
@@ -14,6 +15,7 @@ let lex buf =
   | '}' -> RBRACE
   | ':' -> COLON
   | '=' -> EQUALS
+  | "..." -> DOTS
   | '.' -> DOT
   | ',' -> COMMA
   | ';' -> SEMI
@@ -34,6 +36,8 @@ let lex buf =
   | Plus('0'..'9') -> INT (int_of_string (lexeme buf))
   | ('a'..'z'|'A'..'Z'|'_'), Star('a'..'z'|'A'..'Z'|'0'..'9') ->
      SYMBOL (lexeme buf)
+  | '@', Star('a'..'z') ->
+     PRAGMA (sub_lexeme buf 1 (lexeme_length buf - 1))
   | eof -> EOF
 
   | any -> ERROR
@@ -58,6 +62,8 @@ let token_name = function
   | INT _ -> "INT"
   | IF -> "IF"
   | SYMBOL _ -> "SYMBOL"
+  | PRAGMA _ -> "PRAGMA"
+  | DOTS -> "DOTS"
   | FN -> "FN"
   | FALSE -> "FALSE"
   | ERROR -> "ERROR"

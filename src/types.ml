@@ -48,9 +48,9 @@ and join_fields pol sf tf =
        | [], [] -> []
        | sp :: sps, tp :: tps -> join pol sp tp :: union_pos sps tps
        | xs, [] | [], xs -> same := false; xs in
-     let fpos = union_pos sf.fpos sf.fpos in
+     let fpos = union_pos sf.fpos tf.fpos in
      let fnames = sf.fnames @ 
-       List.filter (fun k -> (*not FIXME*) (StrMap.mem k tf.fnamed)) tf.fnames in
+       List.filter (fun k -> not (StrMap.mem k tf.fnamed)) tf.fnames in
      let fnamed = StrMap.merge (fun _ s t ->
        match s, t with
        | Some s, Some t -> Some (join pol s t)
@@ -94,7 +94,7 @@ and join_fields pol sf tf =
 
 type conflict_reason =
   | Incompatible
-  | Missing of string
+  | Missing of [`Named of string|`Positional]
   | Extra of [`Fields|`Named of string|`Positional]
 
 
@@ -126,20 +126,23 @@ let subtype_cons_fields pol af bf f =
          | exception Not_found -> Extra (`Named k) :: acc
          | _ -> acc) bf.fnames extra_errs
     | _ -> extra_errs in
-  let rec subtype_pos aps bps acc = match aps, bps with
-    | [], _ | _, [] -> acc  (* extra fields handled above *)
-    | ap :: aps, bp :: bps -> f pol ap bp @ subtype_pos aps bps acc in
+
+  let rec subtype_pos aps bps acc = match aps, bps, pol with
+    | [], [], _ -> acc
+    | _, [], Pos | [], _, Neg -> acc (* extra fields handled above *)
+    | [], _, Pos | _, [], Neg -> Missing `Positional :: acc
+    | ap :: aps, bp :: bps, pol -> f pol ap bp @ subtype_pos aps bps acc in
   let errs = subtype_pos af.fpos bf.fpos extra_errs in
   match pol with
   | Pos ->
     StrMap.fold (fun k b acc ->
       match StrMap.find k af.fnamed with
-      | exception Not_found -> Missing k :: acc
+      | exception Not_found -> Missing (`Named k) :: acc
       | a -> f pol a b @ acc) bf.fnamed errs
   | Neg ->
      StrMap.fold (fun k a acc ->
       match StrMap.find k bf.fnamed with
-      | exception Not_found -> Missing k :: acc
+      | exception Not_found -> Missing (`Named k) :: acc
       | b -> f pol a b @ acc) af.fnamed errs
 
 let subtype_cons pol a b f =
@@ -182,7 +185,7 @@ let eps_closure env pol t =
    find the best approximation well-formed in the shorter environment env.
 
    Pos types are approximated from above and Neg types from below. *)
-let rec approx_styp env ext pol' ({ tyvars; cons; pol } as orig) =
+let rec approx_styp env ext pol' ({ tyvars=_; cons=_; pol } as orig) =
   assert_env_prefix env ext;
   wf_env ext;
   wf_styp pol' ext orig;

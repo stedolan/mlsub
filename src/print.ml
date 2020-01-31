@@ -45,6 +45,7 @@ let rec print_exp e = mayloc e @@ function
          braces (print_exp f)
   | Typed (e, t) -> parens (print_exp e ^^ op (char ':') ^^ print_tyexp t)
   | Parens e -> parens (print_exp e)
+  | Pragma s -> char '@' ^^ string s
   | _ -> assert false
 
 and print_pos_field : 'defn . ('defn -> document) -> 'defn * tyexp option -> document

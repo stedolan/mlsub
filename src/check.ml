@@ -65,7 +65,8 @@ let rec env_lookup_var env v =
 
 let report errs = List.iter (function
    | Incompatible -> failwith "incompat"
-   | Missing k -> failwith ("missing " ^ k)
+   | Missing (`Named k) -> failwith ("missing " ^ k)
+   | Missing `Positional -> failwith ("missing pos")
    | Extra _ -> failwith ("extra")) errs
 
 (* When checking a term against a template type,
@@ -93,6 +94,8 @@ and check' env e ty =
      check env e ty
   | Tuple fields, Tm_cons (Record tf) ->
      check_fields env fields tf
+  | Pragma "true", Tm_cons Bool -> ()
+  | Pragma "false", Tm_cons Bool -> ()
   | e, ty ->
      (* Default case: infer and subtype *)
      let ty' = infer' env e in
@@ -148,6 +151,8 @@ and infer' env = function
      !res
   | Tuple fields ->
      cons_typ Pos (Record (infer_fields env fields))
+  | Pragma "bot" -> cons_typ Pos Bot
+  | Pragma s -> failwith ("pragma: " ^ s)
   | _ -> assert false
 
 
@@ -183,3 +188,4 @@ and check_or_check env e ty1 ty2 =
      let tn, tp = typ_of_tyexp env ty in
      check env e (Tm_typ tn);
      match_type env Pos tp ty2 |> report
+

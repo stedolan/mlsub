@@ -1,6 +1,7 @@
 %token <string> SYMBOL
 %token <int> INT
 %token <string> STRING
+%token <string> PRAGMA
 %token SHIFT
 %token EOF WS COMMENT NL ERROR
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
@@ -60,6 +61,8 @@ exp_:
   { Proj (e, f) }
 | IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; f = exp; RBRACE
   { If (e, t, f) }
+| s = PRAGMA
+  { Pragma s }
 
 %inline separated_opt_pair(X, sep, Y):
 | x = X { Some x, None }

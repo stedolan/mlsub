@@ -37,6 +37,8 @@ type exp = exp' mayloc and exp' =
   | Typed of exp * tyexp
   (* (e) *)
   | Parens of exp
+  (* @foo *)
+  | Pragma of string
 
 and 'defn fields =
   { fields_pos : ('defn * tyexp option) list;
