@@ -32,6 +32,7 @@ let lex buf =
   | "if" -> IF
   | "else" -> ELSE
   | "$outer" -> SHIFT
+  | "as" -> AS
 
   | Plus('0'..'9') -> INT (int_of_string (lexeme buf))
   | ('a'..'z'|'A'..'Z'|'_'), Star('a'..'z'|'A'..'Z'|'0'..'9') ->
@@ -78,3 +79,4 @@ let token_name = function
   | AMPER -> "AMPER"
   | VBAR -> "VBAR"
   | SHIFT -> "SHIFT"
+  | AS -> "AS"

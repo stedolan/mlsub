@@ -90,6 +90,7 @@ and print_pat p = mayloc p @@ function
   | Pvar s -> print_symbol s
   | Ptuple ts -> print_tuple print_pat ts
   | Pparens p -> parens (print_pat p)
+  | Ptyped (p, ty) -> parens (print_pat p ^^ op (string ":") ^^ print_tyexp ty)
 
 and print_tyexp t = mayloc t @@ function
   | Tnamed s -> print_ident s

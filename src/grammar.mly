@@ -6,7 +6,7 @@
 %token EOF WS COMMENT NL ERROR
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
 %token COLON EQUALS DOT DOTS COMMA SEMI UNDER QUESTION ARROW AMPER VBAR
-%token FN LET TRUE FALSE IF ELSE
+%token FN LET TRUE FALSE IF ELSE AS
 
 %nonassoc ARROW
 %left AMPER
@@ -14,6 +14,38 @@
 
 %{ open Exp %}
 %start <Exp.exp> prog
+
+%{
+type ('pos, 'named) field =
+  | Fpos of 'pos
+  | Fnamed of 'named
+  | Fdots
+  | Fempty
+
+let rec collect_fields pos named = function
+  | [] | [Fempty] -> List.rev pos, List.rev named, `Closed
+  | Fempty :: _ -> assert false
+  | [Fdots] -> List.rev pos, List.rev named, `Open
+  | Fdots :: _ ->
+     failwith "'...' can only appear at end of tuple"
+  | Fpos _ :: _ when named <> [] ->
+     failwith "positional items must precede named ones"
+  | Fpos p :: fs ->
+     collect_fields (p :: pos) named fs
+  | Fnamed n :: fs ->
+     collect_fields pos (n :: named) fs
+
+let parse_fields fs =
+  let (fields_pos, fields_named, fields_open) =
+    collect_fields [] [] fs in
+  { fields_pos; fields_named; fields_open }
+
+let parse_tyfields fs =
+  let (tyfields_pos, tyfields_named, tyfields_open) =
+    collect_fields [] [] fs in
+  { tyfields_pos; tyfields_named; tyfields_open }
+
+%}
 %%
 
 %inline loc(X): e = X
@@ -44,118 +76,94 @@ literal_:
 
 exp: e = mayloc(exp_) { e }
 exp_:
-| v = ident
-  { Var v }
-| k = literal
-  { Lit k }
-| FN; params = etuple(pat); LBRACE; body = exp; RBRACE
-  { Fn (fst params, body) }
-| fn = exp; args = etuple(exp)
-  { App (fn, fst args) }
-| t = etuple(exp)
-  { match t with
-    | (t, None) -> Tuple t
-    | (_, Some (e, None)) -> Parens e
-    | (_, Some (e, Some ty)) -> Typed (e, ty) }
-| e = exp; DOT; f = symbol
-  { Proj (e, f) }
+| FN; LPAR; params = fields(pat, AS); RPAR; LBRACE; body = exp; RBRACE
+  { Fn (parse_fields params, body) }
 | IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; f = exp; RBRACE
   { If (e, t, f) }
 | s = PRAGMA
   { Pragma s }
+| LET; p = fields(pat, AS); EQUALS; e = fields(exp, EQUALS); SEMI; body = exp
+  { Let (parse_fields p, parse_fields e, body) }
+| t = term_
+  { t }
 
-%inline separated_opt_pair(X, sep, Y):
-| x = X { Some x, None }
-| y = Y { None, Some y }
-| x = X; sep; y = Y { Some x, Some y }
+term: e = mayloc(term_) { e }
+term_:
+| v = ident
+  { Var v }
+| k = literal
+  { Lit k }
+| fn = term; LPAR; args = fields(exp, EQUALS); RPAR
+  { App (fn, parse_fields args) }
+| e = term; DOT; f = symbol
+  { Proj (e, f) }
+| LPAR; t = fields(exp, EQUALS); RPAR
+  { match t with
+    | [Fpos (e, None)] -> Parens e
+    | [Fpos (e, Some ty)] -> Typed (e, ty)
+    | fs -> Tuple (parse_fields fs) }
 
-tuple(X, pfield, nfield):
-| LPAR; t = tuple_positional(X, pfield, nfield)
-  { let (p,n,(e,t)) = t in (p,n,e,t) }
-| LPAR; t = tuple_named(X, pfield, nfield)
-  { let (n,(e,t)) = t in ([], n, e, t) }
-| LPAR; t = tuple_end
-  { let (e, t) = t in ([], [], e, t) }
-tuple_positional(X, pfield, nfield):
-| p = pfield(X); COMMA; xs = tuple_positional(X, pfield, nfield)
-  { let (ps,n,e) = xs in (p::ps,n,e) }
-| p = pfield(X); COMMA; xs = tuple_named(X,pfield,nfield)
-  { let (n,e) = xs in ([p],n,e) }
-| p = pfield(X); e = tuple_end
-  { [p], [], e }
-tuple_named(X,pfield,nfield):
-| n = nfield(X); COMMA; xs = tuple_named(X, pfield, nfield)
-  { let (ns, e) = xs in (n::ns, e) }
-| n = nfield(X); e = tuple_end
-  { [n], e }
-tuple_end:
-| RPAR { `Closed, false }
-| COMMA; RPAR { `Closed, true }
-| COMMA; DOTS; RPAR { `Open, true }
-
-etuple(X): e = tuple(X, pos_field, named_field)
-{
-  let fields_pos, fields_named, fields_open, trail = e in
-  let fields = { fields_pos; fields_named; fields_open } in
-  let parens =
-    match fields with
-    | { fields_pos = [e]; fields_named = []; fields_open = `Closed }
-       when not trail -> Some e
-    | _ -> None in
-  fields, parens
-}
-
-pos_field(X):
-| e = X
-  { (e, None) }
-| e = X; COLON; ty = tyexp
-  { (e, Some ty) }
-
-named_field(X):
-| DOT; f = symbol; EQUALS; e = X
-  { (f, Some e, None) }
+field(defn, named_sep):
+| e = defn
+  { Fpos (e, None) }
+| e = defn; COLON; ty = tyexp
+  { Fpos (e, Some ty) }
 | DOT; f = symbol
-  { (f, None, None) }
-| DOT; f = symbol; COLON; ty = tyexp; EQUALS; e = X
-  { (f, Some e, Some ty) }
+  { Fnamed (f, None, None) }
+| DOT; f = symbol; named_sep; e = defn
+  { Fnamed (f, Some e, None) }
+| DOT; f = symbol; COLON; ty = tyexp; named_sep; e = defn
+  { Fnamed (f, Some e, Some ty) }
 | DOT; f = symbol; COLON; ty = tyexp
-  { (f, None, Some ty) }
+  { Fnamed (f, None, Some ty) }
+| DOTS
+  { Fdots }
 
-tytuple: e = tuple(tyexp, ty_pos_field, ty_named_field)
-{
-  let tyfields_pos, tyfields_named, tyfields_open, trail = e in
-  let fields = { tyfields_pos; tyfields_named; tyfields_open } in
-  let parens =
-    match fields with
-    | { tyfields_pos = [e]; tyfields_named = []; tyfields_open = `Closed}
-      when not trail -> Some e
-    | _ -> None in
-  fields, parens
-}
+fields(defn, named_sep):
+|
+  { [Fempty] }
+| f = field(defn, named_sep)
+  { [f] }
+| f = field(defn, named_sep); COMMA; fs = fields(defn, named_sep)
+  { f :: fs }
 
-ty_pos_field(X): e = X { e }
-ty_named_field(X): DOT; f = symbol; COLON; e = X { f, e }
+tyfield:
+| t = tyexp
+  { Fpos t }
+| DOT; f = symbol; COLON; e = tyexp
+  { Fnamed (f, e) }
+| DOTS
+  { Fdots }
+
+tyfields:
+|
+  { [Fempty] }
+| f = tyfield
+  { [f] }
+| f = tyfield; COMMA; fs = tyfields
+  { f :: fs }
 
 pat: p = mayloc(pat_) { p }
 pat_:
 | v = symbol
   { Pvar v }
-| t = etuple(pat)
+| LPAR; t = fields(pat, AS); RPAR
   { match t with
-    | t, None -> Ptuple t
-    | _, Some (t, None) -> Pparens t
-    | _, Some (_t, _ty) -> failwith "unimplemented" (* Ptyped? *) }
+    | [Fpos (p, None)] -> Pparens p
+    | [Fpos (p, Some ty)] -> Ptyped (p, ty)
+    | p -> Ptuple (parse_fields p) }
 
 tyexp: t = mayloc(tyexp_) { t }
 tyexp_:
 | t = ident
   { Tnamed t }
-| t = tytuple
-  { match t with fs, None -> Trecord fs | _, Some t -> Tparen t }
-
+| LPAR; t = tyfields; RPAR
+  { match t with
+    | [Fpos t] -> Tparen t
+    | fs -> Trecord (parse_tyfields fs) }
 (* FIXME: what does (...) -> a | b mean? (prec of -> and |) *)
-| t = tytuple; ARROW; r = tyexp
-  { Tfunc (fst t, r) }
+| LPAR; t = tyfields; RPAR; ARROW; r = tyexp
+  { Tfunc (parse_tyfields t, r) }
 | t1 = tyexp; VBAR; t2 = tyexp
   { Tjoin(t1, t2) }
 | t1 = tyexp; AMPER; t2 = tyexp

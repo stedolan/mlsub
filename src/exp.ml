@@ -27,8 +27,9 @@ type exp = exp' mayloc and exp' =
   | App of exp * tuple
   (* (a, b, c) *)
   | Tuple of tuple
-  (* let (a, b, c) = ...; ... *)
-  | Let of tuple_pat * exp * exp
+  (* let (a, b, c) = ...; ...
+     let (a, b, c) : t = ...; ... *)
+  | Let of tuple_pat * tuple * exp
   (* a.foo *)
   | Proj of exp * symbol
   (* if a { foo } else { bar } *)
@@ -53,6 +54,7 @@ and pat = pat' mayloc and pat' =
   | Ptuple of tuple_pat
   | Pvar of symbol
   | Pparens of pat
+  | Ptyped of pat * tyexp
 
 and tuple_pat = pat fields
 
@@ -75,3 +77,15 @@ and tyexp_fields =
   { tyfields_pos : tyexp list;
     tyfields_named : (symbol * tyexp) list;
     tyfields_open : [`Open|`Closed] }
+
+
+
+let map_fields f fs =
+  { fs with
+    fields_pos = List.map (fun (d, t) -> (f d, t)) fs.fields_pos;
+    fields_named = List.map (fun (s, d, t) -> (s, Option.map f d, t)) fs.fields_named }
+
+let fold_fields f acc fs =
+  let acc = List.fold_left (fun acc (d, _) -> f acc d) acc fs.fields_pos in
+  let acc = List.fold_left (fun acc (_, d, _) -> match d with None -> acc | Some d -> f acc d) acc fs.fields_named in
+  acc

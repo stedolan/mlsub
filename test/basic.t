@@ -64,10 +64,6 @@ if (false) { 1 } else { false }
 (1)
 > int
 
-# allowed but weird (trailing comma in an empty tuple)
-(,)
-> ()
-
 # arity
 ((1,),(2,3),(4,5,6),(7,8,9,10))
 > ((int), (int, int), (int, int, int), (int, int, int, int))
@@ -132,4 +128,62 @@ if true { (@bot : ((int,any), .foo:(int,int), .bar:any) -> string) } else {(@bot
 ((1, 2) : (int, int, ...))
 > (int, int, ...)
 
-# ((1, 2, 3) : (int, int, ...)) ???
+# FIXME: should this be allowed?
+# ((1, 2, 3) : (int, int, ...))
+
+
+# A checking form for projections! Isn't subtyping great?
+((.foo = @true).foo : bool)
+> bool
+
+#
+# Let-bindings and patterns
+#
+
+let x = 1; x
+> int
+
+let x = (1, 2); x
+> (int, int)
+
+let x : int = (1, 2); x
+> typechecking error: Failure("incompat")
+
+let (x : bool) = true; x
+> bool
+
+let (x : bool) = 5; x
+> typechecking error: Failure("incompat")
+
+let (.x as foo, .y as bar) = (.x = 10, .y = true); (foo, bar)
+> (int, bool)
+
+let (.x as foo, .y as bar) = (.x = 10, .y = true, .z = 42); (foo, bar)
+> typechecking error: Failure("extra")
+
+let (.x as foo, .y as bar, ...) = (.x = 10, .y = true, .z = 42); (foo, bar)
+> (int, bool)
+
+let (x, y) = (1, true); (y, x)
+> (bool, int)
+
+let (.x as foo, .y as bar) : (.x:int, .y:bool) = (.x=1, .y=true); foo
+> int
+let (.x as foo, .y as bar) : (.x:int) = (.x=1, .y=true); foo
+> typechecking error: Failure("unexpected field FIXME open tuples")
+let (.x as foo, .y as bar) : (.x:int,.y:int) = (.x=1, .y=true); foo
+> typechecking error: Failure("incompat")
+let (.x as foo, .y as bar) : (.x:int,.y:bool,.z:bool) = (.x=1, .y=true); foo
+> typechecking error: Failure("extra fields")
+
+let x, y = 1, true; (y, x)
+> (bool, int)
+
+# unimplemented below here...
+
+#
+# Lambda
+#
+
+# fn (a) { a }
+# > asdf

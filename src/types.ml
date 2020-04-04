@@ -211,9 +211,11 @@ let rec approx_styp env ext pol' ({ tyvars=_; cons=_; pol } as orig) =
   (wtf)
  *)
 let flex_closure pol env acc venv vars =
-  assert_env_prefix venv env;
+  (* FIXME: are these assertions right? *)
+  assert_env_prefix env venv;
   wf_styp pol env acc;
   assert (snd (styp_uncons venv Flexible acc) = []);
+  (* FIXME: probably don't want a new table here every time. Profile later! *)
   let seen = Hashtbl.create 10 in
   let rec go acc vars =
     List.fold_left (fun acc v ->
@@ -232,6 +234,8 @@ let flex_closure pol env acc venv vars =
 let pol_flip f pol a b =
   match pol with Pos -> f a b | Neg -> f b a
 
+(* FIXME: this factoring doesn't seem the simplest.
+   Inline subtype_styp_vars? *)
 let rec subtype_styp env p n =
   wf_env env;
   wf_styp Pos env p;
@@ -245,13 +249,14 @@ let rec subtype_styp env p n =
      subtype_styp_vars env p n v.env v.sort
   | VScons pv, VScons nv when
        pv.env == nv.env ->
+     (* FIXME: wtf? *)
      let vsort = min pv.sort nv.sort in (* i.e. Flex if either is *)
      subtype_styp_vars env p n pv.env vsort
   | VScons pv, VScons nv when
       env_level pv.env > env_level nv.env ->
      subtype_styp_vars env p n pv.env pv.sort
-  | VScons _pv, VScons nv
-      (* env_level pv.env < env_level nv.env *) ->
+  | VScons pv, VScons nv ->
+     assert (env_level pv.env < env_level nv.env);
      subtype_styp_vars env p n nv.env nv.sort
 
 and subtype_styp_vars env p n venv vsort =
@@ -346,8 +351,8 @@ let rec freshen_template env pol (t : template) : styp =
          (cons_styp (polneg pol) v (ident (polneg pol))))) t;
      cons_styp pol v (ident pol)
 
-(* All callers use a Pos typ and a Neg template,
-   but recursive calls may swap them *)
+(* match_type env Pos t m = t ≤ m
+   match_type env Neg t m = t ≥ m *)
     
 let rec match_type env pol (p : typ) (t : template) =
   wf_env env;

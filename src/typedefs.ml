@@ -48,7 +48,7 @@ type env =
 (* Entries in the typing environment *)
 and env_entry =
   (* Binding x : τ *)
-  | Eval of symbol * typ
+  | Evals of typ SymMap.t
   (* Marker for scope of generalisation (let binding) *)
   | Egen
   (* Rigid type variables (abstract types, checked forall) *)
@@ -435,7 +435,7 @@ and wf_flexvars env vars =
   
 
 and wf_env_entry env = function
-  | Eval (_, typ) -> wf_typ Pos env typ
+  | Evals vs -> SymMap.iter (fun _ typ ->  wf_typ Pos env typ) vs
   | Egen -> ()
   | Erigid { vars; flow } ->
      flow |> Hashtbl.iter (fun (i,j) () ->
