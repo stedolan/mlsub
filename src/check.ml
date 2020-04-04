@@ -101,6 +101,10 @@ and check' env e ty =
                fnames = [field];
                fopen = `Open } in
      check env e (Tm_cons (Record r))
+  | Let (ps, es, body), ty ->
+     let vs = bind env SymMap.empty ps es in
+     let env = env_cons env (Evals vs) in
+     check env body ty
   | Pragma "true", Tm_cons Bool -> ()
   | Pragma "false", Tm_cons Bool -> ()
   | e, ty ->

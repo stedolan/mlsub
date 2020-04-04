@@ -143,6 +143,12 @@ if true { (@bot : ((int,any), .foo:(int,int), .bar:any) -> string) } else {(@bot
 let x = 1; x
 > int
 
+(let x = @true; x : bool)
+> typechecking error: Failure("pragma: true")
+
+(let x : bool = @true; (x, @false) : (bool,bool))
+> (bool, bool)
+
 let x = (1, 2); x
 > (int, int)
 
