@@ -12,39 +12,12 @@
 %left AMPER
 %left VBAR
 
-%{ open Exp %}
+%{ open Tuple_fields open Exp %}
 %start <Exp.exp> prog
 
 %{
-type ('pos, 'named) field =
-  | Fpos of 'pos
-  | Fnamed of 'named
-  | Fdots
-  | Fempty
-
-let rec collect_fields pos named = function
-  | [] | [Fempty] -> List.rev pos, List.rev named, `Closed
-  | Fempty :: _ -> assert false
-  | [Fdots] -> List.rev pos, List.rev named, `Open
-  | Fdots :: _ ->
-     failwith "'...' can only appear at end of tuple"
-  | Fpos _ :: _ when named <> [] ->
-     failwith "positional items must precede named ones"
-  | Fpos p :: fs ->
-     collect_fields (p :: pos) named fs
-  | Fnamed n :: fs ->
-     collect_fields pos (n :: named) fs
-
-let parse_fields fs =
-  let (fields_pos, fields_named, fields_open) =
-    collect_fields [] [] fs in
-  { fields_pos; fields_named; fields_open }
-
-let parse_tyfields fs =
-  let (tyfields_pos, tyfields_named, tyfields_open) =
-    collect_fields [] [] fs in
-  { tyfields_pos; tyfields_named; tyfields_open }
-
+let parse_fields fs = collect_fields fs
+let parse_tyfields fs = collect_fields fs
 %}
 %%
 
@@ -77,7 +50,9 @@ literal_:
 exp: e = mayloc(exp_) { e }
 exp_:
 | FN; LPAR; params = fields(pat, AS); RPAR; LBRACE; body = exp; RBRACE
-  { Fn (parse_fields params, body) }
+  { Fn (parse_fields params, None, body) }
+| FN; LPAR; params = fields(pat, AS); RPAR; COLON; ty = tyexp; LBRACE; body = exp; RBRACE
+  { Fn (parse_fields params, Some ty, body) }
 | IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; f = exp; RBRACE
   { If (e, t, f) }
 | s = PRAGMA
@@ -99,23 +74,23 @@ term_:
   { Proj (e, f) }
 | LPAR; t = fields(exp, EQUALS); RPAR
   { match t with
-    | [Fpos (e, None)] -> Parens e
-    | [Fpos (e, Some ty)] -> Typed (e, ty)
+    | [Fpos (Some e, None)] -> Parens e
+    | [Fpos (Some e, Some ty)] -> Typed (e, ty)
     | fs -> Tuple (parse_fields fs) }
 
 field(defn, named_sep):
 | e = defn
-  { Fpos (e, None) }
+  { Fpos (Some e, None) }
 | e = defn; COLON; ty = tyexp
-  { Fpos (e, Some ty) }
-| DOT; f = symbol
-  { Fnamed (f, None, None) }
-| DOT; f = symbol; named_sep; e = defn
-  { Fnamed (f, Some e, None) }
-| DOT; f = symbol; COLON; ty = tyexp; named_sep; e = defn
-  { Fnamed (f, Some e, Some ty) }
-| DOT; f = symbol; COLON; ty = tyexp
-  { Fnamed (f, None, Some ty) }
+  { Fpos (Some e, Some ty) }
+| DOT; f = SYMBOL
+  { Fnamed (f, (None, None)) }
+| DOT; f = SYMBOL; named_sep; e = defn
+  { Fnamed (f, (Some e, None)) }
+| DOT; f = SYMBOL; COLON; ty = tyexp; named_sep; e = defn
+  { Fnamed (f, (Some e, Some ty)) }
+| DOT; f = SYMBOL; COLON; ty = tyexp
+  { Fnamed (f, (None, Some ty)) }
 | DOTS
   { Fdots }
 
@@ -130,7 +105,7 @@ fields(defn, named_sep):
 tyfield:
 | t = tyexp
   { Fpos t }
-| DOT; f = symbol; COLON; e = tyexp
+| DOT; f = SYMBOL; COLON; e = tyexp
   { Fnamed (f, e) }
 | DOTS
   { Fdots }
@@ -149,8 +124,8 @@ pat_:
   { Pvar v }
 | LPAR; t = fields(pat, AS); RPAR
   { match t with
-    | [Fpos (p, None)] -> Pparens p
-    | [Fpos (p, Some ty)] -> Ptyped (p, ty)
+    | [Fpos (Some p, None)] -> Pparens p
+    | [Fpos (Some p, Some ty)] -> Ptyped (p, ty)
     | p -> Ptuple (parse_fields p) }
 
 tyexp: t = mayloc(tyexp_) { t }

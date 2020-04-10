@@ -116,10 +116,10 @@ if true { (@bot : ((int,any), .foo:(int,int), .bar:any) -> string) } else {(@bot
 > (bool, bool)
 
 ((1, 2) : (int, int, int))
-> typechecking error: Failure("missing positional field")
+> typechecking error: Failure("missing exp for field")
 
 ((1, 2, 3) : (int, int))
-> typechecking error: Failure("too many positional fields. FIXME open tuples")
+> typechecking error: Failure("unexpected extra field FIXME open")
 
 # weird. Should I allow this? eta-expansion?
 (1, 2, ...)
@@ -176,11 +176,11 @@ let (x, y) = (1, true); (y, x)
 let (.x as foo, .y as bar) : (.x:int, .y:bool) = (.x=1, .y=true); foo
 > int
 let (.x as foo, .y as bar) : (.x:int) = (.x=1, .y=true); foo
-> typechecking error: Failure("unexpected field FIXME open tuples")
+> typechecking error: Failure("unexpected extra field FIXME open")
 let (.x as foo, .y as bar) : (.x:int,.y:int) = (.x=1, .y=true); foo
 > typechecking error: Failure("incompat")
 let (.x as foo, .y as bar) : (.x:int,.y:bool,.z:bool) = (.x=1, .y=true); foo
-> typechecking error: Failure("extra fields")
+> typechecking error: Failure("missing exp for field")
 
 let x, y = 1, true; (y, x)
 > (bool, int)

@@ -1,3 +1,5 @@
+open Tuple_fields
+
 type location =
   { source : string;
     loc_start : Lexing.position;
@@ -12,6 +14,9 @@ type symbol = string loc
 type ident = ident' loc and ident' =
   { label : string; shift : int }
 
+(* FIXME: I think I allow type annotations in too many places,
+   which makes bidir typechecking more annoying than it needs to be *)
+
 (* Expressions *)
 
 type exp = exp' mayloc and exp' =
@@ -20,7 +25,7 @@ type exp = exp' mayloc and exp' =
   (* x *)
   | Var of ident
   (* fn (a, b, c) { ... } *)
-  | Fn of tuple_pat * exp
+  | Fn of tuple_pat * tyexp option * exp
   (* fn f(a, b, c) { .... }; ... *)
   | Def of symbol * tuple_pat * exp * exp
   (* f(...) *)
@@ -41,12 +46,7 @@ type exp = exp' mayloc and exp' =
   (* @foo *)
   | Pragma of string
 
-and 'defn fields =
-  { fields_pos : ('defn * tyexp option) list;
-    fields_named : (symbol * 'defn option * tyexp option) list;
-    fields_open : [`Open|`Closed] }
-
-and tuple = exp fields
+and tuple = (exp option * tyexp option) tuple_fields
 
 (* Patterns *)
 
@@ -56,36 +56,15 @@ and pat = pat' mayloc and pat' =
   | Pparens of pat
   | Ptyped of pat * tyexp
 
-and tuple_pat = pat fields
+and tuple_pat = (pat option * tyexp option) tuple_fields
 
 (* Type expressions *)
 
 and tyexp = tyexp' mayloc and tyexp' =
   | Tnamed of ident
   | Tforall of (symbol * tyexp option * tyexp option) list * tyexp
-  | Trecord of tyexp_fields
-  | Tfunc of tyexp_fields * tyexp
+  | Trecord of tyexp tuple_fields
+  | Tfunc of tyexp tuple_fields * tyexp
   | Tparen of tyexp
   | Tjoin of tyexp * tyexp
   | Tmeet of tyexp * tyexp
-
-and 'defn field_tyexp =
-  | TFpositional of 'defn
-  | TFnamed of symbol * 'defn
-
-and tyexp_fields =
-  { tyfields_pos : tyexp list;
-    tyfields_named : (symbol * tyexp) list;
-    tyfields_open : [`Open|`Closed] }
-
-
-
-let map_fields f fs =
-  { fs with
-    fields_pos = List.map (fun (d, t) -> (f d, t)) fs.fields_pos;
-    fields_named = List.map (fun (s, d, t) -> (s, Option.map f d, t)) fs.fields_named }
-
-let fold_fields f acc fs =
-  let acc = List.fold_left (fun acc (d, _) -> f acc d) acc fs.fields_pos in
-  let acc = List.fold_left (fun acc (_, d, _) -> match d with None -> acc | Some d -> f acc d) acc fs.fields_named in
-  acc

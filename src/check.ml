@@ -1,3 +1,4 @@
+open Tuple_fields
 open Exp
 open Typedefs
 open Types
@@ -39,18 +40,8 @@ and typ_of_tyexp' env : tyexp' -> typ * typ = function
   | None, _ -> failwith "bad tuple of types"
   | Some t, _ -> typs_of_tuple_tyexp' env t cl*)
 and typs_of_tuple_tyexp env t =
-  let fpos = t.tyfields_pos |> List.map (typ_of_tyexp env) in
-  let fnamed = t.tyfields_named |> List.fold_left (fun fields ((s,_), t) ->
-    if StrMap.mem s fields then failwith ("duplicate field names " ^ s);
-    StrMap.add s (typ_of_tyexp env t) fields) StrMap.empty in
-  let fnames = t.tyfields_named |> List.map (fun ((s,_),_) -> s) in
-  let fopen = t.tyfields_open in
-  { fpos = List.map fst fpos;
-    fnamed = StrMap.map fst fnamed;
-    fnames; fopen },
-  { fpos = List.map snd fpos;
-    fnamed = StrMap.map snd fnamed;
-    fnames; fopen }
+  let t = map_fields (typ_of_tyexp env) t in
+  map_fields fst t, map_fields snd t
 
 
 let rec env_lookup_var env v =
@@ -97,7 +88,7 @@ and check' env e ty =
   | Proj (e, (field, _loc)), ty ->
      (* Because of subtyping, there's a checking form for Proj! *)
      let r = { fpos = [];
-               fnamed = StrMap.singleton field ty;
+               fnamed = SymMap.singleton field ty;
                fnames = [field];
                fopen = `Open } in
      check env e (Tm_cons (Record r))
@@ -105,6 +96,8 @@ and check' env e ty =
      let vs = bind env SymMap.empty ps es in
      let env = env_cons env (Evals vs) in
      check env body ty
+  | Fn (params, ret, body), Tm_cons (Func (ptypes, rtype)) ->
+     assert false
   | Pragma "true", Tm_cons Bool -> ()
   | Pragma "false", Tm_cons Bool -> ()
   | e, ty ->
@@ -113,29 +106,16 @@ and check' env e ty =
      match_type env Pos ty' ty |> report
 
 and check_fields env ef tf =
-  let rec check_pos es ts =
-    match es, ts with
-    | (e, ty) :: es, t :: ts ->
-       check_or_check env e ty t; check_pos es ts
-    | [], _::_ -> failwith "missing positional field"
-    | _::_, [] -> failwith "too many positional fields. FIXME open tuples"
-    | [], [] -> () in
-  check_pos ef.fields_pos tf.fpos;
-  let remaining = List.fold_left (fun remaining ((s, _), e, ty) ->
-    let e = match e with Some e -> e | None -> failwith "punning later" in
-    if not (StrMap.mem s remaining) then begin
-      if StrMap.mem s tf.fnamed then
-        failwith "duplicate fields"
-      else
-        failwith "unexpected field FIXME open tuples"
-    end else begin
-      check_or_check env e ty (StrMap.find s remaining);
-      StrMap.remove s remaining
-    end) tf.fnamed ef.fields_named in
-  (* FIXME: ignores open/closed *)
-  if not (StrMap.is_empty remaining) then
-    failwith "extra fields";
-  ()
+  fold2_fields () ef tf
+    ~left:(fun () _n _e -> failwith "unexpected extra field FIXME open")
+    ~right:(fun () _n _ty -> failwith "missing exp for field")
+    ~both:(fun () n (e, ety) ty ->
+      match n, e with
+      | _, Some e ->
+         check_or_check env e ety ty
+      | Field_positional _, None -> assert false (* pos punning *)
+      | Field_named _s, None ->
+         failwith "punning unimplemented")
 
 and infer env = function
   | None, _ -> failwith "bad exp"
@@ -156,7 +136,7 @@ and infer' env = function
      let ty = infer env e in
      let res = ref (cons_typ Pos (ident Pos)) in
      let tmpl = Tm_cons (Record { fpos = [];
-                                  fnamed = StrMap.singleton field (Tm_unknown res);
+                                  fnamed = SymMap.singleton field (Tm_unknown res);
                                   fnames = [field]; fopen = `Open }) in
      match_type env Pos ty tmpl |> report;
      !res
@@ -168,40 +148,38 @@ and infer' env = function
      let vs = bind env SymMap.empty ps es in
      let env = env_cons env (Evals vs) in
      infer env body
+  | Fn (params, ret, body) ->
+     assert false
   | _ -> failwith "typechecking unimplemented for this syntax"
 
 and bind env acc ps es =
-  let ps_open = (ps.fields_open = `Open) in
-  let bind_one acc (p, pty) (e, ety) =
+  let ps_open = (ps.fopen = `Open) in
+  let bind_one acc fn p e =
     let ty =
-      match pty, ety with
-      | None, None ->
+      match fn, p, e with
+      | Field_positional _, (None,_), _
+      | Field_positional _, _, (None,_) -> assert false (* pos punning *)
+      | fn, (Some _, None), (Some e, None) ->
          infer env e
-      | Some t, None | None, Some t ->
+      | fn, (Some _, Some t), (Some e, None)
+      | fn, (Some _, None), (Some e, Some t) ->
          let tn, tp = typ_of_tyexp env t in
          check env e (Tm_typ tn);
          tp
-      | Some pty, Some ety ->
+      | fn, (Some _, Some pty), (Some e, Some ety) ->
          let ptn, ptp = typ_of_tyexp env pty in
          let etn, etp = typ_of_tyexp env ety in
          check env e (Tm_typ etn);
          match_type env Pos etp (Tm_typ ptn) |> report;
          ptp in
-    check_pat env acc ty p in
-  let rec bind_pos acc ps es =
-    match ps, es with
-    | [], [] -> acc
-    | p :: ps, e :: es ->
-       let acc = bind_one acc p e in
-       bind_pos acc ps es
-    | [], es ->
-       List.map (fun (e,ty) -> infer_or_check env e ty) es |> ignore;
-       if not ps_open then failwith "extra bindings";
-       acc
-    | _ :: _, [] ->
-       failwith "insufficient bindings" in
-  let acc = bind_pos acc ps.fields_pos es.fields_pos in
-  assert (ps.fields_named = [] && es.fields_named = []); (* FIXME *)
+    match p with
+    | None, _ -> failwith "punning?"
+    | Some p, _ -> check_pat env acc ty p in
+  let acc =
+    fold2_fields acc ps es
+      ~left:(fun _acc _fn _p -> failwith "extra patterns")
+      ~right:(fun _acc _fn _e -> failwith "extra values FIXME open")
+      ~both:bind_one in
   acc
 
 and check_pat env acc ty = function
@@ -218,29 +196,18 @@ and check_pat' env acc ty = function
      let (tn, tp) = typ_of_tyexp env ty' in
      match_type env Neg tn (Tm_typ ty) |> report;
      check_pat env acc tp p
+
 and check_pat_fields env acc ty fs =
-  let fs = map_fields (fun p -> p, ref (cons_typ Pos (ident Pos))) fs in
-  let trec : _ cons_head_fields =
-    {
-      fpos = fs.fields_pos |> List.map (fun ((_, r), ty) ->
-        match ty with
-        | None -> Tm_unknown r
-        | Some t -> failwith "unimp asc");
-      fnamed = fs.fields_named |> List.fold_left (fun fields ((s, _), p, ty) ->
-        if StrMap.mem s fields then failwith "duplicate key in pat";
-        let r = match p with
-          | None -> failwith "unimp punning"
-          | Some (_, r) -> r in
-        let t = match ty with
-          | None -> Tm_unknown r
-          | Some t -> failwith "unimp asc" in
-        StrMap.add s t fields) StrMap.empty;
-      fnames = fs.fields_named |> List.map (fun ((s, _), _, _) -> s);
-      fopen = fs.fields_open
-    } in
-  let tmpl = Tm_cons (Record trec) in
-  match_type env Pos ty tmpl |> report;
-  fold_fields (fun acc (p, r) -> check_pat env acc !r p) acc fs
+  let fs = map_fields (fun (p,ty) -> p, ty, ref (cons_typ Pos (ident Pos))) fs in
+  let trec : _ tuple_fields =
+    map_fields (fun (p, ty, r) ->
+      match ty with
+      | None -> Tm_unknown r
+      | Some t -> failwith "unimp asc") fs in
+  match_type env Pos ty (Tm_cons (Record trec)) |> report;
+  fold_fields (fun acc (p, ty, r) ->
+    let Some p = p in
+    check_pat env acc !r p) acc fs
 
 
 and infer_lit = function
@@ -251,22 +218,12 @@ and infer_lit' = function
   | String _ -> cons_typ Pos String
 
 and infer_fields env fs =
-  let fpos = fs.fields_pos |> List.map (fun (e, ty) ->
-    infer_or_check env e ty) in
-  let fnamed = fs.fields_named |> List.fold_left (fun fields ((s, _), e, ty) ->
-    let e = match e with Some e -> e | None -> failwith "punning unimplemented" in
-    if StrMap.mem s fields then failwith "duplicate key";
-    StrMap.add s (infer_or_check env e ty) fields) StrMap.empty in
-  let fnames = fs.fields_named |> List.map (fun ((s, _), _, _) -> s) in
-  let fopen = fs.fields_open in
-  { fpos; fnamed; fnames; fopen }
-
-and infer_or_check env e ty =
-  match ty with
-  | None -> infer env e
-  | Some ty ->
-     let tn, tp = typ_of_tyexp env ty in
-     check env e (Tm_typ tn); tp
+  map_fields (function
+    | Some e, None -> infer env e
+    | Some e, Some ty ->
+       let tn, tp = typ_of_tyexp env ty in
+       check env e (Tm_typ tn); tp
+    | None, _ty -> failwith "punning unimplemented") fs
 
 and check_or_check env e ty1 ty2 =
   match ty1 with

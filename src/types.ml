@@ -1,3 +1,4 @@
+open Tuple_fields
 open Typedefs
 
 let intfail s = failwith ("internal error: " ^ s)
@@ -50,8 +51,8 @@ and join_fields pol sf tf =
        | xs, [] | [], xs -> same := false; xs in
      let fpos = union_pos sf.fpos tf.fpos in
      let fnames = sf.fnames @ 
-       List.filter (fun k -> not (StrMap.mem k tf.fnamed)) tf.fnames in
-     let fnamed = StrMap.merge (fun _ s t ->
+       List.filter (fun k -> not (SymMap.mem k tf.fnamed)) tf.fnames in
+     let fnamed = SymMap.merge (fun _ s t ->
        match s, t with
        | Some s, Some t -> Some (join pol s t)
        | (Some _ as x), None | None, (Some _ as x) ->
@@ -77,8 +78,8 @@ and join_fields pol sf tf =
        | sp :: sps, tp :: tps -> join pol sp tp :: inter_pos sps tps
        | _, [] | [], _ -> same := false; [] in
      let fpos = inter_pos sf.fpos tf.fpos in
-     let fnames = List.filter (fun k -> StrMap.mem k tf.fnamed) sf.fnames in
-     let fnamed = StrMap.merge (fun _ s t ->
+     let fnames = List.filter (fun k -> SymMap.mem k tf.fnamed) sf.fnames in
+     let fnamed = SymMap.merge (fun _ s t ->
        match s, t with
        | Some s, Some t -> Some (join pol s t)
        | None, Some _ | Some _, None ->
@@ -113,7 +114,7 @@ let subtype_cons_fields pol af bf f =
          if List.length af.fpos > List.length bf.fpos then
            Extra `Positional :: extra_errs else extra_errs in
        List.fold_right (fun k acc ->
-         match StrMap.find k bf.fnamed with
+         match SymMap.find k bf.fnamed with
          | exception Not_found -> Extra (`Named k) :: acc
          | _ -> acc) af.fnames extra_errs
     | Neg, `Closed, _ ->
@@ -122,7 +123,7 @@ let subtype_cons_fields pol af bf f =
          if List.length bf.fpos > List.length af.fpos then
            Extra `Positional :: extra_errs else extra_errs in
        List.fold_right (fun k acc ->
-         match StrMap.find k af.fnamed with
+         match SymMap.find k af.fnamed with
          | exception Not_found -> Extra (`Named k) :: acc
          | _ -> acc) bf.fnames extra_errs
     | _ -> extra_errs in
@@ -135,13 +136,13 @@ let subtype_cons_fields pol af bf f =
   let errs = subtype_pos af.fpos bf.fpos extra_errs in
   match pol with
   | Pos ->
-    StrMap.fold (fun k b acc ->
-      match StrMap.find k af.fnamed with
+    SymMap.fold (fun k b acc ->
+      match SymMap.find k af.fnamed with
       | exception Not_found -> Missing (`Named k) :: acc
       | a -> f pol a b @ acc) bf.fnamed errs
   | Neg ->
-     StrMap.fold (fun k a acc ->
-      match StrMap.find k bf.fnamed with
+     SymMap.fold (fun k a acc ->
+      match SymMap.find k bf.fnamed with
       | exception Not_found -> Missing (`Named k) :: acc
       | b -> f pol a b @ acc) af.fnamed errs
 

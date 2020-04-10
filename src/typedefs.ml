@@ -5,9 +5,7 @@
 module IntMap = Map.Make (struct type t = int let compare = compare end)
 module StrMap = Map.Make (struct type t = string let compare = compare end)
 
-(* Later, maybe intern these? *)
-type symbol = string
-module SymMap = Map.Make (struct type t = symbol let compare = compare end)
+open Tuple_fields
 
 type polarity = Pos | Neg
 
@@ -20,15 +18,8 @@ type 'a cons_head =
   | Bool
   | Int
   | String
-  | Record of 'a cons_head_fields
-  | Func of 'a cons_head_fields * 'a
-
-and 'a cons_head_fields = {
-  fpos : 'a list;
-  fnamed : 'a StrMap.t;
-  fnames : symbol list;  (* same elems as keys of fnamed *)
-  fopen : [`Open|`Closed]
-}
+  | Record of 'a tuple_fields
+  | Func of 'a tuple_fields * 'a
 
 type var_sort = Flexible | Rigid
 let () = assert (Flexible < Rigid) (* required for vset ordering *)
@@ -261,7 +252,7 @@ let styp_uncons venv vsort ({ tyvars; cons; pol } as t) =
 let map_head_cons pol f fields =
   { fields with
     fpos = List.map (f pol) fields.fpos;
-    fnamed = StrMap.map (f pol) fields.fnamed }
+    fnamed = SymMap.map (f pol) fields.fnamed }
 
 let map_head pol f = function
   | Top -> Top
@@ -408,10 +399,10 @@ let rec wf_cons pol env wf = function
      wf_cons_fields (polneg pol) env wf args;
      wf pol env res
 and wf_cons_fields pol env wf fields =
-  let fnames = StrMap.fold (fun k _ ks -> k::ks) fields.fnamed [] |> List.rev in
+  let fnames = SymMap.fold (fun k _ ks -> k::ks) fields.fnamed [] |> List.rev in
   assert (fnames = List.sort compare fields.fnames);
   List.iter (wf pol env) fields.fpos;
-  StrMap.iter (fun _k t -> wf pol env t) fields.fnamed
+  SymMap.iter (fun _k t -> wf pol env t) fields.fnamed
 
 let rec wf_env = function
   | Env_empty -> ()
@@ -513,7 +504,7 @@ let rec pr_cons pol pr t =
 and pr_cons_fields pol pr fields =
   let pos_fields = fields.fpos |> List.map (pr pol) in
   let named_fields = fields.fnames |> List.map (fun k ->
-    str k ^^ str ":" ^^ blank 1 ^^ pr pol (StrMap.find k fields.fnamed)) in
+    str k ^^ str ":" ^^ blank 1 ^^ pr pol (SymMap.find k fields.fnamed)) in
   let cl = match fields.fopen with `Closed -> [] | `Open -> [str "..."] in
   parens (group (nest 2 (break 0 ^^ separate (comma ^^ break 1)
                                       (pos_fields @ named_fields @ cl))))
@@ -580,7 +571,7 @@ let rec pr_template pol = function
   | Tm_cons cons -> pr_cons pol pr_template cons
   | Tm_unknown _ -> str "??"
 
-let func a b = Func ({fpos=[a]; fnames=[]; fnamed=StrMap.empty; fopen=`Closed}, b)
+let func a b = Func ({fpos=[a]; fnames=[]; fnamed=SymMap.empty; fopen=`Closed}, b)
 
 let bvars pol idx sort vs =
   Tstyp_bound { tyvars = VSnil; cons = ident pol; pol;
