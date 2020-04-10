@@ -332,74 +332,48 @@ let rec subtype env p n =
      subtype_cons Pos s t 
        (pol_flip (subtype env))
 
-let fill_template env pol s t =
-  wf_typ pol env s;
-  if !t <> cons_typ pol (ident pol) then
-    failwith "fill_template: nonlinear template";
-  t := s
-
-let rec freshen_template env pol (t : template) : styp =
-  wf_template pol env t;
-  match t with
-  | Tm_typ t ->
-     approx env env pol t
-  | Tm_cons t ->
-     cons_styp pol VSnil (map_head pol (freshen_template env) t)
-  | Tm_unknown t ->
-     let v = fresh_flexible env in
-     fill_template env (polneg pol)
-       (Tsimple (Tstyp_simple
-         (cons_styp (polneg pol) v (ident (polneg pol))))) t;
-     cons_styp pol v (ident pol)
-
 (* match_type env Pos t m = t ≤ m
    match_type env Neg t m = t ≥ m *)
-    
-let rec match_type env pol (p : typ) (t : template) =
+
+let rec match_type env pol (p : typ) (t : typ option ref cons_head) =
   wf_env env;
   wf_typ pol env p;
-  wf_template (polneg pol) env t;
-  match t with
-  | Tm_typ t ->
-     pol_flip (subtype env) pol p t
-  | Tm_unknown t ->
-     fill_template env pol p t;
-     []
-  | Tm_cons t ->
-     match_type_cons env pol p t
-
-and match_type_cons env pol (p : typ) (t : template cons_head) =
   match p with
   | Tcons cons ->
-     subtype_cons pol cons t (match_type env)
+     subtype_cons pol cons t (fun _ p r ->
+       assert (!r = None);
+       r := Some p;
+       [])
   | Tpoly_neg _ ->
-     (* Is this reachable? *)
-     assert false
+     assert (pol = Neg);
+     failwith "match neg tpoly unimplemented"
   | Tpoly_pos (vars, body) ->
      (* t is not ∀, so we need to instantiate p *)
      assert (pol = Pos);
      let vsets = instantiate_flexible env vars in
      let body = open_typ Flexible vsets 0 Pos body in
-     match_type_cons env pol body t
-  | Tsimple p ->
-     match_styp_cons env pol (is_styp p) t
-
-and match_styp env pol (p : styp) (t : template) =
-  match t with
-  | Tm_typ _
-  | Tm_unknown _ ->
-     match_type env pol (Tsimple (Tstyp_simple p)) t
-  | Tm_cons t ->
-     match_styp_cons env pol p t
-
-and match_styp_cons env pol (p : styp) (t : template cons_head) =
-  match p.tyvars with
-  | VSnil ->
-     (* Optimisation in the case of no flow *)
-     subtype_cons pol p.cons t (match_styp env)
-  | _ ->
-     let t = freshen_template env (polneg pol) (Tm_cons t) in
-     pol_flip (subtype_styp env) pol p t
+     match_type env pol body t
+  | Tsimple (Tstyp_bound _) ->
+     (* bound variable escaped, something's wrong *)
+     assert false
+  | Tsimple (Tstyp_simple p) ->
+     match p.tyvars with
+     | VSnil ->
+        (* Optimisation in the case of no flow *)
+        subtype_cons pol p.cons t (fun _ p r ->
+          assert (!r = None);
+          r := Some (Tsimple (Tstyp_simple p));
+          [])
+     | _ ->
+        let freshen pol r =
+          assert (!r = None);
+          let v = fresh_flexible env in
+          r := Some (Tsimple (Tstyp_simple
+                (cons_styp (polneg pol) v (ident (polneg pol)))));
+          cons_styp pol v (ident pol) in
+        let t = cons_styp (polneg pol) VSnil
+                  (map_head (polneg pol) freshen t) in
+        pol_flip (subtype_styp env) pol p t;
 
 (*
 

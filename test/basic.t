@@ -185,6 +185,35 @@ let (.x as foo, .y as bar) : (.x:int,.y:bool,.z:bool) = (.x=1, .y=true); foo
 let x, y = 1, true; (y, x)
 > (bool, int)
 
+
+# nested typed patterns. FIXME: are these a good idea?
+let (((x : int), y), z) = ((1,2),3); x
+> int
+
+# nested typed patterns. FIXME: are these a good idea?
+let (((x : int), y), z) = ((true,2),3); x
+> typechecking error: Failure("incompat")
+
+# nested typed patterns. FIXME: are these a good idea?
+let (((x : any), y), z) = ((true,2),3); x
+> ⊤
+
+
+# subtyping checks. FIXME: these probably only hit matching :(
+let a = (.foo = 1, .bar = 2); let b : (.foo: int, .bar: int) = a; b
+> (foo: int, bar: int)
+
+let a = (.foo = 1, .bar = 2); let b : (.bar: int) = a; b
+> typechecking error: Failure("extra")
+
+let a = (.foo = 1, .bar = 2); let b : (.bar: any, ...) = a; b
+> (bar: ⊤, ...)
+
+let a = (.foo = 1, .bar = 2); let b : (.bar: nothing, ...) = a; b
+> typechecking error: Failure("incompat")
+
+
+
 # unimplemented below here...
 
 #

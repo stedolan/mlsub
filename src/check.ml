@@ -64,46 +64,47 @@ let report errs = List.iter (function
    I think it's principal to inspect a Tm_typ as long as we don't
    inspect any styps. (???) 
    FIXME: this conflicts with the tendency of cons_typ to make styps. *)
+(* FIXME FIXME principality / boxiness ??? *)
 let inspect = function
-  | Tm_typ (Tcons cons) ->
-     Tm_cons (map_head Neg (fun _pol x -> Tm_typ x) cons)
+  | Tcons cons ->
+     Tcons cons
   | t -> t
 
 
-let rec check env e (ty : template) =
+let rec check env e (ty : typ) =
+  wf_typ Neg env ty;
   match e with
   | None, _ -> failwith "bad exp"
   | Some e, _ -> check' env e ty
 and check' env e ty =
-  let ty = inspect ty in (* ??? *)
-  match e, ty with
-  | If (e, ifso, ifnot), ty ->
-     check env e (Tm_typ (cons_typ Neg Bool));
+  match e, inspect ty with
+  | If (e, ifso, ifnot), _ ->
+     check env e (cons_typ Neg Bool);
      check env ifso ty;
      check env ifnot ty
-  | Parens e, ty ->
+  | Parens e, _ ->
      check env e ty
-  | Tuple fields, Tm_cons (Record tf) ->
+  | Tuple fields, Tcons (Record tf) ->
      check_fields env fields tf
-  | Proj (e, (field, _loc)), ty ->
+  | Proj (e, (field, _loc)), _ ->
      (* Because of subtyping, there's a checking form for Proj! *)
      let r = { fpos = [];
                fnamed = SymMap.singleton field ty;
                fnames = [field];
                fopen = `Open } in
-     check env e (Tm_cons (Record r))
-  | Let (ps, es, body), ty ->
+     check env e (Tcons (Record r))
+  | Let (ps, es, body), _ ->
      let vs = bind env SymMap.empty ps es in
      let env = env_cons env (Evals vs) in
      check env body ty
-  | Fn (params, ret, body), Tm_cons (Func (ptypes, rtype)) ->
+  | Fn (params, ret, body), Tcons (Func (ptypes, rtype)) ->
      assert false
-  | Pragma "true", Tm_cons Bool -> ()
-  | Pragma "false", Tm_cons Bool -> ()
-  | e, ty ->
+  | Pragma "true", Tcons Bool -> ()
+  | Pragma "false", Tcons Bool -> ()
+  | e, _ ->
      (* Default case: infer and subtype *)
      let ty' = infer' env e in
-     match_type env Pos ty' ty |> report
+     subtype env ty' ty |> report
 
 and check_fields env ef tf =
   fold2_fields () ef tf
@@ -125,21 +126,23 @@ and infer' env = function
   | Var (id, _loc) -> env_lookup_var env id
   | Typed (e, ty) ->
      let tn, tp = typ_of_tyexp env ty in
-     check env e (Tm_typ tn); tp
+     check env e tn; tp
   | Parens e -> infer env e
   | If (e, ifso, ifnot) ->
-     check env e (Tm_typ (cons_typ Neg Bool));
+     check env e (cons_typ Neg Bool);
      let tyso = infer env ifso and tynot = infer env ifnot in
      (* FIXME: join of typ? *)
      Tsimple (Tstyp_simple (join Pos (approx env env Pos tyso) (approx env env Pos tynot)))
   | Proj (e, (field,_loc)) ->
      let ty = infer env e in
-     let res = ref (cons_typ Pos (ident Pos)) in
-     let tmpl = Tm_cons (Record { fpos = [];
-                                  fnamed = SymMap.singleton field (Tm_unknown res);
-                                  fnames = [field]; fopen = `Open }) in
+     let res = ref None in
+     let tmpl = (Record { fpos = [];
+                          fnamed = SymMap.singleton field res;
+                          fnames = [field]; fopen = `Open }) in
      match_type env Pos ty tmpl |> report;
-     !res
+     (match !res with
+      | None -> assert false    (* record subtyping *)
+      | Some r -> r)
   | Tuple fields ->
      cons_typ Pos (Record (infer_fields env fields))
   | Pragma "bot" -> cons_typ Pos Bot
@@ -164,13 +167,13 @@ and bind env acc ps es =
       | fn, (Some _, Some t), (Some e, None)
       | fn, (Some _, None), (Some e, Some t) ->
          let tn, tp = typ_of_tyexp env t in
-         check env e (Tm_typ tn);
+         check env e tn;
          tp
       | fn, (Some _, Some pty), (Some e, Some ety) ->
          let ptn, ptp = typ_of_tyexp env pty in
          let etn, etp = typ_of_tyexp env ety in
-         check env e (Tm_typ etn);
-         match_type env Pos etp (Tm_typ ptn) |> report;
+         check env e etn;
+         subtype env etp ptn |> report;
          ptp in
     match p with
     | None, _ -> failwith "punning?"
@@ -194,20 +197,22 @@ and check_pat' env acc ty = function
   | Pparens p -> check_pat env acc ty p
   | Ptyped (p, ty') ->
      let (tn, tp) = typ_of_tyexp env ty' in
-     match_type env Neg tn (Tm_typ ty) |> report;
+     subtype env ty tn |> report;
      check_pat env acc tp p
 
 and check_pat_fields env acc ty fs =
-  let fs = map_fields (fun (p,ty) -> p, ty, ref (cons_typ Pos (ident Pos))) fs in
+  let fs = map_fields (fun (p,ty) -> p, ty, ref None) fs in
   let trec : _ tuple_fields =
     map_fields (fun (p, ty, r) ->
       match ty with
-      | None -> Tm_unknown r
+      | None -> r
       | Some t -> failwith "unimp asc") fs in
-  match_type env Pos ty (Tm_cons (Record trec)) |> report;
+  match_type env Pos ty (Record trec) |> report;
   fold_fields (fun acc (p, ty, r) ->
     let Some p = p in
-    check_pat env acc !r p) acc fs
+    match !r with
+    | Some r -> check_pat env acc r p
+    | None -> failwith "bwuh?") acc fs
 
 
 and infer_lit = function
@@ -222,13 +227,13 @@ and infer_fields env fs =
     | Some e, None -> infer env e
     | Some e, Some ty ->
        let tn, tp = typ_of_tyexp env ty in
-       check env e (Tm_typ tn); tp
+       check env e tn; tp
     | None, _ty -> failwith "punning unimplemented") fs
 
-and check_or_check env e ty1 ty2 =
+and check_or_check env e ty1 (ty2 : typ) =
   match ty1 with
   | None -> check env e ty2
   | Some ty ->
      let tn, tp = typ_of_tyexp env ty in
-     check env e (Tm_typ tn);
-     match_type env Pos tp ty2 |> report
+     check env e tn;
+     subtype env tp ty2 |> report

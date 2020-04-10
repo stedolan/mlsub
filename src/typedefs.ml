@@ -118,16 +118,6 @@ and typ =
   (* Forall in a negative position *)
   | Tpoly_neg of (styp_bound * styp_bound) array * rig_flow * typ
 
-
-(* Type templates, used for checking.
-   (cf. boxy types).
-   TODO: need to ensure linearity still holds with abs types *)
-type template =
-  | Tm_typ of typ
-  | Tm_cons of template cons_head
-  | Tm_unknown of typ ref
-
-
 let polneg = function Pos -> Neg | Neg -> Pos
 
 (* Underconstrained. Might be anything. Identity of meet/join. *)
@@ -475,14 +465,6 @@ and wf_vset pol env_ext = function
      assert (vars = List.sort_uniq compare vars);
      wf_vset pol env' rest
 
-let rec wf_template pol env = function
-  | Tm_typ t ->
-     wf_typ pol env t
-  | Tm_cons cons ->
-     wf_cons pol env wf_template cons
-  | Tm_unknown r ->
-     wf_typ (polneg pol) env !r
-
 (*
  * Printing of internal representations
  *)
@@ -565,11 +547,6 @@ and pr_bound pol (lower, upper) =
   brackets (pr_styp_bound pol lower ^^
               str "," ^^
             pr_styp_bound (polneg pol) upper)
-
-let rec pr_template pol = function
-  | Tm_typ t -> pr_typ pol t
-  | Tm_cons cons -> pr_cons pol pr_template cons
-  | Tm_unknown _ -> str "??"
 
 let func a b = Func ({fpos=[a]; fnames=[]; fnamed=SymMap.empty; fopen=`Closed}, b)
 
