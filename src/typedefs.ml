@@ -75,10 +75,14 @@ and vset =
    for flexible variables α, β from the same binding group,
    β ∈ α.pos.tyvars iff α ∈ β.neg.tyvars *)
 and flexvar = {
+    env : env;
+    ix : int;
     (* positive component, lower bound *)
     mutable pos : styp;
     (* negative component, upper bound *)
     mutable neg : styp;
+    (* copy of variable hoisted to a shorter environment *)
+    mutable hoisted : flexvar option;
   }
 
 (* Rigid type variables *)
@@ -331,9 +335,37 @@ let is_styp = function
 (* Create a single fresh variable with trivial bounds *)
 let fresh_flexible env =
   let tyvars = match env with Env_cons { tyvars; _ } -> tyvars | _ -> assert false in
-  let ix = Vector.push tyvars { pos = cons_styp Pos VSnil Bot;
-                                neg = cons_styp Neg VSnil Top } in
-  VScons { env; sort = Flexible; vars = [ix]; rest = VSnil }
+  let ix = Vector.length tyvars in
+  let v = { env; hoisted = None; ix;
+            pos = cons_styp Pos VSnil Bot;
+            neg = cons_styp Neg VSnil Top } in
+  let ix' = Vector.push tyvars v in
+  assert (Vector.get tyvars ix == v);
+  assert (ix = ix');
+  v
+
+let vset_of_flexvar v =
+  VScons { env=v.env; sort = Flexible; vars = [v.ix]; rest = VSnil }
+
+let styp_of_vset pol tyvars =
+  { pol; cons = ident pol; tyvars }
+
+let rec hoist_flexible env v =
+  assert_env_prefix env v.env;
+  if env == v.env then v
+  else match v.hoisted with
+  | None ->
+     let v' = fresh_flexible env in
+     v.hoisted <- Some v';
+     v'
+  | Some v' ->
+     if env_level env < env_level v'.env then
+       hoist_flexible env v'
+     else
+       let vh = fresh_flexible env in
+       v.hoisted <- Some vh;
+       vh.hoisted <- Some v';
+       vh
 
 (* Create flexible variables with bounds *)
 let instantiate_flexible env vars =
@@ -341,7 +373,8 @@ let instantiate_flexible env vars =
   let nvars = Array.length vars in
   let ixs = Array.init nvars (fun _ ->
     Vector.push tyvars
-      { pos = cons_styp Pos VSnil Bot;
+      { env; ix = Vector.length tyvars; hoisted = None;
+        pos = cons_styp Pos VSnil Bot;
         neg = cons_styp Neg VSnil Top }) in
   let vsets = ixs |> Array.map (fun ix ->
     VScons { env; sort = Flexible; vars = [ix]; rest = VSnil }) in
@@ -403,7 +436,12 @@ let rec wf_env = function
      wf_env rest
 
 and wf_flexvars env vars =
-  Vector.iteri vars (fun i { pos; neg } ->
+  Vector.iteri vars (fun i { env=env'; ix; hoisted; pos; neg } ->
+    assert (env == env');
+    assert (ix = i);
+    (match hoisted with
+     | None -> ()
+     | Some v -> assert (env_level v.env < env_level env));
     wf_styp Pos env pos;
     wf_styp Neg env neg;
     (* Check the ε-invariant *)

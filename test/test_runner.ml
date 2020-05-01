@@ -36,6 +36,8 @@ let run_cmd s =
         let b = Buffer.create 100 in
         PPrint.ToBuffer.pretty 1. 80 b (Typedefs.pr_typ Pos t);
         b |> Buffer.to_bytes |> Bytes.to_string
+     | exception (Assert_failure _ as e) ->
+        Printexc.to_string e ^ "\n" ^ Printexc.get_backtrace ()
      | exception e ->
         "typechecking error: " ^ Printexc.to_string e)
   | Error _ -> "parse error"

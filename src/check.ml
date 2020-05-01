@@ -43,6 +43,11 @@ and typs_of_tuple_tyexp env t =
   let t = map_fields (typ_of_tyexp env) t in
   map_fields fst t, map_fields snd t
 
+let typ_of_tyexp env t =
+  let (tn, tp) = typ_of_tyexp env t in
+  wf_typ Neg env tn; wf_typ Pos env tp;
+  (tn, tp)
+
 
 let rec env_lookup_var env v =
   match env with
@@ -142,7 +147,7 @@ and infer' env = function
      match_type env Pos ty tmpl |> report;
      (match !res with
       | None -> assert false    (* record subtyping *)
-      | Some r -> r)
+      | Some r -> wf_typ Pos env r; r)
   | Tuple fields ->
      cons_typ Pos (Record (infer_fields env fields))
   | Pragma "bot" -> cons_typ Pos Bot
@@ -152,7 +157,23 @@ and infer' env = function
      let env = env_cons env (Evals vs) in
      infer env body
   | Fn (params, ret, body) ->
-     assert false
+     let params = map_fields (fun (p, ty) ->
+       match ty with
+       | Some ty -> typ_of_tyexp env ty, p
+       | None -> fresh_flow env, p) params in
+     let vs = fold_fields (fun acc ((tn, tp), p) ->
+       let Some p = p in (* FIXME punning *)
+       check_pat env acc tp p) SymMap.empty params in
+     let env' = env_cons env (Evals vs) in
+     let res = match ret with
+       | None ->
+          let ty' = infer env' body in
+          Tsimple (Tstyp_simple (approx env env' Pos ty'))
+       | Some ty ->
+          let tn, tp = typ_of_tyexp env ty in
+          check env body tn; tp in
+     wf_typ Pos env res;
+     cons_typ Pos (Func (map_fields (fun ((tn,_tp),_p) -> tn) params, res))
   | _ -> failwith "typechecking unimplemented for this syntax"
 
 and bind env acc ps es =

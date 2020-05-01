@@ -10,12 +10,12 @@ let push v x =
   let pos = v.length in
   assert (pos <= Array.length v.contents);
   if pos = Array.length v.contents then begin
-    let newlen =
+    let newcap =
       if v.length < 10 then 10 else v.length * 2 in
-    let newcontents = Array.make newlen x in
+    let newcontents = Array.make newcap x in
     Array.blit v.contents 0 newcontents 0 v.length;
     v.contents <- newcontents;
-    v.length <- newlen
+    v.length <- pos + 1;
   end else begin
     v.contents.(pos) <- x;
     v.length <- pos + 1;

@@ -162,7 +162,7 @@ let subtype_cons pol a b f =
   | _,_,_ -> [Incompatible]
 
 
-(* Computes epsilon-closure of a type *)
+(* Compute epsilon-closure of a type *)
 let eps_closure env pol t =
   let seen = Hashtbl.create 10 in
   let rec accum_v acc i =
@@ -180,43 +180,77 @@ let eps_closure env pol t =
       (join_cons pol acc cons)
       (vset_lookup env Flexible tyvars) in
   accum (ident pol) t
-  
+
+
+
+(* Hoist a flexible variable to a wider environment *)
+let rec hoist_flexible env v =
+  assert_env_prefix env v.env;
+  if env == v.env then v
+  else match v.hoisted with
+  | Some v' when env_level env <= env_level v'.env ->
+     hoist_flexible env v'
+  | vh ->
+     (* Write the hoisted field _before_ approxing bounds,
+        so that we terminate when hoisting a var with recursive bounds. *)
+     let v' = fresh_flexible env in
+     v'.hoisted <- vh;
+     v.hoisted <- Some v';
+     (* I. approx bounds *)
+     v'.pos <- approx_styp env v.env Pos v.pos;
+     v'.neg <- approx_styp env v.env Neg v.neg;
+     (* II. add variable constraints *)
+     v.pos <- join Pos v.pos (styp_of_vset Pos (vset_of_flexvar v'));
+     v.neg <- join Neg v.neg (styp_of_vset Neg (vset_of_flexvar v'));
+     v'
+
+and approx_vset env pol = function
+  | VSnil -> styp_of_vset pol VSnil
+  | VScons { env = env'; _ } as vs 
+       when env_level env' <= env_level env ->
+     (* already valid in env *)
+     styp_of_vset pol vs
+  | VScons { env = env'; sort; vars; rest } ->
+     assert_env_prefix env env';
+     let acc = approx_vset env pol rest in
+     match sort with
+     | Rigid ->
+        failwith "rigid approx unimplemented"
+     | Flexible ->
+        List.fold_left (fun acc i ->
+          let v = hoist_flexible env (env_flexvar env' i) in
+          join pol acc (styp_of_vset pol (vset_of_flexvar v)))
+          acc vars
 
 (* Given a styp well-formed in ext,
    find the best approximation well-formed in the shorter environment env.
 
+   This may require hoisting some flexible variables from ext to env.
+
    Pos types are approximated from above and Neg types from below. *)
-let rec approx_styp env ext pol' ({ tyvars=_; cons=_; pol } as orig) =
+and approx_styp env ext pol' ({ tyvars; cons; pol } as orig) =
   assert_env_prefix env ext;
   wf_env ext;
   wf_styp pol' ext orig;
   assert (pol = pol');
   if env_equal env ext then orig
   else
-    failwith "approx unimplemented"
-(*
     let cons = map_head pol (approx_styp env ext) cons in
-    let tyvars = asdf in
-    { tyvars; cons; pol }
- *)
+    let ty = join pol { pol; cons; tyvars = VSnil } (approx_vset env pol tyvars) in
+    wf_styp pol env ty;
+    ty
 
 
-(* 
-  flex_closure pol acc env vars, where
-    env ≤ venv
-    env ⊢pol acc, but acc has no vars before venv flex at toplevel
-    vars ⊆ venv.flex
-  returns a styp s, s.t. env ⊢pol s
-  where s is the join of acc and all of vars bounds
-  but s does not have toplevel refs to any flexible vars at level env
-  (wtf)
+(*
+  Given some variables in environment venv ≤ env,
+  flex_closure returns the join of the bounds of their ε-closures.
+  The result will not have flexible toplevel variables beyond level venv.
+  (assuming the same is true for acc)
  *)
 let flex_closure pol env acc venv vars =
-  (* FIXME: are these assertions right? *)
-  assert_env_prefix env venv;
+  assert_env_prefix venv env;
   wf_styp pol env acc;
   assert (snd (styp_uncons venv Flexible acc) = []);
-  (* FIXME: probably don't want a new table here every time. Profile later! *)
   let seen = Hashtbl.create 10 in
   let rec go acc vars =
     List.fold_left (fun acc v ->
@@ -225,7 +259,7 @@ let flex_closure pol env acc venv vars =
       let v = env_flexvar venv v in
       let t = match pol with Pos -> v.pos | Neg -> v.neg in
       let t, newvs = styp_uncons venv Flexible t in
-      join pol t (go acc newvs) end) acc vars in
+      go (join pol t acc) newvs end) acc vars in
   let res = go acc vars in
   wf_styp pol env res;
   assert (snd (styp_uncons venv Flexible res) = []);
@@ -281,6 +315,14 @@ and subtype_styp_vars env p n venv vsort =
   | Rigid ->
      (* this is a load of bollocks *)
      assert false
+
+let subtype_styp env p n =
+  let r = subtype_styp env p n in
+  wf_env env;
+  wf_styp Pos env p;
+  wf_styp Neg env n;
+  r
+
 
 
 (* Give a typ well-formed in ext, approx in env.
@@ -340,8 +382,9 @@ let rec match_type env pol (p : typ) (t : typ option ref cons_head) =
   wf_typ pol env p;
   match p with
   | Tcons cons ->
-     subtype_cons pol cons t (fun _ p r ->
+     subtype_cons pol cons t (fun pol p r ->
        assert (!r = None);
+       wf_typ pol env p;
        r := Some p;
        [])
   | Tpoly_neg _ ->
@@ -351,6 +394,7 @@ let rec match_type env pol (p : typ) (t : typ option ref cons_head) =
      (* t is not ∀, so we need to instantiate p *)
      assert (pol = Pos);
      let vsets = instantiate_flexible env vars in
+     wf_env env;
      let body = open_typ Flexible vsets 0 Pos body in
      match_type env pol body t
   | Tsimple (Tstyp_bound _) ->
@@ -360,21 +404,32 @@ let rec match_type env pol (p : typ) (t : typ option ref cons_head) =
      match p.tyvars with
      | VSnil ->
         (* Optimisation in the case of no flow *)
-        subtype_cons pol p.cons t (fun _ p r ->
+        subtype_cons pol p.cons t (fun pol p r ->
           assert (!r = None);
+          wf_styp pol env p;
           r := Some (Tsimple (Tstyp_simple p));
           [])
      | _ ->
         let freshen pol r =
           assert (!r = None);
-          let v = fresh_flexible env in
-          r := Some (Tsimple (Tstyp_simple
-                (cons_styp (polneg pol) v (ident (polneg pol)))));
+          let v = vset_of_flexvar (fresh_flexible env) in
+          let st = (cons_styp (polneg pol) v (ident (polneg pol))) in
+          (* FIXME: is this the right pol? *)
+          wf_env env;
+          wf_styp (polneg pol) env st;
+          r := Some (Tsimple (Tstyp_simple st));
           cons_styp pol v (ident pol) in
         let t = cons_styp (polneg pol) VSnil
                   (map_head (polneg pol) freshen t) in
-        pol_flip (subtype_styp env) pol p t;
+        let res = pol_flip (subtype_styp env) pol p t in
+        wf_env env;
+        wf_styp pol env p;
+        res
 
+let fresh_flow env =
+  let v = vset_of_flexvar (fresh_flexible env) in
+  Tsimple (Tstyp_simple (cons_styp Neg v (ident Neg))),
+  Tsimple (Tstyp_simple (cons_styp Pos v (ident Pos)))
 (*
 
 
