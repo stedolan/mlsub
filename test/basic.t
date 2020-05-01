@@ -5,16 +5,16 @@
 #
 
 0
-> int
+> * ⊢ int
 
 5
-> int
+> * ⊢ int
 
 true
-> bool
+> * ⊢ bool
 
 false
-> bool
+> * ⊢ bool
 
 # FIXME: string syntax
 # FIXME: interesting numeric literals (negative, hex, float, etc.)
@@ -22,10 +22,10 @@ false
 # checking forms
 
 (42 : int)
-> int
+> * ⊢ int
 
 (true : bool)
-> bool
+> * ⊢ bool
 
 (42 : string)
 > typechecking error: Failure("incompat")
@@ -35,70 +35,70 @@ false
 #
 
 if (true) { 1 } else { 2 }
-> int
+> * ⊢ int
 
 if (false) { 1 } else { false }
-> ⊤
+> * ⊢ ⊤
 
 #
 # Tuples
 #
 
 (1, 2)
-> (int, int)
+> * ⊢ (int, int)
 
 (true, 3, 4)
-> (bool, int, int)
+> * ⊢ (bool, int, int)
 
 # python-style singleton tuples
 (4,)
-> (int)
+> * ⊢ (int)
 
 (.foo=1)
-> (foo: int)
+> * ⊢ (foo: int)
 
 (.foo=1,)
-> (foo: int)
+> * ⊢ (foo: int)
 
 # not a singleton tuple
 (1)
-> int
+> * ⊢ int
 
 # arity
 ((1,),(2,3),(4,5,6),(7,8,9,10))
-> ((int), (int, int), (int, int, int), (int, int, int, int))
+> * ⊢ ((int), (int, int), (int, int, int), (int, int, int, int))
 
 # empty tuple (unit type)
 ()
-> ()
+> * ⊢ ()
 
 # named fields
 ((.foo=20, .bar=17), (.baz=1))
-> ((foo: int, bar: int), (baz: int))
+> * ⊢ ((foo: int, bar: int), (baz: int))
 
 # mixture of named and unnamed
 (1, 2, .bar=3, .baz=true)
-> (int, int, bar: int, baz: bool)
+> * ⊢ (int, int, bar: int, baz: bool)
 
 # joins
 if (true) { (1, 2) } else { (1, true, 3) }
-> (int, ⊤, ...)
+> * ⊢ (int, ⊤, ...)
 
 if (false) { (.foo=1,.bar=2) } else { (.foo=1,.baz=()) }
-> (foo: int, ...)
+> * ⊢ (foo: int, ...)
 
 true.foo
 > typechecking error: Failure("incompat")
 
 @bot
-> ⊥
+> * ⊢ ⊥
 
 # checking join of functions and meet of records
 if true { (@bot : (.foo:(int,int), .bar:any) -> string) } else { (@bot : (.foo:(int,int), .bar:any) -> string) }
-> (foo: (int, int), bar: ⊤) → string
+> * ⊢ (foo: (int, int), bar: ⊤) → string
 
 if true { (@bot : ((int,any), .foo:(int,int), .bar:any) -> string) } else {(@bot : ((any,string), .bar:string, .foo:(string,any)) -> nothing)}
-> ((int, string), foo: (⊥, int), bar: string) → string
+> * ⊢ ((int, string), foo: (⊥, int), bar: string) → string
 
 
 
@@ -110,10 +110,10 @@ if true { (@bot : ((int,any), .foo:(int,int), .bar:any) -> string) } else {(@bot
 > typechecking error: Failure("pragma: true")
 
 (@true : bool)
-> bool
+> * ⊢ bool
 
 ((@true, @false) : (bool, bool))
-> (bool, bool)
+> * ⊢ (bool, bool)
 
 ((1, 2) : (int, int, int))
 > typechecking error: Failure("missing exp for field")
@@ -123,10 +123,10 @@ if true { (@bot : ((int,any), .foo:(int,int), .bar:any) -> string) } else {(@bot
 
 # weird. Should I allow this? eta-expansion?
 (1, 2, ...)
-> (int, int, ...)
+> * ⊢ (int, int, ...)
 
 ((1, 2) : (int, int, ...))
-> (int, int, ...)
+> * ⊢ (int, int, ...)
 
 # FIXME: should this be allowed?
 # ((1, 2, 3) : (int, int, ...))
@@ -134,47 +134,47 @@ if true { (@bot : ((int,any), .foo:(int,int), .bar:any) -> string) } else {(@bot
 
 # A checking form for projections! Isn't subtyping great?
 ((.foo = @true).foo : bool)
-> bool
+> * ⊢ bool
 
 #
 # Let-bindings and patterns
 #
 
 let x = 1; x
-> int
+> * ⊢ int
 
 (let x = @true; x : bool)
 > typechecking error: Failure("pragma: true")
 
 (let x : bool = @true; (x, @false) : (bool,bool))
-> (bool, bool)
+> * ⊢ (bool, bool)
 
 let x = (1, 2); x
-> (int, int)
+> * ⊢ (int, int)
 
 let x : int = (1, 2); x
 > typechecking error: Failure("incompat")
 
 let (x : bool) = true; x
-> bool
+> * ⊢ bool
 
 let (x : bool) = 5; x
 > typechecking error: Failure("incompat")
 
 let (.x as foo, .y as bar) = (.x = 10, .y = true); (foo, bar)
-> (int, bool)
+> * ⊢ (int, bool)
 
 let (.x as foo, .y as bar) = (.x = 10, .y = true, .z = 42); (foo, bar)
 > typechecking error: Failure("extra")
 
 let (.x as foo, .y as bar, ...) = (.x = 10, .y = true, .z = 42); (foo, bar)
-> (int, bool)
+> * ⊢ (int, bool)
 
 let (x, y) = (1, true); (y, x)
-> (bool, int)
+> * ⊢ (bool, int)
 
 let (.x as foo, .y as bar) : (.x:int, .y:bool) = (.x=1, .y=true); foo
-> int
+> * ⊢ int
 let (.x as foo, .y as bar) : (.x:int) = (.x=1, .y=true); foo
 > typechecking error: Failure("unexpected extra field FIXME open")
 let (.x as foo, .y as bar) : (.x:int,.y:int) = (.x=1, .y=true); foo
@@ -183,12 +183,12 @@ let (.x as foo, .y as bar) : (.x:int,.y:bool,.z:bool) = (.x=1, .y=true); foo
 > typechecking error: Failure("missing exp for field")
 
 let x, y = 1, true; (y, x)
-> (bool, int)
+> * ⊢ (bool, int)
 
 
 # nested typed patterns. FIXME: are these a good idea?
 let (((x : int), y), z) = ((1,2),3); x
-> int
+> * ⊢ int
 
 # nested typed patterns. FIXME: are these a good idea?
 let (((x : int), y), z) = ((true,2),3); x
@@ -196,18 +196,18 @@ let (((x : int), y), z) = ((true,2),3); x
 
 # nested typed patterns. FIXME: are these a good idea?
 let (((x : any), y), z) = ((true,2),3); x
-> ⊤
+> * ⊢ ⊤
 
 
 # subtyping checks. FIXME: these probably only hit matching :(
 let a = (.foo = 1, .bar = 2); let b : (.foo: int, .bar: int) = a; b
-> (foo: int, bar: int)
+> * ⊢ (foo: int, bar: int)
 
 let a = (.foo = 1, .bar = 2); let b : (.bar: int) = a; b
 > typechecking error: Failure("extra")
 
 let a = (.foo = 1, .bar = 2); let b : (.bar: any, ...) = a; b
-> (bar: ⊤, ...)
+> * ⊢ (bar: ⊤, ...)
 
 let a = (.foo = 1, .bar = 2); let b : (.bar: nothing, ...) = a; b
 > typechecking error: Failure("incompat")
@@ -221,4 +221,5 @@ let a = (.foo = 1, .bar = 2); let b : (.bar: nothing, ...) = a; b
 #
 
 fn (a, b) { (b, a.foo) }
-> asdf
+> '1.0: [⊥, (foo: '1.2, ...)], '1.1: [⊥, ⊤], '1.2: [⊥, ⊤], *
+> ⊢ ('1.0, '1.1) → ('1.1, '1.2)

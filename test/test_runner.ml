@@ -31,10 +31,11 @@ let run_cmd s =
   let open Lang in
   match Parse.parse_string text with
   | Ok e ->
-     (match Check.infer Check.env0 e with
+     let env0 = Typedefs.(env_cons Env_empty Egen) in
+     (match Check.infer env0 e with
      | t ->
         let b = Buffer.create 100 in
-        PPrint.ToBuffer.pretty 1. 80 b (Typedefs.pr_typ Pos t);
+        PPrint.ToBuffer.pretty 1. 80 b (PPrint.(group @@ Typedefs.pr_env env0 ^^ break 1 ^^ group (utf8string "⊢" ^^ break 1 ^^ (Typedefs.pr_typ Pos t))));
         b |> Buffer.to_bytes |> Bytes.to_string
      | exception (Assert_failure _ as e) ->
         Printexc.to_string e ^ "\n" ^ Printexc.get_backtrace ()

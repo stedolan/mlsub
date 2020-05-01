@@ -3,8 +3,6 @@ open Exp
 open Typedefs
 open Types
 
-let env0 = env_cons Env_empty Egen
-
 let unimp () = failwith "unimplemented"
 
 (* Returns a A⁻ ≤ A⁺ pair *)

@@ -34,3 +34,10 @@ let iteri v f =
   for i = 0 to v.length - 1 do
     f i (v.contents.(i))
   done
+
+let fold_lefti f acc vec =
+  let r = ref acc in
+  for i = 0 to vec.length - 1 do
+    r := f !r i vec.contents.(i)
+  done;
+  !r

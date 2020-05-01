@@ -275,7 +275,7 @@ let cons_styp_bound pol (tyvars : vset) bvars (t : styp_bound cons_head) =
        Tstyp_simple { tyvars; cons; pol }
 
 (* FIXME: styp vs typ for cons *)
-let cons_typ pol cons =
+let cons_typ _pol cons =
   Tcons cons
 (*
   match map_head pol (fun _pol s ->
@@ -305,7 +305,7 @@ let rec open_styp sort vars ix pol' = function
         cons_styp_bound pol tyvars bs cons
      | bvars ->
         cons_styp_bound pol tyvars bvars cons
-     end     
+     end
 
 let rec open_typ sort vars ix pol = function
   | Tsimple s -> Tsimple (open_styp sort vars ix pol s)
@@ -451,7 +451,7 @@ and wf_flexvars env vars =
     vset_lookup env Flexible neg.tyvars |> List.iter (fun j ->
       assert (List.mem i (vset_lookup env Flexible
           (Vector.get vars j).pos.tyvars))))
-  
+
 
 and wf_env_entry env = function
   | Evals vs -> SymMap.iter (fun _ typ ->  wf_typ Pos env typ) vs
@@ -565,7 +565,7 @@ let rec pr_styp_bound pol = function
      pr_cons_tyvars pol
        (pr_vset tyvars @ pr_bvars bvars)
        cons (pr_cons pol pr_styp_bound cons)
-     
+
 
 let rec pr_typ pol = function
   | Tsimple s -> pr_styp_bound pol s
@@ -586,6 +586,25 @@ and pr_bound pol (lower, upper) =
               str "," ^^
             pr_styp_bound (polneg pol) upper)
 
+let rec pr_env = function
+  | Env_empty ->
+     empty
+  | Env_cons { entry; level; rest; tyvars } ->
+     let doc =
+       match rest with
+       | Env_empty -> empty
+       | env -> pr_env env ^^ comma ^^ blank 1 in
+     let doc =
+       Vector.fold_lefti (fun doc i v ->
+         doc ^^ str (Printf.sprintf "'%d.%d" level i) ^^ str ":" ^^ blank 1 ^^
+           str "[" ^^ pr_styp Pos v.pos ^^ comma ^^ blank 1 ^^ pr_styp Neg v.neg ^^ str "]" ^^
+             comma ^^ blank 1) doc tyvars in
+     doc ^^ match entry with
+     | Evals _ | Erigid _ -> failwith "pr_env unimplemented"
+     | Egen -> str "*"
+
+
+
 let func a b = Func ({fpos=[a]; fnames=[]; fnamed=SymMap.empty; fopen=`Closed}, b)
 
 let bvars pol idx sort vs =
@@ -605,4 +624,3 @@ let go () =
   wf_typ Pos Env_empty choose1_pos;
   PPrint.ToChannel.pretty 1. 80 stdout
     (pr_typ Pos choose1_pos ^^ hardline);
-

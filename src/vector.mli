@@ -9,3 +9,5 @@ val get : 'a t -> int -> 'a
 
 val iter : 'a t -> ('a -> unit) -> unit
 val iteri : 'a t -> (int -> 'a -> unit) -> unit
+
+val fold_lefti : ('a -> int -> 'b -> 'a) -> 'a -> 'b t -> 'a
