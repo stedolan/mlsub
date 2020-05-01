@@ -529,12 +529,18 @@ and pr_cons_fields pol pr fields =
   parens (group (nest 2 (break 0 ^^ separate (comma ^^ break 1)
                                       (pos_fields @ named_fields @ cl))))
 
+let pr_flexvar env v =
+  if env_level env = 1 && v < 10 then
+    "'" ^ [| "α"; "β"; "γ"; "δ"; "ε"; "ζ"; "η"; "θ"; "ι"; "κ" |].(v)
+  else
+    Printf.sprintf "'%d.%d" (env_level env) v
+
 let rec pr_vset = function
   | VSnil -> []
   | VScons { env; sort; vars; rest } ->
      List.fold_left (fun acc v ->
        let v = match sort with
-         | Flexible -> Printf.sprintf "'%d.%d" (env_level env) v
+         | Flexible -> pr_flexvar env v
          | Rigid -> Printf.sprintf "#%d.%d" (env_level env) v in
        str v :: acc) (pr_vset rest) vars
 
@@ -589,14 +595,14 @@ and pr_bound pol (lower, upper) =
 let rec pr_env = function
   | Env_empty ->
      empty
-  | Env_cons { entry; level; rest; tyvars } ->
+  | Env_cons { entry; level=_; rest; tyvars } as env ->
      let doc =
        match rest with
        | Env_empty -> empty
        | env -> pr_env env ^^ comma ^^ break 1 in
      let doc =
        Vector.fold_lefti (fun doc i v ->
-         doc ^^ str (Printf.sprintf "'%d.%d" level i) ^^ str ":" ^^ blank 1 ^^
+         doc ^^ str (pr_flexvar env i) ^^ str ":" ^^ blank 1 ^^
            str "[" ^^ pr_styp Pos v.pos ^^ comma ^^ blank 1 ^^ pr_styp Neg v.neg ^^ str "]" ^^
              comma ^^ break 1) doc tyvars in
      doc ^^ match entry with
