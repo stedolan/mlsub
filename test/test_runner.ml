@@ -35,7 +35,7 @@ let run_cmd s =
      (match Check.infer env0 e with
      | t ->
         let b = Buffer.create 100 in
-        PPrint.ToBuffer.pretty 1. 80 b (PPrint.(group @@ Typedefs.pr_env env0 ^^ break 1 ^^ group (utf8string "⊢" ^^ break 1 ^^ (Typedefs.pr_typ Pos t))));
+        PPrint.ToBuffer.pretty 1. 80 b (PPrint.(group @@ group (Typedefs.pr_env env0) ^^ break 1 ^^ group (utf8string "⊢" ^^ break 1 ^^ (Typedefs.pr_typ Pos t))));
         b |> Buffer.to_bytes |> Bytes.to_string
      | exception (Assert_failure _ as e) ->
         Printexc.to_string e ^ "\n" ^ Printexc.get_backtrace ()

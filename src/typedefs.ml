@@ -593,12 +593,12 @@ let rec pr_env = function
      let doc =
        match rest with
        | Env_empty -> empty
-       | env -> pr_env env ^^ comma ^^ blank 1 in
+       | env -> pr_env env ^^ comma ^^ break 1 in
      let doc =
        Vector.fold_lefti (fun doc i v ->
          doc ^^ str (Printf.sprintf "'%d.%d" level i) ^^ str ":" ^^ blank 1 ^^
            str "[" ^^ pr_styp Pos v.pos ^^ comma ^^ blank 1 ^^ pr_styp Neg v.neg ^^ str "]" ^^
-             comma ^^ blank 1) doc tyvars in
+             comma ^^ break 1) doc tyvars in
      doc ^^ match entry with
      | Evals _ | Erigid _ -> failwith "pr_env unimplemented"
      | Egen -> str "*"

@@ -51,7 +51,7 @@ and join_fields pol sf tf =
        | xs, [] | [], xs -> same := false; xs in
      let fpos = union_pos sf.fpos tf.fpos in
      let fnames = sf.fnames @ 
-       List.filter (fun k -> not (SymMap.mem k tf.fnamed)) tf.fnames in
+       List.filter (fun k -> not (SymMap.mem k sf.fnamed)) tf.fnames in
      let fnamed = SymMap.merge (fun _ s t ->
        match s, t with
        | Some s, Some t -> Some (join pol s t)
@@ -59,6 +59,7 @@ and join_fields pol sf tf =
           same := false;
           x
        | None, None -> None) sf.fnamed tf.fnamed in
+     assert (List.length fnames = SymMap.cardinal fnamed);
      begin match sf.fopen, tf.fopen, !same with
      | `Open, `Open, _ ->
         Some {fpos; fnames; fnamed; fopen = `Open}
@@ -86,6 +87,7 @@ and join_fields pol sf tf =
           same := false;
           None
        | _ -> None) sf.fnamed tf.fnamed in
+     assert (List.length fnames = SymMap.cardinal fnamed);
      begin match sf.fopen, tf.fopen, !same with
      | `Closed, `Closed, true ->
         Some {fpos; fnames; fnamed; fopen = `Closed }
@@ -186,6 +188,7 @@ let eps_closure env pol t =
 (* Hoist a flexible variable to a wider environment *)
 let rec hoist_flexible env v =
   assert_env_prefix env v.env;
+  wf_env v.env;
   if env == v.env then v
   else match v.hoisted with
   | Some v' when env_level env <= env_level v'.env ->
@@ -196,12 +199,29 @@ let rec hoist_flexible env v =
      let v' = fresh_flexible env in
      v'.hoisted <- vh;
      v.hoisted <- Some v';
+     wf_env v.env;
+     let ty_pos = styp_of_vset Pos (vset_of_flexvar v') in
+     let ty_neg = styp_of_vset Neg (vset_of_flexvar v') in
      (* I. approx bounds *)
-     v'.pos <- approx_styp env v.env Pos v.pos;
-     v'.neg <- approx_styp env v.env Neg v.neg;
+     let bpos = approx_styp env v.env Pos v.pos in
+     let bneg = approx_styp env v.env Neg v.neg in
+     wf_env v.env;
+     v'.pos <- bpos;
+     v'.neg <- bneg;
+     (* To maintain the ε-invariant, we may need to add other ε-edges *)
+     let _, posv = styp_uncons env Flexible bpos in
+     let _, negv = styp_uncons env Flexible bneg in
+     posv |> List.iter (fun vi ->
+       let vother = env_flexvar env vi in
+       vother.neg <- join Neg vother.neg ty_neg);
+     negv |> List.iter (fun vi ->
+       let vother = env_flexvar env vi in
+       vother.pos <- join Pos vother.pos ty_pos);
+     wf_env v.env;
      (* II. add variable constraints *)
-     v.pos <- join Pos v.pos (styp_of_vset Pos (vset_of_flexvar v'));
-     v.neg <- join Neg v.neg (styp_of_vset Neg (vset_of_flexvar v'));
+     v.pos <- join Pos v.pos ty_pos;
+     v.neg <- join Neg v.neg ty_neg;
+     wf_env v.env;
      v'
 
 and approx_vset env pol = function
@@ -237,6 +257,7 @@ and approx_styp env ext pol' ({ tyvars; cons; pol } as orig) =
   else
     let cons = map_head pol (approx_styp env ext) cons in
     let ty = join pol { pol; cons; tyvars = VSnil } (approx_vset env pol tyvars) in
+    wf_env ext;
     wf_styp pol env ty;
     ty
 

@@ -101,7 +101,10 @@ and check' env e ty =
      let env = env_cons env (Evals vs) in
      check env body ty
   | Fn (params, ret, body), Tcons (Func (ptypes, rtype)) ->
-     assert false
+     (* FIXME: slightly ugly to write (Record ptypes) here *)
+     let vs = check_pat_fields env SymMap.empty (Tcons (Record ptypes)) params in
+     let env' = env_cons env (Evals vs) in
+     check_or_check env' body ret rtype
   | Pragma "true", Tcons Bool -> ()
   | Pragma "false", Tcons Bool -> ()
   | e, _ ->
@@ -169,9 +172,21 @@ and infer' env = function
           Tsimple (Tstyp_simple (approx env env' Pos ty'))
        | Some ty ->
           let tn, tp = typ_of_tyexp env ty in
-          check env body tn; tp in
+          check env' body tn; tp in
      wf_typ Pos env res;
      cons_typ Pos (Func (map_fields (fun ((tn,_tp),_p) -> tn) params, res))
+  | App (f, args) ->
+     let fty = infer env f in
+     let args = map_fields (fun (e, ty) -> e, ty, ref None) args in
+     let res = ref None in
+     let argtmpl = map_fields (fun (_e, _ty, r) -> r) args in
+     match_type env Pos fty (Func (argtmpl, res)) |> report;
+     fold_fields (fun () (e, ty, r) ->
+         let r = match !r with None -> failwith "missing arg? or something?" | Some res -> res in
+         let e = match e with None -> failwith "punning?!" | Some e -> e in
+         check_or_check env e ty r
+       ) () args;
+     (match !res with None -> failwith "match bug?" | Some res -> res)
   | _ -> failwith "typechecking unimplemented for this syntax"
 
 and bind env acc ps es =
