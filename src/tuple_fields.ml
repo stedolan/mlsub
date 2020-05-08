@@ -41,13 +41,15 @@ let map_fields f fs =
   { fs with
     fpos = List.map f fs.fpos;
     fnamed = SymMap.map f fs.fnamed }
-let fold_fields f (acc : 'acc) fs =
-  let acc = List.fold_left (fun acc x -> f acc x) acc fs.fpos in
-  let acc = List.fold_left (fun acc n ->
-                f acc (SymMap.find n fs.fnamed)) acc fs.fnames in
-  acc
+
 
 type field_name = Field_positional of int | Field_named of symbol
+let fold_fields f (acc : 'acc) fs =
+  let fposi = List.mapi (fun i x -> Field_positional i, x) fs.fpos in
+  let acc = List.fold_left (fun acc (i,x) -> f acc i x) acc fposi in
+  let acc = List.fold_left (fun acc n ->
+                f acc (Field_named n) (SymMap.find n fs.fnamed)) acc fs.fnames in
+  acc
 
 let fold2_fields ~left ~both ~right (acc : 'acc) fs1 fs2 =
   let rec pos i acc ps1 ps2 =

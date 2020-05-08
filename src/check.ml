@@ -104,7 +104,7 @@ and check' env e ty =
      (* FIXME: slightly ugly to write (Record ptypes) here *)
      let vs = check_pat_fields env SymMap.empty (Tcons (Record ptypes)) params in
      let env' = env_cons env (Evals vs) in
-     check_or_check env' body ret rtype
+     check env' body (check_annot env' ret rtype)
   | Pragma "true", Tcons Bool -> ()
   | Pragma "false", Tcons Bool -> ()
   | e, _ ->
@@ -119,7 +119,7 @@ and check_fields env ef tf =
     ~both:(fun () n (e, ety) ty ->
       match n, e with
       | _, Some e ->
-         check_or_check env e ety ty
+         check env e (check_annot env ety ty)
       | Field_positional _, None -> assert false (* pos punning *)
       | Field_named _s, None ->
          failwith "punning unimplemented")
@@ -162,7 +162,7 @@ and infer' env = function
        match ty with
        | Some ty -> typ_of_tyexp env ty, p
        | None -> fresh_flow env, p) params in
-     let vs = fold_fields (fun acc ((tn, tp), p) ->
+     let vs = fold_fields (fun acc _fn ((tn, tp), p) ->
        let Some p = p in (* FIXME punning *)
        check_pat env acc tp p) SymMap.empty params in
      let env' = env_cons env (Evals vs) in
@@ -181,10 +181,10 @@ and infer' env = function
      let res = ref None in
      let argtmpl = map_fields (fun (_e, _ty, r) -> r) args in
      match_type env Pos fty (Func (argtmpl, res)) |> report;
-     fold_fields (fun () (e, ty, r) ->
+     fold_fields (fun () _fn (e, ty, r) ->
          let r = match !r with None -> failwith "missing arg? or something?" | Some res -> res in
          let e = match e with None -> failwith "punning?!" | Some e -> e in
-         check_or_check env e ty r
+         check env e (check_annot env ty r)
        ) () args;
      (match !res with None -> failwith "match bug?" | Some res -> res)
   | _ -> failwith "typechecking unimplemented for this syntax"
@@ -242,7 +242,7 @@ and check_pat_fields env acc ty fs =
       | None -> r
       | Some t -> failwith "unimp asc") fs in
   match_type env Pos ty (Record trec) |> report;
-  fold_fields (fun acc (p, ty, r) ->
+  fold_fields (fun acc _fn (p, ty, r) ->
     let Some p = p in
     match !r with
     | Some r -> check_pat env acc r p
@@ -264,10 +264,11 @@ and infer_fields env fs =
        check env e tn; tp
     | None, _ty -> failwith "punning unimplemented") fs
 
-and check_or_check env e ty1 (ty2 : typ) =
-  match ty1 with
-  | None -> check env e ty2
-  | Some ty ->
-     let tn, tp = typ_of_tyexp env ty in
-     check env e tn;
-     subtype env tp ty2 |> report
+and check_annot env annot ty =
+  wf_typ Neg env ty;
+  match annot with
+  | None -> ty
+  | Some ty' ->
+     let tn, tp = typ_of_tyexp env ty' in
+     subtype env tp ty |> report;
+     tn
