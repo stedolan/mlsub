@@ -7,6 +7,10 @@ val push : 'a t -> 'a -> int
 (* raises Invalid_argument if >= length *)
 val get : 'a t -> int -> 'a
 
+val to_array : 'a t -> 'a array
+
+val clear : 'a t -> unit
+
 val iter : 'a t -> ('a -> unit) -> unit
 val iteri : 'a t -> (int -> 'a -> unit) -> unit
 

@@ -33,7 +33,7 @@ type env =
       rest : env;
       (* Flexible variables, being inferred *)
       (* Their scope includes the current entry *)
-      mutable tyvars : flexvar Vector.t;
+      tyvars : flexvar Vector.t;
     }
 
 (* Entries in the typing environment *)
@@ -171,10 +171,13 @@ let env_cons env entry =
   Env_cons { entry; level = env_level env + 1;
              rest = env; tyvars = Vector.create () }
 
-let env_flexvar env i =
+let env_flexvars env =
   match env with
   | Env_empty -> assert false
-  | Env_cons { tyvars; _ } -> Vector.get tyvars i
+  | Env_cons { tyvars; _ } -> tyvars
+
+let env_flexvar env i =
+  Vector.get (env_flexvars env) i
 
 let env_rigid_flow env i j =
   match env with

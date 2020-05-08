@@ -1,5 +1,6 @@
 (executable
  (name test_runner)
+ (modules test_runner)
  (libraries lang))
 
 (rule

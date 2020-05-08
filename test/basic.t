@@ -218,13 +218,13 @@ let a = (.foo = 1, .bar = 2); let b : (.bar: nothing, ...) = a; b
 #
 
 fn (a, b) { (b, a.foo) }
-> 'α: [⊥, (foo: 'γ, ...)], 'β: [⊥, ⊤], 'γ: [⊥, ⊤], * ⊢ ('α, 'β) → ('β, 'γ)
+> 'α: [⊥, ⊤], 'β: [⊥, ⊤], * ⊢ ((foo: 'β, ...), 'α) → ('α, 'β)
 
 fn (a, b) : int { b }
-> 'α: [⊥, ⊤], 'β: [⊥, int], * ⊢ ('α, 'β) → int
+> * ⊢ (⊤, int) → int
 
 fn (a : int, b) : (int, int) { (a, b) }
-> 'α: [⊥, int], * ⊢ (int, 'α) → (int, int)
+> * ⊢ (int, int) → (int, int)
 
 (fn (a) { (a, @true) } : (int) -> (int, bool))
 > * ⊢ (int) → (int, bool)
@@ -233,7 +233,7 @@ fn (a) { if (a.foo) { (.bar=a.bar) } else { a } }
 > 'α: [⊥, (foo: bool, bar: 'β, ...)], 'β: [⊥, ⊤], * ⊢ ('α) → ((bar: 'β)) ⊔ 'α
 
 (fn (a) { a })(5)
-> 'α: [int, ⊤], * ⊢ 'α
+> * ⊢ int
 
 fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { (.foo = 1, .cond = false) }) }
 > 'α: [⊥, ((cond: bool, ...)) ⊓ 'β],
@@ -241,13 +241,12 @@ fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { (.foo = 1
 > *
 > ⊢ ('α) → 'β
 
+# once
+# this is a very disappointing type. The α/γ pair needs to go!
+fn (f, x) { f(x) }
+> 'α: [⊥, 'γ], 'β: [⊥, ⊤], 'γ: ['α, ⊤], * ⊢ (('γ) → 'β, 'α) → 'β
+
 # twice!
 fn (f, x) { f(f(x)) }
-> 'α: [⊥, ('ζ ⊔ 'δ) → 'ε ⊓ 'γ],
-> 'β: [⊥, 'ζ],
-> 'γ: [⊥, ⊤],
-> 'δ: ['ε, ⊤],
-> 'ε: [⊥, 'δ],
-> 'ζ: ['β, ⊤],
-> *
-> ⊢ ('α, 'β) → 'γ
+> 'α: [⊥, 'ε], 'β: [⊥, ⊤], 'γ: ['δ, ⊤], 'δ: [⊥, 'γ], 'ε: ['α, ⊤], *
+> ⊢ (('ε ⊔ 'γ) → 'δ ⊓ 'β, 'α) → 'β

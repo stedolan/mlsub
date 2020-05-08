@@ -50,7 +50,7 @@ and join_fields pol sf tf =
        | sp :: sps, tp :: tps -> join pol sp tp :: union_pos sps tps
        | xs, [] | [], xs -> same := false; xs in
      let fpos = union_pos sf.fpos tf.fpos in
-     let fnames = sf.fnames @ 
+     let fnames = sf.fnames @
        List.filter (fun k -> not (SymMap.mem k sf.fnamed)) tf.fnames in
      let fnamed = SymMap.merge (fun _ s t ->
        match s, t with
@@ -105,7 +105,7 @@ type conflict_reason =
 let subtype_cons_fields pol af bf f =
   let extra_errs =
     match pol, af.fopen, bf.fopen with
-    | Pos, `Open, `Closed 
+    | Pos, `Open, `Closed
     | Neg, `Closed, `Open -> [Extra `Fields]
     | _ -> [] in
   let extra_errs =
@@ -226,7 +226,7 @@ let rec hoist_flexible env v =
 
 and approx_vset env pol = function
   | VSnil -> styp_of_vset pol VSnil
-  | VScons { env = env'; _ } as vs 
+  | VScons { env = env'; _ } as vs
        when env_level env' <= env_level env ->
      (* already valid in env *)
      styp_of_vset pol vs
@@ -285,7 +285,7 @@ let flex_closure pol env acc venv vars =
   wf_styp pol env res;
   assert (snd (styp_uncons venv Flexible res) = []);
   res
-     
+
 
 let pol_flip f pol a b =
   match pol with Pos -> f a b | Neg -> f b a
@@ -394,7 +394,7 @@ let rec subtype env p n =
      subtype_styp env (is_styp p) (approx env env Neg n)
 
   | Tcons s, Tcons t ->
-     subtype_cons Pos s t 
+     subtype_cons Pos s t
        (pol_flip (subtype env))
 
 (* match_type env Pos t m = t ≤ m
@@ -453,3 +453,4 @@ let fresh_flow env =
   let v = vset_of_flexvar (fresh_flexible env) in
   Tsimple (Tstyp_simple (cons_styp Neg v (ident Neg))),
   Tsimple (Tstyp_simple (cons_styp Pos v (ident Pos)))
+
