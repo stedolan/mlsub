@@ -1,0 +1,16 @@
+let f = fun x -> x
+let k = fun x -> fun y -> x
+let prj = fun x -> x.foo
+
+let mk = fun x -> fun y -> { foo = x; bar = y }
+let ok = (mk 1 2).bar
+let error = (mk 1 2).baz
+
+check a -> a -> a <: a -> b -> (a | b)
+check a -> b -> (a | b) <: a -> a -> a
+check a -> unit <: a -> a
+check {foo:{bar:a}} <: {foo:a; bar:b}
+check {foo:a; bar:b} <: {foo:{bar:a}}
+check (rec t = {bar : unit; self: t}) <: {bar: unit}
+check (rec t = {bar : unit; self: t}) <: (rec t = {bar : unit; self: {bar : unit; self : t }})
+check (rec t = {bar : unit; self: {bar : unit; self : t }}) <: (rec t = {bar : unit; self: t})

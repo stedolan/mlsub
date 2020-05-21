@@ -32,7 +32,7 @@ let slurp chan =
   read_all []
 
 let of_file fname =
-  source fname (slurp (open_in fname))
+  source fname (Bytes.to_string (slurp (open_in fname)))
 
 let of_string str =
   source "<input>" str

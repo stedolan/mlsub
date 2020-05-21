@@ -86,7 +86,7 @@ let repl () =
   done
 *)
 
-let to_dscheme name s =
+let to_dscheme _name s =
   let states = s.expr :: SMap.fold (fun v s ss -> s :: ss) s.environment [] in
   let remap, dstates = Types.determinise states in
 (*  Types.print_automaton (Symbol.to_string name) (fun s -> try (remap s).Types.DState.id with Not_found -> -1) Format.std_formatter (fun f -> f "t" s.Typecheck.expr);
@@ -102,14 +102,32 @@ let to_dscheme name s =
 
 let process file =
   let print_err e = Types.Reason.print Format.err_formatter e in
-  let check gamma (name, exp) =
+  let check gamma = function
+    | `Exp (name, exp) ->
     let s = optimise (Typecheck.typecheck print_err gamma exp) in
 (*    Format.printf "val %s : %a\n%!" (Symbol.to_string name) (print_typeterm Pos) (decompile_automaton s.Typecheck.expr);
     Format.printf "val %s : %a\n%!" (Symbol.to_string name) (print_typeterm Pos) (recomp s.Typecheck.expr);*)
     let s = to_dscheme name s in
     Format.printf "val %s : %a\n%!" (Symbol.to_string name) (print_typeterm Pos) 
       (decompile_automaton (Types.clone (fun f -> f (Location.one Location.internal) s.Typecheck.d_expr)));
-    SMap.add name s gamma in
+    SMap.add name s gamma
+    | `Subs (t1,t2) ->
+       let s1 = compile_terms (fun f -> f Pos t1)
+       and s2 = compile_terms (fun f -> f Pos t2) in
+(*       Format.printf "%a\n%a\n%!"
+         print_automaton s1
+         print_automaton s2;*)
+       let d2 = to_dscheme () { environment = SMap.empty; expr = s2 } in
+       let sub s1 s2 = 
+         Format.printf "[%s] %a <: %a\n%!"
+           (match subsumed (fun f -> f Pos s1 d2.d_expr) with true -> "Y" | false -> "N")
+           (print_typeterm Pos) (decompile_automaton s1) 
+           (print_typeterm Pos) (decompile_automaton s2)
+           in
+       sub s1 s2;
+       gamma
+
+  in
   try
     ignore (List.fold_left check gamma0 (Source.parse_modlist (Location.of_file file)))
   with
@@ -118,7 +136,7 @@ let process file =
 
 ;;
 
-if Array.length Sys.argv = 1 then assert false (* repl () *) else
+if Array.length Sys.argv = 1 then Printf.fprintf stderr "Usage: %s <input file>\n" Sys.argv.(0) (* repl () *) else
   Array.iter process (Array.sub Sys.argv 1 (Array.length Sys.argv - 1))
 
 (*

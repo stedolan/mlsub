@@ -133,7 +133,7 @@ module Components = struct
 
   let print pr pol ppf = function
     | Func (l, d, r) ->
-       Format.fprintf ppf "%a -> %a" (pr (polneg pol)) d (pr pol) r
+       Format.fprintf ppf "(%a -> %a)" (pr (polneg pol)) d (pr pol) r
     | Object _ as o ->
        let rec pfield ppf = function
          | [] -> ()
@@ -215,9 +215,13 @@ module TypeLat : TYPES = struct
   let list_fields x =
     x |> List.map Components.list_fields |> List.concat
 
-  let print pr pol =
-    let pp_sep ppf () = Format.fprintf ppf "@ %s@ " (match pol with Pos -> "|" | Neg -> "&") in
-    Format.pp_print_list ~pp_sep (Components.print pr pol)
+  let print pr pol ppf t =
+    match t, pol with
+    | [], Neg -> Format.fprintf ppf "Top"
+    | [], Pos -> Format.fprintf ppf "Bot"
+    | t, _ ->
+       let pp_sep ppf () = Format.fprintf ppf "@ %s@ " (match pol with Pos -> "|" | Neg -> "&") in
+       Format.pp_print_list ~pp_sep (Components.print pr pol) ppf t
 
   let change_locations l = List.map (Components.change_locations l)
 end
@@ -256,7 +260,7 @@ let printp paren ppf fmt =
 let rec gen_print_typeterm vstr pol ppf = function
   | TVar v -> fprintf ppf "%s" (vstr v)
   | TCons cons ->
-     fprintf ppf "@[(%a)@]" (TypeLat.print (gen_print_typeterm vstr) pol) cons
+     fprintf ppf "@[%a@]" (TypeLat.print (gen_print_typeterm vstr) pol) cons
   | TAdd (t1, t2) -> 
     let op = match pol with Pos -> "|" | Neg -> "&" in
     fprintf ppf "@[(%a %s@ %a)@]" (gen_print_typeterm vstr pol) t1 op (gen_print_typeterm vstr pol) t2

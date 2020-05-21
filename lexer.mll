@@ -33,7 +33,6 @@ rule read =
   | "}"      { RBRACE }
   | "["      { LBRACK }
   | "]"      { RBRACK }
-  | ","      { COMMA }
   | ";"      { SEMI }
   | "."      { DOT }
   | "|"      { TY_JOIN }
@@ -53,6 +52,7 @@ rule read =
   | "if"     { IF }
   | "then"   { THEN }
   | "else"   { ELSE }
+  | "check"  { CHECK }
 
   | "=="     { EQEQUALS }
   | "<"      { CMP_LT }

@@ -10,7 +10,6 @@
 %token RBRACE
 %token LBRACK
 %token RBRACK
-%token COMMA
 %token SEMI
 %token UNIT
 %token TY_MEET
@@ -40,6 +39,7 @@
 %token WITH
 %token LIST
 
+%token CHECK
 %token SUBSUME
 %token TOP
 %token BOT
@@ -66,7 +66,7 @@
 %}
 
 %start <Exp.exp> prog
-%start <(Symbol.t * Exp.exp) list> modlist
+%start <[`Exp of Symbol.t * Exp.exp | `Subs of Types.var Types.typeterm * Types.var Types.typeterm] list> modlist
 %start <Types.var Types.typeterm> onlytype
 %start <Types.var Types.typeterm * Types.var Types.typeterm> subsumption
 
@@ -79,8 +79,9 @@ prog:
 
 modlist:
 | EOF { [] }
-| LET; v = IDENT; EQUALS; e = exp; m = modlist; { (v,e) :: m }
-| LET; ve = exp_rec; m = modlist; { ve :: m }
+| LET; v = IDENT; EQUALS; e = exp; m = modlist; { `Exp (v,e) :: m }
+| LET; ve = exp_rec; m = modlist; { `Exp ve :: m }
+| CHECK; s = subsumption; m = modlist; { `Subs s :: m }
 
 exp_rec:
 | REC; v = IDENT; EQUALS; e = exp
@@ -183,7 +184,7 @@ nonemptylist:
     { (L.pos ($startpos, $endpos), e) }
 
 subsumption:
-| t1 = typeterm; SUBSUME; t2 = typeterm; EOF { (t1, t2) }
+| t1 = typeterm; SUBSUME; t2 = typeterm { (t1, t2) }
 
 onlytype:
 | t = typeterm; EOF { t }
@@ -202,7 +203,14 @@ typeterm:
 | UNIT { ty_base (Symbol.intern "unit") (L.pos ($startpos, $endpos)) }
 | t1 = typeterm; meetjoin; t2 = typeterm { TAdd (t1, t2)  } %prec TY_MEET
 | REC; v = IDENT; EQUALS; t = typeterm { TRec (Symbol.to_string v, t) }
+| LBRACE; o = typeobj; RBRACE { ty_obj o (L.pos ($startpos, $endpos)) }
 | LPAR; t = typeterm; RPAR { t }
+
+typeobj:
+| v= IDENT; ASC; t = typeterm
+  { Types.SMap.singleton v (fun _ -> t) }
+| v = IDENT; ASC; t = typeterm; SEMI; o = typeobj
+  { Types.SMap.add v (fun _ -> t) o }
 
 %inline meetjoin : TY_MEET | TY_JOIN {}
 
