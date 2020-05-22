@@ -199,7 +199,7 @@ module TypeLat : TYPES = struct
     (* glb X <= lub Y *)
     (* i.e. exists i,j, Xi <= Yj *)
     List.exists (fun x -> List.exists (fun y ->
-      Components.lte Pos (fun p x y -> if pol_flip f p x y then [] else [Reason.excuse]) x y = [])  xs) ys
+      Components.lte Pos (fun p x y -> if pol_flip f p x y then [] else [Reason.excuse]) x y = [])  ys) xs
 
   let rec subs pol f xs ys =
     (* lub X <= lub Y or glb X >= glb Y *)
