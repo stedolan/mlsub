@@ -35,15 +35,16 @@ let rec collect_fields pos named = function
   | Fnamed (s, x) :: fs ->
      collect_fields pos ((s, x) :: named) fs
 
+
 let collect_fields fs = collect_fields [] [] fs
+
+type field_name = Field_positional of int | Field_named of symbol
 
 let map_fields f fs =
   { fs with
-    fpos = List.map f fs.fpos;
-    fnamed = SymMap.map f fs.fnamed }
+    fpos = List.mapi (fun i x -> f (Field_positional i) x) fs.fpos;
+    fnamed = SymMap.mapi (fun k x -> f (Field_named k) x) fs.fnamed }
 
-
-type field_name = Field_positional of int | Field_named of symbol
 let fold_fields f (acc : 'acc) fs =
   let fposi = List.mapi (fun i x -> Field_positional i, x) fs.fpos in
   let acc = List.fold_left (fun acc (i,x) -> f acc i x) acc fposi in

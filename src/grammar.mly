@@ -49,15 +49,15 @@ literal_:
 
 exp: e = mayloc(exp_) { e }
 exp_:
-| FN; LPAR; params = fields(pat, AS); RPAR; LBRACE; body = exp; RBRACE
+| FN; LPAR; params = typed_fields(pat, AS); RPAR; LBRACE; body = exp; RBRACE
   { Fn (parse_fields params, None, body) }
-| FN; LPAR; params = fields(pat, AS); RPAR; COLON; ty = tyexp; LBRACE; body = exp; RBRACE
+| FN; LPAR; params = typed_fields(pat, AS); RPAR; COLON; ty = tyexp; LBRACE; body = exp; RBRACE
   { Fn (parse_fields params, Some ty, body) }
 | IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; f = exp; RBRACE
   { If (e, t, f) }
 | s = PRAGMA
   { Pragma s }
-| LET; p = fields(pat, AS); EQUALS; e = fields(exp, EQUALS); SEMI; body = exp
+| LET; p = typed_fields(pat, AS); EQUALS; e = untyped_fields(exp, EQUALS); SEMI; body = exp
   { Let (parse_fields p, parse_fields e, body) }
 | t = term_
   { t }
@@ -68,17 +68,18 @@ term_:
   { Var v }
 | k = literal
   { Lit k }
-| fn = term; LPAR; args = fields(exp, EQUALS); RPAR
+| fn = term; LPAR; args = untyped_fields(exp, EQUALS); RPAR
   { App (fn, parse_fields args) }
 | e = term; DOT; f = symbol
   { Proj (e, f) }
-| LPAR; t = fields(exp, EQUALS); RPAR
+| LPAR; t = typed_fields(exp, EQUALS); RPAR
   { match t with
     | [Fpos (Some e, None)] -> Parens e
     | [Fpos (Some e, Some ty)] -> Typed (e, ty)
     | fs -> Tuple (parse_fields fs) }
 
-field(defn, named_sep):
+
+typed_field(defn, named_sep):
 | e = defn
   { Fpos (Some e, None) }
 | e = defn; COLON; ty = tyexp
@@ -94,13 +95,33 @@ field(defn, named_sep):
 | DOTS
   { Fdots }
 
-fields(defn, named_sep):
+typed_fields(defn, named_sep):
 |
   { [Fempty] }
-| f = field(defn, named_sep)
+| f = typed_field(defn, named_sep)
   { [f] }
-| f = field(defn, named_sep); COMMA; fs = fields(defn, named_sep)
+| f = typed_field(defn, named_sep); COMMA; fs = typed_fields(defn, named_sep)
   { f :: fs }
+
+
+untyped_field(defn, named_sep):
+| e = defn
+  { Fpos (Some e) }
+| DOT; f = SYMBOL
+  { Fnamed (f, None) }
+| DOT; f = SYMBOL; named_sep; e = defn
+  { Fnamed (f, Some e) }
+| DOTS
+  { Fdots }
+
+untyped_fields(defn, named_sep):
+|
+  { [Fempty] }
+| f = untyped_field(defn, named_sep)
+  { [f] }
+| f = untyped_field(defn, named_sep); COMMA; fs = untyped_fields(defn, named_sep)
+  { f :: fs }
+
 
 tyfield:
 | t = tyexp
@@ -122,10 +143,9 @@ pat: p = mayloc(pat_) { p }
 pat_:
 | v = symbol
   { Pvar v }
-| LPAR; t = fields(pat, AS); RPAR
+| LPAR; t = untyped_fields(pat, AS); RPAR
   { match t with
-    | [Fpos (Some p, None)] -> Pparens p
-    | [Fpos (Some p, Some ty)] -> Ptyped (p, ty)
+    | [Fpos (Some p)] -> Pparens p
     | p -> Ptuple (parse_fields p) }
 
 tyexp: t = mayloc(tyexp_) { t }

@@ -35,14 +35,14 @@ let rec print_exp e = mayloc e @@ function
   | Var s -> print_ident s
   | Fn (params, None, body) ->
      string "fn" ^^ space ^^
-       print_fields print_pat params ^^ space ^^
+       print_typed_fields print_pat params ^^ space ^^
        braces (print_exp body)
   | Fn (params, Some ty, body) ->
      string "fn" ^^ space ^^
-       print_fields print_pat params ^^ op (string ":") ^^ print_tyexp ty ^^ space ^^
+       print_typed_fields print_pat params ^^ op (string ":") ^^ print_tyexp ty ^^ space ^^
        braces (print_exp body)
-  | Tuple t -> print_tuple print_exp t
-  | App (f, args) -> print_exp f ^^ print_fields print_exp args
+  | Tuple t -> print_typed_tuple print_exp t
+  | App (f, args) -> print_exp f ^^ print_untyped_fields print_exp args
   | Proj (e, f) -> print_exp e ^^ char '.' ^^ print_symbol f
   | If (e, t, f) ->
      string "if" ^^ break 1 ^^ print_exp e ^^
@@ -53,7 +53,7 @@ let rec print_exp e = mayloc e @@ function
   | Pragma s -> char '@' ^^ string s
   | _ -> assert false
 
-and print_fields :
+and print_typed_fields :
  'defn . ('defn -> document) ->
          ('defn option * tyexp option) tuple_fields ->
          document
@@ -84,8 +84,31 @@ and print_fields :
      (separate (comma ^^ break 1) (fields_pos @ fields_named @ fields_open))) ^^
        break 0))
 
+and print_untyped_fields :
+ 'defn . ('defn -> document) ->
+         ('defn option) tuple_fields ->
+         document
+  = fun print_defn {fpos; fnamed; fnames; fopen} ->
+  let fields_pos = fpos |> List.map (function
+    | None ->
+       assert false   (* no punning on positional fields! *)
+    | Some e ->
+       print_defn e) in
+  let fields_named = fnames |> List.map (fun s ->
+    match SymMap.find s fnamed with
+    | (None) ->
+       char '.' ^^ string s
+    | (Some e) ->
+       group (char '.' ^^ string s ^^
+                op equals ^^ print_defn e)) in
+  let fields_open = match fopen with `Open -> [string "..."] | `Closed -> [] in
+  parens (group (indent (break 0 ^^ 
+     (separate (comma ^^ break 1) (fields_pos @ fields_named @ fields_open))) ^^
+       break 0))
+
+
 (* print_tuple: print a trailing comma on a single position elem *)
-and print_tuple :
+and print_typed_tuple :
  'defn . ('defn -> document) ->
          ('defn option * tyexp option) tuple_fields ->
          document
@@ -94,13 +117,21 @@ and print_tuple :
      parens (print_defn e ^^ comma)
   | {fpos = [Some e, Some ty]; fnames = []; fnamed = _; fopen = `Closed} ->
      parens (print_defn e ^^ blank 1 ^^ colon ^^ break 1 ^^ print_tyexp ty ^^ comma)
-  | t -> print_fields print_defn t
+  | t -> print_typed_fields print_defn t
+
+and print_untyped_tuple :
+ 'defn . ('defn -> document) ->
+         ('defn option) tuple_fields ->
+         document
+  = fun print_defn t -> match t with
+  | {fpos = [Some e]; fnames = []; fnamed = _; fopen = `Closed} ->
+     parens (print_defn e ^^ comma)
+  | t -> print_untyped_fields print_defn t
 
 and print_pat p = mayloc p @@ function
   | Pvar s -> print_symbol s
-  | Ptuple ts -> print_tuple print_pat ts
+  | Ptuple ts -> print_untyped_tuple print_pat ts
   | Pparens p -> parens (print_pat p)
-  | Ptyped (p, ty) -> parens (print_pat p ^^ op (string ":") ^^ print_tyexp ty)
 
 and print_tyexp t = mayloc t @@ function
   | Tnamed s -> print_ident s
