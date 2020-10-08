@@ -113,7 +113,7 @@ and check' env e ty =
      subtype env ty' ty |> report
 
 and check_fields env ef tf =
-  subtype_cons_fields Pos ef tf (fun _pol (e, ety) ty ->
+  subtype_cons_fields Pos ef tf (fun _pol _fn (e, ety) ty ->
     let ty = check_annot env ety ty in
     match e with
     | Some e -> check env e ty; []
@@ -138,14 +138,13 @@ and infer' env = function
      Tsimple (Tstyp_simple (join Pos (approx env env Pos tyso) (approx env env Pos tynot)))
   | Proj (e, (field,_loc)) ->
      let ty = infer env e in
-     let res = ref None in
+     let res = ref (Tcons Bot) in
      let tmpl = (Record { fpos = [];
                           fnamed = SymMap.singleton field res;
                           fnames = [field]; fopen = `Open }) in
-     match_type env Pos ty tmpl |> report;
-     (match !res with
-      | None -> assert false    (* record subtyping *)
-      | Some r -> wf_typ Pos env r; r)
+     match_type env ty tmpl |> report;
+     let r = !res in
+     wf_typ Pos env r; r
   | Tuple fields ->
      cons_typ Pos (Record (infer_fields env fields))
   | Pragma "bot" -> cons_typ Pos Bot
@@ -176,19 +175,22 @@ and infer' env = function
      cons_typ Pos (Func (map_fields (fun _fn ((tn,_tp),_p) -> tn) params, res))
   | App (f, args) ->
      let fty = infer env f in
-     let args = map_fields (fun _fn e -> e, ref None) args in
-     let res = ref None in
+     let args = map_fields (fun _fn e -> e, ref (Tcons Top)) args in
+     let res = ref (Tcons Bot) in
      let argtmpl = map_fields (fun _fn (_e, r) -> r) args in
-     match_type env Pos fty (Func (argtmpl, res)) |> report;
+     match_type env fty (Func (argtmpl, res)) |> report;
      fold_fields (fun () _fn (e, r) ->
-         let r = match !r with None -> failwith "missing arg? or something?" | Some res -> res in
+         let r = !r in
          let e = match e with None -> failwith "punning?!" | Some e -> e in
          check env e r
        ) () args;
-     (match !res with None -> failwith "match bug?" | Some res -> res)
+     !res
 
 and bind env acc ps es =
-  let ps_open = (ps.fopen = `Open) in
+  (* FIXME: replace this with subtype_cons_fields
+     Need subtype_cons_fields to fold an accum,
+     report errors some other way (err -> unit?) *)
+  let _ps_open = (ps.fopen = `Open) in
   let bind_one acc fn (p,pty) e =
     let ty = check_or_infer_field env fn pty e in
     check_pat_field env acc ty fn p in
@@ -220,13 +222,14 @@ and check_pat' env acc ty = function
   | Pparens p -> check_pat env acc ty p
 
 and check_pat_typed_fields env acc ptypes fs =
+  (* FIXME: I think this also just needs subtype_cons_fields to fold? *)
   let fs = map_fields (fun _fn (p,ty) -> p, ty, ref None) fs in
   let trec : _ tuple_fields =
     map_fields (fun _fn (_p, ty, r) ->
       match ty with
       | None -> r
       | Some t -> failwith "unimp asc") fs in
-  subtype_cons_fields Pos ptypes trec (fun pol p r ->
+  subtype_cons_fields Pos ptypes trec (fun pol _fn p r ->
     assert (!r = None);
     wf_typ pol env p;
     r := Some p;
@@ -236,11 +239,11 @@ and check_pat_typed_fields env acc ptypes fs =
     check_pat_field env acc r fn p) acc fs
 
 and check_pat_untyped_fields env acc ty fs =
-  let fs = map_fields (fun _fn p -> p, ref None) fs in
-  let trec : _ tuple_fields = map_fields (fun _fn (p, r) -> r) fs in
-  match_type env Pos ty (Record trec) |> report;
+  let fs = map_fields (fun _fn p -> p, ref (Tcons Bot)) fs in
+  let trec : _ tuple_fields = map_fields (fun _fn (_p, r) -> r) fs in
+  match_type env ty (Record trec) |> report;
   fold_fields (fun acc fn (p, r) ->
-    let r = match !r with Some r -> r | None -> failwith "check_pat match?" in
+    let r = !r in
     check_pat_field env acc r fn p) acc fs
 
 and infer_lit = function

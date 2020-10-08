@@ -14,9 +14,6 @@ type symbol = string loc
 type ident = ident' loc and ident' =
   { label : string; shift : int }
 
-(* FIXME: I think I allow type annotations in too many places,
-   which makes bidir typechecking more annoying than it needs to be *)
-
 (* Expressions *)
 
 type exp = exp' mayloc and exp' =

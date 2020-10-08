@@ -249,6 +249,13 @@ fn (a) { if (a.foo) { (.bar=a.bar) } else { a } }
 (fn (a) { a })(5)
 > * ⊢ int
 
+# tricky: the second 5 should be checked against Top (i.e. inferred)
+(fn (a,...) { a })(5,5)
+> * ⊢ int
+(fn (a,...) { a })(5,if 5 { 5 } else { 5 })
+> typechecking error: Failure("incompat")
+
+
 fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { (.foo = 1, .cond = false) }) }
 > 'α: [⊥, ((cond: bool, ...)) ⊓ 'β],
 > 'β: [((foo: int, cond: bool)) ⊔ 'α, (cond: bool, ...)],

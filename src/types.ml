@@ -130,23 +130,24 @@ let subtype_cons_fields pol af bf f =
          | _ -> acc) bf.fnames extra_errs
     | _ -> extra_errs in
 
-  let rec subtype_pos aps bps acc = match aps, bps, pol with
+  let rec subtype_pos i aps bps acc = match aps, bps, pol with
     | [], [], _ -> acc
     | _, [], Pos | [], _, Neg -> acc (* extra fields handled above *)
     | [], _, Pos | _, [], Neg -> Missing `Positional :: acc
-    | ap :: aps, bp :: bps, pol -> f pol ap bp @ subtype_pos aps bps acc in
-  let errs = subtype_pos af.fpos bf.fpos extra_errs in
+    | ap :: aps, bp :: bps, pol ->
+       f pol (Field_positional i) ap bp @ subtype_pos (i+1) aps bps acc in
+  let errs = subtype_pos 0 af.fpos bf.fpos extra_errs in
   match pol with
   | Pos ->
     SymMap.fold (fun k b acc ->
       match SymMap.find k af.fnamed with
       | exception Not_found -> Missing (`Named k) :: acc
-      | a -> f pol a b @ acc) bf.fnamed errs
+      | a -> f pol (Field_named k) a b @ acc) bf.fnamed errs
   | Neg ->
      SymMap.fold (fun k a acc ->
       match SymMap.find k bf.fnamed with
       | exception Not_found -> Missing (`Named k) :: acc
-      | b -> f pol a b @ acc) af.fnamed errs
+      | b -> f pol (Field_named k) a b @ acc) af.fnamed errs
 
 let subtype_cons pol a b f =
   match pol, a, b with
@@ -154,9 +155,9 @@ let subtype_cons pol a b f =
   | _, Int, Int -> []
   | _, String, String -> []
   | pol, Func (args, res), Func (args', res') ->
-     subtype_cons_fields (polneg pol) args args' f @ f pol res res'
+     subtype_cons_fields (polneg pol) args args' (fun pol _fn -> f pol) @ f pol res res'
   | pol, Record fs, Record fs' ->
-     subtype_cons_fields pol fs fs' f
+     subtype_cons_fields pol fs fs' (fun pol _fn -> f pol)
   | Pos, Bot, _
   | Neg, _, Bot
   | Pos, _, Top
@@ -397,29 +398,24 @@ let rec subtype env p n =
      subtype_cons Pos s t
        (pol_flip (subtype env))
 
-(* match_type env Pos t m = t ≤ m
-   match_type env Neg t m = t ≥ m *)
-
-let rec match_type env pol (p : typ) (t : typ option ref cons_head) =
+(* match_type env t⁺ m = t⁺ ≤ m *)
+let rec match_type env (p : typ) (t : typ ref cons_head) =
   wf_env env;
-  wf_typ pol env p;
+  wf_typ Pos env p;
   match p with
   | Tcons cons ->
-     subtype_cons pol cons t (fun pol p r ->
-       assert (!r = None);
+     subtype_cons Pos cons t (fun pol p r ->
+       assert (!r = Tcons (ident pol));
        wf_typ pol env p;
-       r := Some p;
+       r := p;
        [])
-  | Tpoly_neg _ ->
-     assert (pol = Neg);
-     failwith "match neg tpoly unimplemented"
+  | Tpoly_neg _ -> assert false (* can't happen, positive type *)
   | Tpoly_pos (vars, body) ->
      (* t is not ∀, so we need to instantiate p *)
-     assert (pol = Pos);
      let vsets = instantiate_flexible env vars in
      wf_env env;
      let body = open_typ Flexible vsets 0 Pos body in
-     match_type env pol body t
+     match_type env body t
   | Tsimple (Tstyp_bound _) ->
      (* bound variable escaped, something's wrong *)
      assert false
@@ -427,26 +423,25 @@ let rec match_type env pol (p : typ) (t : typ option ref cons_head) =
      match p.tyvars with
      | VSnil ->
         (* Optimisation in the case of no flow *)
-        subtype_cons pol p.cons t (fun pol p r ->
-          assert (!r = None);
+        subtype_cons Pos p.cons t (fun pol p r ->
+          assert (!r = Tcons (ident pol));
           wf_styp pol env p;
-          r := Some (Tsimple (Tstyp_simple p));
+          r := Tsimple (Tstyp_simple p);
           [])
      | _ ->
         let freshen pol r =
-          assert (!r = None);
+          assert (!r = Tcons (ident (polneg pol)));
           let v = vset_of_flexvar (fresh_flexible env) in
           let st = (cons_styp (polneg pol) v (ident (polneg pol))) in
           (* FIXME: is this the right pol? *)
           wf_env env;
           wf_styp (polneg pol) env st;
-          r := Some (Tsimple (Tstyp_simple st));
+          r := (Tsimple (Tstyp_simple st));
           cons_styp pol v (ident pol) in
-        let t = cons_styp (polneg pol) VSnil
-                  (map_head (polneg pol) freshen t) in
-        let res = pol_flip (subtype_styp env) pol p t in
+        let t = cons_styp Neg VSnil (map_head Neg freshen t) in
+        let res = subtype_styp env p t in
         wf_env env;
-        wf_styp pol env p;
+        wf_styp Pos env p;
         res
 
 let fresh_flow env =
