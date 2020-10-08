@@ -66,8 +66,7 @@ let report errs = List.iter (function
 
 (* When checking a term against a template type,
    I think it's principal to inspect a Tm_typ as long as we don't
-   inspect any styps. (???) 
-   FIXME: this conflicts with the tendency of cons_typ to make styps. *)
+   inspect any styps. (???)  *)
 (* FIXME FIXME principality / boxiness ??? *)
 let inspect = function
   | Tcons cons ->
