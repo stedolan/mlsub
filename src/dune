@@ -7,5 +7,6 @@
 (library
  (name lang)
  (libraries pprint menhirLib sedlex)
+ (modes native)
  ; sedlex only needed for sedlex.ppx, but per_module breaks Merlin
  (preprocess (pps sedlex.ppx)))
