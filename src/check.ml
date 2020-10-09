@@ -142,8 +142,7 @@ and infer' env = function
                           fnamed = SymMap.singleton field res;
                           fnames = [field]; fopen = `Open }) in
      match_type env ty tmpl |> report;
-     let r = !res in
-     wf_typ Pos env r; r
+     !res
   | Tuple fields ->
      cons_typ Pos (Record (infer_fields env fields))
   | Pragma "bot" -> cons_typ Pos Bot
@@ -170,7 +169,6 @@ and infer' env = function
        | Some ty ->
           let tn, tp = typ_of_tyexp env ty in
           check env' body tn; tp in
-     wf_typ Pos env res;
      cons_typ Pos (Func (map_fields (fun _fn ((tn,_tp),_p) -> tn) params, res))
   | App (f, args) ->
      let fty = infer env f in
