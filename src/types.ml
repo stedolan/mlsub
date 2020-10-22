@@ -409,49 +409,64 @@ let rec subtype env p n =
      subtype_cons Pos s t
        (pol_flip (subtype env))
 
-        
-let fresh_flow env (lvl, mark) =
-  match env_entry_at_level env lvl mark with
-  | Eflexible vars ->
-     let v = Vector.push vars { pos = cons_styp Pos vsnil (ident Pos);
-                                neg = cons_styp Neg vsnil (ident Neg) } in
-     let vset = { vs_free = Intlist.singleton lvl (mark, Intlist.singleton v ());
-                  vs_bound = Intlist.empty } in
-     (cons_styp Neg vset (ident Neg)),
-     (cons_styp Pos vset (ident Pos))
-  | _ -> intfail "not a flexvar level"
+let fresh_flexvar env (lvl, mark) =
+  let fv = env_flexvars env lvl mark in
+  Vector.push fv { pos = cons_styp Pos vsnil (ident Pos);
+                   neg = cons_styp Neg vsnil (ident Neg);
+                   pos_match_cache = ident Pos;
+                   neg_match_cache = ident Neg }
+
+let vset_of_flexvar _env (lvl, mark) v =
+  { vs_free = Intlist.singleton lvl (mark, Intlist.singleton v ());
+    vs_bound = Intlist.empty }
+
+let flow_of_flexvar env l v =
+  let vset = vset_of_flexvar env l v in
+  (cons_styp Neg vset (ident Neg)),
+  (cons_styp Pos vset (ident Pos))
 
 
-let match_styp env (p : styp) (t : unit cons_head) : styp cons_head * conflict_reason list =
+let fresh_flow env l =
+  flow_of_flexvar env l (fresh_flexvar env l)
+
+let rec match_styp env (p : styp) (t : unit cons_head) : styp cons_head * conflict_reason list =
   wf_env env;
   wf_styp Pos env p;
-  let rec go p =
-    match Intlist.take_max p.tyvars.vs_free with
-    | Empty -> p.cons, []
-    | Cons(lvl, (mark, vs), tyvars) ->
-       (* FIXME this should be less awkward *)
-       let p = { p with tyvars = { vs_free = tyvars; vs_bound = Intlist.empty } } in
-       match env_entry_at_level env lvl mark with
-       | Eflexible _ ->
-          vs |> Intlist.to_list |> List.fold_left (fun (r, errs) (v,()) ->
-            let fresh pol () =
+  match Intlist.take_max p.tyvars.vs_free with
+  | Empty -> p.cons, []
+  | Cons(lvl, (mark, vs), tyvars) ->
+     (* FIXME this should be less awkward *)
+     let p = { p with tyvars = { vs_free = tyvars; vs_bound = Intlist.empty } } in
+     match env_entry_at_level env lvl mark with
+     | Eflexible fvs ->
+        vs |> Intlist.to_list |> List.fold_left (fun (r, errs) (v,()) ->
+          let fv = Vector.get fvs v in
+          let cons = join_cons Neg fv.neg_match_cache
+                       (map_head Neg (fun pol () -> cons_styp pol vsnil (ident pol)) t) in
+          let freshen pol t =
+            if Intlist.is_empty t.tyvars.vs_free then
               let n, p = fresh_flow env (lvl, mark) in
-              match pol with Pos -> n, p | Neg -> p, n in
-            let c = map_head Pos fresh t in
-            let cn = map_head Pos (fun _ t -> fst t) c in
-            let cp = map_head Pos (fun _ t -> snd t) c in
-            let errs' =
-              subtype_styp env
-              (cons_styp Pos { vs_free = Intlist.singleton lvl (mark, Intlist.singleton v ()); vs_bound = Intlist.empty } (ident Pos))
+              match pol with Neg -> n, p | Pos -> p, n
+            else
+              let _lvl', (mark', vs) = Intlist.as_singleton t.tyvars.vs_free in
+              Env_marker.assert_equal mark mark';
+              let v, () = Intlist.as_singleton vs in
+              t, cons_styp (polneg pol) (vset_of_flexvar env (lvl, mark) v) (ident (polneg pol)) in
+          let cons = map_head Neg freshen cons in
+          let cn = map_head Neg (fun _ t -> fst t) cons in
+          let cp = map_head Neg (fun _ t -> snd t) cons in
+          fv.neg_match_cache <- cn;
+          let errs' =
+            subtype_styp env
+              (cons_styp Pos (vset_of_flexvar env (lvl, mark) v) (ident Pos))
               (cons_styp Neg vsnil cn) in
-            join_cons Pos r cp, errs @ errs'
-          ) (go p)
-       | Erigid {vars; flow=_} ->
-          let p = vs |> Intlist.to_list |> List.fold_left (fun r (v,()) ->
-            join Pos r vars.(v).rig_upper) p in
-          go p
-       | _ -> intfail "expected variables here" in
-  go p
+          join_cons Pos r cp, errs @ errs'
+        ) (match_styp env p t)
+     | Erigid {vars; flow=_} ->
+        let p = vs |> Intlist.to_list |> List.fold_left (fun r (v,()) ->
+          join Pos r vars.(v).rig_upper) p in
+        match_styp env p t
+     | _ -> intfail "expected variables here"
 
 (* match_type env t⁺ m = t⁺ ≤ m *)
 let rec match_type env (lvl, mark) (p : typ) (t : typ ref cons_head) =

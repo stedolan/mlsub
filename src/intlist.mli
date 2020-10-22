@@ -57,3 +57,5 @@ type ('k, 'a, 'b) take_max2_result =
   | Right of 'k * 'b * ('k, 'b) t
   | Both of 'k * 'a * 'b * ('k, 'a) t * ('k, 'b) t
 val take_max2 : ('k, 'a) t -> ('k, 'b) t -> ('k, 'a, 'b) take_max2_result
+
+val as_singleton : ('k, 'a) t -> 'k * 'a

@@ -82,6 +82,11 @@ and flexvar = {
     mutable pos : styp;
     (* negative component, upper bound *)
     mutable neg : styp;
+
+
+    (* Match cache styps are either ident or a single flexible variable at the same level *)
+    mutable pos_match_cache : styp cons_head;
+    mutable neg_match_cache : styp cons_head;
   }
 
 (* Rigid type variables.
@@ -317,7 +322,9 @@ let instantiate_flexible env lvl mark (vars : (styp * styp) array) (body : typ) 
     let eps_pos = get_head_vars lvl mark l in
     let eps_neg = get_head_vars lvl mark u in
     let v = { pos = map_bound_styp 0 inst Pos l;
-              neg = map_bound_styp 0 inst Neg u } in
+              neg = map_bound_styp 0 inst Neg u;
+              pos_match_cache = ident Pos;
+              neg_match_cache = ident Neg } in
     let id = Vector.push tyvars v in
     assert (id = i + delta);
     let vs : vset = { vs_free = Intlist.singleton lvl (mark, Intlist.singleton id ());
@@ -407,7 +414,7 @@ let generalise env (lvl, mark) ty =
     let vs = Intlist.singleton ix vs in
     { t with tyvars = vset_union t.tyvars { vs_free = Intlist.empty; vs_bound = vs } } in
   let flexvars = env_flexvars env lvl mark in
-  let bounds = flexvars |> Vector.to_array |> Array.map (fun {pos; neg} ->
+  let bounds = flexvars |> Vector.to_array |> Array.map (fun {pos; neg; _} ->
     map_free_styp lvl mark 0 gen Pos pos,
     map_free_styp lvl mark 0 gen Neg neg) in
   Tpoly_pos(bounds,
@@ -478,17 +485,28 @@ let rec wf_env ({ level; marker=_; entry; rest } as env) =
      assert (level = env'.level + 1);
      wf_env env'
 
+and wf_match_cache_entry pol env t =
+  assert (t.cons = ident pol);
+  assert (Intlist.is_empty t.tyvars.vs_bound);
+  let lvl, (mark, vs) = Intlist.as_singleton t.tyvars.vs_free in
+  assert (lvl = env.level);
+  Env_marker.assert_equal mark env.marker;
+  let v, () = Intlist.as_singleton vs in
+  assert (0 <= v && v < Vector.length (env_flexvars env env.level env.marker))
+
 and wf_env_entry env = function
   | Evals vs ->
      SymMap.iter (fun _ typ ->  wf_typ Pos env typ) vs
   | Eflexible vars ->
-     Vector.iteri vars (fun _i { pos; neg } ->
+     Vector.iteri vars (fun _i { pos; neg; pos_match_cache; neg_match_cache } ->
        wf_styp Pos env pos;
-       wf_styp Neg env neg);
+       wf_styp Neg env neg;
+       wf_cons Pos env wf_match_cache_entry pos_match_cache;
+       wf_cons Neg env wf_match_cache_entry neg_match_cache);
      (* Check the ε-invariant *)
      let head_vars =
        vars |> Vector.to_array
-       |> Array.map (fun { pos; neg } -> get_head_vars env.level env.marker pos, get_head_vars env.level env.marker neg) in
+       |> Array.map (fun { pos; neg; _ } -> get_head_vars env.level env.marker pos, get_head_vars env.level env.marker neg) in
      head_vars |> Array.iteri (fun i (pos, neg) ->
        Intlist.iter pos (fun j () ->
          assert (Intlist.contains (snd head_vars.(j)) i));

@@ -232,42 +232,50 @@ let a = (.foo = 1, .bar = 2); let b : (.bar: nothing, ...) = a; b
 #
 
 fn (a, b) { (b, a.foo) }
-> 'α: [⊥, ⊤], 'β: [⊥, ⊤], * ⊢ ((foo: 'β, ...), 'α) → ('α, 'β)
+> * ⊢ ∀⁺ 0:[⊥,(foo: .0.2, ...)], 1:[⊥,⊤], 2:[⊥,⊤]. (.0.0, .0.1) → (.0.1, .0.2)
 
 fn (a, b) : int { b }
-> * ⊢ (⊤, int) → int
+> * ⊢ ∀⁺ 0:[⊥,⊤], 1:[⊥,int]. (.0.0, .0.1) → int
 
 fn (a : int, b) : (int, int) { (a, b) }
-> * ⊢ (int, int) → (int, int)
+> * ⊢ ∀⁺ 0:[⊥,int]. (int, .0.0) → (int, int)
 
 (fn (a) { (a, @true) } : (int) -> (int, bool))
 > * ⊢ (int) → (int, bool)
 
 fn (a) { if (a.foo) { (.bar=a.bar) } else { a } }
-> 'α: [⊥, (foo: bool, bar: 'β, ...)], 'β: [⊥, ⊤], * ⊢ ('α) → ((bar: 'β)) ⊔ 'α
+> * ⊢ ∀⁺ 0:[⊥,(foo: bool, bar: .0.1, ...)], 1:[⊥,⊤]. (.0.0) → ((bar: .0.1)) ⊔ .0.0
 
 (fn (a) { a })(5)
-> * ⊢ int
+> *0: [int, ⊤],  ⊢ #0.0
 
 # tricky: the second 5 should be checked against Top (i.e. inferred)
 (fn (a,...) { a })(5,5)
-> * ⊢ int
+> *0: [int, ⊤],  ⊢ #0.0
 (fn (a,...) { a })(5,if 5 { 5 } else { 5 })
 > typechecking error: Failure("incompat")
 
 
 fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { (.foo = 1, .cond = false) }) }
-> 'α: [⊥, ((cond: bool, ...)) ⊓ 'β],
-> 'β: [((foo: int, cond: bool)) ⊔ 'α, (cond: bool, ...)],
 > *
-> ⊢ ('α) → 'β
+> ⊢
+> ∀⁺ 0:[⊥,.0.1], 1:[((foo: int, cond: bool)) ⊔ .0.0,(cond: bool, ...)]. (.0.0) → .0.1
+
+fn (x) { (x.foo, x.bar, x.foo) }
+> *
+> ⊢
+> ∀⁺ 0:[⊥,(foo: .0.1, bar: .0.2, ...)], 1:[⊥,⊤], 2:[⊥,⊤]. (.0.0) → (
+>   .0.1,
+>   .0.2,
+>   .0.1)
 
 # once
 # this is a very disappointing type. The α/γ pair needs to go!
 fn (f, x) { f(x) }
-> 'α: [⊥, 'γ], 'β: [⊥, ⊤], 'γ: ['α, ⊤], * ⊢ (('γ) → 'β, 'α) → 'β
+> * ⊢ ∀⁺ 0:[⊥,(.0.3) → .0.2], 1:[⊥,.0.3], 2:[⊥,⊤], 3:[.0.1,⊤]. (.0.0, .0.1) → .0.2
 
 # twice!
 fn (f, x) { f(f(x)) }
-> 'α: [⊥, 'ε], 'β: [⊥, ⊤], 'γ: ['δ, ⊤], 'δ: [⊥, 'γ], 'ε: ['α, ⊤], *
-> ⊢ (('ε ⊔ 'γ) → 'δ ⊓ 'β, 'α) → 'β
+> *
+> ⊢
+> ∀⁺ 0:[⊥,(.0.3) → .0.2], 1:[⊥,.0.3], 2:[⊥,.0.3], 3:[.0.2 ⊔ .0.1,⊤]. (.0.0, .0.1) → .0.2

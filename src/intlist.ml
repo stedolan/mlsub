@@ -131,3 +131,7 @@ let take_max2 (type k) (a : (k, 'a) t) (b : (k, 'b) t) : (k, 'a, 'b) take_max2_r
        Left(ka, va, a)
      else
        Right(kb, vb, b)
+
+let as_singleton (type k) : (k, 'a) t -> k * 'a = function
+  | Cons(Empty, k, v) -> k, v
+  | _ -> assert false
