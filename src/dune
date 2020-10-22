@@ -2,7 +2,7 @@
  (modules grammar)
  (flags (--table --explain --unused-tokens)))
 
-(env (dev (flags (:standard -warn-error -A))))
+(env (dev (flags (:standard -w -30 -warn-error -A))))
 
 (library
  (name lang)

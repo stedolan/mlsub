@@ -1,7 +1,9 @@
 open Tuple_fields
 open Typedefs
 
-let intfail s = failwith ("internal error: " ^ s)
+exception Internal of string
+let intfail s = raise (Internal s)
+let () = Printexc.register_printer (function Internal s -> Some ("internal error: " ^ s) | _ -> None)
 
 (* join Pos = ⊔, join Neg = ⊓ (meet) *)
 let rec join pol (s : styp) (t : styp) =
@@ -165,34 +167,18 @@ let subtype_cons pol a b f =
   | _,_,_ -> [Incompatible]
 
 
-(* Compute epsilon-closure of a type *)
-let eps_closure env pol t =
-  let seen = Hashtbl.create 10 in
-  let rec accum_v acc i =
-    if Hashtbl.mem seen i then acc
-    else begin
-      Hashtbl.add seen i ();
-      let flexvar = env_flexvar env i in
-      let t =
-        match pol with Pos -> flexvar.pos | Neg -> flexvar.neg in
-      accum acc t
-    end
-  and accum acc { tyvars; cons; pol = pol' } =
-    assert (pol = pol');
-    List.fold_left accum_v
-      (join_cons pol acc cons)
-      (vset_lookup env Flexible tyvars) in
-  accum (ident pol) t
+let pol_flip f pol a b =
+  match pol with Pos -> f a b | Neg -> f b a
 
 
-
+(*
 (* Hoist a flexible variable to a wider environment *)
 let rec hoist_flexible env v =
   assert_env_prefix env v.env;
   wf_env v.env;
   if env == v.env then v
   else match v.hoisted with
-  | Some v' when env_level env <= env_level v'.env ->
+  | Some v' when Env_level.extends env.level v'.env.level ->
      hoist_flexible env v'
   | vh ->
      (* Write the hoisted field _before_ approxing bounds,
@@ -261,85 +247,113 @@ and approx_styp env ext pol' ({ tyvars; cons; pol } as orig) =
     wf_env ext;
     wf_styp pol env ty;
     ty
+*)
+
+(* Given a styp well-formed in ext,
+   find the best approximation well-formed in the shorter environment env.
+
+   This may require hoisting some flexible variables from ext to env.
+
+   Pos types are approximated from above and Neg types from below. *)
+let rec approx_styp env lvl mark pol' ({ tyvars; cons; pol } as orig) =
+  wf_styp pol' env orig;
+  assert (pol = pol');
+  if env.level = lvl then orig
+  else if Intlist.is_supported lvl tyvars.vs_free then
+    { tyvars; pol;
+      cons = map_head pol (approx_styp env lvl mark) cons }
+  else
+    intfail "approx unimplemented"
+  (*
+    let cons = map_head pol (approx_styp env ext) cons in
+    let ty = join pol { pol; cons; tyvars = VSnil } (approx_vset env pol tyvars) in
+    wf_env ext;
+    wf_styp pol env ty;
+    ty
+   *)
 
 
-(*
-  Given some variables in environment venv ≤ env,
-  flex_closure returns the join of the bounds of their ε-closures.
-  The result will not have flexible toplevel variables beyond level venv.
-  (assuming the same is true for acc)
- *)
-let flex_closure pol env acc venv vars =
-  assert_env_prefix venv env;
-  wf_styp pol env acc;
-  assert (snd (styp_uncons venv Flexible acc) = []);
-  let seen = Hashtbl.create 10 in
-  let rec go acc vars =
-    List.fold_left (fun acc v ->
-      if Hashtbl.mem seen v then acc else begin
-      Hashtbl.add seen v ();
-      let v = env_flexvar venv v in
-      let t = match pol with Pos -> v.pos | Neg -> v.neg in
-      let t, newvs = styp_uncons venv Flexible t in
-      go (join pol t acc) newvs end) acc vars in
-  let res = go acc vars in
-  wf_styp pol env res;
-  assert (snd (styp_uncons venv Flexible res) = []);
-  res
+let rec flex_closure pol env lvl flexvars (t : styp) vseen vnew =
+  wf_styp pol env t;
+  assert (Intlist.all_below lvl t.tyvars.vs_free);
+  if Intlist.is_empty vnew then t
+  else begin
+    let t = Intlist.to_list vnew |> List.fold_left (fun t (v, ()) ->
+      let v = Vector.get flexvars v in
+      let bound = match pol with Pos -> v.pos | Neg -> v.neg in
+      join pol t bound) t in
+    let vseen = Intlist.union (fun _k () () -> ()) vseen vnew in
+    let t, vnext =
+      match Intlist.peel_max lvl t.tyvars.vs_free with
+      | None -> t, Intlist.empty
+      | Some ((_mark,vs), rest) -> { t with tyvars = { t.tyvars with vs_free = rest } }, vs in
+    flex_closure pol env lvl flexvars t vseen (Intlist.remove vnext vseen)
+  end
+  
+(* The termination condition here is extremely tricky, if it's even true *)
 
-
-let pol_flip f pol a b =
-  match pol with Pos -> f a b | Neg -> f b a
-
-(* FIXME: this factoring doesn't seem the simplest.
-   Inline subtype_styp_vars? *)
-let rec subtype_styp env p n =
+(* env ⊢ p ≤ n *)
+let rec subtype_styp env (p : styp) (n : styp) =
   wf_env env;
   wf_styp Pos env p;
   wf_styp Neg env n;
-  match p.tyvars, n.tyvars with
-  | VSnil, VSnil ->
-     subtype_cons Pos p.cons n.cons
-       (pol_flip (subtype_styp env))
-  | VScons v, VSnil
-  | VSnil, VScons v ->
-     subtype_styp_vars env p n v.env v.sort
-  | VScons pv, VScons nv when
-       pv.env == nv.env ->
-     (* FIXME: wtf? *)
-     let vsort = min pv.sort nv.sort in (* i.e. Flex if either is *)
-     subtype_styp_vars env p n pv.env vsort
-  | VScons pv, VScons nv when
-      env_level pv.env > env_level nv.env ->
-     subtype_styp_vars env p n pv.env pv.sort
-  | VScons pv, VScons nv ->
-     assert (env_level pv.env < env_level nv.env);
-     subtype_styp_vars env p n nv.env nv.sort
+  match Intlist.take_max2 p.tyvars.vs_free n.tyvars.vs_free with
+  | Empty ->
+     subtype_cons Pos p.cons n.cons (pol_flip (subtype_styp env))
+  | Left (lvl, (mark, pv), pvars') ->
+     let p' = { p with tyvars = { p.tyvars with vs_free = pvars' } } in
+     subtype_styp_vars env lvl mark p n p' n pv Intlist.empty
+  | Right(lvl, (mark, nv), nvars') ->
+     let n' = { n with tyvars = { n.tyvars with vs_free = nvars' } } in
+     subtype_styp_vars env lvl mark p n p n' Intlist.empty nv
+  | Both(lvl, (pmark, pv), (nmark, nv), pvars', nvars') ->
+     let p' = { p with tyvars = { p.tyvars with vs_free = pvars' } } in
+     let n' = { n with tyvars = { n.tyvars with vs_free = nvars' } } in
+     Env_marker.assert_equal pmark nmark;
+     subtype_styp_vars env lvl pmark p n p' n' pv nv
 
-and subtype_styp_vars env p n venv vsort =
+(* env ⊢ p ⊔ pv ≤ n ⊓ nv, where pv, nv same level, above anything else in p,n *)
+and subtype_styp_vars env lvl mark orig_p orig_n (p : styp) (n : styp) pvs nvs =
   wf_env env;
   wf_styp Pos env p;
   wf_styp Neg env n;
-  assert_env_prefix venv env;
-  let (prest, pvs) = styp_uncons venv vsort p in
-  let (nrest, nvs) = styp_uncons venv vsort n in
-  match vsort with
-  | Flexible ->
-     let n_apx = approx_styp venv env Neg n in
-     let p_apx = approx_styp venv env Pos p in
-     pvs |> List.iter (fun pvi ->
-       let v = env_flexvar venv pvi in
-       v.neg <- join Neg v.neg n_apx);
-     nvs |> List.iter (fun nvi ->
-       let v = env_flexvar venv nvi in
-       v.pos <- join Pos v.pos p_apx);
+  match env_entry_at_level env lvl mark with
+  | Eflexible vars ->
+     Intlist.iter pvs (fun pv () ->
+       let pv = Vector.get vars pv in
+       pv.neg <- join Neg pv.neg (approx_styp env lvl mark Neg orig_n)
+     );
+     Intlist.iter nvs (fun nv () ->
+       let nv = Vector.get vars nv in
+       nv.pos <- join Pos nv.pos (approx_styp env lvl mark Pos orig_p)
+     );
+     wf_env env;
      subtype_styp env
-       (flex_closure Pos env prest venv pvs)
-       (flex_closure Neg env nrest venv nvs)
-  | Rigid ->
-     (* this is a load of bollocks *)
-     assert false
+       (flex_closure Pos env lvl vars p Intlist.empty pvs)
+       (flex_closure Neg env lvl vars n Intlist.empty nvs)
+  | Erigid { vars; flow } ->
+     (* p ⊔ pvs ≤ n ⊓ nvs splits into:
+          1. p ≤ n
+          2. ∀ pv ∈ pvs, U(pv) ≤ n
+          3. ∀ nv ∈ nvs, p ≤ L(nv)
+          4. ∀ pv ∈ pvs, nv ∈ nvs. U(pv) ≤ L(nv) OR (pv,nv) ∈ flow
+        Algorithm here is to combine (1,3) and (2,4):
+          1,3: p ≤ n ⊓ {L(nv) | nv ∈ nvs}
+          2,4: ∀pv ∈ pvs, U(pv) ≤ n ⊓ {L(nv) | nv ∈ nvs, (pv,nv) ∉ flow}
+        Could equally have chosen to combine differently, or not combine.
+        Important to ensure that there are no duplicate checks, so that
+        errors are reported only once. *)
+     let nbound nvs =
+       nvs |> Intlist.to_list |> List.fold_left (fun ty (nv, ()) ->
+         join Neg ty vars.(nv).rig_lower) n in
+     let errs = subtype_styp env p (nbound nvs) in
+     pvs |> Intlist.to_list |> List.fold_left (fun errs (pv, ()) ->
+       let nvs = Intlist.filter (fun nv () -> not (Hashtbl.mem flow (pv, nv))) nvs in
+       subtype_styp env vars.(pv).rig_upper (nbound nvs) @ errs) errs
+  | _ ->
+     failwith "expected variables at this env level"
 
+(* extra wf checks *)
 let subtype_styp env p n =
   let r = subtype_styp env p n in
   wf_env env;
@@ -348,27 +362,24 @@ let subtype_styp env p n =
   r
 
 
-
 (* Give a typ well-formed in ext, approx in env.
    Same as approx_styp *)
-let rec approx env ext pol t =
-  assert_env_prefix env ext;
-  wf_env ext;
-  wf_typ pol ext t;
+let rec approx env lvl mark pol t =
+  wf_env env;
+  wf_typ pol env t;
   match t with
   | Tpoly_neg (bounds, flow, body) ->
      assert (pol = Neg);
-     let (ext, vsets) = enter_poly_neg ext bounds flow in
-     approx env ext pol (open_typ Rigid vsets 0 Neg body)
+     let (env, body) = enter_poly_neg env bounds flow body in
+     approx env lvl mark pol body
   | Tpoly_pos (vars, body) ->
      assert (pol = Pos);
-     let (ext, vsets) = enter_poly_pos ext vars in
-     approx env ext pol (open_typ Flexible vsets 0 Pos body)
+     let (env, body) = enter_poly_pos env vars body in
+     approx env lvl mark pol body
   | Tsimple s ->
-     approx_styp env ext pol (is_styp s)
+     approx_styp env lvl mark pol s
   | Tcons cons ->
-     cons_styp pol VSnil (map_head pol (approx env ext) cons)
-
+     cons_styp pol vsnil (map_head pol (approx env lvl mark) cons)
 
 (* Always Pos <= Neg *)
 let rec subtype env p n =
@@ -379,27 +390,71 @@ let rec subtype env p n =
   | Tpoly_neg _, _
   | _, Tpoly_pos _ -> intfail "malformed"
 
-  (* FIXME: some sort of coherence check needed *)
+  (* FIXME: some sort of coherence check needed. Where? *)
   | p, Tpoly_neg (bounds, flow, body) ->
-     let env, vsets = enter_poly_neg env bounds flow in
-     subtype env p (open_typ Rigid vsets 0 Neg body)
+     let env, body = enter_poly_neg env bounds flow body in
+     subtype env p body
   | Tpoly_pos(vars, body), n ->
-     let env, vsets = enter_poly_pos env vars in
-     subtype env (open_typ Flexible vsets 0 Pos body) n
+     let env, body = enter_poly_pos env vars body in
+     subtype env body n
 
   | Tsimple p, Tsimple n ->
-     subtype_styp env (is_styp p) (is_styp n)
+     subtype_styp env p n
   | _, Tsimple n ->
-     subtype_styp env (approx env env Pos p) (is_styp n)
+     subtype_styp env (approx env env.level env.marker Pos p) n
   | Tsimple p, _ ->
-     subtype_styp env (is_styp p) (approx env env Neg n)
+     subtype_styp env p (approx env env.level env.marker Neg n)
 
   | Tcons s, Tcons t ->
      subtype_cons Pos s t
        (pol_flip (subtype env))
 
+        
+let fresh_flow env (lvl, mark) =
+  match env_entry_at_level env lvl mark with
+  | Eflexible vars ->
+     let v = Vector.push vars { pos = cons_styp Pos vsnil (ident Pos);
+                                neg = cons_styp Neg vsnil (ident Neg) } in
+     let vset = { vs_free = Intlist.singleton lvl (mark, Intlist.singleton v ());
+                  vs_bound = Intlist.empty } in
+     (cons_styp Neg vset (ident Neg)),
+     (cons_styp Pos vset (ident Pos))
+  | _ -> intfail "not a flexvar level"
+
+
+let match_styp env (p : styp) (t : unit cons_head) : styp cons_head * conflict_reason list =
+  wf_env env;
+  wf_styp Pos env p;
+  let rec go p =
+    match Intlist.take_max p.tyvars.vs_free with
+    | Empty -> p.cons, []
+    | Cons(lvl, (mark, vs), tyvars) ->
+       (* FIXME this should be less awkward *)
+       let p = { p with tyvars = { vs_free = tyvars; vs_bound = Intlist.empty } } in
+       match env_entry_at_level env lvl mark with
+       | Eflexible _ ->
+          vs |> Intlist.to_list |> List.fold_left (fun (r, errs) (v,()) ->
+            let fresh pol () =
+              let n, p = fresh_flow env (lvl, mark) in
+              match pol with Pos -> n, p | Neg -> p, n in
+            let c = map_head Pos fresh t in
+            let cn = map_head Pos (fun _ t -> fst t) c in
+            let cp = map_head Pos (fun _ t -> snd t) c in
+            let errs' =
+              subtype_styp env
+              (cons_styp Pos { vs_free = Intlist.singleton lvl (mark, Intlist.singleton v ()); vs_bound = Intlist.empty } (ident Pos))
+              (cons_styp Neg vsnil cn) in
+            join_cons Pos r cp, errs @ errs'
+          ) (go p)
+       | Erigid {vars; flow=_} ->
+          let p = vs |> Intlist.to_list |> List.fold_left (fun r (v,()) ->
+            join Pos r vars.(v).rig_upper) p in
+          go p
+       | _ -> intfail "expected variables here" in
+  go p
+
 (* match_type env t⁺ m = t⁺ ≤ m *)
-let rec match_type env (p : typ) (t : typ ref cons_head) =
+let rec match_type env (lvl, mark) (p : typ) (t : typ ref cons_head) =
   wf_env env;
   wf_typ Pos env p;
   match p with
@@ -412,40 +467,14 @@ let rec match_type env (p : typ) (t : typ ref cons_head) =
   | Tpoly_neg _ -> assert false (* can't happen, positive type *)
   | Tpoly_pos (vars, body) ->
      (* t is not ∀, so we need to instantiate p *)
-     let vsets = instantiate_flexible env vars in
+     let body = instantiate_flexible env lvl mark vars body in
      wf_env env;
-     let body = open_typ Flexible vsets 0 Pos body in
-     match_type env body t
-  | Tsimple (Tstyp_bound _) ->
-     (* bound variable escaped, something's wrong *)
-     assert false
-  | Tsimple (Tstyp_simple p) ->
-     match p.tyvars with
-     | VSnil ->
-        (* Optimisation in the case of no flow *)
-        subtype_cons Pos p.cons t (fun pol p r ->
-          assert (!r = Tcons (ident pol));
-          wf_styp pol env p;
-          r := Tsimple (Tstyp_simple p);
-          [])
-     | _ ->
-        let freshen pol r =
-          assert (!r = Tcons (ident (polneg pol)));
-          let v = vset_of_flexvar (fresh_flexible env) in
-          let st = (cons_styp (polneg pol) v (ident (polneg pol))) in
-          (* FIXME: is this the right pol? *)
-          wf_env env;
-          wf_styp (polneg pol) env st;
-          r := (Tsimple (Tstyp_simple st));
-          cons_styp pol v (ident pol) in
-        let t = cons_styp Neg VSnil (map_head Neg freshen t) in
-        let res = subtype_styp env p t in
-        wf_env env;
-        wf_styp Pos env p;
-        res
-
-let fresh_flow env =
-  let v = vset_of_flexvar (fresh_flexible env) in
-  Tsimple (Tstyp_simple (cons_styp Neg v (ident Neg))),
-  Tsimple (Tstyp_simple (cons_styp Pos v (ident Pos)))
-
+     wf_typ Pos env body;
+     match_type env (lvl, mark) body t
+  | Tsimple p ->
+     let tcons, errs = match_styp env p (map_head Neg (fun _ _ -> ()) t) in
+     subtype_cons Pos tcons t (fun pol p r ->
+       assert (!r = Tcons (ident pol));
+       wf_styp pol env p;
+       r := Tsimple p;
+       []) @ errs

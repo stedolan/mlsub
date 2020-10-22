@@ -1,7 +1,7 @@
 open Lang
-let () = Typedefs.go ()
+let () = Typedefs.test ()
 open Parse
-
+(*
 let app_name = "polytope"
 
 let rec run_repl ~histfile () =
@@ -32,3 +32,4 @@ let () =
     LNoise.history_load ~filename:histfile |> ignore;
     LNoise.history_set ~max_length:1000 |> ignore;
     run_repl ~histfile ())
+*)

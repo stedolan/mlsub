@@ -3,7 +3,7 @@
 type symbol = string
 module SymMap = Map.Make (struct type t = string let compare = compare end)
 
-type 'a tuple_fields =
+type +'a tuple_fields =
   { fpos : 'a list;
     fnamed : 'a SymMap.t;
     fnames : symbol list;
