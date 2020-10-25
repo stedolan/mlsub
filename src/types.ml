@@ -349,7 +349,7 @@ and subtype_styp_vars env lvl mark orig_p orig_n (p : styp) (n : styp) pvs nvs =
          join Neg ty vars.(nv).rig_lower) n in
      let errs = subtype_styp env p (nbound nvs) in
      pvs |> Intlist.to_list |> List.fold_left (fun errs (pv, ()) ->
-       let nvs = Intlist.filter (fun nv () -> not (Hashtbl.mem flow (pv, nv))) nvs in
+       let nvs = Intlist.filter (fun nv () -> not (Flow_graph.mem flow pv nv)) nvs in
        subtype_styp env vars.(pv).rig_upper (nbound nvs) @ errs) errs
   | _ ->
      failwith "expected variables at this env level"

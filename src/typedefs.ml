@@ -49,7 +49,7 @@ type env_entry =
       (* all fields immutable, despite array/table *)
       (* FIXME: explain why predicativity matters here *)
       vars : rigvar array;
-      flow : rig_flow;
+      flow : Flow_graph.t;
     }
 
 and env =
@@ -57,10 +57,6 @@ and env =
     marker : Env_marker.t;
     entry : env_entry;
     rest : env option }
-
-(* Flow relation between rigid variables of the same binding group.
-   Reflexive and transitive. *)
-and rig_flow = (int * int, unit) Hashtbl.t
 
 (* Simple types (the result of inference). No binders. *)
 and styp =
@@ -109,7 +105,7 @@ and typ =
   (* Forall in a positive position. *)
   | Tpoly_pos of (styp * styp) array * typ
   (* Forall in a negative position *)
-  | Tpoly_neg of (styp * styp) array * rig_flow * typ
+  | Tpoly_neg of (styp * styp) array * Flow_graph.t * typ
 
 let polneg = function Pos -> Neg | Neg -> Pos
 
@@ -182,7 +178,7 @@ let env_rigid_flow env lvl mark i j =
   let vars, flow = env_rigid_vars env lvl mark in
   assert (0 <= i && i < Array.length vars);
   assert (0 <= j && j < Array.length vars);
-  Hashtbl.mem flow (i, j)
+  Flow_graph.mem flow i j
 
 let vset_union vars1 vars2 =
   let vlist_union v1 v2 =
@@ -531,10 +527,7 @@ and wf_env_entry env = function
        Intlist.iter neg (fun j () ->
          assert (Intlist.contains (fst head_vars.(j)) i)))
   | Erigid { vars; flow } ->
-     flow |> Hashtbl.iter (fun (i,j) () ->
-       assert (i <> j);         (* FIXME: unconvinced by this! *)
-       assert (0 <= i && i < Array.length vars);
-       assert (0 <= j && j < Array.length vars));
+     assert (Flow_graph.length flow = Array.length vars);
      vars |> Array.iter (fun { rig_lower; rig_upper } ->
        wf_styp Neg env rig_lower;
        wf_styp Pos env rig_upper;
@@ -640,7 +633,7 @@ let rec pr_typ pol = function
   | Tpoly_neg (bounds, flow, body) ->
      str "∀⁻" ^^ blank 1 ^^
        separate_map (str "," ^^ blank 1) (pr_bound Neg) (Array.to_list bounds |> List.mapi (fun i x -> i,x)) ^^
-         (Hashtbl.fold (fun (n,p) () acc ->
+         (Flow_graph.fold (fun acc n p ->
              acc ^^ comma ^^ break 1 ^^ str (Printf.sprintf "%d ≤ %d" n p)) flow empty) ^^
          str "." ^^ blank 1 ^^ pr_typ pol body
 
