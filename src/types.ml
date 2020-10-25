@@ -276,13 +276,14 @@ let rec approx_styp env lvl mark pol' ({ tyvars; cons; pol } as orig) =
 let rec flex_closure pol env lvl flexvars (t : styp) vseen vnew =
   wf_styp pol env t;
   assert (Intlist.all_below lvl t.tyvars.vs_free);
-  if Intlist.is_empty vnew then t
+  if Intlist.is_empty vnew then t, vseen
   else begin
     let t = Intlist.to_list vnew |> List.fold_left (fun t (v, ()) ->
       let v = Vector.get flexvars v in
       let bound = match pol with Pos -> v.pos | Neg -> v.neg in
       join pol t bound) t in
     let vseen = Intlist.union (fun _k () () -> ()) vseen vnew in
+    (* FIXME use uncons *)
     let t, vnext =
       match Intlist.peel_max lvl t.tyvars.vs_free with
       | None -> t, Intlist.empty
@@ -328,9 +329,9 @@ and subtype_styp_vars env lvl mark orig_p orig_n (p : styp) (n : styp) pvs nvs =
        nv.pos <- join Pos nv.pos (approx_styp env lvl mark Pos orig_p)
      );
      wf_env env;
-     subtype_styp env
-       (flex_closure Pos env lvl vars p Intlist.empty pvs)
-       (flex_closure Neg env lvl vars n Intlist.empty nvs)
+     let clp, _ = flex_closure Pos env lvl vars p Intlist.empty pvs in
+     let cln, _ = flex_closure Neg env lvl vars n Intlist.empty nvs in
+     subtype_styp env clp cln
   | Erigid { vars; flow } ->
      (* p ⊔ pvs ≤ n ⊓ nvs splits into:
           1. p ≤ n
@@ -416,12 +417,12 @@ let fresh_flexvar env (lvl, mark) =
                    pos_match_cache = ident Pos;
                    neg_match_cache = ident Neg }
 
-let vset_of_flexvar _env (lvl, mark) v =
+let vset_of_flexvar (lvl, mark) v =
   { vs_free = Intlist.singleton lvl (mark, Intlist.singleton v ());
     vs_bound = Intlist.empty }
 
-let flow_of_flexvar env l v =
-  let vset = vset_of_flexvar env l v in
+let flow_of_flexvar _env l v =
+  let vset = vset_of_flexvar l v in
   (cons_styp Neg vset (ident Neg)),
   (cons_styp Pos vset (ident Pos))
 
@@ -451,14 +452,14 @@ let rec match_styp env (p : styp) (t : unit cons_head) : styp cons_head * confli
               let _lvl', (mark', vs) = Intlist.as_singleton t.tyvars.vs_free in
               Env_marker.assert_equal mark mark';
               let v, () = Intlist.as_singleton vs in
-              t, cons_styp (polneg pol) (vset_of_flexvar env (lvl, mark) v) (ident (polneg pol)) in
+              t, cons_styp (polneg pol) (vset_of_flexvar (lvl, mark) v) (ident (polneg pol)) in
           let cons = map_head Neg freshen cons in
           let cn = map_head Neg (fun _ t -> fst t) cons in
           let cp = map_head Neg (fun _ t -> snd t) cons in
           fv.neg_match_cache <- cn;
           let errs' =
             subtype_styp env
-              (cons_styp Pos (vset_of_flexvar env (lvl, mark) v) (ident Pos))
+              (cons_styp Pos (vset_of_flexvar (lvl, mark) v) (ident Pos))
               (cons_styp Neg vsnil cn) in
           join_cons Pos r cp, errs @ errs'
         ) (match_styp env p t)

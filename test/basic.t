@@ -232,19 +232,22 @@ let a = (.foo = 1, .bar = 2); let b : (.bar: nothing, ...) = a; b
 #
 
 fn (a, b) { (b, a.foo) }
-> * ⊢ ∀⁺ 0:[⊥,(foo: .0.2, ...)], 1:[⊥,⊤], 2:[⊥,⊤]. (.0.0, .0.1) → (.0.1, .0.2)
+> * ⊢ ∀⁺ 0:[⊥,⊤], 1:[⊥,⊤]. ((foo: .0.1, ...), .0.0) → (.0.0, .0.1)
 
 fn (a, b) : int { b }
-> * ⊢ ∀⁺ 0:[⊥,⊤], 1:[⊥,int]. (.0.0, .0.1) → int
+> * ⊢ ∀⁺ . (⊤, int) → int
 
 fn (a : int, b) : (int, int) { (a, b) }
-> * ⊢ ∀⁺ 0:[⊥,int]. (int, .0.0) → (int, int)
+> * ⊢ ∀⁺ . (int, int) → (int, int)
 
 (fn (a) { (a, @true) } : (int) -> (int, bool))
 > * ⊢ (int) → (int, bool)
 
 fn (a) { if (a.foo) { (.bar=a.bar) } else { a } }
-> * ⊢ ∀⁺ 0:[⊥,(foo: bool, bar: .0.1, ...)], 1:[⊥,⊤]. (.0.0) → ((bar: .0.1)) ⊔ .0.0
+> *
+> ⊢
+> ∀⁺ 0:[⊥,((foo: bool, bar: .0.1, ...)) ⊓ .0.2], 1:[⊥,⊤], 2:[((bar: .0.1)) ⊔ .0.0,⊤]. (
+>   .0.0) → .0.2
 
 (fn (a) { a })(5)
 > *0: [int, ⊤],  ⊢ #0.0
@@ -257,25 +260,85 @@ fn (a) { if (a.foo) { (.bar=a.bar) } else { a } }
 
 
 fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { (.foo = 1, .cond = false) }) }
+> * ⊢ ∀⁺ 0:[(foo: int, cond: bool),(cond: bool, ...)]. (.0.0) → .0.0
+
+fn(b) { if (b.cond) { b } else { (.foo = 1, .cond = false) } }
 > *
 > ⊢
-> ∀⁺ 0:[⊥,.0.1], 1:[((foo: int, cond: bool)) ⊔ .0.0,(cond: bool, ...)]. (.0.0) → .0.1
+> ∀⁺ 0:[⊥,((cond: bool, ...)) ⊓ .0.1], 1:[((foo: int, cond: bool)) ⊔ .0.0,⊤]. (
+>   .0.0) → .0.1
+
+fn(b) { if (b.cond) { b } else { (.foo = 1, .cond = 4) } }
+> *
+> ⊢
+> ∀⁺ 0:[⊥,((cond: bool, ...)) ⊓ .0.1], 1:[((foo: int, cond: int)) ⊔ .0.0,⊤]. (.0.0) → .0.1
 
 fn (x) { (x.foo, x.bar, x.foo) }
+> * ⊢ ∀⁺ 0:[⊥,⊤], 1:[⊥,⊤]. ((foo: .0.0, bar: .0.1, ...)) → (.0.0, .0.1, .0.0)
+
+fn (x) { if (x.cond) { (x.foo, x.bar) } else { (x.foo, x.foo) } }
 > *
 > ⊢
-> ∀⁺ 0:[⊥,(foo: .0.1, bar: .0.2, ...)], 1:[⊥,⊤], 2:[⊥,⊤]. (.0.0) → (
->   .0.1,
->   .0.2,
+> ∀⁺ 0:[⊥,.0.1], 1:[.0.0,⊤]. ((cond: bool, foo: .0.0, bar: .0.1, ...)) → (
+>   .0.0,
 >   .0.1)
+
+fn (x) { ((fn(x){x.foo})(x), (fn(x){x.foo})(x))  }
+> * ⊢ ∀⁺ 0:[⊥,⊤]. ((foo: .0.0, ...)) → (.0.0, .0.0)
+
+# nested constraints, garbage variables
+fn (x) { (fn(y) { y.foo.bar })((.foo=(.bar=x))) }
+> * ⊢ ∀⁺ 0:[⊥,⊤]. (.0.0) → .0.0
+
+# Trying to make an example with meets/joins under ctors in bounds
+fn (x, f, g) { ( f(x.foo), g(x.foo) ) }
+> *
+> ⊢
+> ∀⁺ 0:[⊥,⊤], 1:[⊥,⊤], 2:[⊥,⊤]. ((foo: .0.2, ...), (.0.2) → .0.0, (.0.2) → .0.1) → (
+>   .0.0,
+>   .0.1)
+
+# same example in garbage position
+# FIXME: hits "approx unimplemented"
+# (fn(x) { 5 }) (fn (x, f, g) { ( f(x.foo), g(x.foo) ) })
+# > ?
+
+# garbage
+fn (x) { (fn (y) { 5 })(if (x.cond) { (x.a, x.b) } else { (x.b, x.a) }) }
+> * ⊢ ∀⁺ . ((cond: bool, a: ⊤, b: ⊤, ...)) → int
+
+
+fn (x) { if (x.cond) { (x.a, x.b) } else { (x.b, x.a) } }
+> * ⊢ ∀⁺ 0:[⊥,⊤]. ((cond: bool, a: .0.0, b: .0.0, ...)) → (.0.0, .0.0)
+
+fn (x) { if (x.cond) { (x, 5) } else { (x, x) } }
+> *
+> ⊢ ∀⁺ 0:[⊥,((cond: bool, ...)) ⊓ .0.1], 1:[(int) ⊔ .0.0,⊤]. (.0.0) → (.0.0, .0.1)
+
+fn (x) { if (x.cond) { (x, 5) } else { (x, x.n) } }
+> * ⊢ ∀⁺ 0:[⊥,(cond: bool, n: .0.1, ...)], 1:[int,⊤]. (.0.0) → (.0.0, .0.1)
 
 # once
 # this is a very disappointing type. The α/γ pair needs to go!
 fn (f, x) { f(x) }
-> * ⊢ ∀⁺ 0:[⊥,(.0.3) → .0.2], 1:[⊥,.0.3], 2:[⊥,⊤], 3:[.0.1,⊤]. (.0.0, .0.1) → .0.2
+> * ⊢ ∀⁺ 0:[⊥,⊤], 1:[⊥,⊤]. ((.0.1) → .0.0, .0.1) → .0.0
 
 # twice!
 fn (f, x) { f(f(x)) }
-> *
-> ⊢
-> ∀⁺ 0:[⊥,(.0.3) → .0.2], 1:[⊥,.0.3], 2:[⊥,.0.3], 3:[.0.2 ⊔ .0.1,⊤]. (.0.0, .0.1) → .0.2
+> * ⊢ ∀⁺ 0:[⊥,.0.1], 1:[.0.0,⊤]. ((.0.1) → .0.0, .0.1) → .0.0
+
+# can I hit approx with nested lambda-generalisations? trickier than I thought.
+fn (f) { fn(x) { (f(x), x) } }
+> File "src/type_simplification.ml", line 40, characters 2-8: Assertion failed
+> Raised at Lang__Type_simplification.bound_is_trivial in file "src/type_simplification.ml", line 40, characters 2-36
+> Called from Lang__Type_simplification.garbage_collect.replace_vars in file "src/type_simplification.ml", line 296, characters 11-43
+> Called from Lang__Typedefs.map_free_typ.(fun) in file "src/typedefs.ml", line 296, characters 18-61
+> Called from Stdlib__array.map in file "array.ml", line 106, characters 21-40
+> Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 294, characters 16-164
+> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 239, characters 46-55
+> Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 290, characters 24-73
+> Called from Lang__Type_simplification.garbage_collect in file "src/type_simplification.ml", line 320, characters 11-54
+> Called from Lang__Check.infer' in file "src/check.ml", line 184, characters 21-68
+> Called from Lang__Check.infer in file "src/check.ml", line 136, characters 26-43
+> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 39, characters 12-36
+> 

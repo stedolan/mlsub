@@ -7,6 +7,10 @@ let is_empty (type k) : (k, _) t -> bool = function Empty -> true | Cons _ -> fa
 
 let singleton k v = Cons (Empty, k, v)
 
+let rec length : type k . (k, _) t -> int = function
+  | Empty -> 0
+  | Cons(m, _, _) -> length m + 1
+
 let rec union : type k . (k -> 'v -> 'v -> 'v) -> (k, 'v) t -> (k, 'v) t -> (k, 'v) t =
   fun f a b -> match a, b with
   | Empty, x | x, Empty -> x
@@ -135,3 +139,7 @@ let take_max2 (type k) (a : (k, 'a) t) (b : (k, 'b) t) : (k, 'a, 'b) take_max2_r
 let as_singleton (type k) : (k, 'a) t -> k * 'a = function
   | Cons(Empty, k, v) -> k, v
   | _ -> assert false
+
+let is_singleton (type k) : (k, 'a) t -> bool = function
+  | Cons(Empty, _, _) -> true
+  | _ -> false

@@ -179,7 +179,11 @@ and infer' env flex = function
      let res = check_or_infer env' flex ret body in
      let ty = cons_typ Pos (Func (map_fields (fun _fn ((tn,_tp),_p) -> tn) params, res)) in
      wf_typ Pos env ty; (* no dependency for now! Probably never, inferred. *)
-     let ty = generalise env flex ty in
+(*     let ty = Type_simplification.canonise env flex ty in*)
+     let ty = Type_simplification.remove_joins env flex ty in
+     let envgc, ty = Type_simplification.garbage_collect env flex ty in
+     wf_typ Pos envgc ty;
+     let ty = generalise envgc (envgc.level, envgc.marker) ty in
      wf_typ Pos orig_env ty;
      ty
   | App (f, args) ->
@@ -237,13 +241,13 @@ and check_pat_typed_fields env acc ptypes fs =
     map_fields (fun _fn (_p, ty, r) ->
       match ty with
       | None -> r
-      | Some t -> failwith "unimp asc") fs in
+      | Some _t -> failwith "unimp asc") fs in
   subtype_cons_fields Pos ptypes trec (fun pol _fn p r ->
     assert (!r = None);
     wf_typ pol env p;
     r := Some p;
     []) |> report;
-  fold_fields (fun acc fn (p, ty, r) ->
+  fold_fields (fun acc fn (p, _ty, r) ->
     let r = match !r with Some r -> r | None -> failwith "check_pat match?" in
     let flex = (-1,ref()) in    (* FIXME hack. I think this can trigger on weird pats. *)
     check_pat_field env flex acc r fn p) acc fs

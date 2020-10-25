@@ -281,6 +281,10 @@ let rec map_free_styp lvl mark ix rw pol' { tyvars; cons; pol } =
      let rest = { tyvars = { tyvars with vs_free = free' }; cons; pol } in
      rw ix vs rest
 
+(* FIXME: Tpoly_pos should have separate bounds,
+   copied through here. 
+   That way the rewrite function doesn't need to see poly pos flow.
+   IOW: the move to canon bounds (free x cons or bound) breaks the hack that stores flow inline *)
 let rec map_free_typ lvl mark ix rw pol = function
   | Tsimple s -> Tsimple (map_free_styp lvl mark ix rw pol s)
   | Tcons cons -> Tcons (map_head pol (map_free_typ lvl mark ix rw) cons)
@@ -299,6 +303,20 @@ let rec map_free_typ lvl mark ix rw pol = function
                   map_free_styp lvl mark ix rw (polneg pol) u) bounds,
                 flow,
                 map_free_typ lvl mark ix rw pol body)
+
+
+(* FIXME: use these more *)
+let styp_consv lvl mark { tyvars; cons; pol }  vs =
+  let tyvars = { tyvars with vs_free = Intlist.cons_max tyvars.vs_free lvl (mark, vs) } in
+  { tyvars; cons; pol }
+
+let styp_unconsv lvl mark t =
+  match Intlist.peel_max lvl t.tyvars.vs_free with
+  | None -> t, Intlist.empty
+  | Some ((mark', vs), rest) ->
+     Env_marker.assert_equal mark mark';
+     let tyvars = { t.tyvars with vs_free = rest } in
+     { t with tyvars }, vs
 
 
 let get_head_vars lvl mark (t : styp) =

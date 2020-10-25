@@ -4,6 +4,8 @@ val empty : ('k, 'v) t
 
 val is_empty : ('k, 'v) t -> bool
 
+val length : ('k, 'v) t -> int
+
 val singleton : int -> 'v -> (int, 'v) t
 
 val map : ('k -> 'a -> 'b) -> ('k, 'a) t -> ('k, 'b) t
@@ -59,3 +61,4 @@ type ('k, 'a, 'b) take_max2_result =
 val take_max2 : ('k, 'a) t -> ('k, 'b) t -> ('k, 'a, 'b) take_max2_result
 
 val as_singleton : ('k, 'a) t -> 'k * 'a
+val is_singleton : ('k, 'a) t -> bool

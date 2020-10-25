@@ -8,6 +8,7 @@ val push : 'a t -> 'a -> int
 val get : 'a t -> int -> 'a
 
 val to_array : 'a t -> 'a array
+val of_array : 'a array -> 'a t
 
 val clear : 'a t -> unit
 

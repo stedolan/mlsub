@@ -43,5 +43,6 @@ let fold_lefti f acc vec =
   !r
 
 let to_array vec = Array.sub vec.contents 0 vec.length
+let of_array arr = { contents = arr; length = Array.length arr }
 
 let clear vec = vec.length <- 0
