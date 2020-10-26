@@ -102,10 +102,8 @@ and rigvar = {
 and typ =
   | Tsimple of styp
   | Tcons of typ cons_head
-  (* Forall in a positive position. *)
-  | Tpoly_pos of (styp * styp) array * Flow_graph.t * typ
-  (* Forall in a negative position *)
-  | Tpoly_neg of (styp * styp) array * Flow_graph.t * typ
+  (* Forall *)
+  | Tpoly of (styp * styp) array * Flow_graph.t * typ
 
 let polneg = function Pos -> Neg | Neg -> Pos
 
@@ -251,22 +249,13 @@ let rec map_bound_styp ix rw pol' { tyvars; cons; pol } =
 let rec map_bound_typ ix rw pol = function
   | Tsimple s -> Tsimple (map_bound_styp ix rw pol s)
   | Tcons cons -> Tcons (map_head pol (map_bound_typ ix rw) cons)
-  | Tpoly_pos (bounds, flow, body) ->
-     assert (pol = Pos);
+  | Tpoly (bounds, flow, body) ->
      let ix = ix + 1 in
-     Tpoly_pos (Array.map (fun (l,u) ->
-                    map_bound_styp ix rw pol l,
-                    map_bound_styp ix rw (polneg pol) u) bounds,
-                flow,
-                map_bound_typ ix rw pol body)
-  | Tpoly_neg (bounds, flow, body) ->
-     assert (pol = Neg);
-     let ix = ix + 1 in
-     Tpoly_neg (Array.map (fun (l, u) ->
-                    map_bound_styp ix rw pol l,
-                    map_bound_styp ix rw (polneg pol) u) bounds,
-                flow,
-                map_bound_typ ix rw pol body)
+     Tpoly (Array.map (fun (l, u) ->
+                map_bound_styp ix rw pol l,
+                map_bound_styp ix rw (polneg pol) u) bounds,
+            flow,
+            map_bound_typ ix rw pol body)
 
 (* Rewrite occurrences of the outermost free variable *)
 let rec map_free_styp lvl mark ix rw pol' { tyvars; cons; pol } =
@@ -285,22 +274,13 @@ let rec map_free_styp lvl mark ix rw pol' { tyvars; cons; pol } =
 let rec map_free_typ lvl mark ix rw pol = function
   | Tsimple s -> Tsimple (map_free_styp lvl mark ix rw pol s)
   | Tcons cons -> Tcons (map_head pol (map_free_typ lvl mark ix rw) cons)
-  | Tpoly_pos (bounds, flow, body) ->
-     assert (pol = Pos);
+  | Tpoly (bounds, flow, body) ->
      let ix = ix + 1 in
-     Tpoly_pos (Array.map (fun (l, u) ->
-                  map_free_styp lvl mark ix rw pol l,
-                  map_free_styp lvl mark ix rw (polneg pol) u) bounds,
-                flow,
-                map_free_typ lvl mark ix rw pol body)
-  | Tpoly_neg (bounds, flow, body) ->
-     assert (pol = Neg);
-     let ix = ix + 1 in
-     Tpoly_neg (Array.map (fun (l, u) ->
-                  map_free_styp lvl mark ix rw pol l,
-                  map_free_styp lvl mark ix rw (polneg pol) u) bounds,
-                flow,
-                map_free_typ lvl mark ix rw pol body)
+     Tpoly (Array.map (fun (l, u) ->
+                map_free_styp lvl mark ix rw pol l,
+                map_free_styp lvl mark ix rw (polneg pol) u) bounds,
+            flow,
+            map_free_typ lvl mark ix rw pol body)
 
 
 (* FIXME: use these more *)
@@ -326,7 +306,7 @@ let get_head_vars lvl mark (t : styp) =
 
 (* Open a ∀⁺ binder by instantiating its bound variables with fresh flexvars.
    Inserts variables into the current environment (no new level created) *)
-let instantiate_flexible env lvl mark (vars : (styp * styp) array) flow (body : typ) =
+let instantiate_flexible env lvl mark (vars : (styp * styp) array) (flow : Flow_graph.t) (body : typ) =
   (* The environment already contains ≥0 flexible variables, so we need to
      renumber the new ones to avoid collisions *)
   let tyvars = env_flexvars env lvl mark in
@@ -337,13 +317,10 @@ let instantiate_flexible env lvl mark (vars : (styp * styp) array) flow (body : 
   vars |> Array.iteri (fun i (l, u) ->
     let eps_pos = get_head_vars lvl mark l in
     let eps_neg = get_head_vars lvl mark u in
-    let pos = map_bound_styp 0 inst Pos l in
-    let pos = { pos with tyvars = { pos.tyvars with vs_free = Intlist.cons_max pos.tyvars.vs_free lvl (mark, flow.(i).Flow_graph.pred) } } in
-    let neg = map_bound_styp 0 inst Neg u in
-    let neg = { neg with tyvars = { neg.tyvars with vs_free = Intlist.cons_max neg.tyvars.vs_free lvl (mark, flow.(i).Flow_graph.succ) } } in
+    let pos = inst flow.(i).pred (map_bound_styp 0 inst Pos l) in
+    let neg = inst flow.(i).succ (map_bound_styp 0 inst Neg u) in
     let v = { pos; neg;
-              pos_match_cache = ident Pos;
-              neg_match_cache = ident Neg } in
+              pos_match_cache = ident Pos; neg_match_cache = ident Neg } in
     let id = Vector.push tyvars v in
     assert (id = i + delta);
     let vs : vset = { vs_free = Intlist.singleton lvl (mark, Intlist.singleton id ());
@@ -440,9 +417,9 @@ let generalise env (lvl, mark) ty =
     let nbound = map_free_styp lvl mark 0 gen Neg nbound in
     (pbound, nbound), (pflow, nflow)) in
   let bounds = Array.map fst bounds_flow and flow = Array.map snd bounds_flow in
-  Tpoly_pos(bounds,
-            Flow_graph.make flow,
-            map_free_typ lvl mark 0 gen Pos ty)
+  Tpoly(bounds,
+        Flow_graph.make flow,
+        map_free_typ lvl mark 0 gen Pos ty)
 
 (* Open a ∀⁻ binder, extending env with rigid variables *)
 let enter_poly_neg (env : env) bounds flow body =
@@ -461,6 +438,11 @@ let enter_poly_neg (env : env) bounds flow body =
       entry = Erigid { vars; flow };
       rest = Some env } in
   env, body
+
+let enter_poly pol env vars flow body =
+  match pol with
+  | Pos -> enter_poly_pos env vars flow body
+  | Neg -> enter_poly_neg env vars flow body
 
 (*
 
@@ -554,22 +536,15 @@ and wf_typ pol env = function
      wf_cons pol env wf_typ cons
   | Tsimple s ->
      wf_styp pol env s
-  | Tpoly_pos (vars, flow, body) ->
-     assert (pol = Pos);
-     assert (Flow_graph.length flow = Array.length vars);
+  | Tpoly (bounds, flow, body) ->
+     assert (Flow_graph.length flow = Array.length bounds);
      (* toplevel references to bound variables should be in flow, not bounds *)
-     vars |> Array.iter (fun (p, n) ->
+     bounds |> Array.iter (fun (p, n) ->
        assert (Intlist.is_empty p.tyvars.vs_bound);
        assert (Intlist.is_empty n.tyvars.vs_bound));
-     let env, body = enter_poly_pos env vars flow body in
+     let env, body = enter_poly pol env bounds flow body in
      wf_env_entry env env.entry;
      wf_typ Pos env body
-  | Tpoly_neg (bounds, flow, body) ->
-     assert (pol = Neg);
-     assert (Flow_graph.length flow = Array.length bounds);
-     let env, body = enter_poly_neg env bounds flow body in
-     wf_env_entry env env.entry;
-     wf_typ Neg env body
 
 and wf_vset _pol env { vs_free; vs_bound } =
   assert (vs_bound = Intlist.empty); (* locally closed *)
@@ -642,8 +617,7 @@ let rec pr_styp pol { tyvars; cons; _ } =
 let rec pr_typ pol = function
   | Tsimple s -> pr_styp pol s
   | Tcons cons -> pr_cons pol pr_typ cons
-  | Tpoly_pos (bounds, flow, body)
-  | Tpoly_neg (bounds, flow, body) ->
+  | Tpoly (bounds, flow, body) ->
      str "∀" ^^ (match pol with Pos -> str "⁺" | Neg -> str "⁻") ^^ blank 1 ^^
        separate_map (str "," ^^ blank 1) (pr_bound pol) (Array.to_list bounds |> List.mapi (fun i x -> i,x)) ^^
          (Flow_graph.fold (fun acc n p ->
@@ -686,9 +660,9 @@ let bvars pol lvl var =
 let test () =
   let env = make_env () in
   let choose1_pos =
-    Tpoly_pos ([| cons_styp Pos vsnil Bot, cons_styp Neg vsnil Top;
-                  cons_styp Pos vsnil Bot, cons_styp Neg vsnil Top;
-                  cons_styp Pos vsnil Bot, cons_styp Neg vsnil Top |],
+    Tpoly ([| cons_styp Pos vsnil Bot, cons_styp Neg vsnil Top;
+              cons_styp Pos vsnil Bot, cons_styp Neg vsnil Top;
+              cons_styp Pos vsnil Bot, cons_styp Neg vsnil Top |],
                Flow_graph.of_list 3 [(0,2); (1,2)],
                Tsimple (cons_styp Pos vsnil (func
                  (bvars Neg 0 0)
@@ -700,9 +674,9 @@ let test () =
     (pr_typ Pos choose1_pos ^^ hardline);
 
   let nested =
-    Tpoly_pos ([| cons_styp Pos vsnil Bot, cons_styp Neg vsnil Top |],
+    Tpoly ([| cons_styp Pos vsnil Bot, cons_styp Neg vsnil Top |],
                Flow_graph.of_list 1 [],
-      Tpoly_pos ([| cons_styp Pos vsnil Bot, bvars Neg 1 0 |],
+      Tpoly ([| cons_styp Pos vsnil Bot, bvars Neg 1 0 |],
                  Flow_graph.of_list 1 [],
         Tsimple (bvars Pos 0 0))) in
   wf_typ Pos env nested;
@@ -710,7 +684,7 @@ let test () =
     (pr_env env ^^ str " ⊢ " ^^ pr_typ Pos nested ^^ hardline);
   let body =
     match nested with
-    | Tpoly_pos (bounds, flow, body) ->
+    | Tpoly (bounds, flow, body) ->
        instantiate_flexible env env.level env.marker bounds flow body
     | _ -> assert false in
   PPrint.ToChannel.pretty 1. 80 stdout
@@ -718,7 +692,7 @@ let test () =
   wf_env env; wf_typ Pos env body;
   let body =
     match body with
-    | Tpoly_pos (bounds, flow, body) ->
+    | Tpoly (bounds, flow, body) ->
        instantiate_flexible env env.level env.marker bounds flow body
     | _ -> assert false in
   PPrint.ToChannel.pretty 1. 80 stdout

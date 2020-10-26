@@ -369,13 +369,8 @@ let rec approx env lvl mark pol t =
   wf_env env;
   wf_typ pol env t;
   match t with
-  | Tpoly_neg (bounds, flow, body) ->
-     assert (pol = Neg);
-     let (env, body) = enter_poly_neg env bounds flow body in
-     approx env lvl mark pol body
-  | Tpoly_pos (vars, flow, body) ->
-     assert (pol = Pos);
-     let (env, body) = enter_poly_pos env vars flow body in
+  | Tpoly (bounds, flow, body) ->
+     let (env, body) = enter_poly pol env bounds flow body in
      approx env lvl mark pol body
   | Tsimple s ->
      approx_styp env lvl mark pol s
@@ -388,14 +383,11 @@ let rec subtype env p n =
   wf_typ Pos env p;
   wf_typ Neg env n;
   match p, n with
-  | Tpoly_neg _, _
-  | _, Tpoly_pos _ -> intfail "malformed"
-
   (* FIXME: some sort of coherence check needed. Where? *)
-  | p, Tpoly_neg (bounds, flow, body) ->
+  | p, Tpoly (bounds, flow, body) ->
      let env, body = enter_poly_neg env bounds flow body in
      subtype env p body
-  | Tpoly_pos(vars, flow, body), n ->
+  | Tpoly(vars, flow, body), n ->
      let env, body = enter_poly_pos env vars flow body in
      subtype env body n
 
@@ -480,8 +472,7 @@ let rec match_type env (lvl, mark) (p : typ) (t : typ ref cons_head) =
        wf_typ pol env p;
        r := p;
        [])
-  | Tpoly_neg _ -> assert false (* can't happen, positive type *)
-  | Tpoly_pos (vars, flow, body) ->
+  | Tpoly (vars, flow, body) ->
      (* t is not ∀, so we need to instantiate p *)
      let body = instantiate_flexible env lvl mark vars flow body in
      wf_env env;
