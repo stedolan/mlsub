@@ -373,9 +373,9 @@ let rec approx env lvl mark pol t =
      assert (pol = Neg);
      let (env, body) = enter_poly_neg env bounds flow body in
      approx env lvl mark pol body
-  | Tpoly_pos (vars, body) ->
+  | Tpoly_pos (vars, flow, body) ->
      assert (pol = Pos);
-     let (env, body) = enter_poly_pos env vars body in
+     let (env, body) = enter_poly_pos env vars flow body in
      approx env lvl mark pol body
   | Tsimple s ->
      approx_styp env lvl mark pol s
@@ -395,8 +395,8 @@ let rec subtype env p n =
   | p, Tpoly_neg (bounds, flow, body) ->
      let env, body = enter_poly_neg env bounds flow body in
      subtype env p body
-  | Tpoly_pos(vars, body), n ->
-     let env, body = enter_poly_pos env vars body in
+  | Tpoly_pos(vars, flow, body), n ->
+     let env, body = enter_poly_pos env vars flow body in
      subtype env body n
 
   | Tsimple p, Tsimple n ->
@@ -481,9 +481,9 @@ let rec match_type env (lvl, mark) (p : typ) (t : typ ref cons_head) =
        r := p;
        [])
   | Tpoly_neg _ -> assert false (* can't happen, positive type *)
-  | Tpoly_pos (vars, body) ->
+  | Tpoly_pos (vars, flow, body) ->
      (* t is not ∀, so we need to instantiate p *)
-     let body = instantiate_flexible env lvl mark vars body in
+     let body = instantiate_flexible env lvl mark vars flow body in
      wf_env env;
      wf_typ Pos env body;
      match_type env (lvl, mark) body t

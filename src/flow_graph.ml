@@ -1,5 +1,5 @@
 (* A directed graph represented as adjacency lists in both directions *)
-type node = { succ : (int, unit) Intlist.t; pred : (int, unit) Intlist.t }
+type node = { pred : (int, unit) Intlist.t; succ : (int, unit) Intlist.t; }
 type t = node array
 
 (* FIXME: array + DFS might well be faster *)
@@ -20,14 +20,24 @@ let mem (t : t) i j =
   || Intlist.contains (reachable t i) j
 
 let make nodes =
-  Array.mapi (fun i (succ, pred) ->
+  Array.mapi (fun i (pred, succ) ->
     Intlist.iter succ (fun j () ->
-      assert (Intlist.contains (snd nodes.(j)) i));
-    Intlist.iter pred (fun j () ->
       assert (Intlist.contains (fst nodes.(j)) i));
-    { succ; pred })
+    Intlist.iter pred (fun j () ->
+      assert (Intlist.contains (snd nodes.(j)) i));
+    { succ; pred }) nodes
+
+let of_list len pairs =
+  let nodes = Array.make len { succ = Intlist.empty; pred = Intlist.empty } in
+  pairs |> List.iter (fun (i, j) ->
+    nodes.(i) <- { nodes.(i) with succ = Intlist.add nodes.(i).succ j () };
+    nodes.(j) <- { nodes.(j) with pred = Intlist.add nodes.(j).pred i () });
+  nodes
 
 let length t = Array.length t
+
+let empty len =
+  Array.make len (fun _ -> { succ = Intlist.empty; pred = Intlist.empty })
 
 let fold f t s =
   t

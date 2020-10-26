@@ -31,6 +31,8 @@ let rec remove : type k . (k, 'v) t -> (k, 'a) t -> (k, 'v) t =
      Cons(remove a b, ka, va)
   | Cons(_, _ka, _), Cons(b, _kb, _) (* when _ka < kb *) ->
      remove a b
+
+let add t k v = union (fun _ _a b -> b) t (singleton k v)
      
 
 let rec map : type k . (k -> 'a -> 'b) -> (k, 'a) t -> (k, 'b) t =
@@ -72,7 +74,7 @@ let peel_max (type k) (k : k) : (k, 'v) t -> ('v * (k, 'v) t) option = function
   | _ -> None
 
 let cons_max m k v =
-  assert (is_supported (k-1) m);
+  assert (all_below k m);
   Cons (m, k, v)
 
 

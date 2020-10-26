@@ -16,6 +16,8 @@ val union : ('k -> 'v -> 'v -> 'v) -> ('k, 'v) t -> ('k, 'v) t -> ('k, 'v) t
 
 val remove : ('k, 'a) t -> ('k, 'b) t -> ('k, 'a) t
 
+val add : (int, 'v) t -> int -> 'v -> (int, 'v) t
+
 val union_map :
   left:('k -> 'a -> 'c) ->
   right:('k -> 'b -> 'c) ->
