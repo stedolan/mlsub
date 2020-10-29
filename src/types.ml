@@ -8,9 +8,11 @@ let () = Printexc.register_printer (function Internal s -> Some ("internal error
 (* join Pos = ⊔, join Neg = ⊓ (meet) *)
 let rec join pol (s : styp) (t : styp) =
   assert (s.pol = pol && t.pol = pol);
-  { tyvars = vset_union s.tyvars t.tyvars;
-    cons = join_cons pol s.cons t.cons;
-    pol }
+  match s.body, t.body with
+  | Styp s, Styp t ->
+     { body = Styp { cons = join_cons pol s.cons t.cons;
+                     tyvars = vset_union s.tyvars t.tyvars }; pol }
+  | _ -> assert false  (* locally closed *)
 and join_cons pol s t =
   match s, t with
   (* top/bottom *)
@@ -255,15 +257,18 @@ and approx_styp env ext pol' ({ tyvars; cons; pol } as orig) =
    This may require hoisting some flexible variables from ext to env.
 
    Pos types are approximated from above and Neg types from below. *)
-let rec approx_styp env lvl mark pol' ({ tyvars; cons; pol } as orig) =
+let rec approx_styp env lvl mark pol' ({ body; pol } as orig) =
   wf_styp pol' env orig;
   assert (pol = pol');
   if env.level = lvl then orig
-  else if Intlist.is_supported lvl tyvars.vs_free then
-    { tyvars; pol;
-      cons = map_head pol (approx_styp env lvl mark) cons }
   else
-    intfail "approx unimplemented"
+    match body with
+    | Styp { cons; tyvars } when
+           Intlist.is_supported lvl tyvars ->
+    { pol; body = Styp { tyvars;
+      cons = map_head pol (approx_styp env lvl mark) cons } }
+    | _ ->
+       intfail "approx unimplemented"
   (*
     let cons = map_head pol (approx_styp env ext) cons in
     let ty = join pol { pol; cons; tyvars = VSnil } (approx_vset env pol tyvars) in
@@ -273,9 +278,9 @@ let rec approx_styp env lvl mark pol' ({ tyvars; cons; pol } as orig) =
    *)
 
 
-let rec flex_closure pol env lvl flexvars (t : styp) vseen vnew =
+let rec flex_closure pol env lvl mark flexvars (t : styp) vseen vnew =
   wf_styp pol env t;
-  assert (Intlist.all_below lvl t.tyvars.vs_free);
+  (* FIXME head_below wf assert (Intlist.all_below lvl t.tyvars.vs_free); *)
   if Intlist.is_empty vnew then t, vseen
   else begin
     let t = Intlist.to_list vnew |> List.fold_left (fun t (v, ()) ->
@@ -284,11 +289,8 @@ let rec flex_closure pol env lvl flexvars (t : styp) vseen vnew =
       join pol t bound) t in
     let vseen = Intlist.union (fun _k () () -> ()) vseen vnew in
     (* FIXME use uncons *)
-    let t, vnext =
-      match Intlist.peel_max lvl t.tyvars.vs_free with
-      | None -> t, Intlist.empty
-      | Some ((_mark,vs), rest) -> { t with tyvars = { t.tyvars with vs_free = rest } }, vs in
-    flex_closure pol env lvl flexvars t vseen (Intlist.remove vnext vseen)
+    let t, vnext = styp_unconsv lvl mark t in
+    flex_closure pol env lvl mark flexvars t vseen (Intlist.remove vnext vseen)
   end
   
 (* The termination condition here is extremely tricky, if it's even true *)
@@ -298,20 +300,22 @@ let rec subtype_styp env (p : styp) (n : styp) =
   wf_env env;
   wf_styp Pos env p;
   wf_styp Neg env n;
-  match Intlist.take_max2 p.tyvars.vs_free n.tyvars.vs_free with
-  | Empty ->
-     subtype_cons Pos p.cons n.cons (pol_flip (subtype_styp env))
-  | Left (lvl, (mark, pv), pvars') ->
-     let p' = { p with tyvars = { p.tyvars with vs_free = pvars' } } in
-     subtype_styp_vars env lvl mark p n p' n pv Intlist.empty
-  | Right(lvl, (mark, nv), nvars') ->
-     let n' = { n with tyvars = { n.tyvars with vs_free = nvars' } } in
-     subtype_styp_vars env lvl mark p n p n' Intlist.empty nv
-  | Both(lvl, (pmark, pv), (nmark, nv), pvars', nvars') ->
-     let p' = { p with tyvars = { p.tyvars with vs_free = pvars' } } in
-     let n' = { n with tyvars = { n.tyvars with vs_free = nvars' } } in
-     Env_marker.assert_equal pmark nmark;
-     subtype_styp_vars env lvl pmark p n p' n' pv nv
+  let max_var_level =
+    match styp_max_var_level p, styp_max_var_level n with
+    | None, None -> None
+    | (Some _ as x), None | None, (Some _ as x) -> x
+    | (Some (lp, _) as p), (Some (ln, _) as n) ->
+       if lp > ln then p else n in
+  match max_var_level with
+  | None ->
+     (match p, n with
+     | { body = Styp { cons = p; _ }; _ }, { body = Styp { cons = n; _ }; _ } ->
+        subtype_cons Pos p n (pol_flip (subtype_styp env))
+     | _ -> assert false)
+  | Some (lvl, mark) ->
+     let pcons, pvars = styp_unconsv lvl mark p in
+     let ncons, nvars = styp_unconsv lvl mark n in
+     subtype_styp_vars env lvl mark p n pcons ncons pvars nvars
 
 (* env ⊢ p ⊔ pv ≤ n ⊓ nv, where pv, nv same level, above anything else in p,n *)
 and subtype_styp_vars env lvl mark orig_p orig_n (p : styp) (n : styp) pvs nvs =
@@ -329,8 +333,8 @@ and subtype_styp_vars env lvl mark orig_p orig_n (p : styp) (n : styp) pvs nvs =
        nv.pos <- join Pos nv.pos (approx_styp env lvl mark Pos orig_p)
      );
      wf_env env;
-     let clp, _ = flex_closure Pos env lvl vars p Intlist.empty pvs in
-     let cln, _ = flex_closure Neg env lvl vars n Intlist.empty nvs in
+     let clp, _ = flex_closure Pos env lvl mark vars p Intlist.empty pvs in
+     let cln, _ = flex_closure Neg env lvl mark vars n Intlist.empty nvs in
      subtype_styp env clp cln
   | Erigid { vars; flow } ->
      (* p ⊔ pvs ≤ n ⊓ nvs splits into:
@@ -410,8 +414,7 @@ let fresh_flexvar env (lvl, mark) =
                    neg_match_cache = ident Neg }
 
 let vset_of_flexvar (lvl, mark) v =
-  { vs_free = Intlist.singleton lvl (mark, Intlist.singleton v ());
-    vs_bound = Intlist.empty }
+  Intlist.singleton lvl (mark, Intlist.singleton v ())
 
 let flow_of_flexvar _env l v =
   let vset = vset_of_flexvar l v in
@@ -425,11 +428,10 @@ let fresh_flow env l =
 let rec match_styp env (p : styp) (t : unit cons_head) : styp cons_head * conflict_reason list =
   wf_env env;
   wf_styp Pos env p;
-  match Intlist.take_max p.tyvars.vs_free with
-  | Empty -> p.cons, []
-  | Cons(lvl, (mark, vs), tyvars) ->
-     (* FIXME this should be less awkward *)
-     let p = { p with tyvars = { vs_free = tyvars; vs_bound = Intlist.empty } } in
+  match styp_max_var_level p with
+  | None -> (match p.body with Styp { cons; _ } -> cons, [] | _ -> assert false)
+  | Some (lvl, mark) ->
+     let p, vs = styp_unconsv lvl mark p in
      match env_entry_at_level env lvl mark with
      | Eflexible fvs ->
         vs |> Intlist.to_list |> List.fold_left (fun (r, errs) (v,()) ->
@@ -437,11 +439,11 @@ let rec match_styp env (p : styp) (t : unit cons_head) : styp cons_head * confli
           let cons = join_cons Neg fv.neg_match_cache
                        (map_head Neg (fun pol () -> cons_styp pol vsnil (ident pol)) t) in
           let freshen pol t =
-            if Intlist.is_empty t.tyvars.vs_free then
+            if Intlist.is_empty (match t.body with Styp s -> s.tyvars | _ -> assert false) then
               let n, p = fresh_flow env (lvl, mark) in
               match pol with Neg -> n, p | Pos -> p, n
             else
-              let _lvl', (mark', vs) = Intlist.as_singleton t.tyvars.vs_free in
+              let _lvl', (mark', vs) = Intlist.as_singleton (match t.body with Styp s -> s.tyvars | _ -> assert false) in
               Env_marker.assert_equal mark mark';
               let v, () = Intlist.as_singleton vs in
               t, cons_styp (polneg pol) (vset_of_flexvar (lvl, mark) v) (ident (polneg pol)) in

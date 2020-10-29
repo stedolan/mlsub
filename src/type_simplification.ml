@@ -33,12 +33,12 @@ themselves in their own bound should not be removed, even if monopolar. I think 
 can be computed during the polarity DFS, by locating backedges. (weak guardedness)
 *)
 
-
-
-let bound_is_trivial pol { cons; tyvars = { vs_free; vs_bound }; pol = pol' } =
+let is_trivial pol { body; pol = pol' } =
   assert (pol = pol');
-  assert (Intlist.is_empty vs_bound);
-  cons = ident pol && Intlist.is_empty vs_free
+  match body with
+  | Styp {cons; tyvars} ->
+     cons = ident pol && Intlist.is_empty tyvars
+  | Bound_var _ -> assert false
 
 (* Canonisation.
    Bring a type with flexvars into 1BV form:
@@ -63,19 +63,18 @@ let remove_joins env (lvl, mark) ty =
   let rec canon pol ty =
     map_free_styp lvl mark 0 canon_var pol ty
 
-  and canon_var _ix (mark', vs) (rest : styp) =
+  and canon_var pol _ix (mark', vs) (rest : styp) =
     Env_marker.assert_equal mark mark';
     (* map_free_styp should never call us with an empty vs *)
     assert (not (Intlist.is_empty vs));
     match rest, vs with
-    | { cons; tyvars; pol }, vs when
+    | { body = Styp {cons; tyvars}; pol }, vs when
            cons = ident pol &&
-           Intlist.is_empty tyvars.vs_free &&
+           Intlist.is_empty tyvars &&
            Intlist.is_singleton vs ->
        (* 1BV because only one var at this level *)
-       (* FIXME: figure out whether tyvars.vs_bound must be empty. True by 1BV assumption? *)
-       cons_styp pol { tyvars with vs_free = (Intlist.singleton lvl (mark', vs)) } (ident pol)
-    | { pol; _ }, vs ->
+       cons_styp pol (Intlist.singleton lvl (mark', vs)) (ident pol)
+    | _, vs ->
        (* Otherwise, need to introduce a new flexvar to enforce 1BV *)
        let key = (pol, rest, vs) in
        match Hashtbl.find canon_table key with
@@ -180,9 +179,9 @@ let garbage_collect env (lvl, mark) ty =
   and visit_styp pol t =
     assert (pol = t.pol);
     ignore (map_free_styp lvl mark 0 visit_vars_strong pol t)
-  and visit_vars_strong _ix (mark', vs) (rest : styp) =
-    let pol = rest.pol in (* FIXME should be passed in *)
+  and visit_vars_strong pol _ix (mark', vs) (rest : styp) =
     Env_marker.assert_equal mark mark';
+    assert (is_trivial pol rest); (* Should be 1BV form already *)
     Intlist.iter vs (fun v () ->
       (var_side pol vars.(v)).strong <- true;
       visit_bound pol v);
@@ -225,7 +224,7 @@ let garbage_collect env (lvl, mark) ty =
   (* Pass IIa. Delete variables not strongly reachable with trivial cons bounds *)
   vars |> Array.iteri (fun vi v ->
     if not v.vneg.strong && not v.vpos.strong &&
-         bound_is_trivial Neg v.vneg.cons && bound_is_trivial Pos v.vpos.cons then begin
+         is_trivial Neg v.vneg.cons && is_trivial Pos v.vpos.cons then begin
       remove_all_flow vi;
       mark_deleted v;           (* FIXME remove *)
     end);
@@ -233,8 +232,8 @@ let garbage_collect env (lvl, mark) ty =
   (* Pass IIIa. Merge variables with a unique other variable *)
   vars |> Array.iteri (fun vi v ->
     if not v.vpos.strong &&
-         bound_is_trivial Neg v.vneg.cons &&
-         bound_is_trivial Pos v.vpos.cons &&
+         is_trivial Neg v.vneg.cons &&
+         is_trivial Pos v.vpos.cons &&
          Intlist.is_singleton v.vneg.flow then begin
       let (v', ()) = Intlist.as_singleton v.vneg.flow in
       remove_all_flow vi;
@@ -243,8 +242,8 @@ let garbage_collect env (lvl, mark) ty =
       v.replacement <- Link v';
     end
     else if not v.vneg.strong &&
-         bound_is_trivial Neg v.vneg.cons &&
-         bound_is_trivial Pos v.vpos.cons &&
+         is_trivial Neg v.vneg.cons &&
+         is_trivial Pos v.vpos.cons &&
          Intlist.is_singleton v.vpos.flow then begin
       let (v', ()) = Intlist.as_singleton v.vpos.flow in
       remove_all_flow vi;
@@ -289,11 +288,11 @@ let garbage_collect env (lvl, mark) ty =
        t
   and replace_styp pol t =
     map_free_styp lvl mark 0 replace_vars pol t
-  and replace_vars _ix (mark', vs) (rest : styp) =
+  and replace_vars pol _ix (mark', vs) (rest : styp) =
     Env_marker.assert_equal mark mark';
     (* no joins: if we have vs, then rest should be trivial *)
     assert (Intlist.is_singleton vs);
-    assert (bound_is_trivial rest.pol rest);
+    assert (is_trivial pol rest);
     let (v, ()) = Intlist.as_singleton vs in
     replace_var rest.pol v in
 
@@ -433,6 +432,11 @@ let garbage_collect env (lvl, mark) ty =
   wf_typ Pos env' ty;
   env', ty
 *)
+
+
+(*
+Previous attempt at GC.
+
 
 type reachability =
   { mutable pos_reachable : bool;
@@ -687,6 +691,8 @@ let canonise env (lvl, mark) ty =
   wf_env_entry env (env_entry_at_level env lvl mark);
   wf_typ Pos env ty;
   ty, reachable
+
+*)
 
 (*
 (* Reachable parts of ty assumed to be in 1BV form.
