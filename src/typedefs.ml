@@ -286,16 +286,14 @@ let rec map_free_typ lvl mark ix rw pol = function
 
 
 (* FIXME: use these more *)
-let styp_consv lvl mark { body; pol } vs =
+let styp_consv lvl mark ({ body; pol } as t) vs =
   (* FIXME: add a wf_styp_at_level here? *)
-  (* FIXME: this assertion shouldn't be necessary *)
-(*  assert (not (Intlist.is_empty vs));
-*)
-  match body with
-  | Bound_var _ -> assert false (* should be at-or-below lvl, bound variables aren't *)
-  | Styp { cons; tyvars } ->
-     let tyvars = Intlist.cons_max tyvars lvl (mark, vs) in
-     { body = Styp { cons; tyvars };  pol }
+  if Intlist.is_empty vs then t else
+    match body with
+    | Bound_var _ -> assert false (* should be at-or-below lvl, bound variables aren't *)
+    | Styp { cons; tyvars } ->
+       let tyvars = Intlist.cons_max tyvars lvl (mark, vs) in
+       { body = Styp { cons; tyvars };  pol }
 
 let styp_unconsv lvl mark ({ body; pol } as t) =
   (* FIXME: add a wf_styp_at_level here? *)
@@ -588,6 +586,7 @@ and wf_vset _pol env tyvars =
   Intlist.wf tyvars;
   Intlist.iter tyvars (fun lvl (mark, vs) ->
     Intlist.wf vs;
+    assert (not (Intlist.is_empty vs));
     let len =
       match env_entry_at_level env lvl mark with
       | Eflexible fvars -> Vector.length fvars
