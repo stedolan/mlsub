@@ -316,14 +316,6 @@ let styp_max_var_level {body; pol=_} =
      match Intlist.take_max tyvars with
      | Empty -> None
      | Cons (lvl, (mark, _), _) -> Some (lvl, mark)
-(*
-let get_head_vars lvl mark (t : styp) =
-  match Intlist.peel_max lvl t.tyvars.vs_free with
-  | None -> Intlist.empty
-  | Some ((mk, vs), _) ->
-     Env_marker.assert_equal mk mark;
-     vs
-*)
 
 (* Open a ∀⁺ binder by instantiating its bound variables with fresh flexvars.
    Inserts variables into the current environment (no new level created) *)
@@ -361,66 +353,6 @@ let instantiate_flexible env lvl mark (vars : (styp * styp) array) (flow : Flow_
 
 (* NB: a similar invariant-preservation trick needed if ∀⁻ are ever merged.
    Not sure there's any need to do that, though *)
-
-
-(*
-(* Create a single fresh variable with trivial bounds *)
-let fresh_flexible env =
-  let tyvars = match env with Env_cons { tyvars; _ } -> tyvars | _ -> assert false in
-  let ix = Vector.length tyvars in
-  let v = { env; hoisted = None; ix;
-            pos = cons_styp Pos VSnil Bot;
-            neg = cons_styp Neg VSnil Top } in
-  let ix' = Vector.push tyvars v in
-  assert (Vector.get tyvars ix == v);
-  assert (ix = ix');
-  v
-
-let vset_of_flexvar v =
-  VScons { env=v.env; sort = Flexible; vars = [v.ix]; rest = VSnil }
-
-let styp_of_vset pol tyvars =
-  { pol; cons = ident pol; tyvars }
-
-let rec hoist_flexible env v =
-  assert_env_prefix env v.env;
-  if env == v.env then v
-  else match v.hoisted with
-  | None ->
-     let v' = fresh_flexible env in
-     v.hoisted <- Some v';
-     v'
-  | Some v' ->
-     if env_level env < env_level v'.env then
-       hoist_flexible env v'
-     else
-       let vh = fresh_flexible env in
-       v.hoisted <- Some vh;
-       vh.hoisted <- Some v';
-       vh
-*)
-
-
-(*
-(* Create flexible variables with bounds *)
-let instantiate_flexible env vars =
-  let tyvars = match env with Env_cons { tyvars; _ } -> tyvars | _ -> assert false in (* uglllyyyy. *)
-  let nvars = Array.length vars in
-  let ixs = Array.init nvars (fun _ ->
-    Vector.push tyvars
-      { env; ix = Vector.length tyvars; hoisted = None;
-        pos = cons_styp Pos VSnil Bot;
-        neg = cons_styp Neg VSnil Top }) in
-  let vsets = ixs |> Array.map (fun ix ->
-    VScons { env; sort = Flexible; vars = [ix]; rest = VSnil }) in
-  ixs |> Array.iteri (fun i ix ->
-    let v = Vector.get tyvars ix in
-    let (pos, neg) = vars.(i) in
-    v.pos <- is_styp (open_styp Flexible vsets 0 Pos pos);
-    v.neg <- is_styp (open_styp Flexible vsets 0 Neg neg));
-  vsets
-*)
-
 
 (* Open a ∀⁺ binder, extending env with flexible variables *)
 let enter_poly_pos env vars flow body =
@@ -473,27 +405,6 @@ let enter_poly pol env vars flow body =
   match pol with
   | Pos -> enter_poly_pos env vars flow body
   | Neg -> enter_poly_neg env vars flow body
-
-(*
-
-let enter_poly_neg env bounds flow =
-  let nvars = Array.length bounds in
-  let vars = Array.init nvars (fun _ ->
-    { rig_lower = cons_styp Neg VSnil Bot;
-      rig_upper = cons_styp Pos VSnil Top }) in
-  let env_entry = Erigid { vars; flow } in
-  let env = env_cons env env_entry in
-  let vsets = Array.init nvars (fun i ->
-    VScons { env; sort = Rigid; vars = [i]; rest = VSnil }) in
-  for i = 0 to nvars - 1 do
-    let (lower, upper) = bounds.(i) in
-    vars.(i) <-
-      { rig_lower = is_styp (open_styp Rigid vsets 0 Neg lower);
-        rig_upper = is_styp (open_styp Rigid vsets 0 Pos upper) }
-  done;
-  env, vsets
-*)
-
 
 (*
  * Well-formedness checks.
@@ -580,7 +491,7 @@ and wf_typ pol env = function
        (match n.body with Bound_var _ -> assert false | _ -> ()));
      let env, body = enter_poly pol env bounds flow body in
      wf_env_entry env env.entry;
-     wf_typ Pos env body
+     wf_typ pol env body
 
 and wf_vset _pol env tyvars =
   Intlist.wf tyvars;
@@ -678,7 +589,11 @@ let rec pr_env { level=_; marker=_; entry; rest } =
       doc ^^ str (Printf.sprintf "%d" i) ^^ str ":" ^^ blank 1 ^^
         str "[" ^^ pr_styp Pos v.pos ^^ comma ^^ blank 1 ^^ pr_styp Neg v.neg ^^ str "]" ^^
           comma ^^ break 1) doc vars
-  | Erigid _ -> failwith "pr_env unimplemented for Erigid"
+  | Erigid {vars;flow} ->
+     doc ^^ 
+       separate_map (str "," ^^ blank 1) (pr_bound Neg) (Array.to_list vars |> List.mapi (fun i x -> i,(x.rig_lower,x.rig_upper))) ^^
+         (Flow_graph.fold (fun acc n p ->
+             acc ^^ comma ^^ break 1 ^^ str (Printf.sprintf "%d ≤ %d" n p)) flow empty)
 
 
 

@@ -24,6 +24,8 @@ let lex buf =
   | '&' -> AMPER
   | '|' -> VBAR
   | "->" -> ARROW
+  | "<:" -> SUBTYPE
+  | ":>" -> SUPTYPE
 
   | "fn" -> FN
   | "let" -> LET
@@ -80,3 +82,5 @@ let token_name = function
   | VBAR -> "VBAR"
   | SHIFT -> "SHIFT"
   | AS -> "AS"
+  | SUBTYPE -> "SUBTYPE"
+  | SUPTYPE -> "SUPTYPE"

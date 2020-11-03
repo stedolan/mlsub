@@ -295,9 +295,8 @@ fn (x, f, g) { ( f(x.foo), g(x.foo) ) }
 >   .0.1)
 
 # same example in garbage position
-# FIXME: hits "approx unimplemented"
-# (fn(x) { 5 }) (fn (x, f, g) { ( f(x.foo), g(x.foo) ) })
-# > ?
+(fn(x) { 5 }) (fn (x, f, g) { ( f(x.foo), g(x.foo) ) })
+> * ⊢ int
 
 # garbage
 fn (x) { (fn (y) { 5 })(if (x.cond) { (x.a, x.b) } else { (x.b, x.a) }) }
@@ -325,3 +324,61 @@ fn (f, x) { f(f(x)) }
 # can I hit approx with nested lambda-generalisations? trickier than I thought.
 fn (f) { fn(x) { (f(x), x) } }
 > * ⊢ ∀⁺ 0:[⊥,⊤], 1:[⊥,⊤]. ((.0.1) → .0.0) → ∀⁺ 0:[⊥,.1.1]. (.0.0) → (.1.0, .0.0)
+
+
+# poly id as an argument!
+fn (f) { (f(1), f(true)) }
+> * ⊢ ∀⁺ 0:[⊥,⊤]. ((⊤) → .0.0) → (.0.0, .0.0)
+
+fn (f : [A] (A) -> A) { (f(1), f(true)) }
+> * ⊢ ∀⁺ . (∀⁻ 0:[⊥,⊤]. (.0.0) → .0.0) → (int, bool)
+
+fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){(.x=x(a),.y=a).y}) }
+> * ⊢ ∀⁺ . ((⊤) → ⊤, (∀⁺ 0:[⊥,⊤]. (.0.0) → .0.0) → int) → int
+
+fn (x, wid : (([A <: (.foo:int), A :> (.foo:int,.bar:string)] (A) -> A) -> int)) { wid(fn(a){x(a)}) }
+> *
+> ⊢
+> ∀⁺ . (
+>   ((foo: int)) → (foo: int, bar: string),
+>   (∀⁺ 0:[(foo: int, bar: string),(foo: int)]. (.0.0) → .0.0) → int) → int
+
+fn(f) { (fn(x) { 5 })(f(10)) }
+> * ⊢ ∀⁺ . ((int) → ⊤) → int
+
+
+# needs approx
+(fn (x) { x })(fn (x) { x })
+> internal error: approx unimplemented
+> Raised at Lang__Types.intfail in file "src/types.ml", line 5, characters 16-34
+> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 231, characters 46-55
+> Called from Lang__Types.approx_styp in file "src/types.ml", line 269, characters 13-57
+> Called from Lang__Types.subtype_styp_vars.(fun) in file "src/types.ml", line 369, characters 33-70
+> Called from Lang__Intlist.iter in file "src/intlist.ml", line 90, characters 21-26
+> Called from Lang__Types.subtype_styp_vars in file "src/types.ml", line 367, characters 5-151
+> Called from Lang__Types.subtype_styp in file "src/types.ml", line 399, characters 10-30
+> Called from Lang__Check.check' in file "src/check.ml", line 228, characters 5-23
+> Called from Stdlib__list.fold_left in file "list.ml", line 121, characters 24-34
+> Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 50, characters 12-65
+> Called from Lang__Check.infer' in file "src/check.ml", line 301, characters 5-177
+> Called from Lang__Check.infer in file "src/check.ml", line 242, characters 26-43
+> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 39, characters 12-36
+> 
+
+# self-app
+(fn (x) { x(x) }) (fn (x) { x(x) })
+> internal error: approx unimplemented
+> Raised at Lang__Types.intfail in file "src/types.ml", line 5, characters 16-34
+> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 231, characters 46-55
+> Called from Lang__Types.approx_styp in file "src/types.ml", line 269, characters 13-57
+> Called from Lang__Types.subtype_styp_vars.(fun) in file "src/types.ml", line 369, characters 33-70
+> Called from Lang__Intlist.iter in file "src/intlist.ml", line 90, characters 21-26
+> Called from Lang__Types.subtype_styp_vars in file "src/types.ml", line 367, characters 5-151
+> Called from Lang__Types.subtype_styp in file "src/types.ml", line 399, characters 10-30
+> Called from Lang__Check.check' in file "src/check.ml", line 228, characters 5-23
+> Called from Stdlib__list.fold_left in file "list.ml", line 121, characters 24-34
+> Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 50, characters 12-65
+> Called from Lang__Check.infer' in file "src/check.ml", line 301, characters 5-177
+> Called from Lang__Check.infer in file "src/check.ml", line 242, characters 26-43
+> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 39, characters 12-36
+> 

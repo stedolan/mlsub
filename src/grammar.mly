@@ -7,13 +7,16 @@
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
 %token COLON EQUALS DOT DOTS COMMA SEMI UNDER QUESTION ARROW AMPER VBAR
 %token FN LET TRUE FALSE IF ELSE AS
+%token SUBTYPE SUPTYPE
 
 %nonassoc ARROW
 %left AMPER
 %left VBAR
+%right AS 
+
 
 %{ open Tuple_fields open Exp %}
-%start <Exp.exp> prog
+%start <[`Exp of Exp.exp | `Sub of Exp.tyexp * Exp.tyexp]> prog
 
 %{
 let parse_fields fs = collect_fields fs
@@ -26,7 +29,9 @@ let parse_tyfields fs = collect_fields fs
 %inline mayfail(X): e = X { Some e } (* | error { None } *) 
 %inline mayloc(X): e = loc(mayfail(X)) { e }
 
-prog: e = exp; EOF { e }
+prog:
+| e = exp; EOF { `Exp e }
+| COLON; t1 = tyexp; SUBTYPE; t2 = tyexp; EOF { `Sub (t1, t2) }
 
 symbol: s = loc(SYMBOL) { s } 
 ident: v = loc(ident_) { v }
@@ -163,3 +168,13 @@ tyexp_:
   { Tjoin(t1, t2) }
 | t1 = tyexp; AMPER; t2 = tyexp
   { Tmeet(t1, t2) }
+| LBRACK; t = separated_list(COMMA, typolybound); RBRACK; b = tyexp %prec AS (* kinda hack *)
+  { Tforall(t, b) }
+
+subtype_symbol:
+| SUBTYPE { `Sub }
+| SUPTYPE { `Sup }
+
+typolybound:
+| s = symbol; t = subtype_symbol; b = tyexp { s, Some (t, b) }
+| s = symbol { s, None }

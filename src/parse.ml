@@ -51,7 +51,7 @@ let tok_significant s t =
   | _, _ -> true
 
 type checkpoint =
-  Exp.exp MenhirInterpreter.checkpoint
+  [`Exp of Exp.exp | `Sub of Exp.tyexp * Exp.tyexp] MenhirInterpreter.checkpoint
 type state =
   (lexeme * checkpoint) list
 

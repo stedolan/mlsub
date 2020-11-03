@@ -11,7 +11,7 @@ let rec closure tbl vseen vnew =
     closure tbl (Intlist.union (fun _ () () -> ()) vseen vnew) vnext
 
 let reachable t i =
-  closure t Intlist.empty t.(i).succ
+  closure t (Intlist.singleton i ()) t.(i).succ
 
 let mem (t : t) i j =
   assert (0 <= i && i < Array.length t);

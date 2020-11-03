@@ -269,6 +269,39 @@ let rec approx_styp env lvl mark pol' ({ body; pol } as orig) =
       cons = map_head pol (approx_styp env lvl mark) cons } }
     | _ ->
        intfail "approx unimplemented"
+
+let f g =
+  let id x = g x; x in
+  id 42
+
+(*
+
+Can I do approx using articulation & articulation caches?
+Tricky case is approx of a recursive type.
+Suppose Γ, α, ..., β ≤ { foo : β }
+and we have α ≤ β
+Need to approx β to α's level, I think?
+
+
+(I). Let's try purely articulation-based approx. Causes head exp, but that's fine here.
+    α ≤ β. β: [α, {foo:β}], recurse on bounds.
+    α ≤ { foo : β }
+    articulate α to { foo : γ }, cache γ in articulation cache
+    { foo : γ } ≤ { foo : β }
+    γ ≤ β
+    expands to
+    γ ≤ { foo : β }
+    tricky! α's articulation cache does not apply. Hard to ensure termination here.
+
+(II). Separate approx operation.
+    Need to approx β to the level of α.
+    Introduce β'.
+    β' ≤ { foo : γ }, γ ≤ β.
+    This is really about caching β. I don't see a good way around that.
+
+
+*)
+
   (*
     let cons = map_head pol (approx_styp env ext) cons in
     let ty = join pol { pol; cons; tyvars = VSnil } (approx_vset env pol tyvars) in
@@ -297,6 +330,7 @@ let rec flex_closure pol env lvl mark flexvars (t : styp) vseen vnew =
 
 (* env ⊢ p ≤ n *)
 let rec subtype_styp env (p : styp) (n : styp) =
+  (* PPrint.(ToChannel.pretty 1. 80 stdout (hardline ^^ group (group (pr_env env ^^ string " ⊢") ^^ break 1 ^^ group (group (pr_styp Pos p) ^^ break 1 ^^ string "≤" ^^ break 1 ^^ group (pr_styp Neg n))) ^^ hardline)); *)
   wf_env env;
   wf_styp Pos env p;
   wf_styp Neg env n;
@@ -306,7 +340,7 @@ let rec subtype_styp env (p : styp) (n : styp) =
     | (Some _ as x), None | None, (Some _ as x) -> x
     | (Some (lp, _) as p), (Some (ln, _) as n) ->
        if lp > ln then p else n in
-  match max_var_level with
+  let errs = match max_var_level with
   | None ->
      (match p, n with
      | { body = Styp { cons = p; _ }; _ }, { body = Styp { cons = n; _ }; _ } ->
@@ -315,7 +349,9 @@ let rec subtype_styp env (p : styp) (n : styp) =
   | Some (lvl, mark) ->
      let pcons, pvars = styp_unconsv lvl mark p in
      let ncons, nvars = styp_unconsv lvl mark n in
-     subtype_styp_vars env lvl mark p n pcons ncons pvars nvars
+     subtype_styp_vars env lvl mark p n pcons ncons pvars nvars in
+  (* Printf.printf "%d\n%!" (List.length errs); *)
+  errs
 
 (* env ⊢ p ⊔ pv ≤ n ⊓ nv, where pv, nv same level, above anything else in p,n *)
 and subtype_styp_vars env lvl mark orig_p orig_n (p : styp) (n : styp) pvs nvs =
@@ -383,6 +419,7 @@ let rec approx env lvl mark pol t =
 
 (* Always Pos <= Neg *)
 let rec subtype env p n =
+  (* PPrint.(ToChannel.pretty 1. 80 stdout (group (pr_env env ^^ string " ⊢") ^^ break 1 ^^ group (group (pr_typ Pos p) ^^ break 1 ^^ string "≤" ^^ break 1 ^^ group (pr_typ Neg n)) ^^ hardline)); *)
   wf_env env;
   wf_typ Pos env p;
   wf_typ Neg env n;

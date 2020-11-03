@@ -5,45 +5,151 @@ open Types
 
 let unimp () = failwith "unimplemented"
 
-(* Returns a A⁻ ≤ A⁺ pair *)
-let rec typ_of_tyexp env = function
-  | None, _ -> failwith "bad type"
-  | Some t, _ -> typ_of_tyexp' env t
-and typ_of_tyexp' env : tyexp' -> typ * typ = function
-  | Tnamed ({label="any";_}, _) ->
-     cons_typ Neg Top, cons_typ Pos Top
-  | Tnamed ({label="nothing";_}, _) ->
-     cons_typ Neg Bot, cons_typ Pos Bot
-  | Tnamed ({label="bool";_}, _) ->
-     cons_typ Neg Bool, cons_typ Pos Bool
-  | Tnamed ({label="int";_}, _) ->
-     cons_typ Neg Int, cons_typ Pos Int
-  | Tnamed ({label="string";_}, _) ->
-     cons_typ Neg String, cons_typ Pos String
-  | Tnamed _ -> assert false
-  | Tforall (_vars, _body) -> unimp ()
-  | Trecord fields ->
-     let ns, ps = typs_of_tuple_tyexp env fields in
-     cons_typ Neg (Record ns), cons_typ Pos (Record ps)
-  | Tfunc (args, res) ->
-     let ans, aps = typs_of_tuple_tyexp env args in
-     let rn, rp = typ_of_tyexp env res in
-     cons_typ Neg (Func (aps, rn)), cons_typ Pos (Func (ans, rp))
-  | Tparen t ->
-     typ_of_tyexp env t
-  | Tjoin (_s, _t) -> unimp ()
-  | Tmeet (_s, _t) -> unimp ()
+type _ ty_sort =
+  | Simple : styp ty_sort
+  | Gen : typ ty_sort
+let tys_cons (type a) (sort : a ty_sort) pol (x : a cons_head) : a =
+  match sort with
+  | Simple -> cons_styp pol vsnil x
+  | Gen -> cons_typ pol x
+let tys_of_styp (type a) (sort : a ty_sort) (x : styp) : a =
+  match sort with
+  | Simple -> x
+  | Gen -> Tsimple x
 
-(*and typs_of_tuple_tyexp env fields cl = match fields with
-  | None, _ -> failwith "bad tuple of types"
-  | Some t, _ -> typs_of_tuple_tyexp' env t cl*)
-and typs_of_tuple_tyexp env t =
-  let t = map_fields (fun _fn t -> typ_of_tyexp env t) t in
+type env_ext =
+  | Env of env
+  | Ext of { level : Env_level.t; mark : Env_marker.t; vars: int SymMap.t; rest : env_ext }
+
+let env_extend env vars =
+  let level = match env with Env { level; _ } | Ext { level; _ } -> level in
+  let level = Env_level.extend level in
+  let mark = Env_marker.make () in
+  Ext { level; mark; vars; rest = env }, level, mark
+
+let env_gen_var pol index (_mark', vs) rest =
+  assert (Type_simplification.is_trivial pol rest);
+  assert (Intlist.is_singleton vs);
+  let (var, ()) = Intlist.as_singleton vs in
+  { pol; body = Bound_var { index; var } }
+
+let rec lookup_type_var env name =
+  match env with
+  | Env _ -> None
+  | Ext { level; mark; vars; rest } when SymMap.mem name.label vars ->
+     if name.shift > 0 then lookup_type_var rest { name with shift = name.shift - 1 }
+     else
+       let vs = Intlist.singleton (SymMap.find name.label vars) () in
+       Some (cons_styp Neg (Intlist.singleton level (mark, vs)) (ident Neg),
+             cons_styp Pos (Intlist.singleton level (mark, vs)) (ident Pos))
+  | Ext { rest; _ } -> lookup_type_var rest name
+
+
+(* Returns a A⁻ ≤ A⁺ pair *)
+let rec typ_of_tyexp : type s . s ty_sort -> env_ext -> tyexp -> s * s  =
+  fun sort env ty -> match ty with
+  | None, _ -> failwith "bad type"
+  | Some t, _ -> typ_of_tyexp' sort env t
+and typ_of_tyexp' : type s . s ty_sort -> env_ext -> tyexp' -> s * s =
+  fun sort env tyexp -> match tyexp with
+  | Tnamed (name, _) ->
+     begin match lookup_type_var env name with
+     | Some (n, p) -> (tys_of_styp sort n, tys_of_styp sort p)
+     | None ->
+        match name.label with
+        | "any" ->
+           tys_cons sort Neg Top, tys_cons sort Pos Top
+        | "nothing" ->
+           tys_cons sort Neg Bot, tys_cons sort Pos Bot
+        | "bool" ->
+           tys_cons sort Neg Bool, tys_cons sort Pos Bool
+        | "int" ->
+           tys_cons sort Neg Int, tys_cons sort Pos Int
+        | "string" ->
+           tys_cons sort Neg String, tys_cons sort Pos String
+        | s -> failwith ("unknown type " ^ s)
+     end
+  | Trecord fields ->
+     let ns, ps = typs_of_tuple_tyexp sort env fields in
+     tys_cons sort Neg (Record ns), tys_cons sort Pos (Record ps)
+  | Tfunc (args, res) ->
+     let ans, aps = typs_of_tuple_tyexp sort env args in
+     let rn, rp = typ_of_tyexp sort env res in
+     tys_cons sort Neg (Func (aps, rn)), tys_cons sort Pos (Func (ans, rp))
+  | Tparen t ->
+     typ_of_tyexp sort env t
+  | Tjoin _ | Tmeet _ -> unimp ()
+  | Tforall (vars, body) ->
+     match sort with Simple -> failwith "simple type expected" | Gen ->
+     let bounds = Vector.create () in
+     let var_ix =
+       List.fold_left (fun m ((v,_), bound) ->
+         match SymMap.find v m with
+         | i ->
+            Vector.push (Vector.get bounds i) bound |> ignore; m
+         | exception Not_found ->
+            let bv = Vector.create () in
+            ignore (Vector.push bv bound);
+            SymMap.add v (Vector.push bounds bv) m) SymMap.empty vars in
+     let rec check_flow = function None, _ -> failwith "bad type" | Some t, _ ->
+       match t with
+       | Tnamed ({label;_}, _) when SymMap.mem label var_ix -> Some (SymMap.find label var_ix)
+       | Tnamed _ | Trecord _ | Tfunc _ -> None
+       | Tparen t -> check_flow t
+       | Tjoin _ | Tmeet _ -> unimp ()
+       | Tforall _ -> failwith "expected styp" in
+     let nvars = Vector.length bounds in
+     let env, lvl, mark = env_extend env var_ix in
+     let gen_typ_of_tyexp (type s) (sort : s ty_sort) (ty : tyexp) : s * s =
+       let tn, tp = typ_of_tyexp sort env ty in
+       match sort with
+       | Simple ->
+          map_free_styp lvl mark 0 env_gen_var Neg tn,
+          map_free_styp lvl mark 0 env_gen_var Pos tp
+       | Gen ->
+          map_free_typ lvl mark 0 env_gen_var Neg tn,
+          map_free_typ lvl mark 0 env_gen_var Pos tp in
+     let bounds = Vector.to_array bounds |> Array.mapi (fun i bounds ->
+       Vector.fold_lefti (fun (lower, upper, flow) _ bound ->
+         match bound with
+         | None -> lower, upper, flow
+         | Some (dir, bound) ->
+            match check_flow bound with
+            | Some j ->
+               let edge = match dir with `Sub -> (i, j) | `Sup -> (j, i) in
+               lower, upper, edge :: flow
+            | None ->
+               match dir, lower, upper with
+               | `Sub, _, Some _ -> failwith "duplicate upper bounds"
+               | `Sup, Some _, _ -> failwith "duplicate lower bounds"
+               | `Sub, _, None ->
+                  let upper = Some (gen_typ_of_tyexp Simple bound) in
+                  lower, upper, flow
+               | `Sup, None, _ ->
+                  let lower = Some (gen_typ_of_tyexp Simple bound) in
+                  lower, upper, flow
+       ) (None, None, []) bounds) in
+     let flow = bounds |> Array.map (fun (_,_,f) -> f) |> Array.to_list |> List.concat |> Flow_graph.of_list nvars in
+     let bn, bp = gen_typ_of_tyexp Gen body in
+     let bounds = bounds |> Array.map (fun (l,u,_) ->
+       let ln, lp = match l with
+         | None -> (cons_styp Neg vsnil Bot, cons_styp Pos vsnil Bot)
+         | Some l -> l in
+       let un, up = match u with
+         | None -> (cons_styp Neg vsnil Top, cons_styp Pos vsnil Top)
+         | Some u -> u in
+       (ln, up), (lp, un)) in
+     Tpoly (Array.map fst bounds, flow, bn),
+     Tpoly (Array.map snd bounds, flow, bp)
+
+and typs_of_tuple_tyexp : type s . s ty_sort -> env_ext -> tyexp tuple_fields -> s tuple_fields * s tuple_fields =
+  fun sort env t ->
+  let t = map_fields (fun _fn t -> typ_of_tyexp sort env t) t in
   map_fields (fun _fn (tn, _tp) -> tn) t,
   map_fields (fun _fn (_tn, tp) -> tp) t
 
 let typ_of_tyexp env t =
-  let (tn, tp) = typ_of_tyexp env t in
+  let (tn, tp) = typ_of_tyexp Gen (Env env) t in
   wf_typ Neg env tn; wf_typ Pos env tp;
   (tn, tp)
 

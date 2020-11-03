@@ -30,7 +30,7 @@ let run_cmd s =
   let text = String.concat "\n" s in
   let open Lang in
   match Parse.parse_string text with
-  | Ok e ->
+  | Ok (`Exp e) ->
      let env0 : Typedefs.env = { level = Typedefs.Env_level.empty;
                                  marker = Typedefs.Env_marker.make ();
                                  entry = Eflexible (Vector.create ());
@@ -51,6 +51,17 @@ let run_cmd s =
         Printexc.to_string e ^ "\n" ^ Printexc.get_backtrace ()
      | exception e ->
         "typechecking error: " ^ Printexc.to_string e)
+  | Ok (`Sub (t1, t2)) ->
+     let env0 : Typedefs.env = { level = Typedefs.Env_level.empty;
+                                 marker = Typedefs.Env_marker.make ();
+                                 entry = Eflexible (Vector.create ());
+                                 rest = None } in
+     let _, t1 = Check.typ_of_tyexp env0 t1 in
+     let t2, _ = Check.typ_of_tyexp env0 t2 in
+     (*PPrint.(ToChannel.pretty 1. 80 stdout (Typedefs.pr_typ Pos t1 ^^ string " <: " ^^ Typedefs.pr_typ Neg t2 ^^ hardline));*)
+     (match Types.subtype env0 t1 t2 |> Check.report with
+      | () -> "ok"
+      | exception e -> "typechecking error: " ^ Printexc.to_string e)
   | Error _ -> "parse error"
   | exception (Failure s) -> "parser failure: " ^ s
 

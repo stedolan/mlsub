@@ -60,7 +60,7 @@ and pat = pat' mayloc and pat' =
 
 and tyexp = tyexp' mayloc and tyexp' =
   | Tnamed of ident
-  | Tforall of (symbol * tyexp option * tyexp option) list * tyexp
+  | Tforall of (symbol * ([`Sub|`Sup] * tyexp) option) list * tyexp
   | Trecord of tyexp tuple_fields
   | Tfunc of tyexp tuple_fields * tyexp
   | Tparen of tyexp
