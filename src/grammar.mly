@@ -54,10 +54,11 @@ literal_:
 
 exp: e = mayloc(exp_) { e }
 exp_:
-| FN; LPAR; params = typed_fields(pat, AS); RPAR; LBRACE; body = exp; RBRACE
-  { Fn (parse_fields params, None, body) }
-| FN; LPAR; params = typed_fields(pat, AS); RPAR; COLON; ty = tyexp; LBRACE; body = exp; RBRACE
-  { Fn (parse_fields params, Some ty, body) }
+| FN;
+  LPAR; params = separated_list(COMMA, parameter); RPAR;
+  ty = opt_type_annotation;
+  LBRACE; body = exp; RBRACE
+  { Fn (parse_fields params, ty, body) }
 | IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; f = exp; RBRACE
   { If (e, t, f) }
 | s = PRAGMA
@@ -75,7 +76,7 @@ term_:
   { Var v }
 | k = literal
   { Lit k }
-| fn = term; LPAR; args = untyped_fields(exp, EQUALS); RPAR
+| fn = term; LPAR; args = separated_list(COMMA, argument); RPAR
   { App (fn, parse_fields args) }
 | e = term; DOT; f = symbol
   { Proj (e, f) }
@@ -97,49 +98,27 @@ named_field:
 | f = SYMBOL
   { Fnamed (f, (None, None)) }
 
-typed_field(defn, named_sep):
-| e = defn
-  { Fpos (Some e, None) }
-| e = defn; COLON; ty = tyexp
-  { Fpos (Some e, Some ty) }
-| DOT; f = SYMBOL
-  { Fnamed (f, (None, None)) }
-| DOT; f = SYMBOL; named_sep; e = defn
-  { Fnamed (f, (Some e, None)) }
-| DOT; f = SYMBOL; COLON; ty = tyexp; named_sep; e = defn
-  { Fnamed (f, (Some e, Some ty)) }
-| DOT; f = SYMBOL; COLON; ty = tyexp
-  { Fnamed (f, (None, Some ty)) }
-| DOTS
-  { Fdots }
-
-typed_fields(defn, named_sep):
-|
-  { [Fempty] }
-| f = typed_field(defn, named_sep)
-  { [f] }
-| f = typed_field(defn, named_sep); COMMA; fs = typed_fields(defn, named_sep)
-  { f :: fs }
-
-
-untyped_field(defn, named_sep):
-| e = defn
+argument:
+| e = exp
   { Fpos (Some e) }
-| DOT; f = SYMBOL
+| TILDE; f = SYMBOL
   { Fnamed (f, None) }
-| DOT; f = SYMBOL; named_sep; e = defn
+| TILDE; f = SYMBOL; COLON; e = exp
   { Fnamed (f, Some e) }
-| DOTS
-  { Fdots }
 
-untyped_fields(defn, named_sep):
-|
-  { [Fempty] }
-| f = untyped_field(defn, named_sep)
-  { [f] }
-| f = untyped_field(defn, named_sep); COMMA; fs = untyped_fields(defn, named_sep)
-  { f :: fs }
+parameter:
+| p = pat; ty = opt_type_annotation
+  { Fpos (Some p, ty) }
+| TILDE; f = SYMBOL; ty = opt_type_annotation
+  { Fnamed (f, (None, ty)) }
+| TILDE; f = SYMBOL; p = pat; ty = opt_type_annotation
+  { Fnamed (f, (Some p, ty)) }
 
+opt_type_annotation:
+| 
+  { None }
+| COLON; ty = tyexp
+  { Some ty }
 
 tyfield:
 | t = tyexp

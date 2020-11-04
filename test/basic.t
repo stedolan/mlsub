@@ -218,7 +218,7 @@ let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
 fn (f: (int,int) -> int) { f(1,2) }
 > * ⊢ ∀⁺ . ((int, int) → int) → int
 
-fn (f: (~x:int,~y:int) -> int) { f(.x=1,.y=2) }
+fn (f: (~x:int,~y:int) -> int) { f(~x:1, ~y:2) }
 > * ⊢ ∀⁺ . ((x: int, y: int) → int) → int
 
 
@@ -248,9 +248,9 @@ fn (a) { if (a.foo) { {bar: a.bar} } else { a } }
 > *0: [int, ⊤],  ⊢ #0.0
 
 # tricky: the second 5 should be checked against Top (i.e. inferred)
-(fn (a,...) { a })(5,5)
+(fn (a,b) { a })(5,5)
 > *0: [int, ⊤],  ⊢ #0.0
-(fn (a,...) { a })(5,if 5 { 5 } else { 5 })
+(fn (a,b) { a })(5,if 5 { 5 } else { 5 })
 > typechecking error: Failure("incompat")
 
 
