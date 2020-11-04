@@ -23,6 +23,7 @@ let lex buf =
   | '?' -> QUESTION
   | '&' -> AMPER
   | '|' -> VBAR
+  | '~' -> TILDE
   | "->" -> ARROW
   | "<:" -> SUBTYPE
   | ":>" -> SUPTYPE
@@ -84,3 +85,4 @@ let token_name = function
   | AS -> "AS"
   | SUBTYPE -> "SUBTYPE"
   | SUPTYPE -> "SUPTYPE"
+  | TILDE -> "TILDE"

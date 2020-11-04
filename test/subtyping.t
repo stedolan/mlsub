@@ -16,19 +16,19 @@
 : [X] (X, X) -> X <: [A,B,C, A <: C, B <: C] (A, B) -> C
 > ok
 
-: [X] (.foo: (X) -> X, .bar: (X) -> X) <: (.foo: (int) -> int, .bar: (int) -> int)
+: [X] {foo: (X) -> X, bar: (X) -> X} <: {foo: (int) -> int, bar: (int) -> int}
 > ok
 
-: [X] (.foo: (X) -> X, .bar: (X) -> X) <: [X <: int] (.foo: (X) -> int, .bar: (X) -> X)
+: [X] {foo: (X) -> X, bar: (X) -> X} <: [X <: int] {foo: (X) -> int, bar: (X) -> X}
 > ok
 
-: [X] (.foo: (X) -> X, .bar: (X) -> X) <: (.foo: (int) -> int, .bar: (string) -> string)
+: [X] {foo: (X) -> X, bar: (X) -> X} <: {foo: (int) -> int, bar: (string) -> string}
 > typechecking error: Failure("incompat")
 
-: [X] (.foo: (X) -> X, .bar: (X) -> X) <: [X, Y] (.foo: (X) -> X, .bar: (Y) -> Y)
+: [X] {foo: (X) -> X, bar: (X) -> X} <: [X, Y] {foo: (X) -> X, bar: (Y) -> Y}
 > typechecking error: Failure("incompat")
 
-: [X, Y] (.foo: (X) -> X, .bar: (Y) -> Y) <: [X] (.foo: (X) -> X, .bar: (X) -> X)
+: [X, Y] {foo: (X) -> X, bar: (Y) -> Y} <: [X] {foo: (X) -> X, bar: (X) -> X}
 > ok
 
 : [X <: int, X :> int] (X) -> X <: (int) -> int

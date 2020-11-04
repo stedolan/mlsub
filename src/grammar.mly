@@ -6,7 +6,7 @@
 %token EOF WS COMMENT NL ERROR
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
 %token COLON EQUALS DOT DOTS COMMA SEMI UNDER QUESTION ARROW AMPER VBAR
-%token FN LET TRUE FALSE IF ELSE AS
+%token FN LET TRUE FALSE IF ELSE AS TILDE
 %token SUBTYPE SUPTYPE
 
 %nonassoc ARROW
@@ -79,12 +79,23 @@ term_:
   { App (fn, parse_fields args) }
 | e = term; DOT; f = symbol
   { Proj (e, f) }
-| LPAR; t = typed_fields(exp, EQUALS); RPAR
-  { match t with
-    | [Fpos (Some e, None)] -> Parens e
-    | [Fpos (Some e, Some ty)] -> Typed (e, ty)
-    | fs -> Tuple (parse_fields fs) }
 
+| LPAR; RPAR
+  { Tuple (parse_fields []) }
+| LPAR; e = exp; RPAR
+  { Parens e }
+| LPAR; e = exp; COLON; t = tyexp; RPAR
+  { Typed (e, t) }
+| LPAR; e = exp; COMMA; es = separated_list(COMMA, exp); RPAR
+  { Tuple (parse_fields (List.map (fun e -> Fpos (Some e, None)) (e :: es))) }
+| LBRACE; es = separated_nonempty_list(COMMA, named_field); RBRACE
+  { Tuple (parse_fields es) }
+
+named_field:
+| f = SYMBOL; COLON; e = exp
+  { Fnamed (f, (Some e, None)) }
+| f = SYMBOL
+  { Fnamed (f, (None, None)) }
 
 typed_field(defn, named_sep):
 | e = defn
@@ -133,7 +144,7 @@ untyped_fields(defn, named_sep):
 tyfield:
 | t = tyexp
   { Fpos t }
-| DOT; f = SYMBOL; COLON; e = tyexp
+| TILDE; f = SYMBOL; COLON; e = tyexp
   { Fnamed (f, e) }
 | DOTS
   { Fdots }
@@ -150,10 +161,30 @@ pat: p = mayloc(pat_) { p }
 pat_:
 | v = symbol
   { Pvar v }
-| LPAR; t = untyped_fields(pat, AS); RPAR
-  { match t with
-    | [Fpos (Some p)] -> Pparens p
-    | p -> Ptuple (parse_fields p) }
+| LPAR; RPAR
+  { Ptuple (parse_fields []) }
+| LPAR; DOTS; RPAR
+  { Ptuple (parse_fields [Fdots]) }
+| LPAR; p = pat; RPAR
+  { Pparens p }
+| LPAR; p = pat; COMMA; ps = separated_list(COMMA, pat_or_dots); RPAR
+  { Ptuple (parse_fields ((Fpos (Some p)) :: ps)) }
+| LBRACE; ps = separated_nonempty_list(COMMA, named_field_pat); RBRACE
+  { Ptuple (parse_fields ps) }
+
+pat_or_dots:
+| p = pat
+  { Fpos (Some p) }
+| DOTS
+  { Fdots }
+
+named_field_pat:
+| f = SYMBOL; COLON; p = pat
+  { Fnamed(f, Some p) }
+| f = SYMBOL
+  { Fnamed(f, None) }
+| DOTS
+  { Fdots }
 
 tyexp: t = mayloc(tyexp_) { t }
 tyexp_:
@@ -163,6 +194,8 @@ tyexp_:
   { match t with
     | [Fpos t] -> Tparen t
     | fs -> Trecord (parse_tyfields fs) }
+| LBRACE; ts = separated_nonempty_list(COMMA, named_field_typ); RBRACE
+  { Trecord (parse_tyfields ts) }
 (* FIXME: what does (...) -> a | b mean? (prec of -> and |) *)
 | LPAR; t = tyfields; RPAR; ARROW; r = tyexp
   { Tfunc (parse_tyfields t, r) }
@@ -172,6 +205,12 @@ tyexp_:
   { Tmeet(t1, t2) }
 | LBRACK; t = separated_list(COMMA, typolybound); RBRACK; b = tyexp %prec AS (* kinda hack *)
   { Tforall(t, b) }
+
+named_field_typ:
+| f = SYMBOL; COLON; t = tyexp
+  { Fnamed(f, t) }
+| DOTS
+  { Fdots }
 
 subtype_symbol:
 | SUBTYPE { `Sub }

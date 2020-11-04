@@ -54,10 +54,7 @@ if (false) { 1 } else { false }
 (4,)
 > * ⊢ (int)
 
-(.foo=1)
-> * ⊢ (foo: int)
-
-(.foo=1,)
+{foo:1}
 > * ⊢ (foo: int)
 
 # not a singleton tuple
@@ -73,18 +70,18 @@ if (false) { 1 } else { false }
 > * ⊢ ()
 
 # named fields
-((.foo=20, .bar=17), (.baz=1))
+({foo:20, bar:17}, {baz:1})
 > * ⊢ ((foo: int, bar: int), (baz: int))
 
-# mixture of named and unnamed
-(1, 2, .bar=3, .baz=true)
-> * ⊢ (int, int, bar: int, baz: bool)
+# FIXME mixture of named and unnamed
+# (1, 2, .bar=3, .baz=true)
+# > * ⊢ (int, int, bar: int, baz: bool)
 
 # joins
 if (true) { (1, 2) } else { (1, true, 3) }
 > * ⊢ (int, ⊤, ...)
 
-if (false) { (.foo=1,.bar=2) } else { (.foo=1,.baz=()) }
+if (false) { {foo:1,bar:2} } else { {foo:1,baz:()} }
 > * ⊢ (foo: int, ...)
 
 true.foo
@@ -94,10 +91,10 @@ true.foo
 > * ⊢ ⊥
 
 # checking join of functions and meet of records
-if true { (@bot : (.foo:(int,int), .bar:any) -> string) } else { (@bot : (.foo:(int,int), .bar:any) -> string) }
+if true { (@bot : (~foo:(int,int), ~bar:any) -> string) } else { (@bot : (~foo:(int,int), ~bar:any) -> string) }
 > * ⊢ (foo: (int, int), bar: ⊤) → string
 
-if true { (@bot : ((int,any), .foo:(int,int), .bar:any) -> string) } else {(@bot : ((any,string), .bar:string, .foo:(string,any)) -> nothing)}
+if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot : ((any,string), ~bar:string, ~foo:(string,any)) -> nothing)}
 > * ⊢ ((int, string), foo: (⊥, int), bar: string) → string
 
 
@@ -122,8 +119,8 @@ if true { (@bot : ((int,any), .foo:(int,int), .bar:any) -> string) } else {(@bot
 > typechecking error: Failure("extra")
 
 # weird. Should I allow this? eta-expansion?
-(1, 2, ...)
-> * ⊢ (int, int, ...)
+# (1, 2, ...)
+# > * ⊢ (int, int, ...)
 
 ((1, 2) : (int, int, ...))
 > * ⊢ (int, int, ...)
@@ -133,7 +130,7 @@ if true { (@bot : ((int,any), .foo:(int,int), .bar:any) -> string) } else {(@bot
 
 
 # A checking form for projections! Isn't subtyping great?
-((.foo = @true).foo : bool)
+({foo: @true}.foo : bool)
 > * ⊢ bool
 
 #
@@ -161,13 +158,13 @@ let x : bool = true; x
 let x : bool = 5; x
 > typechecking error: Failure("incompat")
 
-let (.x as foo, .y as bar) = (.x = 10, .y = true); (foo, bar)
+let {x: foo, y: bar} = {x: 10, y: true}; (foo, bar)
 > * ⊢ (int, bool)
 
-let (.x as foo, .y as bar) = (.x = 10, .y = true, .z = 42); (foo, bar)
+let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
 > typechecking error: Failure("extra")
 
-let (.x as foo, .y as bar, ...) = (.x = 10, .y = true, .z = 42); (foo, bar)
+let {x: foo, y: bar, ...} = {x: 10, y: true, z: 42}; (foo, bar)
 > * ⊢ (int, bool)
 
 
@@ -176,43 +173,53 @@ let (.x as foo, .y as bar, ...) = (.x = 10, .y = true, .z = 42); (foo, bar)
 let (x, y) = (1, true); (y, x)
 > * ⊢ (bool, int)
 
+let (x, y, ...) = (false, (), 3); {x,y}
+> * ⊢ (x: bool, y: ())
 
-let (.x as foo, .y as bar) : (.x:int, .y:bool) = (.x=1, .y=true); foo
+
+let {x: foo, y: bar} : {x:int, y:bool} = {x:1, y:true}; foo
 > * ⊢ int
-let (.x as foo, .y as bar) : (.x:int) = (.x=1, .y=true); foo
+let {x: foo, y: bar} : {x:int} = {x:1, y:true}; foo
 > typechecking error: Failure("extra")
-let (.x as foo, .y as bar) : (.x:int,.y:int) = (.x=1, .y=true); foo
+let {x: foo, y: bar} : {x:int,y:int} = {x:1, y:true}; foo
 > typechecking error: Failure("incompat")
-let (.x as foo, .y as bar) : (.x:int,.y:bool,.z:bool) = (.x=1, .y=true); foo
+let {x: foo, y: bar} : {x:int,y:bool,z:bool} = {x:1, y:true}; foo
 > typechecking error: Failure("missing z")
 
 # punning
 
-let (.x, .y) : (.x:int, .y:bool) = (.x=1, .y=true); (y,x)
+let {x, y} : {x:int, y:bool} = {x:1, y:true}; (y,x)
 > * ⊢ (bool, int)
 
-let (.x, .y) = (.x=1, .y=true); (y,x)
+let {x, y} = {x:1, y:true}; (y,x)
 > * ⊢ (bool, int)
 
-let (.x, .y) = (.x=1, .y=true); (.y,.x,.z=3)
+let {x, y} = {x:1, y:true}; {y,x,z:3}
 > * ⊢ (y: bool, x: int, z: int)
 
-let (.x, .y) = (.x=1, .y=true); ((.y,.x,.z=3) : (.y: bool, .x: int, .z: int))
+let {x, y} = {x:1, y:true}; ({y,x,z:3} : {y: bool, x: int, z: int})
 > typechecking error: Failure("punning unimplemented")
 
 
 # subtyping checks. FIXME: these probably only hit matching :(
-let a = (.foo = 1, .bar = 2); let b : (.foo: int, .bar: int) = a; b
+let a = {foo: 1, bar: 2}; let b : {foo: int, bar: int} = a; b
 > * ⊢ (foo: int, bar: int)
 
-let a = (.foo = 1, .bar = 2); let b : (.bar: int) = a; b
+let a = {foo: 1, bar: 2}; let b : {bar: int} = a; b
 > typechecking error: Failure("extra")
 
-let a = (.foo = 1, .bar = 2); let b : (.bar: any, ...) = a; b
+let a = {foo: 1, bar: 2}; let b : {bar: any, ...} = a; b
 > * ⊢ (bar: ⊤, ...)
 
-let a = (.foo = 1, .bar = 2); let b : (.bar: nothing, ...) = a; b
+let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
 > typechecking error: Failure("incompat")
+
+# function types
+fn (f: (int,int) -> int) { f(1,2) }
+> * ⊢ ∀⁺ . ((int, int) → int) → int
+
+fn (f: (~x:int,~y:int) -> int) { f(.x=1,.y=2) }
+> * ⊢ ∀⁺ . ((x: int, y: int) → int) → int
 
 
 #
@@ -231,7 +238,7 @@ fn (a : int, b) : (int, int) { (a, b) }
 (fn (a) { (a, @true) } : (int) -> (int, bool))
 > * ⊢ (int) → (int, bool)
 
-fn (a) { if (a.foo) { (.bar=a.bar) } else { a } }
+fn (a) { if (a.foo) { {bar: a.bar} } else { a } }
 > *
 > ⊢
 > ∀⁺ 0:[⊥,(foo: bool, bar: .0.1, ...)], 1:[⊥,⊤], 2:[(bar: .0.1),⊤],
@@ -247,14 +254,14 @@ fn (a) { if (a.foo) { (.bar=a.bar) } else { a } }
 > typechecking error: Failure("incompat")
 
 
-fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { (.foo = 1, .cond = false) }) }
+fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { {foo: 1, cond: false} }) }
 > * ⊢ ∀⁺ 0:[(foo: int, cond: bool),(cond: bool, ...)]. (.0.0) → .0.0
 
-fn(b) { if (b.cond) { b } else { (.foo = 1, .cond = false) } }
+fn(b) { if (b.cond) { b } else { {foo: 1, cond: false} } }
 > *
 > ⊢ ∀⁺ 0:[⊥,(cond: bool, ...)], 1:[(foo: int, cond: bool),⊤], 0 ≤ 1. (.0.0) → .0.1
 
-fn(b) { if (b.cond) { b } else { (.foo = 1, .cond = 4) } }
+fn(b) { if (b.cond) { b } else { {foo: 1, cond: 4} } }
 > *
 > ⊢ ∀⁺ 0:[⊥,(cond: bool, ...)], 1:[(foo: int, cond: int),⊤], 0 ≤ 1. (.0.0) → .0.1
 
@@ -271,7 +278,7 @@ fn (x) { ((fn(x){x.foo})(x), (fn(x){x.foo})(x))  }
 > * ⊢ ∀⁺ 0:[⊥,⊤]. ((foo: .0.0, ...)) → (.0.0, .0.0)
 
 # nested constraints, garbage variables
-fn (x) { (fn(y) { y.foo.bar })((.foo=(.bar=x))) }
+fn (x) { (fn(y) { y.foo.bar })({foo:{bar:x}}) }
 > * ⊢ ∀⁺ 0:[⊥,⊤]. (.0.0) → .0.0
 
 # Trying to make an example with meets/joins under ctors in bounds
@@ -321,10 +328,10 @@ fn (f) { (f(1), f(true)) }
 fn (f : [A] (A) -> A) { (f(1), f(true)) }
 > * ⊢ ∀⁺ . (∀⁻ 0:[⊥,⊤]. (.0.0) → .0.0) → (int, bool)
 
-fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){(.x=x(a),.y=a).y}) }
+fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 > * ⊢ ∀⁺ . ((⊤) → ⊤, (∀⁺ 0:[⊥,⊤]. (.0.0) → .0.0) → int) → int
 
-fn (x, wid : (([A <: (.foo:int), A :> (.foo:int,.bar:string)] (A) -> A) -> int)) { wid(fn(a){x(a)}) }
+fn (x, wid : (([A <: {foo:int}, A :> {foo:int,bar:string}] (A) -> A) -> int)) { wid(fn(a){x(a)}) }
 > *
 > ⊢
 > ∀⁺ . (
