@@ -206,12 +206,14 @@ and check' env e ty =
                fnames = [field];
                fopen = `Open } in
      check env e (Tcons (Record r))
-  | Let (ps, es, body), _ ->
+  | Let (p, pty, e, body), _ ->
      let env = env_cons env (Eflexible (Vector.create ())) in
      let flex = (env.level, env.marker) in
-     let vs = bind env flex SymMap.empty ps es in
+     let pty = check_or_infer env flex pty e in
+     let vs = check_pat env flex SymMap.empty pty p in
      let env = env_cons env (Evals vs) in
      check env body ty
+  (* FIXME: the checking form for Fn/Tpoly needs thought *)
   | Fn (params, ret, body), Tcons (Func (ptypes, rtype)) ->
      let vs = check_pat_typed_fields env SymMap.empty ptypes params in
      let env' = env_cons env (Evals vs) in
@@ -264,8 +266,9 @@ and infer' env flex = function
      cons_typ Pos (Record (infer_fields env flex fields))
   | Pragma "bot" -> cons_typ Pos Bot
   | Pragma s -> failwith ("pragma: " ^ s)
-  | Let (ps, es, body) ->
-     let vs = bind env flex SymMap.empty ps es in
+  | Let (p, pty, e, body) ->
+     let pty = check_or_infer env flex pty e in
+     let vs = check_pat env flex SymMap.empty pty p in
      let env = env_cons env (Evals vs) in
      infer env flex body
   | Fn (params, ret, body) ->

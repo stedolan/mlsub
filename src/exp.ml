@@ -29,11 +29,8 @@ type exp = exp' mayloc and exp' =
   | App of exp * (exp option) tuple_fields
   (* (a, b, c) *)
   | Tuple of tuple
-  (* let a : t, b : t, ... = a : t, b : t, ...; ... *)
-  | Let of
-      typed_pats *
-      (exp option) tuple_fields *
-      exp
+  (* let a : t = ...; ... *)
+  | Let of pat * tyexp option * exp * exp
   (* a.foo *)
   | Proj of exp * symbol
   (* if a { foo } else { bar } *)

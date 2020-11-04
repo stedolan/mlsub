@@ -62,8 +62,10 @@ exp_:
   { If (e, t, f) }
 | s = PRAGMA
   { Pragma s }
-| LET; p = typed_fields(pat, AS); EQUALS; e = untyped_fields(exp, EQUALS); SEMI; body = exp
-  { Let (parse_fields p, parse_fields e, body) }
+| LET; p = pat; EQUALS; e = exp; SEMI; body = exp
+  { Let (p, None, e, body) }
+| LET; p = pat; COLON; t = tyexp; EQUALS; e = exp; SEMI; body = exp
+  { Let (p, Some t, e, body) }
 | t = term_
   { t }
 
