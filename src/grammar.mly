@@ -88,31 +88,31 @@ term_:
 | LPAR; e = exp; COLON; t = tyexp; RPAR
   { Typed (e, t) }
 | LPAR; e = exp; COMMA; es = separated_list(COMMA, exp); RPAR
-  { Tuple (parse_fields (List.map (fun e -> Fpos (Some e, None)) (e :: es))) }
+  { Tuple (parse_fields (List.map (fun e -> Fpos e) (e :: es))) }
 | LBRACE; es = separated_nonempty_list(COMMA, named_field); RBRACE
   { Tuple (parse_fields es) }
 
 named_field:
 | f = SYMBOL; COLON; e = exp
-  { Fnamed (f, (Some e, None)) }
-| f = SYMBOL
-  { Fnamed (f, (None, None)) }
+  { Fnamed (f, e) }
+| f = ident
+  { Fnamed ((fst f).label, (Some (Var f), snd f)) }
 
 argument:
 | e = exp
-  { Fpos (Some e) }
-| TILDE; f = SYMBOL
-  { Fnamed (f, None) }
+  { Fpos e }
+| TILDE; f = ident
+  { Fnamed ((fst f).label, (Some (Var f), snd f)) }
 | TILDE; f = SYMBOL; COLON; e = exp
-  { Fnamed (f, Some e) }
+  { Fnamed (f, e) }
 
 parameter:
 | p = pat; ty = opt_type_annotation
-  { Fpos (Some p, ty) }
-| TILDE; f = SYMBOL; ty = opt_type_annotation
-  { Fnamed (f, (None, ty)) }
+  { Fpos (p, ty) }
+| TILDE; f = symbol; ty = opt_type_annotation
+  { Fnamed (fst f, ((Some (Pvar f), snd f), ty)) }
 | TILDE; f = SYMBOL; p = pat; ty = opt_type_annotation
-  { Fnamed (f, (Some p, ty)) }
+  { Fnamed (f, (p, ty)) }
 
 opt_type_annotation:
 | 
@@ -147,21 +147,21 @@ pat_:
 | LPAR; p = pat; RPAR
   { Pparens p }
 | LPAR; p = pat; COMMA; ps = separated_list(COMMA, pat_or_dots); RPAR
-  { Ptuple (parse_fields ((Fpos (Some p)) :: ps)) }
+  { Ptuple (parse_fields (Fpos p :: ps)) }
 | LBRACE; ps = separated_nonempty_list(COMMA, named_field_pat); RBRACE
   { Ptuple (parse_fields ps) }
 
 pat_or_dots:
 | p = pat
-  { Fpos (Some p) }
+  { Fpos p }
 | DOTS
   { Fdots }
 
 named_field_pat:
 | f = SYMBOL; COLON; p = pat
-  { Fnamed(f, Some p) }
-| f = SYMBOL
-  { Fnamed(f, None) }
+  { Fnamed(f, p) }
+| f = symbol
+  { Fnamed(fst f, (Some (Pvar f), snd f)) }
 | DOTS
   { Fdots }
 

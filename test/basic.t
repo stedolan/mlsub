@@ -198,7 +198,7 @@ let {x, y} = {x:1, y:true}; {y,x,z:3}
 > * ⊢ (y: bool, x: int, z: int)
 
 let {x, y} = {x:1, y:true}; ({y,x,z:3} : {y: bool, x: int, z: int})
-> typechecking error: Failure("punning unimplemented")
+> * ⊢ (y: bool, x: int, z: int)
 
 
 # subtyping checks. FIXME: these probably only hit matching :(
@@ -221,6 +221,11 @@ fn (f: (int,int) -> int) { f(1,2) }
 fn (f: (~x:int,~y:int) -> int) { f(~x:1, ~y:2) }
 > * ⊢ ∀⁺ . ((x: int, y: int) → int) → int
 
+fn (f: (~x:int,~y:int) -> int) { let x = 1; f(~x, ~y:2) }
+> * ⊢ ∀⁺ . ((x: int, y: int) → int) → int
+
+fn () { (fn (~x, ~y) { {x,y} }) (~y:1, ~x:()) }
+> * ⊢ ∀⁺ . () → (x: (), y: int)
 
 #
 # Lambda
@@ -352,11 +357,11 @@ fn(f) { (fn(x) { 5 })(f(10)) }
 > Called from Lang__Intlist.iter in file "src/intlist.ml", line 90, characters 21-26
 > Called from Lang__Types.subtype_styp_vars in file "src/types.ml", line 367, characters 5-151
 > Called from Lang__Types.subtype_styp in file "src/types.ml", line 399, characters 10-30
-> Called from Lang__Check.check' in file "src/check.ml", line 230, characters 5-23
+> Called from Lang__Check.check' in file "src/check.ml", line 232, characters 5-23
 > Called from Stdlib__list.fold_left in file "list.ml", line 121, characters 24-34
-> Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 50, characters 12-65
-> Called from Lang__Check.infer' in file "src/check.ml", line 304, characters 5-177
-> Called from Lang__Check.infer in file "src/check.ml", line 244, characters 26-43
+> Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 54, characters 12-65
+> Called from Lang__Check.infer' in file "src/check.ml", line 296, characters 5-62
+> Called from Lang__Check.infer in file "src/check.ml", line 237, characters 26-43
 > Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 39, characters 12-36
 > 
 
@@ -370,10 +375,10 @@ fn(f) { (fn(x) { 5 })(f(10)) }
 > Called from Lang__Intlist.iter in file "src/intlist.ml", line 90, characters 21-26
 > Called from Lang__Types.subtype_styp_vars in file "src/types.ml", line 367, characters 5-151
 > Called from Lang__Types.subtype_styp in file "src/types.ml", line 399, characters 10-30
-> Called from Lang__Check.check' in file "src/check.ml", line 230, characters 5-23
+> Called from Lang__Check.check' in file "src/check.ml", line 232, characters 5-23
 > Called from Stdlib__list.fold_left in file "list.ml", line 121, characters 24-34
-> Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 50, characters 12-65
-> Called from Lang__Check.infer' in file "src/check.ml", line 304, characters 5-177
-> Called from Lang__Check.infer in file "src/check.ml", line 244, characters 26-43
+> Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 54, characters 12-65
+> Called from Lang__Check.infer' in file "src/check.ml", line 296, characters 5-62
+> Called from Lang__Check.infer in file "src/check.ml", line 237, characters 26-43
 > Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 39, characters 12-36
 > 

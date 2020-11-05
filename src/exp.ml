@@ -22,13 +22,13 @@ type exp = exp' mayloc and exp' =
   (* x *)
   | Var of ident
   (* fn (a, b, c) { ... } *)
-  | Fn of typed_pats * tyexp option * exp
+  | Fn of parameters * tyexp option * exp
   (* fn f(a, b, c) { .... }; ... *)
   (* | Def of symbol * typed_pats * exp * exp *)
   (* f(...) *)
-  | App of exp * (exp option) tuple_fields
+  | App of exp * exp tuple_fields
   (* (a, b, c) or {x: a, y, z: c}*)
-  | Tuple of tuple
+  | Tuple of exp tuple_fields
   (* let a : t = ...; ... *)
   | Let of pat * tyexp option * exp * exp
   (* a.foo *)
@@ -42,14 +42,12 @@ type exp = exp' mayloc and exp' =
   (* @foo *)
   | Pragma of string
 
-and typed_pats = (pat option * tyexp option) tuple_fields
-
-and tuple = (exp option * tyexp option) tuple_fields
+and parameters = (pat * tyexp option) tuple_fields
 
 (* Patterns *)
 
 and pat = pat' mayloc and pat' =
-  | Ptuple of pat option tuple_fields
+  | Ptuple of pat tuple_fields
   | Pvar of symbol
   | Pparens of pat
 

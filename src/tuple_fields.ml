@@ -1,5 +1,9 @@
 (* Later, maybe intern these? *)
 
+(* FIXME: preserve ordering of tuple fields in mixtures,
+   to avoid screwing up evaluation order.
+   (Alt: ban mixtures in the parser) *)
+
 type symbol = string
 module SymMap = Map.Make (struct type t = string let compare = compare end)
 
