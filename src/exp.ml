@@ -21,8 +21,8 @@ type exp = exp' mayloc and exp' =
   | Lit of literal loc
   (* x *)
   | Var of ident
-  (* fn (a, b, c) { ... } *)
-  | Fn of parameters * tyexp option * exp
+  (* fn [...](a, b, c) { ... } *)
+  | Fn of typolybounds option * parameters * tyexp option * exp
   (* fn f(a, b, c) { .... }; ... *)
   (* | Def of symbol * typed_pats * exp * exp *)
   (* f(...) *)
@@ -55,9 +55,12 @@ and pat = pat' mayloc and pat' =
 
 and tyexp = tyexp' mayloc and tyexp' =
   | Tnamed of ident
-  | Tforall of (symbol * ([`Sub|`Sup] * tyexp) option) list * tyexp
+  | Tforall of typolybounds * tyexp
   | Trecord of tyexp tuple_fields
   | Tfunc of tyexp tuple_fields * tyexp
   | Tparen of tyexp
   | Tjoin of tyexp * tyexp
   | Tmeet of tyexp * tyexp
+
+and typolybounds =
+  (symbol * ([`Sub|`Sup] * tyexp) option) list

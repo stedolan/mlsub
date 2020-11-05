@@ -216,16 +216,16 @@ let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
 
 # function types
 fn (f: (int,int) -> int) { f(1,2) }
-> * ⊢ ∀⁺ . ((int, int) → int) → int
+> * ⊢ ((int, int) → int) → int
 
 fn (f: (~x:int,~y:int) -> int) { f(~x:1, ~y:2) }
-> * ⊢ ∀⁺ . ((x: int, y: int) → int) → int
+> * ⊢ ((x: int, y: int) → int) → int
 
 fn (f: (~x:int,~y:int) -> int) { let x = 1; f(~x, ~y:2) }
-> * ⊢ ∀⁺ . ((x: int, y: int) → int) → int
+> * ⊢ ((x: int, y: int) → int) → int
 
 fn () { (fn (~x, ~y) { {x,y} }) (~y:1, ~x:()) }
-> * ⊢ ∀⁺ . () → (x: (), y: int)
+> * ⊢ () → (x: (), y: int)
 
 #
 # Lambda
@@ -235,10 +235,10 @@ fn (a, b) { (b, a.foo) }
 > * ⊢ ∀⁺ 0:[⊥,⊤], 1:[⊥,⊤]. ((foo: .0.1, ...), .0.0) → (.0.0, .0.1)
 
 fn (a, b) : int { b }
-> * ⊢ ∀⁺ . (⊤, int) → int
+> * ⊢ (⊤, int) → int
 
 fn (a : int, b) : (int, int) { (a, b) }
-> * ⊢ ∀⁺ . (int, int) → (int, int)
+> * ⊢ (int, int) → (int, int)
 
 (fn (a) { (a, @true) } : (int) -> (int, bool))
 > * ⊢ (int) → (int, bool)
@@ -300,7 +300,7 @@ fn (x, f, g) { ( f(x.foo), g(x.foo) ) }
 
 # garbage
 fn (x) { (fn (y) { 5 })(if (x.cond) { (x.a, x.b) } else { (x.b, x.a) }) }
-> * ⊢ ∀⁺ . ((cond: bool, a: ⊤, b: ⊤, ...)) → int
+> * ⊢ ((cond: bool, a: ⊤, b: ⊤, ...)) → int
 
 
 fn (x) { if (x.cond) { (x.a, x.b) } else { (x.b, x.a) } }
@@ -331,37 +331,37 @@ fn (f) { (f(1), f(true)) }
 > * ⊢ ∀⁺ 0:[⊥,⊤]. ((⊤) → .0.0) → (.0.0, .0.0)
 
 fn (f : [A] (A) -> A) { (f(1), f(true)) }
-> * ⊢ ∀⁺ . (∀⁻ 0:[⊥,⊤]. (.0.0) → .0.0) → (int, bool)
+> * ⊢ (∀⁻ 0:[⊥,⊤]. (.0.0) → .0.0) → (int, bool)
 
 fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
-> * ⊢ ∀⁺ . ((⊤) → ⊤, (∀⁺ 0:[⊥,⊤]. (.0.0) → .0.0) → int) → int
+> * ⊢ (⊤, (∀⁺ 0:[⊥,⊤]. (.0.0) → .0.0) → int) → int
 
 fn (x, wid : (([A <: {foo:int}, A :> {foo:int,bar:string}] (A) -> A) -> int)) { wid(fn(a){x(a)}) }
 > *
 > ⊢
-> ∀⁺ . (
+> (
 >   ((foo: int)) → (foo: int, bar: string),
 >   (∀⁺ 0:[(foo: int, bar: string),(foo: int)]. (.0.0) → .0.0) → int) → int
 
 fn(f) { (fn(x) { 5 })(f(10)) }
-> * ⊢ ∀⁺ . ((int) → ⊤) → int
+> * ⊢ ((int) → ⊤) → int
 
 
 # needs approx
 (fn (x) { x })(fn (x) { x })
 > internal error: approx unimplemented
 > Raised at Lang__Types.intfail in file "src/types.ml", line 5, characters 16-34
-> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 231, characters 46-55
+> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 240, characters 46-55
 > Called from Lang__Types.approx_styp in file "src/types.ml", line 269, characters 13-57
-> Called from Lang__Types.subtype_styp_vars.(fun) in file "src/types.ml", line 369, characters 33-70
+> Called from Lang__Types.subtype_styp_vars.(fun) in file "src/types.ml", line 364, characters 33-70
 > Called from Lang__Intlist.iter in file "src/intlist.ml", line 90, characters 21-26
-> Called from Lang__Types.subtype_styp_vars in file "src/types.ml", line 367, characters 5-151
-> Called from Lang__Types.subtype_styp in file "src/types.ml", line 399, characters 10-30
-> Called from Lang__Check.check' in file "src/check.ml", line 232, characters 5-23
+> Called from Lang__Types.subtype_styp_vars in file "src/types.ml", line 362, characters 5-151
+> Called from Lang__Types.subtype_styp in file "src/types.ml", line 394, characters 10-30
+> Called from Lang__Check.check' in file "src/check.ml", line 249, characters 5-23
 > Called from Stdlib__list.fold_left in file "list.ml", line 121, characters 24-34
 > Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 54, characters 12-65
-> Called from Lang__Check.infer' in file "src/check.ml", line 296, characters 5-62
-> Called from Lang__Check.infer in file "src/check.ml", line 237, characters 26-43
+> Called from Lang__Check.infer' in file "src/check.ml", line 326, characters 5-62
+> Called from Lang__Check.infer in file "src/check.ml", line 254, characters 26-43
 > Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 39, characters 12-36
 > 
 
@@ -369,16 +369,16 @@ fn(f) { (fn(x) { 5 })(f(10)) }
 (fn (x) { x(x) }) (fn (x) { x(x) })
 > internal error: approx unimplemented
 > Raised at Lang__Types.intfail in file "src/types.ml", line 5, characters 16-34
-> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 231, characters 46-55
+> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 240, characters 46-55
 > Called from Lang__Types.approx_styp in file "src/types.ml", line 269, characters 13-57
-> Called from Lang__Types.subtype_styp_vars.(fun) in file "src/types.ml", line 369, characters 33-70
+> Called from Lang__Types.subtype_styp_vars.(fun) in file "src/types.ml", line 364, characters 33-70
 > Called from Lang__Intlist.iter in file "src/intlist.ml", line 90, characters 21-26
-> Called from Lang__Types.subtype_styp_vars in file "src/types.ml", line 367, characters 5-151
-> Called from Lang__Types.subtype_styp in file "src/types.ml", line 399, characters 10-30
-> Called from Lang__Check.check' in file "src/check.ml", line 232, characters 5-23
+> Called from Lang__Types.subtype_styp_vars in file "src/types.ml", line 362, characters 5-151
+> Called from Lang__Types.subtype_styp in file "src/types.ml", line 394, characters 10-30
+> Called from Lang__Check.check' in file "src/check.ml", line 249, characters 5-23
 > Called from Stdlib__list.fold_left in file "list.ml", line 121, characters 24-34
 > Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 54, characters 12-65
-> Called from Lang__Check.infer' in file "src/check.ml", line 296, characters 5-62
-> Called from Lang__Check.infer in file "src/check.ml", line 237, characters 26-43
+> Called from Lang__Check.infer' in file "src/check.ml", line 326, characters 5-62
+> Called from Lang__Check.infer in file "src/check.ml", line 254, characters 26-43
 > Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 39, characters 12-36
 > 

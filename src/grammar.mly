@@ -24,6 +24,8 @@ let parse_tyfields fs = collect_fields fs
 %}
 %%
 
+
+%inline id(X): X { $1 }
 %inline loc(X): e = X
   { e, { source = "FIXME"; loc_start = $startpos(e); loc_end = $endpos(e) } }
 %inline mayfail(X): e = X { Some e } (* | error { None } *) 
@@ -55,10 +57,11 @@ literal_:
 exp: e = mayloc(exp_) { e }
 exp_:
 | FN;
+  poly = ioption(typolybounds);
   LPAR; params = separated_list(COMMA, parameter); RPAR;
   ty = opt_type_annotation;
   LBRACE; body = exp; RBRACE
-  { Fn (parse_fields params, ty, body) }
+  { Fn (poly, parse_fields params, ty, body) }
 | IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; f = exp; RBRACE
   { If (e, t, f) }
 | s = PRAGMA
@@ -165,6 +168,10 @@ named_field_pat:
 | DOTS
   { Fdots }
 
+typolybounds:
+| LBRACK; t = separated_list(COMMA, typolybound); RBRACK
+  { t }
+
 tyexp: t = mayloc(tyexp_) { t }
 tyexp_:
 | t = ident
@@ -182,7 +189,7 @@ tyexp_:
   { Tjoin(t1, t2) }
 | t1 = tyexp; AMPER; t2 = tyexp
   { Tmeet(t1, t2) }
-| LBRACK; t = separated_list(COMMA, typolybound); RBRACK; b = tyexp %prec AS (* kinda hack *)
+| t = typolybounds; b = tyexp %prec AS (* kinda hack *)
   { Tforall(t, b) }
 
 named_field_typ:
@@ -191,10 +198,9 @@ named_field_typ:
 | DOTS
   { Fdots }
 
-subtype_symbol:
-| SUBTYPE { `Sub }
-| SUPTYPE { `Sup }
-
 typolybound:
-| s = symbol; t = subtype_symbol; b = tyexp { s, Some (t, b) }
+| s = symbol;
+  t = id(SUBTYPE {`Sub} | SUPTYPE {`Sup});
+  b = tyexp
+  { s, Some (t, b) }
 | s = symbol { s, None }

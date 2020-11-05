@@ -17,46 +17,32 @@ let tys_of_styp (type a) (sort : a ty_sort) (x : styp) : a =
   | Simple -> x
   | Gen -> Tsimple x
 
-type env_ext =
-  | Env of env
-  | Ext of { level : Env_level.t; mark : Env_marker.t; vars: int SymMap.t; rest : env_ext }
+let close_tys (type s) (sort : s ty_sort) lvl mark pol (t : s) : s =
+  let env_gen_var pol index (_mark', vs) rest =
+    assert (Type_simplification.is_trivial pol rest);
+    assert (Intlist.is_singleton vs);
+    let (var, ()) = Intlist.as_singleton vs in
+    { pol; body = Bound_var { index; var } } in
+  match sort with
+  | Simple ->
+     map_free_styp lvl mark 0 env_gen_var pol t
+  | Gen ->
+     map_free_typ lvl mark 0 env_gen_var pol t
 
-let env_extend env vars =
-  let level = match env with Env { level; _ } | Ext { level; _ } -> level in
-  let level = Env_level.extend level in
-  let mark = Env_marker.make () in
-  Ext { level; mark; vars; rest = env }, level, mark
-
-let env_gen_var pol index (_mark', vs) rest =
-  assert (Type_simplification.is_trivial pol rest);
-  assert (Intlist.is_singleton vs);
-  let (var, ()) = Intlist.as_singleton vs in
-  { pol; body = Bound_var { index; var } }
-
-let rec lookup_type_var env name =
-  match env with
-  | Env _ -> None
-  | Ext { level; mark; vars; rest } when SymMap.mem name.label vars ->
-     if name.shift > 0 then lookup_type_var rest { name with shift = name.shift - 1 }
-     else
-       let vs = Intlist.singleton (SymMap.find name.label vars) () in
-       Some (cons_styp Neg (Intlist.singleton level (mark, vs)) (ident Neg),
-             cons_styp Pos (Intlist.singleton level (mark, vs)) (ident Pos))
-  | Ext { rest; _ } -> lookup_type_var rest name
-
-
-(* Returns a A⁻ ≤ A⁺ pair *)
-let rec typ_of_tyexp : type s . s ty_sort -> env_ext -> tyexp -> s * s  =
-  fun sort env ty -> match ty with
-  | None, _ -> failwith "bad type"
-  | Some t, _ -> typ_of_tyexp' sort env t
-and typ_of_tyexp' : type s . s ty_sort -> env_ext -> tyexp' -> s * s =
-  fun sort env tyexp -> match tyexp with
-  | Tnamed (name, _) ->
-     begin match lookup_type_var env name with
-     | Some (n, p) -> (tys_of_styp sort n, tys_of_styp sort p)
+let rec env_lookup_type : type s . s ty_sort -> env -> string -> s * s =
+  fun sort env name ->
+  match env.entry with
+  | Erigid { names; _ } when SymMap.mem name names ->
+     (* FIXME shifting? *)
+     let i = SymMap.find name names in
+     let vs = Intlist.singleton i () in
+     (tys_of_styp sort (cons_styp Neg (Intlist.singleton env.level (env.marker, vs)) (ident Neg)),
+      tys_of_styp sort (cons_styp Pos (Intlist.singleton env.level (env.marker, vs)) (ident Pos)))
+  | _ ->
+     match env.rest with
+     | Some env -> env_lookup_type sort env name
      | None ->
-        match name.label with
+        match name with
         | "any" ->
            tys_cons sort Neg Top, tys_cons sort Pos Top
         | "nothing" ->
@@ -67,8 +53,17 @@ and typ_of_tyexp' : type s . s ty_sort -> env_ext -> tyexp' -> s * s =
            tys_cons sort Neg Int, tys_cons sort Pos Int
         | "string" ->
            tys_cons sort Neg String, tys_cons sort Pos String
-        | s -> failwith ("unknown type " ^ s)
-     end
+        | _ -> failwith ("unknown type " ^ name)
+
+(* Returns a A⁻ ≤ A⁺ pair *)
+let rec typ_of_tyexp : type s . s ty_sort -> env -> tyexp -> s * s  =
+  fun sort env ty -> match ty with
+  | None, _ -> failwith "bad type"
+  | Some t, _ -> typ_of_tyexp' sort env t
+and typ_of_tyexp' : type s . s ty_sort -> env -> tyexp' -> s * s =
+  fun sort env tyexp -> match tyexp with
+  | Tnamed (name, _) ->
+     env_lookup_type sort env name.label
   | Trecord fields ->
      let ns, ps = typs_of_tuple_tyexp sort env fields in
      tys_cons sort Neg (Record ns), tys_cons sort Pos (Record ps)
@@ -81,75 +76,92 @@ and typ_of_tyexp' : type s . s ty_sort -> env_ext -> tyexp' -> s * s =
   | Tjoin _ | Tmeet _ -> unimp ()
   | Tforall (vars, body) ->
      match sort with Simple -> failwith "simple type expected" | Gen ->
-     let bounds = Vector.create () in
-     let var_ix =
-       List.fold_left (fun m ((v,_), bound) ->
-         match SymMap.find v m with
-         | i ->
-            Vector.push (Vector.get bounds i) bound |> ignore; m
-         | exception Not_found ->
-            let bv = Vector.create () in
-            ignore (Vector.push bv bound);
-            SymMap.add v (Vector.push bounds bv) m) SymMap.empty vars in
-     let rec check_flow = function None, _ -> failwith "bad type" | Some t, _ ->
-       match t with
-       | Tnamed ({label;_}, _) when SymMap.mem label var_ix -> Some (SymMap.find label var_ix)
-       | Tnamed _ | Trecord _ | Tfunc _ -> None
-       | Tparen t -> check_flow t
-       | Tjoin _ | Tmeet _ -> unimp ()
-       | Tforall _ -> failwith "expected styp" in
-     let nvars = Vector.length bounds in
-     let env, lvl, mark = env_extend env var_ix in
-     let gen_typ_of_tyexp (type s) (sort : s ty_sort) (ty : tyexp) : s * s =
-       let tn, tp = typ_of_tyexp sort env ty in
-       match sort with
-       | Simple ->
-          map_free_styp lvl mark 0 env_gen_var Neg tn,
-          map_free_styp lvl mark 0 env_gen_var Pos tp
-       | Gen ->
-          map_free_typ lvl mark 0 env_gen_var Neg tn,
-          map_free_typ lvl mark 0 env_gen_var Pos tp in
-     let bounds = Vector.to_array bounds |> Array.mapi (fun i bounds ->
-       Vector.fold_lefti (fun (lower, upper, flow) _ bound ->
-         match bound with
-         | None -> lower, upper, flow
-         | Some (dir, bound) ->
-            match check_flow bound with
-            | Some j ->
-               let edge = match dir with `Sub -> (i, j) | `Sup -> (j, i) in
-               lower, upper, edge :: flow
-            | None ->
-               match dir, lower, upper with
-               | `Sub, _, Some _ -> failwith "duplicate upper bounds"
-               | `Sup, Some _, _ -> failwith "duplicate lower bounds"
-               | `Sub, _, None ->
-                  let upper = Some (gen_typ_of_tyexp Simple bound) in
-                  lower, upper, flow
-               | `Sup, None, _ ->
-                  let lower = Some (gen_typ_of_tyexp Simple bound) in
-                  lower, upper, flow
-       ) (None, None, []) bounds) in
-     let flow = bounds |> Array.map (fun (_,_,f) -> f) |> Array.to_list |> List.concat |> Flow_graph.of_list nvars in
-     let bn, bp = gen_typ_of_tyexp Gen body in
-     let bounds = bounds |> Array.map (fun (l,u,_) ->
-       let ln, lp = match l with
-         | None -> (cons_styp Neg vsnil Bot, cons_styp Pos vsnil Bot)
-         | Some l -> l in
-       let un, up = match u with
-         | None -> (cons_styp Neg vsnil Top, cons_styp Pos vsnil Top)
-         | Some u -> u in
-       (ln, up), (lp, un)) in
-     Tpoly (Array.map fst bounds, flow, bn),
-     Tpoly (Array.map snd bounds, flow, bp)
+     let names, nbounds, pbounds, flow = poly_of_typolybounds env vars in
+     let env, _ = enter_poly_neg env names nbounds flow (Tcons (ident Neg)) in
+     let bn, bp = typ_of_tyexp sort env body in
+     let bn = close_tys Gen env.level env.marker Neg bn in
+     let bp = close_tys Gen env.level env.marker Pos bp in
+     Tpoly {names; bounds=nbounds; flow; body=bn},
+     Tpoly {names; bounds=pbounds; flow; body=bp}
 
-and typs_of_tuple_tyexp : type s . s ty_sort -> env_ext -> tyexp tuple_fields -> s tuple_fields * s tuple_fields =
+and typs_of_tuple_tyexp : type s . s ty_sort -> env -> tyexp tuple_fields -> s tuple_fields * s tuple_fields =
   fun sort env t ->
   let t = map_fields (fun _fn t -> typ_of_tyexp sort env t) t in
   map_fields (fun _fn (tn, _tp) -> tn) t,
   map_fields (fun _fn (_tn, tp) -> tp) t
 
+(* FIXME crazy type *)
+and poly_of_typolybounds env (vars : typolybounds) :
+  int SymMap.t *
+    (string * styp * styp) array * (string * styp * styp) array * Flow_graph.t =
+  let bounds = Vector.create () in
+  let var_ix =
+    List.fold_left (fun m ((v,_), bound) ->
+      match SymMap.find v m with
+      | i ->
+         Vector.push (snd (Vector.get bounds i)) bound |> ignore; m
+      | exception Not_found ->
+         let bv = Vector.create () in
+         ignore (Vector.push bv bound);
+         SymMap.add v (Vector.push bounds (v,bv)) m) SymMap.empty vars in
+  let rec check_flow = function None, _ -> failwith "bad type" | Some t, _ ->
+    match t with
+    | Tnamed ({label;_}, _) when SymMap.mem label var_ix -> Some (SymMap.find label var_ix)
+    | Tnamed _ | Trecord _ | Tfunc _ -> None
+    | Tparen t -> check_flow t
+    | Tjoin _ | Tmeet _ -> unimp ()
+    | Tforall _ -> failwith "expected styp" in
+  let nvars = Vector.length bounds in
+  let env = env_cons env (Erigid {
+    names = var_ix;
+    vars = bounds |> Vector.to_array |> Array.map (fun (name,_) ->
+      { name;
+        rig_lower = cons_styp Neg vsnil (ident Neg);
+        rig_upper = cons_styp Pos vsnil (ident Pos) });
+    flow = Flow_graph.empty (Vector.length bounds);
+  }) in
+  let bound_of_tyexp (ty : tyexp) =
+    let n, p = typ_of_tyexp Simple env ty in
+    close_tys Simple env.level env.marker Neg n,
+    close_tys Simple env.level env.marker Pos p in
+  let bounds = Vector.to_array bounds |> Array.mapi (fun i (name,bounds) ->
+    let lower, upper, flow =
+      Vector.fold_lefti (fun (lower, upper, flow) _ bound ->
+      match bound with
+      | None -> lower, upper, flow
+      | Some (dir, bound) ->
+         match check_flow bound with
+         | Some j ->
+            let edge = match dir with `Sub -> (i, j) | `Sup -> (j, i) in
+            lower, upper, edge :: flow
+         | None ->
+            match dir, lower, upper with
+            | `Sub, _, Some _ -> failwith "duplicate upper bounds"
+            | `Sup, Some _, _ -> failwith "duplicate lower bounds"
+            | `Sub, _, None ->
+               let upper = Some (bound_of_tyexp bound) in
+               lower, upper, flow
+            | `Sup, None, _ ->
+               let lower = Some (bound_of_tyexp bound) in
+               lower, upper, flow
+      ) (None, None, []) bounds in
+    (name, lower, upper, flow)) in
+  let flow = bounds |> Array.map (fun (_,_,_,f) -> f) |> Array.to_list |> List.concat |> Flow_graph.of_list nvars in
+  let bounds = bounds |> Array.map (fun (name,l,u,_) ->
+    let ln, lp = match l with
+      | None -> (cons_styp Neg vsnil Bot, cons_styp Pos vsnil Bot)
+      | Some l -> l in
+    let un, up = match u with
+      | None -> (cons_styp Neg vsnil Top, cons_styp Pos vsnil Top)
+      | Some u -> u in
+    (name, ln, up), (name, lp, un)) in
+  var_ix, Array.map fst bounds, Array.map snd bounds, flow
+
+  
+
+
 let typ_of_tyexp env t =
-  let (tn, tp) = typ_of_tyexp Gen (Env env) t in
+  let (tn, tp) = typ_of_tyexp Gen env t in
   wf_typ Neg env tn; wf_typ Pos env tp;
   (tn, tp)
 
@@ -191,6 +203,11 @@ let rec check env e (ty : typ) =
   | Some e, _ -> check' env e ty
 and check' env e ty =
   match e, inspect ty with
+  | e, Tpoly { names = _; bounds; flow; body } ->
+     (* The names should not be in scope in the body *)
+     let env, ty = enter_poly_neg env SymMap.empty bounds flow body in
+     check' env e ty
+
   | If (e, ifso, ifnot), _ ->
      check env e (cons_typ Neg Bool);
      check env ifso ty;
@@ -215,8 +232,8 @@ and check' env e ty =
      let vs = check_pat env flex SymMap.empty pty p in
      let env = env_cons env (Evals vs) in
      check env body ty
-  (* FIXME: the checking form for Fn/Tpoly needs thought *)
-  | Fn (params, ret, body), Tcons (Func (ptypes, rtype)) ->
+  | Fn (None, params, ret, body), Tcons (Func (ptypes, rtype)) ->
+     (* If poly <> None, then we should infer & subtype *)
      let vs = check_parameters env SymMap.empty ptypes params in
      let env' = env_cons env (Evals vs) in
      check env' body (check_annot env' ret rtype)
@@ -265,9 +282,15 @@ and infer' env flex = function
      let vs = check_pat env flex SymMap.empty pty p in
      let env = env_cons env (Evals vs) in
      infer env flex body
-  | Fn (params, ret, body) ->
+  | Fn (poly, params, ret, body) ->
      let orig_env = env in
-     let env = env_cons orig_env (Eflexible (Vector.create ())) in
+     let poly = Option.map (poly_of_typolybounds env) poly in
+     let poly_env =
+       match poly with
+       | None -> orig_env
+       | Some (names, nbounds, _pbounds, flow) ->
+          fst (enter_poly_neg env names nbounds flow (Tcons (ident Neg))) in
+     let env = env_cons poly_env (Eflexible (Vector.create ())) in
      let flex = (env.level, env.marker) in
      let params = map_fields (fun _fn (p, ty) ->
        match ty with
@@ -285,6 +308,13 @@ and infer' env flex = function
      let envgc, ty = Type_simplification.garbage_collect env flex ty in
      wf_typ Pos envgc ty;
      let ty = generalise envgc (envgc.level, envgc.marker) ty in
+     wf_typ Pos poly_env ty;
+     let ty =
+       match poly with
+       | None -> ty
+       | Some (names, _nbounds, pbounds, flow) ->
+          let ty = close_tys Gen poly_env.level poly_env.marker Pos ty in
+          Tpoly {names; bounds=pbounds; flow; body=ty} in
      wf_typ Pos orig_env ty;
      ty
   | App (f, args) ->
@@ -308,31 +338,31 @@ and check_pat' env flex acc ty = function
   | Pvar (s,_) -> SymMap.add s ty acc
   | Pparens p -> check_pat env flex acc ty p
   | Ptuple fs ->
-     (* FIXME: is this match? *)
      let fs = map_fields (fun _fn p -> p, ref (Tcons Bot)) fs in
-     let trec : _ tuple_fields = map_fields (fun _fn (_p, r) -> r) fs in
+     let trec : typ ref tuple_fields = map_fields (fun _fn (_p, r) -> r) fs in
      match_type env flex ty (Record trec) |> report;
      fold_fields (fun acc fn (p, r) ->
-         let r = !r in
-         check_pat_field env flex acc r fn p) acc fs
+         check_pat_field env flex acc !r fn p) acc fs
 
 and check_parameters env acc ptypes fs =
   (* FIXME: I think this also just needs subtype_cons_fields to fold? *)
   let fs = map_fields (fun _fn (p,ty) -> p, ty, ref None) fs in
-  let trec : _ tuple_fields =
-    map_fields (fun _fn (_p, ty, r) ->
-      match ty with
-      | None -> r
-      | Some _t -> failwith "unimp asc") fs in
-  subtype_cons_fields Pos ptypes trec (fun pol _fn p r ->
-    assert (!r = None);
+  subtype_cons_fields Pos ptypes fs (fun pol _fn p (_pat, ty, r) ->
+    assert (!r = None); assert (pol = Pos);
     wf_typ pol env p;
-    r := Some p;
+    let ty =
+      match ty with
+      | None -> p
+      | Some ty ->
+         let (tn, tp) = typ_of_tyexp env ty in
+         subtype env p tn |> report;
+         tp in
+    r := Some ty;
     []) |> report;
-  fold_fields (fun acc fn (p, _ty, r) ->
-    let r = match !r with Some r -> r | None -> failwith "check_pat match?" in
+  fold_fields (fun acc _fn (p, _ty, r) ->
+    let ty = match !r with Some r -> r | None -> failwith "check_pat match?" in
     let flex = (-1,ref()) in    (* FIXME hack. I think this can trigger on weird pats. *)
-    check_pat_field env flex acc r fn p) acc fs
+    check_pat env flex acc ty p) acc fs
 
 and infer_lit = function
   | l, _ -> infer_lit' l

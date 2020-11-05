@@ -269,11 +269,6 @@ let rec approx_styp env lvl mark pol' ({ body; pol } as orig) =
       cons = map_head pol (approx_styp env lvl mark) cons } }
     | _ ->
        intfail "approx unimplemented"
-
-let f g =
-  let id x = g x; x in
-  id 42
-
 (*
 
 Can I do approx using articulation & articulation caches?
@@ -372,7 +367,7 @@ and subtype_styp_vars env lvl mark orig_p orig_n (p : styp) (n : styp) pvs nvs =
      let clp, _ = flex_closure Pos env lvl mark vars p Intlist.empty pvs in
      let cln, _ = flex_closure Neg env lvl mark vars n Intlist.empty nvs in
      subtype_styp env clp cln
-  | Erigid { vars; flow } ->
+  | Erigid { names=_; vars; flow } ->
      (* p ⊔ pvs ≤ n ⊓ nvs splits into:
           1. p ≤ n
           2. ∀ pv ∈ pvs, U(pv) ≤ n
@@ -409,8 +404,8 @@ let rec approx env lvl mark pol t =
   wf_env env;
   wf_typ pol env t;
   match t with
-  | Tpoly (bounds, flow, body) ->
-     let (env, body) = enter_poly pol env bounds flow body in
+  | Tpoly {names; bounds; flow; body} ->
+     let (env, body) = enter_poly pol env names bounds flow body in
      approx env lvl mark pol body
   | Tsimple s ->
      approx_styp env lvl mark pol s
@@ -425,13 +420,12 @@ let rec subtype env p n =
   wf_typ Neg env n;
   match p, n with
   (* FIXME: some sort of coherence check needed. Where? *)
-  | p, Tpoly (bounds, flow, body) ->
-     let env, body = enter_poly_neg env bounds flow body in
+  | p, Tpoly {names; bounds; flow; body} ->
+     let env, body = enter_poly_neg env names bounds flow body in
      subtype env p body
-  | Tpoly(vars, flow, body), n ->
-     let env, body = enter_poly_pos env vars flow body in
+  | Tpoly {names=_; bounds; flow; body}, n ->
+     let env, body = enter_poly_pos env bounds flow body in
      subtype env body n
-
   | Tsimple p, Tsimple n ->
      subtype_styp env p n
   | _, Tsimple n ->
@@ -494,7 +488,7 @@ let rec match_styp env (p : styp) (t : unit cons_head) : styp cons_head * confli
               (cons_styp Neg vsnil cn) in
           join_cons Pos r cp, errs @ errs'
         ) (match_styp env p t)
-     | Erigid {vars; flow=_} ->
+     | Erigid {names=_; vars; flow=_} ->
         let p = vs |> Intlist.to_list |> List.fold_left (fun r (v,()) ->
           join Pos r vars.(v).rig_upper) p in
         match_styp env p t
@@ -511,9 +505,9 @@ let rec match_type env (lvl, mark) (p : typ) (t : typ ref cons_head) =
        wf_typ pol env p;
        r := p;
        [])
-  | Tpoly (vars, flow, body) ->
+  | Tpoly {names=_; bounds; flow; body} ->
      (* t is not ∀, so we need to instantiate p *)
-     let body = instantiate_flexible env lvl mark vars flow body in
+     let body = instantiate_flexible env lvl mark bounds flow body in
      wf_env env;
      wf_typ Pos env body;
      match_type env (lvl, mark) body t

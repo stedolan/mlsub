@@ -37,7 +37,7 @@ let of_list len pairs =
 let length t = Array.length t
 
 let empty len =
-  Array.make len (fun _ -> { succ = Intlist.empty; pred = Intlist.empty })
+  Array.init len (fun _ -> { succ = Intlist.empty; pred = Intlist.empty })
 
 let fold f t s =
   t
