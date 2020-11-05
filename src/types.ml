@@ -48,28 +48,22 @@ and join_fields pol sf tf =
   | Neg ->
      (* lower bound - union of fields *)
      let same = ref true in
-     let rec union_pos sps tps =
-       match sps, tps with
-       | [], [] -> []
-       | sp :: sps, tp :: tps -> join pol sp tp :: union_pos sps tps
-       | xs, [] | [], xs -> same := false; xs in
-     let fpos = union_pos sf.fpos tf.fpos in
      let fnames = sf.fnames @
-       List.filter (fun k -> not (SymMap.mem k sf.fnamed)) tf.fnames in
-     let fnamed = SymMap.merge (fun _ s t ->
+       List.filter (fun k -> not (FieldMap.mem k sf.fields)) tf.fnames in
+     let fields = FieldMap.merge (fun _ s t ->
        match s, t with
        | Some s, Some t -> Some (join pol s t)
        | (Some _ as x), None | None, (Some _ as x) ->
           same := false;
           x
-       | None, None -> None) sf.fnamed tf.fnamed in
-     assert (List.length fnames = SymMap.cardinal fnamed);
+       | None, None -> None) sf.fields tf.fields in
+     assert (List.length fnames = FieldMap.cardinal fields);
      begin match sf.fopen, tf.fopen, !same with
      | `Open, `Open, _ ->
-        Some {fpos; fnames; fnamed; fopen = `Open}
+        Some {fnames; fields; fopen = `Open}
      | _, _, true ->
         (* Not both open, but same fields *)
-        Some {fpos; fnames; fnamed; fopen = `Closed}
+        Some {fnames; fields; fopen = `Closed}
      | _, _, false ->
         (* Neither both open nor same fields *)
         None
@@ -77,33 +71,26 @@ and join_fields pol sf tf =
   | Pos ->
      (* upper bound - intersection of fields *)
      let same = ref true in
-     let rec inter_pos sps tps =
-       match sps, tps with
-       | [], [] -> []
-       | sp :: sps, tp :: tps -> join pol sp tp :: inter_pos sps tps
-       | _, [] | [], _ -> same := false; [] in
-     let fpos = inter_pos sf.fpos tf.fpos in
-     let fnames = List.filter (fun k -> SymMap.mem k tf.fnamed) sf.fnames in
-     let fnamed = SymMap.merge (fun _ s t ->
+     let fnames = List.filter (fun k -> FieldMap.mem k tf.fields) sf.fnames in
+     let fields = FieldMap.merge (fun _ s t ->
        match s, t with
        | Some s, Some t -> Some (join pol s t)
        | None, Some _ | Some _, None ->
           same := false;
           None
-       | _ -> None) sf.fnamed tf.fnamed in
-     assert (List.length fnames = SymMap.cardinal fnamed);
+       | _ -> None) sf.fields tf.fields in
+     assert (List.length fnames = FieldMap.cardinal fields);
      begin match sf.fopen, tf.fopen, !same with
      | `Closed, `Closed, true ->
-        Some {fpos; fnames; fnamed; fopen = `Closed }
+        Some {fnames; fields; fopen = `Closed }
      | _, _, _ ->
-        Some {fpos; fnames; fnamed; fopen = `Open }
+        Some {fnames; fields; fopen = `Open }
      end
 
 type conflict_reason =
   | Incompatible
-  | Missing of [`Named of string|`Positional]
-  | Extra of [`Fields|`Named of string|`Positional]
-
+  | Missing of field_name
+  | Extra of [`Fields|`Named of field_name]
 
 (* pol = Pos: <=, pol = Neg: >= *)
 let subtype_cons_fields pol af bf f =
@@ -116,42 +103,29 @@ let subtype_cons_fields pol af bf f =
     match pol, af.fopen, bf.fopen with
     | Pos, _, `Closed ->
        (* check dom a ⊆ dom b *)
-       let extra_errs =
-         if List.length af.fpos > List.length bf.fpos then
-           Extra `Positional :: extra_errs else extra_errs in
        List.fold_right (fun k acc ->
-         match SymMap.find k bf.fnamed with
+         match FieldMap.find k bf.fields with
          | exception Not_found -> Extra (`Named k) :: acc
          | _ -> acc) af.fnames extra_errs
     | Neg, `Closed, _ ->
        (* check dom b ⊆ dom a *)
-       let extra_errs =
-         if List.length bf.fpos > List.length af.fpos then
-           Extra `Positional :: extra_errs else extra_errs in
        List.fold_right (fun k acc ->
-         match SymMap.find k af.fnamed with
+         match FieldMap.find k af.fields with
          | exception Not_found -> Extra (`Named k) :: acc
          | _ -> acc) bf.fnames extra_errs
     | _ -> extra_errs in
 
-  let rec subtype_pos i aps bps acc = match aps, bps, pol with
-    | [], [], _ -> acc
-    | _, [], Pos | [], _, Neg -> acc (* extra fields handled above *)
-    | [], _, Pos | _, [], Neg -> Missing `Positional :: acc
-    | ap :: aps, bp :: bps, pol ->
-       f pol (Field_positional i) ap bp @ subtype_pos (i+1) aps bps acc in
-  let errs = subtype_pos 0 af.fpos bf.fpos extra_errs in
   match pol with
   | Pos ->
-    SymMap.fold (fun k b acc ->
-      match SymMap.find k af.fnamed with
-      | exception Not_found -> Missing (`Named k) :: acc
-      | a -> f pol (Field_named k) a b @ acc) bf.fnamed errs
+    FieldMap.fold (fun k b acc ->
+      match FieldMap.find k af.fields with
+      | exception Not_found -> Missing k :: acc
+      | a -> f pol k a b @ acc) bf.fields extra_errs
   | Neg ->
-     SymMap.fold (fun k a acc ->
-      match SymMap.find k bf.fnamed with
-      | exception Not_found -> Missing (`Named k) :: acc
-      | b -> f pol (Field_named k) a b @ acc) af.fnamed errs
+     FieldMap.fold (fun k a acc ->
+      match FieldMap.find k bf.fields with
+      | exception Not_found -> Missing k :: acc
+      | b -> f pol k a b @ acc) af.fields extra_errs
 
 let subtype_cons pol a b f =
   match pol, a, b with

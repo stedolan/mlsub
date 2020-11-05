@@ -179,8 +179,7 @@ and env_lookup_var_rest env v =
 
 let report errs = List.iter (function
    | Incompatible -> failwith "incompat"
-   | Missing (`Named k) -> failwith ("missing " ^ k)
-   | Missing `Positional -> failwith ("missing pos")
+   | Missing k -> failwith ("missing " ^ string_of_field_name k)
    | Extra _ -> failwith ("extra")) errs
 
 (* When checking a term against a template type,
@@ -220,9 +219,8 @@ and check' env e ty =
      ) |> report
   | Proj (e, (field, _loc)), _ ->
      (* Because of subtyping, there's a checking form for Proj! *)
-     let r = { fpos = [];
-               fnamed = SymMap.singleton field ty;
-               fnames = [field];
+     let r = { fields = FieldMap.singleton (Field_named field) ty;
+               fnames = [Field_named field];
                fopen = `Open } in
      check env e (Tcons (Record r))
   | Let (p, pty, e, body), _ ->
@@ -267,9 +265,8 @@ and infer' env flex = function
   | Proj (e, (field,_loc)) ->
      let ty = infer env flex e in
      let res = ref (Tcons Bot) in
-     let tmpl = (Record { fpos = [];
-                          fnamed = SymMap.singleton field res;
-                          fnames = [field]; fopen = `Open }) in
+     let tmpl = (Record { fields = FieldMap.singleton (Field_named field) res;
+                          fnames = [Field_named field]; fopen = `Open }) in
      match_type env flex ty tmpl |> report;
      !res
   | Tuple fields ->

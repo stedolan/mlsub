@@ -69,6 +69,20 @@ if (false) { 1 } else { false }
 ()
 > * ⊢ ()
 
+# trailing comma in types, too
+((1,) : (int,))
+> * ⊢ (int)
+
+((1,) : (int))
+> typechecking error: Failure("incompat")
+
+# and patterns
+let (x,) = (1,); {x}
+> * ⊢ (x: int)
+
+let (x) = (1,); {x}
+> * ⊢ (x: (int))
+
 # named fields
 ({foo:20, bar:17}, {baz:1})
 > * ⊢ ((foo: int, bar: int), (baz: int))
@@ -113,7 +127,7 @@ if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot
 > * ⊢ (bool, bool)
 
 ((1, 2) : (int, int, int))
-> typechecking error: Failure("missing pos")
+> typechecking error: Failure("missing .2")
 
 ((1, 2, 3) : (int, int))
 > typechecking error: Failure("extra")

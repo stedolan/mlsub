@@ -436,10 +436,9 @@ let rec wf_cons pol env wf = function
      wf_cons_fields (polneg pol) env wf args;
      wf pol env res
 and wf_cons_fields pol env wf fields =
-  let fnames = SymMap.fold (fun k _ ks -> k::ks) fields.fnamed [] |> List.rev in
+  let fnames = FieldMap.fold (fun k _ ks -> k::ks) fields.fields [] |> List.rev in
   assert (fnames = List.sort compare fields.fnames);
-  List.iter (wf pol env) fields.fpos;
-  SymMap.iter (fun _k t -> wf pol env t) fields.fnamed
+  FieldMap.iter (fun _k t -> wf pol env t) fields.fields
 
 let rec wf_env ({ level; marker=_; entry; rest } as env) =
   wf_env_entry env entry;
@@ -542,12 +541,12 @@ let rec pr_cons pol pr t =
        blank 1 ^^ str "→" ^^ blank 1 ^^
          pr pol res
 and pr_cons_fields pol pr fields =
-  let pos_fields = fields.fpos |> List.map (pr pol) in
   let named_fields = fields.fnames |> List.map (fun k ->
-    str k ^^ str ":" ^^ blank 1 ^^ pr pol (SymMap.find k fields.fnamed)) in
+    (match k with
+     | Field_named s -> str s ^^ str ":" ^^ blank 1
+     | Field_positional _ -> empty) ^^ pr pol (FieldMap.find k fields.fields)) in
   let cl = match fields.fopen with `Closed -> [] | `Open -> [str "..."] in
-  parens (group (nest 2 (break 0 ^^ separate (comma ^^ break 1)
-                                      (pos_fields @ named_fields @ cl))))
+  parens (group (nest 2 (break 0 ^^ separate (comma ^^ break 1) (named_fields @ cl))))
 
 (*
 let pr_flexvar env v =
@@ -615,7 +614,7 @@ let rec pr_env { level=_; marker=_; entry; rest } =
 
 
 
-let func a b = Func ({fpos=[a]; fnames=[]; fnamed=SymMap.empty; fopen=`Closed}, b)
+let func a b = Func (collect_fields [Fpos a], b)
 
 let vsnil : vset = Intlist.empty
 
