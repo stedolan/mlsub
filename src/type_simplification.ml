@@ -85,8 +85,8 @@ let remove_joins env (lvl, mark) ty =
           let nofail = function [] -> () | _ -> assert false in
           let repl =
             match pol with
-            | Pos -> Types.subtype_styp env t n |> nofail; p
-            | Neg -> Types.subtype_styp env p t |> nofail; n in
+            | Pos -> Types.subtype_styp env (Hashtbl.create 1) t n |> nofail; p
+            | Neg -> Types.subtype_styp env (Hashtbl.create 1) p t |> nofail; n in
           Hashtbl.add canon_table key repl;
           repl in
   (* iterate only over original vars, not any new ones *)

@@ -121,49 +121,17 @@ let ch = fn[A,B,R, A<:R, B<:R](x : A, y : B) : R { if true { x } else { y } }; f
 (fn[A,B,R, A<:R](x : A, y : B) : R { x } : [A] (A, A) -> A)
 > * ⊢ ∀⁺ 0:[⊥,⊤]. (.0.0, .0.0) → .0.0
 
-let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let z = f(x); x}) }
-> internal error: approx unimplemented
-> Raised at Lang__Types.intfail in file "src/types.ml", line 5, characters 16-34
-> Called from Stdlib__map.Make.mapi in file "map.ml", line 312, characters 19-24
-> Called from Lang__Tuple_fields.map_fields in file "src/tuple_fields.ml", line 50, characters 13-67
-> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 238, characters 28-56
-> Called from Lang__Types.approx_styp in file "src/types.ml", line 269, characters 13-57
-> Called from Lang__Types.subtype_styp_vars.(fun) in file "src/types.ml", line 364, characters 33-70
-> Called from Lang__Intlist.iter in file "src/intlist.ml", line 90, characters 21-26
-> Called from Lang__Types.subtype_styp_vars in file "src/types.ml", line 362, characters 5-151
-> Called from Lang__Types.subtype_styp_vars.(fun) in file "src/types.ml", line 388, characters 7-56
-> Called from Stdlib__list.fold_left in file "list.ml", line 121, characters 24-34
-> Called from Lang__Types.subtype_styp in file "src/types.ml", line 394, characters 10-30
-> Called from Lang__Check.check' in file "src/check.ml", line 249, characters 5-23
-> Called from Stdlib__list.fold_left in file "list.ml", line 121, characters 24-34
-> Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 54, characters 12-65
-> Called from Lang__Check.infer' in file "src/check.ml", line 326, characters 5-62
-> Called from Lang__Check.infer in file "src/check.ml", line 254, characters 26-43
-> Called from Lang__Check.check' in file "src/check.ml", line 231, characters 15-44
-> Called from Stdlib__list.fold_left in file "list.ml", line 121, characters 24-34
-> Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 54, characters 12-65
-> Called from Lang__Check.infer' in file "src/check.ml", line 326, characters 5-62
-> Called from Lang__Check.infer in file "src/check.ml", line 254, characters 26-43
-> Called from Lang__Check.infer' in file "src/check.ml", line 303, characters 15-48
-> Called from Lang__Check.infer in file "src/check.ml", line 254, characters 26-43
-> Called from Lang__Check.infer in file "src/check.ml", line 254, characters 26-43
-> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 39, characters 12-36
-> 
+let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let z = f({bar:x}); x.foo}) }
+> * ⊢ (((bar: (foo: ⊤))) → ⊤) → int
 
-let id = fn(x) { x }; id (id)
-> internal error: approx unimplemented
-> Raised at Lang__Types.intfail in file "src/types.ml", line 5, characters 16-34
-> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 240, characters 46-55
-> Called from Lang__Types.approx_styp in file "src/types.ml", line 269, characters 13-57
-> Called from Lang__Types.subtype_styp_vars.(fun) in file "src/types.ml", line 364, characters 33-70
-> Called from Lang__Intlist.iter in file "src/intlist.ml", line 90, characters 21-26
-> Called from Lang__Types.subtype_styp_vars in file "src/types.ml", line 362, characters 5-151
-> Called from Lang__Types.subtype_styp in file "src/types.ml", line 394, characters 10-30
-> Called from Lang__Check.check' in file "src/check.ml", line 249, characters 5-23
-> Called from Stdlib__list.fold_left in file "list.ml", line 121, characters 24-34
-> Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 54, characters 12-65
-> Called from Lang__Check.infer' in file "src/check.ml", line 326, characters 5-62
-> Called from Lang__Check.infer in file "src/check.ml", line 254, characters 26-43
-> Called from Lang__Check.infer in file "src/check.ml", line 254, characters 26-43
-> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 39, characters 12-36
-> 
+let id = fn(x) { x }; fn () { (id (id), id) }
+> * ⊢ ∀⁺ 0:[⊥,⊤]. () → ((.0.0) → .0.0, ∀⁺ 0:[⊥,⊤]. (.0.0) → .0.0)
+
+
+fn(f) { fn(id: [A] (A) -> A) { let x = f(id); id(1) } }
+> * ⊢ ∀⁺ 0:[⊥,⊤]. (((.0.0) → .0.0) → ⊤) → (∀⁻ 0:[⊥,⊤]. (.0.0) → .0.0) → int
+
+fn(f) { fn(id: [A] (A) -> A) { id(fn(y) { let x = f(y); y }) } }
+> *
+> ⊢
+> ∀⁺ 0:[⊥,⊤]. ((.0.0) → ⊤) → ∀⁺ 0:[⊥,.1.0]. (∀⁻ 0:[⊥,⊤]. (.0.0) → .0.0) → (.0.0) → .0.0

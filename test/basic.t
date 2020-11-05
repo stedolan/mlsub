@@ -349,36 +349,12 @@ fn(f) { (fn(x) { 5 })(f(10)) }
 
 # needs approx
 (fn (x) { x })(fn (x) { x })
-> internal error: approx unimplemented
-> Raised at Lang__Types.intfail in file "src/types.ml", line 5, characters 16-34
-> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 240, characters 46-55
-> Called from Lang__Types.approx_styp in file "src/types.ml", line 269, characters 13-57
-> Called from Lang__Types.subtype_styp_vars.(fun) in file "src/types.ml", line 364, characters 33-70
-> Called from Lang__Intlist.iter in file "src/intlist.ml", line 90, characters 21-26
-> Called from Lang__Types.subtype_styp_vars in file "src/types.ml", line 362, characters 5-151
-> Called from Lang__Types.subtype_styp in file "src/types.ml", line 394, characters 10-30
-> Called from Lang__Check.check' in file "src/check.ml", line 249, characters 5-23
-> Called from Stdlib__list.fold_left in file "list.ml", line 121, characters 24-34
-> Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 54, characters 12-65
-> Called from Lang__Check.infer' in file "src/check.ml", line 326, characters 5-62
-> Called from Lang__Check.infer in file "src/check.ml", line 254, characters 26-43
-> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 39, characters 12-36
-> 
+> *0: [(#0.2) → #0.1, ⊤], 1: [#0.2, ⊤], 2: [⊥, #0.1],  ⊢ #0.0
+
+# generalised version
+fn() { (fn (x) { x })(fn (x) { x }) }
+> * ⊢ ∀⁺ 0:[⊥,⊤]. () → (.0.0) → .0.0
 
 # self-app
 (fn (x) { x(x) }) (fn (x) { x(x) })
-> internal error: approx unimplemented
-> Raised at Lang__Types.intfail in file "src/types.ml", line 5, characters 16-34
-> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 240, characters 46-55
-> Called from Lang__Types.approx_styp in file "src/types.ml", line 269, characters 13-57
-> Called from Lang__Types.subtype_styp_vars.(fun) in file "src/types.ml", line 364, characters 33-70
-> Called from Lang__Intlist.iter in file "src/intlist.ml", line 90, characters 21-26
-> Called from Lang__Types.subtype_styp_vars in file "src/types.ml", line 362, characters 5-151
-> Called from Lang__Types.subtype_styp in file "src/types.ml", line 394, characters 10-30
-> Called from Lang__Check.check' in file "src/check.ml", line 249, characters 5-23
-> Called from Stdlib__list.fold_left in file "list.ml", line 121, characters 24-34
-> Called from Lang__Tuple_fields.fold_fields in file "src/tuple_fields.ml", line 54, characters 12-65
-> Called from Lang__Check.infer' in file "src/check.ml", line 326, characters 5-62
-> Called from Lang__Check.infer in file "src/check.ml", line 254, characters 26-43
-> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 39, characters 12-36
-> 
+> typechecking error: Stack overflow
