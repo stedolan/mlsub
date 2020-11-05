@@ -244,7 +244,7 @@ and check' env e ty =
      let env' = env_cons env (Eflexible (Vector.create ())) in
      let flex = (env'.level, env'.marker) in
      let ty' = infer' env' flex e in
-     subtype env ty' ty |> report;
+     subtype env' ty' ty |> report;
      wf_typ Neg env ty
 
 and infer env flex = function
