@@ -19,7 +19,7 @@ let tys_of_styp (type a) (sort : a ty_sort) (x : styp) : a =
 
 let close_tys (type s) (sort : s ty_sort) lvl mark pol (t : s) : s =
   let env_gen_var pol index (_mark', vs) rest =
-    assert (Type_simplification.is_trivial pol rest);
+    assert (is_trivial pol rest);
     assert (Intlist.is_singleton vs);
     let (var, ()) = Intlist.as_singleton vs in
     { pol; body = Bound_var { index; var } } in
@@ -29,10 +29,13 @@ let close_tys (type s) (sort : s ty_sort) lvl mark pol (t : s) : s =
   | Gen ->
      map_free_typ lvl mark 0 env_gen_var pol t
 
+(* FIXME: don't always enter Erigid during parsing! *)
+
 let rec env_lookup_type : type s . s ty_sort -> env -> string -> s * s =
   fun sort env name ->
   match env.entry with
-  | Erigid { names; _ } when SymMap.mem name names ->
+  | (Erigid { names; _ } | Eflexible { names; _ })
+       when SymMap.mem name names ->
      (* FIXME shifting? *)
      let i = SymMap.find name names in
      let vs = Intlist.singleton i () in
@@ -93,7 +96,7 @@ and typs_of_tuple_tyexp : type s . s ty_sort -> env -> tyexp tuple_fields -> s t
 (* FIXME crazy type *)
 and poly_of_typolybounds env (vars : typolybounds) :
   int SymMap.t *
-    (string * styp * styp) array * (string * styp * styp) array * Flow_graph.t =
+    (string option * styp * styp) array * (string option * styp * styp) array * Flow_graph.t =
   let bounds = Vector.create () in
   let var_ix =
     List.fold_left (fun m ((v,_), bound) ->
@@ -115,7 +118,7 @@ and poly_of_typolybounds env (vars : typolybounds) :
   let env = env_cons env (Erigid {
     names = var_ix;
     vars = bounds |> Vector.to_array |> Array.map (fun (name,_) ->
-      { name;
+      { name = Some name;
         rig_lower = cons_styp Neg vsnil (ident Neg);
         rig_upper = cons_styp Pos vsnil (ident Pos) });
     flow = Flow_graph.empty (Vector.length bounds);
@@ -145,7 +148,7 @@ and poly_of_typolybounds env (vars : typolybounds) :
                let lower = Some (bound_of_tyexp bound) in
                lower, upper, flow
       ) (None, None, []) bounds in
-    (name, lower, upper, flow)) in
+    (Some name, lower, upper, flow)) in
   let flow = bounds |> Array.map (fun (_,_,_,f) -> f) |> Array.to_list |> List.concat |> Flow_graph.of_list nvars in
   let bounds = bounds |> Array.map (fun (name,l,u,_) ->
     let ln, lp = match l with
@@ -224,7 +227,7 @@ and check' env e ty =
                fopen = `Open } in
      check env e (Tcons (Record r))
   | Let (p, pty, e, body), _ ->
-     let env = env_cons env (Eflexible (Vector.create ())) in
+     let env = env_cons env (Eflexible {vars=Vector.create ();names=SymMap.empty}) in
      let flex = (env.level, env.marker) in
      let pty = check_or_infer env flex pty e in
      let vs = check_pat env flex SymMap.empty pty p in
@@ -241,7 +244,7 @@ and check' env e ty =
   | e, _ ->
      (* Default case: infer and subtype.
         Using the icfp19 rule! *)
-     let env' = env_cons env (Eflexible (Vector.create ())) in
+     let env' = env_cons env (Eflexible {vars=Vector.create ();names=SymMap.empty}) in
      let flex = (env'.level, env'.marker) in
      let ty' = infer' env' flex e in
      subtype env' ty' ty |> report;
@@ -287,7 +290,7 @@ and infer' env flex = function
        | None -> orig_env
        | Some (names, nbounds, _pbounds, flow) ->
           fst (enter_poly_neg env names nbounds flow (Tcons (ident Neg))) in
-     let env = env_cons poly_env (Eflexible (Vector.create ())) in
+     let env = env_cons poly_env (Eflexible {vars=Vector.create ();names=SymMap.empty}) in
      let flex = (env.level, env.marker) in
      let params = map_fields (fun _fn (p, ty) ->
        match ty with

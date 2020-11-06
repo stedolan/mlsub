@@ -33,13 +33,6 @@ themselves in their own bound should not be removed, even if monopolar. I think 
 can be computed during the polarity DFS, by locating backedges. (weak guardedness)
 *)
 
-let is_trivial pol { body; pol = pol' } =
-  assert (pol = pol');
-  match body with
-  | Styp {cons; tyvars} ->
-     cons = ident pol && Intlist.is_empty tyvars
-  | Bound_var _ -> assert false
-
 (* Canonisation.
    Bring a type with flexvars into 1BV form:
      the type and the constructed part of each flexvar bound
@@ -298,7 +291,8 @@ let garbage_collect env (lvl, mark) ty =
 
   let new_flexvars : flexvar Vector.t =
     Array.init !num_new_vars (fun _ ->
-      { pos = cons_styp Pos vsnil (ident Pos);
+      { name = None;
+        pos = cons_styp Pos vsnil (ident Pos);
         neg = cons_styp Neg vsnil (ident Neg);
         pos_match_cache = ident Pos;
         neg_match_cache = ident Neg })
@@ -323,7 +317,7 @@ let garbage_collect env (lvl, mark) ty =
     Env_marker.assert_equal mark mark';
     { level = lvl;
       marker = new_env_marker;
-      entry = Eflexible new_flexvars;
+      entry = Eflexible {vars=new_flexvars;names=Tuple_fields.SymMap.empty};
       rest } in
   wf_env_entry env' (env_entry_at_level env' lvl new_env_marker);
   wf_typ Pos env' ty;

@@ -227,7 +227,8 @@ and approx_styp env ext pol' ({ tyvars; cons; pol } as orig) =
 
 let fresh_flexvar env (lvl, mark) =
   let fv = env_flexvars env lvl mark in
-  Vector.push fv { pos = cons_styp Pos vsnil (ident Pos);
+  Vector.push fv { name = None;
+                   pos = cons_styp Pos vsnil (ident Pos);
                    neg = cons_styp Neg vsnil (ident Neg);
                    pos_match_cache = ident Pos;
                    neg_match_cache = ident Neg }
@@ -272,7 +273,7 @@ and approx_styp_var env apxcache lvl mark pol lvl' mark' v' =
   (* approximate the variable v at (lvl', mark') to (lvl, mark) *)
   assert (lvl < lvl');
   match env_entry_at_level env lvl' mark' with
-  | Eflexible flexvars' ->
+  | Eflexible {vars=flexvars'; _} ->
      begin match Hashtbl.find apxcache (lvl', v', pol, lvl) with
      | (mark'', v) ->
         Env_marker.assert_equal mark mark'';
@@ -401,7 +402,7 @@ and subtype_styp_vars env apxcache lvl mark orig_p orig_n (p : styp) (n : styp) 
   wf_styp Pos env p;
   wf_styp Neg env n;
   match env_entry_at_level env lvl mark with
-  | Eflexible vars ->
+  | Eflexible {vars;_} ->
      (* FIXME: avoid some calls to approx_styp for constraints that already hold! *)
      Intlist.iter pvs (fun pv () ->
        let pv = Vector.get vars pv in
@@ -471,8 +472,8 @@ let rec subtype env p n =
   | p, Tpoly {names; bounds; flow; body} ->
      let env, body = enter_poly_neg env names bounds flow body in
      subtype env p body
-  | Tpoly {names=_; bounds; flow; body}, n ->
-     let env, body = enter_poly_pos env bounds flow body in
+  | Tpoly {names; bounds; flow; body}, n ->
+     let env, body = enter_poly_pos env names bounds flow body in
      subtype env body n
   | Tcons s, Tcons t ->
      subtype_cons Pos s t
@@ -493,7 +494,7 @@ let rec match_styp env (p : styp) (t : unit cons_head) : styp cons_head * confli
   | Some (lvl, mark) ->
      let p, vs = styp_unconsv lvl mark p in
      match env_entry_at_level env lvl mark with
-     | Eflexible fvs ->
+     | Eflexible {vars=fvs;_} ->
         vs |> Intlist.to_list |> List.fold_left (fun (r, errs) (v,()) ->
           let fv = Vector.get fvs v in
           let cons = join_cons Neg fv.neg_match_cache
