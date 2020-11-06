@@ -44,3 +44,6 @@ let fold f t s =
   |> Array.mapi (fun i { succ; pred=_ } -> i, succ)
   |> Array.fold_left (fun s (i, succ) ->
      Intlist.to_list succ |> List.fold_left (fun s (j, ()) -> f s i j) s) s
+
+let to_list (t : t) =
+  fold (fun xs i j -> (i, j)::xs) t []

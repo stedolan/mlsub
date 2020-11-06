@@ -36,10 +36,11 @@ let run_cmd s =
   let open Lang in
   match Parse.parse_string text with
   | Ok (`Exp e) ->
-     let env0 : Typedefs.env = { level = Typedefs.Env_level.empty;
+     let envZ : Typedefs.env = { level = Typedefs.Env_level.empty;
                                  marker = Typedefs.Env_marker.make ();
-                                 entry = Eflexible (Vector.create ());
+                                 entry = Evals (Tuple_fields.SymMap.empty);
                                  rest = None } in
+     let env0 : Typedefs.env = Typedefs.env_cons envZ (Eflexible {vars=Vector.create ();names=Tuple_fields.SymMap.empty}) in
      let flex0 = (env0.level, env0.marker) in
      let rendered = to_string ~width:120 (PPrint.group (Print.exp e)) in
      rendered ^ "\n" ^
@@ -50,7 +51,7 @@ let run_cmd s =
       | _ -> "MISMATCH\n") ^
      (match Check.infer env0 flex0 e with
      | t ->
-        let b = Buffer.create 100 in
+        (let b = Buffer.create 100 in
         let open Typedefs in
 (*        let rec as_styp pol = function
           | Tsimple t -> t
@@ -58,7 +59,18 @@ let run_cmd s =
           | _ -> raise Exit in
         let t = match as_styp Pos t with exception Exit -> t | s -> Tsimple (Type_simplification.garbage_collect env0 Pos s) in*)
         PPrint.ToBuffer.pretty 1. 80 b (PPrint.(group @@ group (string "*" ^^ Typedefs.pr_env env0) ^^ break 1 ^^ group (utf8string "⊢" ^^ break 1 ^^ (Typedefs.pr_typ Pos t))));
-        b |> Buffer.to_bytes |> Bytes.to_string
+        let t = Type_simplification.remove_joins env0 flex0 t in
+        let env0, t = Type_simplification.garbage_collect env0 flex0 t in
+        let t = generalise env0 (env0.level, env0.marker) t in
+        wf_typ Pos envZ t;
+        (b |> Buffer.to_bytes |> Bytes.to_string) ^
+          let te = Type_print.convert envZ Pos t in
+          "\n" ^
+            to_string ~width:120 (PPrint.group (Print.tyexp te)) ^
+              let tn, _ = Check.typ_of_tyexp envZ te in
+              (match Check.check envZ e tn with
+               | () -> ""
+               | exception e -> "\nRECHECK: " ^ Printexc.to_string e))
      | exception ((Assert_failure _ | Types.Internal _) as e) ->
         Printexc.to_string e ^ "\n" ^ Printexc.get_backtrace ()
      | exception e ->
@@ -66,7 +78,7 @@ let run_cmd s =
   | Ok (`Sub (t1, t2)) ->
      let env0 : Typedefs.env = { level = Typedefs.Env_level.empty;
                                  marker = Typedefs.Env_marker.make ();
-                                 entry = Eflexible (Vector.create ());
+                                 entry = Eflexible {vars=Vector.create ();names=Tuple_fields.SymMap.empty};
                                  rest = None } in
      let _, t1 = Check.typ_of_tyexp env0 t1 in
      let t2, _ = Check.typ_of_tyexp env0 t2 in
