@@ -114,7 +114,6 @@ let subtype_cons_fields pol af bf f =
          | exception Not_found -> Extra (`Named k) :: acc
          | _ -> acc) bf.fnames extra_errs
     | _ -> extra_errs in
-
   match pol with
   | Pos ->
     FieldMap.fold (fun k b acc ->
@@ -478,7 +477,6 @@ let rec subtype env p n =
   | Tcons s, Tcons t ->
      subtype_cons Pos s t
        (pol_flip (subtype env))
-
   | (Tsimple _, _) | (_, Tsimple _) ->
      let p = approx env env.level env.marker Pos p in
      let n = approx env env.level env.marker Neg n in

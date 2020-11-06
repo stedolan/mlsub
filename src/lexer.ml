@@ -1,10 +1,10 @@
 open Grammar
 open Sedlexing
 open Sedlexing.Utf8
-let lex buf =
+let rec lex buf =
   match%sedlex buf with
   | Plus(' ' | '\t') -> WS
-  | '\n' | "\r\n" -> NL
+  | '\n' | "\r\n" -> (* NL *) lex buf
   | "//", Star(Compl('\n'|'\r')) -> COMMENT
 
   | '(' -> LPAR

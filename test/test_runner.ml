@@ -10,6 +10,11 @@ let rec rawlines acc =
 
 type cmd = Comment of string | Input of string list
 
+let to_string ?(width=80) doc =
+  let b = Buffer.create 100 in
+  PPrint.ToBuffer.pretty 1. width b doc;
+  b |> Buffer.to_bytes |> Bytes.to_string
+
 let rec parse_cmds acc curr : rawline list -> cmd list = function
   | [] -> List.rev (finish_cmd acc curr)
   | Empty :: rest ->
@@ -36,6 +41,13 @@ let run_cmd s =
                                  entry = Eflexible (Vector.create ());
                                  rest = None } in
      let flex0 = (env0.level, env0.marker) in
+     let rendered = to_string ~width:120 (PPrint.group (Print.exp e)) in
+     rendered ^ "\n" ^
+     (match (Parse.parse_string rendered) with
+      | exception e -> "MISMATCH: " ^ Printexc.to_string e ^ "\n"
+      | Ok (`Exp e') when Exp.equal e e' -> ""
+      | Ok (`Exp e') -> Printf.sprintf "MISMATCH %s\n" (to_string ~width:1000 (Print.exp e'))
+      | _ -> "MISMATCH\n") ^
      (match Check.infer env0 flex0 e with
      | t ->
         let b = Buffer.create 100 in

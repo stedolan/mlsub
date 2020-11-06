@@ -1,8 +1,11 @@
+
 (* Later, maybe intern these? *)
 
 (* FIXME: preserve ordering of tuple fields in mixtures,
    to avoid screwing up evaluation order.
    (Alt: ban mixtures in the parser) *)
+
+(* FIXME: make positional precede kw when mixed *)
 
 type symbol = string
 module SymMap = Map.Make (struct type t = string let compare = compare end)

@@ -1,4 +1,4 @@
-(*
+
 open PPrint
 open Tuple_fields
 open Exp
@@ -9,16 +9,16 @@ open Exp
 let string = utf8string
 let indent d = nest 2 d
 
-let op x = blank 1 ^^ x ^^ break 1
+let op x = blank 1 ^^ string x ^^ break 1
 
-let print_lit = function
+let literal = function
   | Bool b -> string (string_of_bool b)
   | Int n -> string (string_of_int n)
   (* FIXME escaping *)
   | String s -> char '"' ^^ string s ^^ char '"'
 
-let print_symbol (s, _) = string s
-let print_ident (l, _) =
+let symbol (s, _) = string s
+let ident (l, _) =
   let rec go =
     function
     | 0 -> empty
@@ -30,168 +30,121 @@ let mayloc x f = match x with
   | (Some s, _) -> f s
 
 let parens x = parens (group x)
+let braces x = braces (group x)
+let brackets x = brackets (group x)
 
-let rec print_exp e = mayloc e @@ function
-  | Lit (l, _) -> print_lit l
-  | Var s -> print_ident s
-  | Fn (params, None, body) ->
+let rec exp e = mayloc e @@ function
+  | Lit (l, _) -> literal l
+  | Var s -> ident s
+  | Fn (poly, params, ty, body) ->
      string "fn" ^^ space ^^
-       print_typed_fields print_pat params ^^ space ^^
-       braces (print_exp body)
-  | Fn (params, Some ty, body) ->
-     string "fn" ^^ space ^^
-       print_typed_fields print_pat params ^^ op (string ":") ^^ print_tyexp ty ^^ space ^^
-       braces (print_exp body)
-  | Tuple t -> print_typed_tuple print_exp t
-  | App (f, args) -> print_exp f ^^ print_untyped_fields print_exp args
-  | Proj (e, f) -> print_exp e ^^ char '.' ^^ print_symbol f
+       (match poly with
+        | None -> empty
+        | Some poly -> typolybounds poly) ^^
+       parens (fields parameter params) ^^
+       opt_type_annotation ty ^^
+       space ^^ braces (break 1 ^^ exp body ^^ break 1)
+  | Let (p, ty, e, body) ->
+     group (string "let" ^^ space ^^
+       pat p ^^ opt_type_annotation ty ^^
+       op "=" ^^ group (exp e) ^^
+       string ";") ^^ break 1 ^^ exp body
+  | Tuple t -> record ~pun:exp_pun exp t
+  | App (f, args) ->
+     exp f ^^
+     parens (fields argument args)
+  | Proj (e, f) -> exp e ^^ char '.' ^^ field_name (Field_named (fst f))
   | If (e, t, f) ->
-     string "if" ^^ break 1 ^^ print_exp e ^^
-       braces (print_exp t) ^^ op (string "else") ^^
-         braces (print_exp f)
-  | Typed (e, t) -> parens (print_exp e ^^ op (char ':') ^^ print_tyexp t)
-  | Parens e -> parens (print_exp e)
+     string "if" ^^ break 1 ^^ exp e ^^
+       braces (exp t) ^^ op "else" ^^
+         braces (exp f)
+  | Typed (e, t) -> parens (exp e ^^ opt_type_annotation (Some t))
+  | Parens e -> parens (exp e)
   | Pragma s -> char '@' ^^ string s
-  | _ -> assert false
 
-and print_typed_fields :
- 'defn . ('defn -> document) ->
-         ('defn option * tyexp option) tuple_fields ->
-         document
-  = fun print_defn {fpos; fnamed; fnames; fopen} ->
-  let fields_pos = fpos |> List.map (function
-    | None, _ ->
-       assert false   (* no punning on positional fields! *)
-    | Some e, None ->
-       print_defn e
-    | Some e, Some ty ->
-       group (print_defn e ^^ blank 1 ^^ colon ^^ break 1 ^^ print_tyexp ty)) in
-  let fields_named = fnames |> List.map (fun s ->
-    match SymMap.find s fnamed with
-    | (None, None) ->
-       char '.' ^^ string s
-    | (None, Some ty) ->
-       group (char '.' ^^ string s ^^
-                op colon ^^ print_tyexp ty)
-    | (Some e, None) ->
-       group (char '.' ^^ string s ^^
-                op equals ^^ print_defn e)
-    | (Some e, Some ty) ->
-       group (char '.' ^^ string s ^^
-              op colon ^^ print_tyexp ty ^^
-              op equals ^^ print_defn e)) in
-  let fields_open = match fopen with `Open -> [string "..."] | `Closed -> [] in
-  parens (group (indent (break 0 ^^ 
-     (separate (comma ^^ break 1) (fields_pos @ fields_named @ fields_open))) ^^
-       break 0))
+and fields : 'e . ?tcomma:bool -> (pos:bool -> field_name -> 'e -> document) -> 'e tuple_fields -> document =
+  fun ?(tcomma=false) print_elem {fnames; fields; fopen} ->
+  let rec annot_fnames i = function
+    | (Field_positional n as fn) :: rest when n = i ->
+       (true, fn) :: annot_fnames (i+1) rest
+    | fnames -> List.map (fun fn -> false, fn) fnames in
+  let fnames = annot_fnames 0 fnames in
+  let tcomma = tcomma && List.length fnames = 1 && fopen = `Closed in
+  separate (comma ^^ break 1)
+    (List.map (fun (pos,f) -> print_elem ~pos f (FieldMap.find f fields)) fnames
+    @ (match fopen with `Open -> [string "..."] | `Closed -> []))
+    ^^ (if tcomma then comma else empty)
 
-and print_untyped_fields :
- 'defn . ('defn -> document) ->
-         ('defn option) tuple_fields ->
-         document
-  = fun print_defn {fpos; fnamed; fnames; fopen} ->
-  let fields_pos = fpos |> List.map (function
-    | None ->
-       assert false   (* no punning on positional fields! *)
-    | Some e ->
-       print_defn e) in
-  let fields_named = fnames |> List.map (fun s ->
-    match SymMap.find s fnamed with
-    | (None) ->
-       char '.' ^^ string s
-    | (Some e) ->
-       group (char '.' ^^ string s ^^
-                op equals ^^ print_defn e)) in
-  let fields_open = match fopen with `Open -> [string "..."] | `Closed -> [] in
-  parens (group (indent (break 0 ^^ 
-     (separate (comma ^^ break 1) (fields_pos @ fields_named @ fields_open))) ^^
-       break 0))
+and record : 'e . pun:(field_name * 'e -> bool) -> ('e -> document) -> 'e tuple_fields -> document =
+  fun ~pun print_elem t ->
+  (* FIXME: misprints mono-tuple. Check that tests catch this! *)
+  if t.fnames = List.init (List.length t.fnames) (fun i -> Field_positional i) then
+    parens (fields ~tcomma:true (fun ~pos:_ _ e -> print_elem e) t)
+  else
+    braces (fields (fun ~pos:_ fn e ->
+       if pun (fn, e) then field_name fn else
+          field_name fn ^^ string ":" ^^ break 1 ^^ print_elem e) t)
 
+and field_name = function
+  (* FIXME: positional field syntax *)
+  | Field_positional n -> string (Printf.sprintf ".%d" n)
+  | Field_named s -> string s
 
-(* print_tuple: print a trailing comma on a single position elem *)
-and print_typed_tuple :
- 'defn . ('defn -> document) ->
-         ('defn option * tyexp option) tuple_fields ->
-         document
-  = fun print_defn t -> match t with
-  | {fpos = [Some e, None]; fnames = []; fnamed = _; fopen = `Closed} ->
-     parens (print_defn e ^^ comma)
-  | {fpos = [Some e, Some ty]; fnames = []; fnamed = _; fopen = `Closed} ->
-     parens (print_defn e ^^ blank 1 ^^ colon ^^ break 1 ^^ print_tyexp ty ^^ comma)
-  | t -> print_typed_fields print_defn t
+and exp_pun = function
+  | Field_named s, (Some (Var ({label=s';shift=0}, _)), _) -> s = s'
+  | _ -> false
+and pat_pun = function
+  | Field_named s, (Some (Pvar (s',_)), _) -> s = s'
+  | _ -> false
 
-and print_untyped_tuple :
- 'defn . ('defn -> document) ->
-         ('defn option) tuple_fields ->
-         document
-  = fun print_defn t -> match t with
-  | {fpos = [Some e]; fnames = []; fnamed = _; fopen = `Closed} ->
-     parens (print_defn e ^^ comma)
-  | t -> print_untyped_fields print_defn t
+and argument ~pos fn arg =
+  match fn, arg with
+  | _ when pos -> exp arg
+  | Field_named s, (Some (Var ({label=s';shift=0}, _)), _) when s = s' ->
+     string "~" ^^ field_name fn
+  | fn, arg ->
+     string "~" ^^ field_name fn ^^ colon ^^ space ^^ exp arg
 
-and print_pat p = mayloc p @@ function
-  | Pvar s -> print_symbol s
-  | Ptuple ts -> print_untyped_tuple print_pat ts
-  | Pparens p -> parens (print_pat p)
+and parameter ~pos fn (p,ty) =
+  match fn, p with
+  | _ when pos -> pat p ^^ opt_type_annotation ~prespace:false ty
+  | Field_named s, (Some (Pvar (s',_)), _) when s = s' ->
+     string "~" ^^ field_name fn ^^
+       opt_type_annotation ty
+  | _ ->
+     string "~" ^^ field_name fn ^^ space ^^ pat p ^^
+       opt_type_annotation ty
 
-and print_tyexp t = mayloc t @@ function
-  | Tnamed s -> print_ident s
+and opt_type_annotation ?(prespace=true) = function
+  | Some ty -> (if prespace then blank 1 else empty) ^^ string ":" ^^ blank 1 ^^ tyexp ty
+  | None -> empty
+
+and pat p = mayloc p @@ function
+  | Pvar s -> symbol s
+  | Ptuple ts -> record ~pun:pat_pun pat ts
+  | Pparens p -> parens (pat p)
+
+and tyexp t = mayloc t @@ function
+  | Tnamed s -> ident s
   | Trecord fields ->
-     print_tyexp_tuple fields
+     record ~pun:(fun _ -> false) tyexp fields
   | Tfunc (args, ret) ->
-     print_tyexp_fields args ^^ op (string "->") ^^
-       print_tyexp ret
-  | Tforall _ -> assert false
-  | Tparen t -> parens (print_tyexp t)
-  | Tjoin (s, t) -> print_tyexp s ^^ op (string "|") ^^ print_tyexp t
-  | Tmeet (s, t) -> print_tyexp s ^^ op (string "&") ^^ print_tyexp t
+     parens (fields argtype args) ^^ op "->" ^^
+       tyexp ret
+  | Tforall (bounds, body) ->
+      typolybounds bounds ^^ space ^^ tyexp body
+  | Tparen t -> parens (tyexp t)
+  | Tjoin (s, t) -> tyexp s ^^ op "|" ^^ tyexp t
+  | Tmeet (s, t) -> tyexp s ^^ op "&" ^^ tyexp t
 
-and print_tyexp_fields' { fpos; fnamed; fnames; fopen } =
-  let tyfields_pos = fpos |> List.map print_tyexp in
-  let tyfields_named = fnames |> List.map (fun s ->
-    let ty = SymMap.find s fnamed in
-    string s ^^ op colon ^^ print_tyexp ty) in
-  let tyfields_open = match fopen with `Open -> [string "..."] | `Closed -> [] in
-  parens (group (indent (break 0 ^^ separate (comma ^^ break 1)
-                  (tyfields_pos @ tyfields_named @ tyfields_open))))
+and argtype ~pos fn ty =
+  if pos then tyexp ty
+  else string "~" ^^ field_name fn ^^ colon ^^ space ^^ tyexp ty
 
-and print_tyexp_fields t = print_tyexp_fields' t
-and print_tyexp_tuple t = match t with
-  | {fpos = [f]; fnamed = _; fnames = []; fopen = `Closed} ->
-    parens (print_tyexp f ^^ comma)
-  | t -> print_tyexp_fields' t
-
-(*
- tuple syntax:
-  (f : T = e,)
-  (.f : T)
-  (.f)
-  (.f : T as p)
-  (.f : T)
-
-  (e : T)
-
-  (.f :
-
-
-  name: pos/named
-
-  let's skip optional for the moment
-
-
-  (.f : T as p ?= default) ???
- *)
-
-(* These names are illegal in user-entered code, and used here only
-   for debugging *)
-(*let tyvar_name v : symbol = "$" ^ string_of_int v.v_id*)
-(*
-(* Not strictly a printing function, but only useful for printing so
-   it goes here *)
-let rec tyexp_of_type pol { stypes; cons } =
-  match cons with
-  | Ident | Annih -> assert false (* what are these called again? *)
-  | Func 
- *)
-
-*)
+and typolybounds bs =
+  let bound = function
+    | (a, None) -> symbol a
+    | (a, Some (dir, ty)) ->
+       let dir = match dir with `Sub -> "<:" | `Sup -> ":>" in
+       symbol a ^^ op dir ^^ tyexp ty in
+  brackets (separate (comma ^^ break 1) (List.map bound bs))

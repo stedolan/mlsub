@@ -5,6 +5,10 @@ type location =
     loc_start : Lexing.position;
     loc_end : Lexing.position }
 
+let noloc =
+  let loc : Lexing.position = {pos_fname="_";pos_lnum=0;pos_cnum=0;pos_bol=0} in
+  { source = "_"; loc_start = loc; loc_end = loc}
+
 type 'a loc = 'a * location
 
 type 'a mayloc = 'a option loc
@@ -64,3 +68,50 @@ and tyexp = tyexp' mayloc and tyexp' =
 
 and typolybounds =
   (symbol * ([`Sub|`Sup] * tyexp) option) list
+
+
+module Strip_locations = struct
+  let rec exp (e, _) = Option.map exp' e, noloc
+  and exp' = function
+    | Lit (l, _) -> Lit (l, noloc)
+    | Var (id, _) -> Var (id, noloc)
+    | Fn (poly, args, ret, body) ->
+       Fn(Option.map typolybounds poly,
+          map_fields (fun _ (p, ty) -> (pat p, Option.map tyexp ty)) args,
+          Option.map tyexp ret,
+          exp body)
+    | App (e, args) ->
+       App (exp e, map_fields (fun _ e -> exp e) args)
+    | Tuple es ->
+       Tuple (map_fields (fun _ e -> exp e) es)
+    | Let (p, ty, e, body) ->
+       Let (pat p, Option.map tyexp ty, exp e, exp body)
+    | Proj (e, (s,_)) ->
+       Proj (exp e, (s,noloc))
+    | If (e, t, f) ->
+       If (exp e, exp t, exp f)
+    | Typed (e, ty) ->
+       Typed (exp e, tyexp ty)
+    | Parens e ->
+       Parens (exp e)
+    | Pragma s -> Pragma s
+  and pat (p, _) = Option.map pat' p, noloc
+  and pat' = function
+    | Ptuple ps -> Ptuple (map_fields (fun _ p -> pat p) ps)
+    | Pvar (s, _) -> Pvar (s, noloc)
+    | Pparens p -> Pparens (pat p)
+  and tyexp (t, _) = Option.map tyexp' t, noloc
+  and tyexp' = function
+    | Tnamed (s, _) -> Tnamed (s, noloc)
+    | Tforall (poly, t) -> Tforall (typolybounds poly, tyexp t)
+    | Trecord ts -> Trecord (map_fields (fun _ ty -> tyexp ty) ts)
+    | Tfunc (args, ret) -> Tfunc (map_fields (fun _ ty -> tyexp ty) args, tyexp ret)
+    | Tparen t -> Tparen (tyexp t)
+    | Tjoin (a, b) -> Tjoin (tyexp a, tyexp b)
+    | Tmeet (a, b) -> Tmeet (tyexp a, tyexp b)
+  and typolybounds (bounds : typolybounds) =
+    bounds |> List.map (fun ((s,_), b) ->
+      ((s,noloc), (b |> Option.map (fun (dir, ty) -> dir, tyexp ty))))
+end
+
+let equal e1 e2 = Strip_locations.(exp e1 = exp e2)

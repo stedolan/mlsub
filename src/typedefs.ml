@@ -101,8 +101,7 @@ and rigvar = {
 }
 
 (* General polymorphic types.  Inference may produce these after
-   generalisation, but never instantiates a variable with one.
-   Inference never produces Poly_neg *)
+   generalisation, but never instantiates a variable with one. *)
 and typ =
   | Tsimple of styp
   | Tcons of typ cons_head
