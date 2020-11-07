@@ -228,8 +228,8 @@ and approx_styp env ext pol' ({ tyvars; cons; pol } as orig) =
 let fresh_flexvar env (lvl, mark) =
   let fv = env_flexvars env lvl mark in
   Vector.push fv { name = None;
-                   pos = cons_styp Pos vsnil (ident Pos);
-                   neg = cons_styp Neg vsnil (ident Neg);
+                   pos = styp_trivial Pos;
+                   neg = styp_trivial Neg;
                    pos_match_cache = ident Pos;
                    neg_match_cache = ident Neg }
 
@@ -498,7 +498,7 @@ let rec match_styp env (p : styp) (t : unit cons_head) : styp cons_head * confli
         vs |> Intlist.to_list |> List.fold_left (fun (r, errs) (v,()) ->
           let fv = Vector.get fvs v in
           let cons = join_cons Neg fv.neg_match_cache
-                       (map_head Neg (fun pol () -> cons_styp pol vsnil (ident pol)) t) in
+                       (map_head Neg (fun pol () -> styp_trivial pol) t) in
           let freshen pol t =
             if Intlist.is_empty (match t.body with Styp s -> s.tyvars | _ -> assert false) then
               let n, p = fresh_flow env (lvl, mark) in

@@ -146,9 +146,9 @@ let garbage_collect env (lvl, mark) ty =
       replacement = Unknown }) in
 
   let mark_deleted v =
-    v.vneg.cons <- cons_styp Neg vsnil (ident Neg);
+    v.vneg.cons <- styp_trivial Neg;
     v.vneg.flow <- Intlist.empty;
-    v.vpos.cons <- cons_styp Pos vsnil (ident Pos);
+    v.vpos.cons <- styp_trivial Pos;
     v.vpos.flow <- Intlist.empty;
     v.replacement <- Deleted in
 
@@ -179,15 +179,15 @@ let garbage_collect env (lvl, mark) ty =
       (var_side pol vars.(v)).strong <- true;
       visit_bound pol v);
     (* unused. Maybe I need an iter_free_styp... *)
-    cons_styp pol vsnil (ident pol) in
+    styp_trivial pol in
   ignore (map_free_typ lvl mark 0 visit_vars_strong Pos ty);
 
   (* FIXME: write tests that hit each of these cases *)
 
   (* Pass I. Remove totally useless stuff: unreachable bounds and unreachable vars. *)
   vars |> Array.iter (fun v ->
-    if not v.vneg.weak then v.vneg.cons <- cons_styp Neg vsnil (ident Neg);
-    if not v.vpos.weak then v.vpos.cons <- cons_styp Pos vsnil (ident Pos);
+    if not v.vneg.weak then v.vneg.cons <- styp_trivial Neg;
+    if not v.vpos.weak then v.vpos.cons <- styp_trivial Pos;
     (* FIXME: bug here.
        Suppose β ≤ α ⊓ γ ⊢ γ.
        γ strong+, β weak+, α unreachable.
@@ -292,8 +292,8 @@ let garbage_collect env (lvl, mark) ty =
   let new_flexvars : flexvar Vector.t =
     Array.init !num_new_vars (fun _ ->
       { name = None;
-        pos = cons_styp Pos vsnil (ident Pos);
-        neg = cons_styp Neg vsnil (ident Neg);
+        pos = styp_trivial Pos;
+        neg = styp_trivial Neg;
         pos_match_cache = ident Pos;
         neg_match_cache = ident Neg })
     |> Vector.of_array in
@@ -572,8 +572,8 @@ let garbage_collect' env (lvl, mark) ty =
   let new_flex_vars : flexvar Vector.t = Vector.create () in
   for i = 0 to !num_new_vars - 1 do
     let i' = Vector.push new_flex_vars
-               { pos = cons_styp Pos vsnil (ident Pos);
-                 neg = cons_styp Neg vsnil (ident Neg);
+               { pos = styp_trivial Pos;
+                 neg = styp_trivial Neg;
                  pos_match_cache = ident Pos;
                  neg_match_cache = ident Neg } in
     assert (i = i');

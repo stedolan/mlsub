@@ -119,8 +119,8 @@ and poly_of_typolybounds env (vars : typolybounds) :
     names = var_ix;
     vars = bounds |> Vector.to_array |> Array.map (fun (name,_) ->
       { name = Some name;
-        rig_lower = cons_styp Neg vsnil (ident Neg);
-        rig_upper = cons_styp Pos vsnil (ident Pos) });
+        rig_lower = styp_trivial Neg;
+        rig_upper = styp_trivial Pos });
     flow = Flow_graph.empty (Vector.length bounds);
   }) in
   let bound_of_tyexp (ty : tyexp) =
@@ -152,10 +152,10 @@ and poly_of_typolybounds env (vars : typolybounds) :
   let flow = bounds |> Array.map (fun (_,_,_,f) -> f) |> Array.to_list |> List.concat |> Flow_graph.of_list nvars in
   let bounds = bounds |> Array.map (fun (name,l,u,_) ->
     let ln, lp = match l with
-      | None -> (cons_styp Neg vsnil Bot, cons_styp Pos vsnil Bot)
+      | None -> (styp_bot Neg, styp_bot Pos)
       | Some l -> l in
     let un, up = match u with
-      | None -> (cons_styp Neg vsnil Top, cons_styp Pos vsnil Top)
+      | None -> (styp_top Neg, styp_top Pos)
       | Some u -> u in
     (name, ln, up), (name, lp, un)) in
   var_ix, Array.map fst bounds, Array.map snd bounds, flow

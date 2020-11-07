@@ -250,6 +250,18 @@ let cons_styp pol tyvars cons = { pol; body = Styp {cons; tyvars} }
 let cons_typ _pol cons = Tcons cons
 
 
+let vsnil : vset = Intlist.empty
+
+let styp_pos_bot = cons_styp Pos vsnil Bot
+let styp_neg_bot = cons_styp Neg vsnil Bot
+let styp_bot = function Pos -> styp_pos_bot | Neg -> styp_neg_bot
+let styp_pos_top = cons_styp Pos vsnil Top
+let styp_neg_top = cons_styp Neg vsnil Top
+let styp_top = function Pos -> styp_pos_top | Neg -> styp_neg_top
+
+let styp_trivial pol = cons_styp pol vsnil (ident pol)
+
+
 (* Rewrite occurrences of the outermost bound variable *)
 let rec map_bound_styp ix rw pol' ({ body; pol } as ty) =
   assert (pol = pol');
@@ -634,8 +646,6 @@ let rec pr_env { level=_; marker=_; entry; rest } =
 
 let func a b = Func (collect_fields [Fpos a], b)
 
-let vsnil : vset = Intlist.empty
-
 let make_env () = { level = Env_level.empty; marker = Env_marker.make ();
                     entry = Eflexible {vars=Vector.create ();names=SymMap.empty}; rest = None }
 
@@ -646,9 +656,9 @@ let test () =
   let env = make_env () in
   let choose1_pos =
     Tpoly {names=SymMap.empty;
-           bounds =[| Some "A", cons_styp Pos vsnil Bot, cons_styp Neg vsnil Top;
-                      Some "B", cons_styp Pos vsnil Bot, cons_styp Neg vsnil Top;
-                      Some "C", cons_styp Pos vsnil Bot, cons_styp Neg vsnil Top |];
+           bounds =[| Some "A", styp_bot Pos, styp_top Neg;
+                      Some "B", styp_bot Pos, styp_top Neg;
+                      Some "C", styp_bot Pos, styp_top Neg |];
            flow=Flow_graph.of_list 3 [(0,2); (1,2)];
            body=Tsimple (cons_styp Pos vsnil (func
                  (bvars Neg 0 0)
@@ -660,10 +670,10 @@ let test () =
     (pr_typ Pos choose1_pos ^^ hardline);
   let nested =
     Tpoly {names=SymMap.empty;
-           bounds=[| Some "A", cons_styp Pos vsnil Bot, cons_styp Neg vsnil Top |];
+           bounds=[| Some "A", styp_bot Pos, styp_top Neg |];
            flow=Flow_graph.of_list 1 [];
            body=Tpoly {names=SymMap.empty;
-                       bounds=[| Some "B", cons_styp Pos vsnil Bot, bvars Neg 1 0 |];
+                       bounds=[| Some "B", styp_bot Pos, bvars Neg 1 0 |];
                        flow=Flow_graph.of_list 1 [];
                        body=Tsimple (bvars Pos 0 0)}} in
   wf_typ Pos env nested;

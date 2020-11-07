@@ -100,7 +100,7 @@ let rec convert env pol (ty : Typedefs.typ) : Exp.tyexp =
        let constraints =
          vars |> Array.map (fun (name, (pl, l), (pu, u)) ->
            let name = match name with Some name -> name,loc | _ -> assert false in
-           match (l = cons_styp pl vsnil Bot), (u = cons_styp pu vsnil Top) with
+           match (l = styp_bot pl), (u = styp_top pu) with
            | true, true -> [name, None]
            | false, true -> [name, Some (`Sup, convert_styp env pl l)]
            | true, false -> [name, Some (`Sub, convert_styp env pu u)]
