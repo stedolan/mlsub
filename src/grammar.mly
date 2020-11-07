@@ -28,7 +28,7 @@ let parse_tyfields fs = collect_fields fs
 %inline id(X): X { $1 }
 %inline loc(X): e = X
   { e, { source = "FIXME"; loc_start = $startpos(e); loc_end = $endpos(e) } }
-%inline mayfail(X): e = X { Some e } (* | error { None } *) 
+%inline mayfail(X): e = X { Some e } | ERROR { None }
 %inline mayloc(X): e = loc(mayfail(X)) { e }
 
 prog:

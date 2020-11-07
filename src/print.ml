@@ -26,7 +26,7 @@ let ident (l, _) =
   string l.label ^^ go l.shift
 
 let mayloc x f = match x with
-  | (None, _) -> string "??"
+  | (None, _) -> string "<err>"
   | (Some s, _) -> f s
 
 let parens x = parens (group x)

@@ -14,107 +14,83 @@ type error =
   | Unexpected_eof
 exception Fatal of error
 
+type nest_type = File | Paren | Brace | Bracket
 
-open Sedlexing
-let rec scan lexbuf acc =
-  match Lexer.lex lexbuf with
-  | EOF -> List.rev acc
-  | t ->
-     let (loc_start, loc_end) = lexing_positions lexbuf in
-     let token = { token = t; loc_start; loc_end } in
-     scan lexbuf (token :: acc)
+type lextree =
+  | Tok of { token : Grammar.token; loc_start: Lexing.position; loc_end: Lexing.position }
+  | Nest of { nest_type : nest_type; elems: lexforest } (* elems includes delimiters *)
+and lexforest = lextree list
 
-let dump_tokens { name; source; tokens } =
-  Printf.printf "%s:\n" name;
-  tokens |> List.iter (fun { token; loc_start; loc_end } ->
-    Printf.printf "%8s: [%s]\n"
-      (Lexer.token_name token)
-      (String.sub source loc_start.pos_cnum
-         (loc_end.pos_cnum - loc_start.pos_cnum)))
+type token_class =
+  | Tok_open of nest_type
+  | Tok_close of nest_type
+  | Tok_normal
+let token_class : Grammar.token -> token_class = function
+  | LPAR -> Tok_open Paren
+  | RPAR -> Tok_close Paren
+  | LBRACE -> Tok_open Brace
+  | RBRACE -> Tok_close Brace
+  | LBRACK -> Tok_open Bracket
+  | RBRACK -> Tok_close Bracket
+  | EOF -> Tok_close File
+  | _ -> Tok_normal
 
-open Grammar
-let tok_matches s t =
-  match s, t with
-  | LPAR, RPAR
-  | LBRACE, RBRACE
-  | LBRACK, RBRACK -> true
-  | _, _ -> false
+let tok_open : nest_type -> Grammar.token list =
+  function Paren -> [LPAR] | Brace -> [LBRACE] | Bracket -> [LBRACK] | File -> []
+let tok_close : nest_type -> Grammar.token list =
+  function Paren -> [RPAR] | Brace -> [RBRACE] | Bracket -> [RBRACK] | File -> [EOF]
 
-let tok_opens  = function LPAR | LBRACE | LBRACK -> true | _ -> false
-let tok_closes = function RPAR | RBRACE | RBRACK -> true | _ -> false
+let mkerror nest loc_start loc_end =
+  let mktoks toks loc =
+    List.map (fun token -> Tok {token; loc_start = loc; loc_end = loc}) toks in
+  mktoks (tok_open nest) loc_start @ [Tok {token=ERROR; loc_start; loc_end}] @ mktoks (tok_close nest) loc_end
 
-let tok_significant s t =
-  match s, t with
-  | _, WS -> false
-  | ([] | ({token = LBRACE; _}, _) :: _), NL -> true
-  | _, NL -> false
-  | _, _ -> true
-
-type checkpoint =
-  [`Exp of Exp.exp | `Sub of Exp.tyexp * Exp.tyexp] MenhirInterpreter.checkpoint
-type state =
-  (lexeme * checkpoint) list
+let rec scan lexbuf nest acc : lexforest =
+  let token = Lexer.lex lexbuf in
+  let (loc_start, loc_end) = Sedlexing.lexing_positions lexbuf in
+  let tok = Tok { token; loc_start; loc_end } in
+  match token_class token with
+  | Tok_open nest_type ->
+     let sub = Nest { nest_type; elems = scan lexbuf nest_type [tok] } in
+     scan lexbuf nest (sub :: acc)
+  | Tok_close ty when ty = nest ->
+     List.rev (tok :: acc)
+  | Tok_normal ->
+     begin match nest, token with
+     | _, WS
+     | (Paren|Bracket), NL -> scan lexbuf nest acc
+     | _ -> scan lexbuf nest (tok :: acc)
+     end
+  | Tok_close _ ->
+     failwith "mismatched parens"
 
 module P = Grammar.MenhirInterpreter
 
-let feed_token (p : checkpoint) tok =
-  assert (tok.token <> EOF);
-  let rec go = function
-    (* Should never see Rejected, as we do not resume on HandlingError *)
-    | P.Rejected -> assert false
-    (* Should never see Accepted, as we have not input EOF yet *)
-    | P.Accepted _ -> assert false
-    | P.Shifting _
-    | P.AboutToReduce _ as p -> go (P.resume p)
-    | P.InputNeeded _ as p -> Ok p
-    | P.HandlingError _ as p -> Error p in
-  let input = (tok.token, tok.loc_start, tok.loc_end) in
-  go (P.offer p input)
-
-let finish_parser (p : checkpoint) =
-  let eof_position =
-    Lexing.{pos_fname="EOF"; pos_lnum=0; pos_cnum=0; pos_bol=0} in
-  let rec go = function
-    | P.Accepted e -> Ok e
-    | P.Rejected -> assert false
-    | P.Shifting _
-    | P.AboutToReduce _ as p -> go (P.resume p)
-    | P.InputNeeded _
-    | P.HandlingError _ as p -> Error p in
-  go (P.offer p (EOF, eof_position, eof_position))
-
-
-let advance (s : state) p (tok : lexeme) =
-  match s, tok.token with
-  | [], t when tok_closes t ->
-     raise (Fatal (Mismatched_parens (None, Some tok)))
-  | ((op, _) :: s), t when tok_closes t ->
-     if tok_matches op.token t then s else
-       raise (Fatal (Mismatched_parens (Some op, Some tok)))
-  | s, t when tok_opens t ->
-      (tok, p) :: s
-  | s, _ -> s
-
-let rec feed_parser (s : state) p (tokens : lexeme list) =
-  match tokens with
-  | [] -> s, p
-  | tok :: tokens when not (tok_significant s tok.token) ->
-     feed_parser s p tokens
-  | tok :: tokens ->
-     match feed_token p tok with
-     | Ok p ->
-        feed_parser (advance s p tok) p tokens
-     | Error _ ->
-        failwith "plz recover"
+let rec parse p (toks : lexforest) =
+  match toks with
+  | [] -> Ok p
+  | Tok { token; loc_start; loc_end } :: rest ->
+     let input = (token, loc_start, loc_end) in
+     let rec go = function
+       (* Should never see Rejected, as we do not resume on HandlingError *)
+       | P.Rejected -> assert false
+       | (P.Shifting _ | P.AboutToReduce _) as p -> go (P.resume p)
+       | (P.Accepted _ | P.InputNeeded _) as p -> parse p rest
+       | P.HandlingError _ as p -> Error (input, p) in
+     go (P.offer p input)
+  | Nest { nest_type; elems } :: rest ->
+     match parse p elems with
+     | Ok p -> parse p rest
+     | Error ((_tok, loc_start, loc_end), _) as orig_err ->
+        match parse p (mkerror nest_type loc_start loc_end) with
+        | Ok p -> parse p rest
+        | Error _ -> orig_err
 
 let parse_string s =
-  let lexbuf = Utf8.from_string s in
-  let startpos = fst (lexing_positions lexbuf) in
-  let tokens = scan lexbuf [] in
-  let source = { name = "<stdin>"; source = s; tokens } in
-  if false then dump_tokens source;
-  let p = Grammar.Incremental.prog startpos in
-  begin match feed_parser [] p tokens with
-  | [], p -> finish_parser p
-  | _ -> failwith "??"
-  end
+  let lexbuf = Sedlexing.Utf8.from_string s in
+  let startpos = fst (Sedlexing.lexing_positions lexbuf) in
+  let tokens = scan lexbuf File [] in
+  match parse (Grammar.Incremental.prog startpos) tokens with
+  | Ok (P.Accepted x) -> Ok x
+  | Ok (P.InputNeeded _) -> failwith "unexpected eof"
+  | _ -> failwith "bad parse"
