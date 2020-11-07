@@ -10,7 +10,7 @@ type _ ty_sort =
   | Gen : typ ty_sort
 let tys_cons (type a) (sort : a ty_sort) pol (x : a cons_head) : a =
   match sort with
-  | Simple -> cons_styp pol vsnil x
+  | Simple -> styp_cons pol x
   | Gen -> cons_typ pol x
 let tys_of_styp (type a) (sort : a ty_sort) (x : styp) : a =
   match sort with
@@ -18,11 +18,11 @@ let tys_of_styp (type a) (sort : a ty_sort) (x : styp) : a =
   | Gen -> Tsimple x
 
 let close_tys (type s) (sort : s ty_sort) lvl pol (t : s) : s =
-  let env_gen_var pol index (_mark', vs) rest =
+  let env_gen_var pol index vs rest =
     assert (is_trivial pol rest);
     assert (Intlist.is_singleton vs);
     let (var, ()) = Intlist.as_singleton vs in
-    { pol; body = Bound_var { index; var } } in
+    Bound_var { pol; index; var } in
   match sort with
   | Simple ->
      map_free_styp lvl 0 env_gen_var pol t
@@ -38,9 +38,8 @@ let rec env_lookup_type : type s . s ty_sort -> env -> string -> s * s =
        when SymMap.mem name names ->
      (* FIXME shifting? *)
      let i = SymMap.find name names in
-     let vs = Intlist.singleton i () in
-     (tys_of_styp sort (cons_styp Neg (Intlist.singleton (fst env.level) ((snd env.level), vs)) (ident Neg)),
-      tys_of_styp sort (cons_styp Pos (Intlist.singleton (fst env.level) ((snd env.level), vs)) (ident Pos)))
+     (tys_of_styp sort (styp_var Neg env.level i),
+      tys_of_styp sort (styp_var Pos env.level i))
   | _ ->
      match env.rest with
      | Some env -> env_lookup_type sort env name
@@ -361,7 +360,7 @@ and check_parameters env acc ptypes fs =
     []) |> report;
   fold_fields (fun acc _fn (p, _ty, r) ->
     let ty = match !r with Some r -> r | None -> failwith "check_pat match?" in
-    let flex = (-1,ref()) in    (* FIXME hack. I think this can trigger on weird pats. *)
+    let flex = (Env_level.empty ()) in    (* FIXME hack. I think this can trigger on weird pats. *)
     check_pat env flex acc ty p) acc fs
 
 and infer_lit = function

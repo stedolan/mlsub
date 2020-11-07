@@ -56,18 +56,13 @@ let remove_joins env lvl ty =
   let rec canon pol ty =
     map_free_styp lvl 0 canon_var pol ty
 
-  and canon_var pol _ix (mark', vs) (rest : styp) =
-    assert (Env_level.equal lvl (fst lvl, mark'));
+  and canon_var pol _ix vs (rest : styp) =
     (* map_free_styp should never call us with an empty vs *)
     assert (not (Intlist.is_empty vs));
-    match rest, vs with
-    | { body = Styp {cons; tyvars}; pol }, vs when
-           cons = ident pol &&
-           Intlist.is_empty tyvars &&
-           Intlist.is_singleton vs ->
+    if is_trivial pol rest && Intlist.is_singleton vs then
        (* 1BV because only one var at this level *)
-       cons_styp pol (Intlist.singleton (fst lvl) (mark', vs)) (ident pol)
-    | _, vs ->
+       styp_vars pol lvl vs
+    else
        (* Otherwise, need to introduce a new flexvar to enforce 1BV *)
        let key = (pol, rest, vs) in
        match Hashtbl.find canon_table key with
@@ -170,10 +165,8 @@ let garbage_collect env lvl ty =
       Intlist.iter vs.flow (fun v' () -> visit_bound pol v')
     end
   and visit_styp pol t =
-    assert (pol = t.pol);
     ignore (map_free_styp lvl 0 visit_vars_strong pol t)
-  and visit_vars_strong pol _ix (mark', vs) (rest : styp) =
-    assert (Env_level.equal lvl (fst lvl, mark'));
+  and visit_vars_strong pol _ix vs (rest : styp) =
     assert (is_trivial pol rest); (* Should be 1BV form already *)
     Intlist.iter vs (fun v () ->
       (var_side pol vars.(v)).strong <- true;
@@ -256,7 +249,7 @@ let garbage_collect env lvl ty =
       end
    end);
 
-  let new_env_level = (fst lvl, Env_level.new_marker ()) in
+  let new_env_level = Env_level.replace lvl in
   let num_new_vars = ref 0 in
   vars |> Array.iter (fun v ->
     if v.replacement = Unknown then begin
@@ -273,7 +266,7 @@ let garbage_collect env lvl ty =
     | Link v' ->
        replace_var pol v' (* could path compress... *)
     | Keep (mark, v) ->
-       cons_styp pol (Types.vset_of_flexvar (fst lvl, mark) v) (ident pol)
+       styp_var pol (fst lvl, mark) v
     | SubstPost t -> t
     | SubstPre t ->
        let t = replace_styp pol t in
@@ -281,13 +274,12 @@ let garbage_collect env lvl ty =
        t
   and replace_styp pol t =
     map_free_styp lvl 0 replace_vars pol t
-  and replace_vars pol _ix (mark', vs) (rest : styp) =
-    assert (Env_level.equal lvl (fst lvl, mark'));
+  and replace_vars pol _ix vs (rest : styp) =
     (* no joins: if we have vs, then rest should be trivial *)
     assert (Intlist.is_singleton vs);
     assert (is_trivial pol rest);
     let (v, ()) = Intlist.as_singleton vs in
-    replace_var rest.pol v in
+    replace_var pol v in
 
   let new_flexvars : flexvar Vector.t =
     Array.init !num_new_vars (fun _ ->

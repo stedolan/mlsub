@@ -2,7 +2,6 @@
  * Core definitions used by the typechecker
  *)
 
-module IntMap = Map.Make (struct type t = int let compare = compare end)
 module StrMap = Map.Make (struct type t = string let compare = compare end)
 
 open Tuple_fields
@@ -20,7 +19,21 @@ type +'a cons_head =
   | Record of 'a tuple_fields
   | Func of 'a tuple_fields * 'a
 
-module Env_level = struct
+module Env_level : sig
+  type level
+  type marker
+
+  type t = level * marker
+
+  val empty : unit -> t
+  val extend : t -> t
+  val replace : t -> t
+
+  val equal : t -> t -> bool
+  val extends : t -> t -> bool
+
+  val to_int : t -> int
+end = struct
   type level = int
   type marker = unit ref
 
@@ -30,6 +43,7 @@ module Env_level = struct
 
   let empty () = 0, new_marker ()
   let extend (l, _) = (l + 1, new_marker ())
+  let replace (l, _) = (l, new_marker ())
 
   let extends (l1, _) (l2, _) = l1 <= l2
   let equal ((l1, m1) : t) ((l2, m2) : t) =
@@ -37,6 +51,8 @@ module Env_level = struct
       (assert (m1 == m2); true)
     else
       false
+
+  let to_int = fst
 end
 
 
@@ -62,13 +78,9 @@ and env =
 
 (* Simple types (the result of inference). No binders. *)
 and styp =
-  { body: styp_body; pol: polarity }
-
-and styp_body =
-  | Styp of { cons : styp cons_head; tyvars : vset }
-  | Bound_var of { index : int; var : int }
-
-and vset = (Env_level.level, Env_level.marker * (int, unit) Intlist.t) Intlist.t
+  | Cons of { pol: polarity; cons: styp cons_head }
+  | Free_vars of { level: Env_level.t; vars: (int, unit) Intlist.t; rest: styp }
+  | Bound_var of { pol: polarity; index: int; var: int }
 
 (* Flexible type variables.
    Maintain the ε-invariant:
@@ -81,9 +93,8 @@ and flexvar = {
     (* negative component, upper bound *)
     mutable neg : styp;
 
-
     (* Match cache styps are either ident or a single flexible variable at the same level *)
-    (* FIXME: should be an int or vset cons_head?  *)
+    (* FIXME: should be an int or var cons_head?  *)
     mutable pos_match_cache : styp cons_head;
     mutable neg_match_cache : styp cons_head;
   }
@@ -122,20 +133,13 @@ let ident = function
   | Pos -> Bot
   | Neg -> Top
 
-let is_trivial pol { body; pol = pol' } =
-  assert (pol = pol');
-  match body with
-  | Styp {cons; tyvars} ->
-     cons = ident pol && Intlist.is_empty tyvars
-  | Bound_var _ -> assert false
-
 (* Overconstrained. Must be everything. Annihilator of meet/join. *)
 let annih = function
   | Pos -> Top
   | Neg -> Bot
 
 (*
- * Environment ordering and vset merging
+ * Environment ordering
  *)
 
 let assert_env_equal env1 env2 =
@@ -182,11 +186,6 @@ let env_rigid_flow env lvl i j =
 let vlist_union v1 v2 =
   Intlist.union (fun _ () () -> ()) v1 v2
 
-let vset_union vars1 vars2 =
-  Intlist.union (fun l (m1, v1) (m2, v2) ->
-      assert (Env_level.equal (l,m1) (l,m2));
-      m1, vlist_union v1 v2) vars1 vars2
-
 (*
  * Opening/closing of binders
  *)
@@ -205,32 +204,41 @@ let map_head pol f = function
   | Func (args, res) ->
      Func (map_head_cons (polneg pol) f args, f pol res)
 
-let cons_styp pol tyvars cons = { pol; body = Styp {cons; tyvars} }
 let cons_typ _pol cons = Tcons cons
 
 
-let vsnil : vset = Intlist.empty
-
-let styp_pos_bot = cons_styp Pos vsnil Bot
-let styp_neg_bot = cons_styp Neg vsnil Bot
+let styp_pos_bot = Cons {pol=Pos; cons=Bot}
+let styp_neg_bot = Cons {pol=Neg; cons=Bot}
 let styp_bot = function Pos -> styp_pos_bot | Neg -> styp_neg_bot
-let styp_pos_top = cons_styp Pos vsnil Top
-let styp_neg_top = cons_styp Neg vsnil Top
+let styp_pos_top = Cons {pol=Pos; cons=Top}
+let styp_neg_top = Cons {pol=Neg; cons=Top}
 let styp_top = function Pos -> styp_pos_top | Neg -> styp_neg_top
 
-let styp_trivial pol = cons_styp pol vsnil (ident pol)
+let styp_trivial pol = Cons {pol; cons=ident pol}
+
+let is_trivial pol = function
+  | Cons { pol=pol'; cons } -> assert (pol = pol'); cons = ident pol
+  | Free_vars _ | Bound_var _ -> false
+
+let styp_vars pol level vars =
+  Free_vars { level; vars; rest = styp_trivial pol }
+let styp_var pol level var =
+  styp_vars pol level (Intlist.singleton var ())
+let styp_cons pol cons =
+  Cons {pol; cons}
 
 
 (* Rewrite occurrences of the outermost bound variable *)
-let rec map_bound_styp ix rw pol' ({ body; pol } as ty) =
-  assert (pol = pol');
-  match body with
-  | Styp { cons; tyvars } ->
-     { body = Styp { cons = map_head pol (map_bound_styp ix rw) cons;
-                     tyvars }; pol }
-  | Bound_var { index; var } when index = ix ->
+let rec map_bound_styp ix rw pol' = function
+  | Cons { pol; cons } ->
+     assert (pol = pol');
+     Cons { pol; cons = map_head pol (map_bound_styp ix rw) cons }
+  | Free_vars { level; vars; rest } ->
+     Free_vars { level; vars; rest = map_bound_styp ix rw pol' rest }
+  | Bound_var { pol; index; var } when index = ix ->
+     assert (pol = pol');
      rw pol var
-  | Bound_var _ -> ty
+  | Bound_var _ as ty -> ty
 
 let rec map_bound_typ ix rw pol = function
   | Tsimple s -> Tsimple (map_bound_styp ix rw pol s)
@@ -246,17 +254,18 @@ let rec map_bound_typ ix rw pol = function
             body = map_bound_typ ix rw pol body}
 
 (* Rewrite occurrences of the outermost free variable *)
-let rec map_free_styp lvl ix rw pol' ({ body; pol } as ty) =
-  assert (pol = pol');
-  match body with
-  | Bound_var _ -> ty
-  | Styp { cons; tyvars } ->
-     let cons = map_head pol (map_free_styp lvl ix rw) cons in
-     match Intlist.peel_max (fst lvl) tyvars with
-     | None -> { body = Styp { cons; tyvars }; pol }
-     | Some (vs, tyvars') ->
-        let rest = { body = Styp { cons; tyvars = tyvars' }; pol } in
-        rw pol ix vs rest
+let rec map_free_styp lvl ix rw pol' = function
+  | Bound_var _ as ty -> ty
+  | Cons { pol; cons } ->
+     assert (pol = pol');
+     Cons { pol; cons = map_head pol (map_free_styp lvl ix rw) cons }
+  | Free_vars { level; vars; rest } ->
+     assert (Env_level.extends level lvl);
+     let rest = map_free_styp lvl ix rw pol' rest in
+     if Env_level.equal lvl level then
+       rw pol' ix vars rest
+     else
+       Free_vars { level; vars; rest }
 
 (* FIXME: Tpoly_pos should have separate bounds,
    copied through here. 
@@ -277,36 +286,49 @@ let rec map_free_typ lvl ix rw pol = function
 
 
 (* FIXME: use these more *)
-let styp_consv lvl ({ body; pol } as t) vs =
+let styp_consv level t vars =
   (* FIXME: add a wf_styp_at_level here? *)
-  if Intlist.is_empty vs then t else
-    match body with
-    | Bound_var _ -> assert false (* should be at-or-below lvl, bound variables aren't *)
-    | Styp { cons; tyvars } ->
-       let tyvars = Intlist.cons_max tyvars (fst lvl) (snd lvl, vs) in
-       { body = Styp { cons; tyvars };  pol }
+  if Intlist.is_empty vars then t
+  else Free_vars { level; vars; rest = t }
 
-let styp_unconsv lvl ({ body; pol } as t) =
+let styp_unconsv lvl = function
   (* FIXME: add a wf_styp_at_level here? *)
-  match body with
-  | Bound_var _ -> assert false (* should be below lvl, bound variables aren't *)
-  | Styp { cons; tyvars } ->
-     match Intlist.peel_max (fst lvl) tyvars with
-     | None -> t, Intlist.empty
-     | Some ((mark', vs), rest) ->
-        (* FIXME FIXME bug here, this is nonsense. Should hit the case above.
-           Let's see if testing hits this. Might need nested scopes first *)
-        assert (Env_level.equal lvl (fst lvl, mark'));
-        { body = Styp { cons; tyvars = rest }; pol }, vs
+  | Free_vars { level; vars; rest } when Env_level.equal lvl level ->
+     rest, vars
+  | t -> t, Intlist.empty
 
-let styp_max_var_level {body; pol=_} =
-  match body with
+type styp_unconsv2_result =
+  | Cons2 of { a: styp cons_head; b: styp cons_head }
+  | Vars2 of { level: Env_level.t;
+               a: styp; va: (int, unit) Intlist.t;
+               b: styp; vb: (int, unit) Intlist.t }
+
+let styp_unconsv2 a b =
+  match a, b with
+  | (Bound_var _, _) | (_, Bound_var _) -> assert false
+  | Cons {pol=_; cons=a}, Cons {pol=_; cons=b} ->
+     Cons2 {a;b}
+  | Free_vars { level; vars=va; rest=a }, Cons _ ->
+     Vars2 {level; a; va; b; vb = Intlist.empty}
+  | Cons _, Free_vars { level; vars=vb; rest=b } ->
+     Vars2 {level; a; va=Intlist.empty; b; vb }
+  | Free_vars {level; vars=va; rest=a},
+    Free_vars {level=level'; vars=vb; rest=b}
+       when Env_level.equal level level' ->
+     Vars2 {level; a; va; b; vb}
+  | Free_vars {level=la; vars=va; rest=ra},
+    Free_vars {level=lb; vars=vb; rest=rb} ->
+     if Env_level.extends la lb then
+       Vars2 {level=lb; a; va=Intlist.empty; b=rb; vb}
+     else
+       Vars2 {level=la; a=ra; va; b; vb=Intlist.empty}
+
+(* FIXME: is this needed any more? *)
+let styp_max_var_level = function
   | Bound_var _ ->
      assert false
-  | Styp { cons=_; tyvars } ->
-     match Intlist.take_max tyvars with
-     | Empty -> None
-     | Cons (lvl, (mark, _), _) -> Some (lvl, mark)
+  | Free_vars { level; _ } -> Some level
+  | Cons _ -> None
 
 (* Open a ∀⁺ binder by instantiating its bound variables with fresh flexvars.
    Inserts variables into the current environment (no new level created) *)
@@ -324,7 +346,7 @@ let instantiate_flexible env ?(names=SymMap.empty) lvl (vars : (string option * 
   let disjoint_union v1 v2 =
     Intlist.union (fun _ _ _ -> assert false) v1 v2 in
   let inst pol v =
-    cons_styp pol (Intlist.singleton (fst lvl) (snd lvl, Intlist.singleton (v+delta) ())) (ident pol) in
+    styp_vars pol lvl (Intlist.singleton (v+delta) ()) in
   vars |> Array.iteri (fun i (name, l, u) ->
     let cons_pos, eps_pos = styp_unconsv lvl l in
     let cons_neg, eps_neg = styp_unconsv lvl u in
@@ -358,16 +380,10 @@ let enter_poly_pos env names vars flow body =
 
 (* Close a ∀⁺ binder, generalising flexible variables *)
 let generalise env lvl ty =
-  let gen pol' index (mark', vs) { body; pol } =
-    assert (Env_level.equal lvl (fst lvl, mark'));
-    assert (pol = pol');
+  let gen pol index vs rest =
     let var, () = Intlist.as_singleton vs in
-    match body with
-    | Styp {cons; tyvars} when
-         cons = ident pol && Intlist.is_empty tyvars ->
-       { body = Bound_var {index; var}; pol }
-    | _ ->
-       failwith "generalise: should be a single variable" in
+    assert (is_trivial pol rest);
+    Bound_var {pol; index; var} in
   let flexvars = env_flexvars env lvl in
   if Vector.length flexvars = 0 then ty else
   let bounds_flow = flexvars |> Vector.to_array |> Array.map (fun {pos; neg; _} ->
@@ -387,8 +403,7 @@ let generalise env lvl ty =
 let enter_poly_neg (env : env) names bounds flow body =
   let rigvar_level = Env_level.extend env.level in
   let inst pol v =
-    let tyvars = Intlist.singleton (fst rigvar_level) ((snd rigvar_level), Intlist.singleton v ()) in
-    { pol; body = Styp { cons = ident pol; tyvars } } in
+    styp_vars pol rigvar_level (Intlist.singleton v ()) in
   let vars = bounds |> Array.map (fun (name, l, u) ->
     { name;
       rig_lower = map_bound_styp 0 inst Neg l;
@@ -425,17 +440,15 @@ and wf_cons_fields pol env wf fields =
 let rec wf_env ({ level; entry; rest } as env) =
   wf_env_entry env entry;
   match rest with
-  | None -> assert (fst level = 0);
+  | None -> assert (Env_level.to_int level = 0);
   | Some env' ->
-     assert ((fst level) = (fst env'.level) + 1);
+     assert ((Env_level.to_int level) = (Env_level.to_int env'.level) + 1);
      wf_env env'
 
-and wf_match_cache_entry pol env t =
-  match t.body with
-  | Styp {cons; tyvars} when cons = ident pol ->
-     let lvl, (mark, vs) = Intlist.as_singleton tyvars in
-     assert (Env_level.equal env.level (lvl, mark));
-     let v, () = Intlist.as_singleton vs in
+and wf_match_cache_entry pol env = function
+  | Free_vars { level; vars; rest} when is_trivial pol rest ->
+     assert (Env_level.equal env.level level);
+     let v, () = Intlist.as_singleton vars in
      assert (0 <= v && v < Vector.length (env_flexvars env env.level))
   | _ -> assert false
 
@@ -469,13 +482,14 @@ and wf_env_entry env = function
        assert (snd (styp_unconsv env.level rig_lower) = Intlist.empty);
        assert (snd (styp_unconsv env.level rig_upper) = Intlist.empty))
 
-and wf_styp pol' env { body; pol } =
-  assert (pol = pol');
-  match body with
+and wf_styp pol' env = function
   | Bound_var _ -> assert false (* locally closed *)
-  | Styp { cons; tyvars } ->
-     wf_cons pol env wf_styp cons;
-     wf_vset pol env tyvars
+  | Cons { pol; cons } ->
+     assert (pol = pol');
+     wf_cons pol env wf_styp cons
+  | Free_vars { level; vars; rest } ->
+     wf_vars pol' env level vars;
+     wf_styp pol' env rest
 
 and wf_typ pol env = function
   | Tcons cons ->
@@ -486,23 +500,21 @@ and wf_typ pol env = function
      assert (Flow_graph.length flow = Array.length bounds);
      (* toplevel references to bound variables should be in flow, not bounds *)
      bounds |> Array.iter (fun (_name, p, n) ->
-       (match p.body with Bound_var _ -> assert false | _ -> ());
-       (match n.body with Bound_var _ -> assert false | _ -> ()));
+       (match p with Bound_var _ -> assert false | _ -> ());
+       (match n with Bound_var _ -> assert false | _ -> ()));
      let env, body = enter_poly pol env names bounds flow body in
      wf_env_entry env env.entry;
      wf_typ pol env body
 
-and wf_vset _pol env tyvars =
-  Intlist.wf tyvars;
-  Intlist.iter tyvars (fun lvl (mark, vs) ->
-    Intlist.wf vs;
-    assert (not (Intlist.is_empty vs));
-    let len =
-      match env_entry_at_level env (lvl, mark) with
-      | Eflexible {vars; _} -> Vector.length vars
-      | Erigid { vars; _ } -> Array.length vars
-      | _ -> assert false in
-    Intlist.iter vs (fun v () -> assert (0 <= v && v < len)))
+and wf_vars _pol env level vs =
+  Intlist.wf vs;
+  assert (not (Intlist.is_empty vs));
+  let len =
+    match env_entry_at_level env level with
+    | Eflexible {vars; _} -> Vector.length vars
+    | Erigid { vars; _ } -> Array.length vars
+    | _ -> assert false in
+  Intlist.iter vs (fun v () -> assert (0 <= v && v < len))
 
 (*
  * Printing of internal representations
@@ -530,35 +542,20 @@ and pr_cons_fields pol pr fields =
   let cl = match fields.fopen with `Closed -> [] | `Open -> [str "..."] in
   parens (group (nest 2 (break 0 ^^ separate (comma ^^ break 1) (named_fields @ cl))))
 
-(*
-let pr_flexvar env v =
-  if env.level = 1 && v < 10 then
-    "'" ^ [| "α"; "β"; "γ"; "δ"; "ε"; "ζ"; "η"; "θ"; "ι"; "κ" |].(v)
-  else
-    Printf.sprintf "'%d.%d" env.level v
-*)
-
-let pr_vset vs =
-  (Intlist.to_list vs |> List.concat_map (fun (lvl, (_,vs)) ->
-     Intlist.to_list vs |> List.map (fun (v,()) ->
-       Printf.sprintf "#%d.%d" lvl v |> string)))
-
-let pr_cons_tyvars pol vars cons_orig cons =
-  let join = match pol with Pos -> "⊔" | Neg -> "⊓" in
-  let join = blank 1 ^^ str join ^^ blank 1 in
-  let pvars = separate_map join (fun v -> v) vars in
-  match pol, cons_orig, vars with
-  | _, _, [] -> cons
-  | Pos, Bot, _
-  | Neg, Top, _ -> pvars
-  | _, _, _ -> parens cons ^^ join ^^ pvars
-
-let rec pr_styp pol t =
-  match t.body with
-  | Bound_var { index; var } ->
+let rec pr_styp pol = function
+  | Bound_var { pol=_; index; var } ->
      string (Printf.sprintf ".%d.%d" index var)
-  | Styp { cons; tyvars } ->
-     pr_cons_tyvars pol (pr_vset tyvars) cons (pr_cons pol pr_styp cons)
+  | Cons { pol=_; cons } ->
+     pr_cons pol pr_styp cons
+  | Free_vars { level; vars; rest } ->
+     let join = match pol with Pos -> "⊔" | Neg -> "⊓" in
+     let join = blank 1 ^^ str join ^^ blank 1 in
+     let pv (v, ()) = Printf.sprintf "#%d.%d" (Env_level.to_int level) v |> string in
+     let pvars = separate_map join pv (Intlist.to_list vars) in
+     if is_trivial pol rest then
+       pvars
+     else
+       pr_styp pol rest ^^ join ^^ pvars
 
 let rec pr_typ pol = function
   | Tsimple s -> pr_styp pol s
@@ -606,7 +603,7 @@ let make_env () = { level = Env_level.empty ();
                     entry = Eflexible {vars=Vector.create ();names=SymMap.empty}; rest = None }
 
 let bvars pol index var =
-  { pol; body = Bound_var {index; var} }
+  Bound_var {pol; index; var}
 
 let test () =
   let env = make_env () in
@@ -616,9 +613,9 @@ let test () =
                       Some "B", styp_bot Pos, styp_top Neg;
                       Some "C", styp_bot Pos, styp_top Neg |];
            flow=Flow_graph.of_list 3 [(0,2); (1,2)];
-           body=Tsimple (cons_styp Pos vsnil (func
+           body=Tsimple (styp_cons Pos (func
                  (bvars Neg 0 0)
-                 (cons_styp Pos vsnil (func
+                 (styp_cons Pos (func
                    (bvars Neg 0 1)
                    (bvars Pos 0 2)))))} in
   wf_typ Pos env choose1_pos;

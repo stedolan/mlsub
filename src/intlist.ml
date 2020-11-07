@@ -69,15 +69,6 @@ let all_below (type k) (k : k) : (k, _) t -> bool = function
   | Empty -> true
   | Cons(_, k', _) -> k' < k
 
-let peel_max (type k) (k : k) : (k, 'v) t -> ('v * (k, 'v) t) option = function
-  | Cons(m', k', v) when k' = k -> Some (v, m')
-  | _ -> None
-
-let cons_max m k v =
-  assert (all_below k m);
-  Cons (m, k, v)
-
-
 let rec increase_keys : type k . int -> (k, 'v) t -> (k, 'v) t =
   fun n m -> match m with
   | Empty -> Empty
@@ -107,36 +98,6 @@ let rec to_list : type k . (k, 'v) t -> (k * 'v) list =
   function
   | Empty -> []
   | Cons(m, k, v) -> (k, v) :: to_list m
-
-type ('k, 'a, 'b) take_max2_result =
-  | Empty
-  | Left of 'k * 'a * ('k, 'a) t
-  | Right of 'k * 'b * ('k, 'b) t
-  | Both of 'k * 'a * 'b * ('k, 'a) t * ('k, 'b) t
-
-type ('k, 'a) take_max_result =
-  | Empty
-  | Cons of 'k * 'a * ('k, 'a) t
-let take_max (type k) (a : (k, 'a) t) : (k, 'a) take_max_result =
-  match a with
-  | Empty -> Empty
-  | Cons(a, ka, va) -> Cons (ka, va, a)
-
-let take_max2 (type k) (a : (k, 'a) t) (b : (k, 'b) t) : (k, 'a, 'b) take_max2_result =
-  match a, b with
-  | Empty, Empty ->
-     Empty
-  | Cons(a, ka, va), Empty ->
-     Left(ka, va, a)
-  | Empty, Cons(b, kb, vb) ->
-     Right(kb, vb, b)
-  | Cons(a, ka, va), Cons(b, kb, vb) when ka = kb ->
-     Both(ka, va, vb, a, b)
-  | Cons(a, ka, va), Cons(b, kb, vb) ->
-     if ka > kb then
-       Left(ka, va, a)
-     else
-       Right(kb, vb, b)
 
 let as_singleton (type k) : (k, 'a) t -> k * 'a = function
   | Cons(Empty, k, v) -> k, v

@@ -50,14 +50,12 @@ let convert_cons conv env pol (ty : _ Typedefs.cons_head) =
    In such types, all stypes are lone variables *)
 let rec convert_styp' env pol (ty : Typedefs.styp) : Exp.tyexp' =
   wf_styp pol env ty;
-  match ty.body with
+  match ty with
   | Bound_var _ -> failwith "locally closed"
-  | Styp { cons; tyvars } when Intlist.is_empty tyvars ->
+  | Cons { pol=_; cons } ->
      convert_cons convert_styp env pol cons
-  | Styp { cons; tyvars } ->
-     assert (cons = ident pol);
-     let lvl_, (mark_, vs) = Intlist.as_singleton tyvars in
-     let lvl = lvl_, mark_ in
+  | Free_vars { level=lvl; rest; vars=vs } ->
+     assert (is_trivial pol rest);
      let v, () = Intlist.as_singleton vs in
      let name =
        match env_entry_at_level env lvl with
