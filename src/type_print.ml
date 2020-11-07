@@ -56,10 +56,11 @@ let rec convert_styp' env pol (ty : Typedefs.styp) : Exp.tyexp' =
      convert_cons convert_styp env pol cons
   | Styp { cons; tyvars } ->
      assert (cons = ident pol);
-     let lvl, (mark, vs) = Intlist.as_singleton tyvars in
+     let lvl_, (mark_, vs) = Intlist.as_singleton tyvars in
+     let lvl = lvl_, mark_ in
      let v, () = Intlist.as_singleton vs in
      let name =
-       match env_entry_at_level env lvl mark with
+       match env_entry_at_level env lvl with
        | Erigid { vars; _ } ->
           vars.(v).name
        | Eflexible {vars=flexvars; _} ->
@@ -93,8 +94,8 @@ let rec convert env pol (ty : Typedefs.typ) : Exp.tyexp =
          | Pos, Eflexible {vars=flexvars; _} ->
             flexvars |> Vector.to_array |> Array.map (fun {name; pos; neg; _} ->
               (* drop flow *)
-              let pos, _ = styp_unconsv env.level env.marker pos in
-              let neg, _ = styp_unconsv env.level env.marker neg in
+              let pos, _ = styp_unconsv env.level pos in
+              let neg, _ = styp_unconsv env.level neg in
               name, (Pos, pos), (Neg, neg))
          | _ -> assert false in
        let constraints =

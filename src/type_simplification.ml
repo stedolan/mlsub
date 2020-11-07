@@ -43,21 +43,21 @@ can be computed during the polarity DFS, by locating backedges. (weak guardednes
    FIXME: would be better to do this, because this current wastes
           time redundantly canonising useless variables.
 *)
-let remove_joins env (lvl, mark) ty =
+let remove_joins env lvl ty =
   wf_typ Pos env ty;
   (* FIXME: this is a poor way to key this table.
      Hashing styps isn't very reliable, because tuple_fields are not canonical
      (this only causes a possible loss of sharing, though) *)
   let canon_table : (polarity * styp * (int, unit) Intlist.t, styp) Hashtbl.t = Hashtbl.create 10 in
-  let flexvars = env_flexvars env lvl mark in
+  let flexvars = env_flexvars env lvl in
 
   (* FIXME: this can probably determine recursive reachability, for rectypes *)
 
   let rec canon pol ty =
-    map_free_styp lvl mark 0 canon_var pol ty
+    map_free_styp lvl 0 canon_var pol ty
 
   and canon_var pol _ix (mark', vs) (rest : styp) =
-    Env_marker.assert_equal mark mark';
+    assert (Env_level.equal lvl (fst lvl, mark'));
     (* map_free_styp should never call us with an empty vs *)
     assert (not (Intlist.is_empty vs));
     match rest, vs with
@@ -66,15 +66,15 @@ let remove_joins env (lvl, mark) ty =
            Intlist.is_empty tyvars &&
            Intlist.is_singleton vs ->
        (* 1BV because only one var at this level *)
-       cons_styp pol (Intlist.singleton lvl (mark', vs)) (ident pol)
+       cons_styp pol (Intlist.singleton (fst lvl) (mark', vs)) (ident pol)
     | _, vs ->
        (* Otherwise, need to introduce a new flexvar to enforce 1BV *)
        let key = (pol, rest, vs) in
        match Hashtbl.find canon_table key with
        | t' -> t'
        | exception Not_found ->
-          let (n, p) = Types.fresh_flow env (lvl, mark) in
-          let t = styp_consv lvl mark rest vs in
+          let (n, p) = Types.fresh_flow env lvl in
+          let t = styp_consv lvl rest vs in
           let nofail = function [] -> () | _ -> assert false in
           let repl =
             match pol with
@@ -85,17 +85,17 @@ let remove_joins env (lvl, mark) ty =
   (* iterate only over original vars, not any new ones *)
   for i = 0 to Vector.length flexvars - 1 do
     let v = Vector.get flexvars i in
-    let pcons, pvar = styp_unconsv lvl mark v.pos in
+    let pcons, pvar = styp_unconsv lvl v.pos in
     let pcons = canon Pos pcons in
-    v.pos <- styp_consv lvl mark pcons pvar;
+    v.pos <- styp_consv lvl pcons pvar;
     v.pos_match_cache <- ident Pos;
-    let ncons, nvar = styp_unconsv lvl mark v.neg in
+    let ncons, nvar = styp_unconsv lvl v.neg in
     let ncons = canon Neg ncons in
-    v.neg <- styp_consv lvl mark ncons nvar;
+    v.neg <- styp_consv lvl ncons nvar;
     v.neg_match_cache <- ident Neg
   done;
-  let ty = map_free_typ lvl mark 0 canon_var Pos ty in
-  wf_env_entry env (env_entry_at_level env lvl mark);
+  let ty = map_free_typ lvl 0 canon_var Pos ty in
+  wf_env_entry env (env_entry_at_level env lvl);
   wf_typ Pos env ty;
   ty
 
@@ -110,7 +110,7 @@ type replacement =
   | Unknown
   | Deleted
   | Link of int
-  | Keep of Env_marker.t * int
+  | Keep of Env_level.marker * int
   | SubstPre of styp            (* in old env *)
   | SubstPost of styp           (* in new env *)
 
@@ -134,13 +134,13 @@ let var_side pol { vneg; vpos; _ } =
      α ≤ C
      γ ≤ α ≤ β ≤ D ⊢ α → (β × γ)
    α should be expanded to C ⊓ β, even in the upper bound of +-reachable γ *)
-let garbage_collect env (lvl, mark) ty =
+let garbage_collect env lvl ty =
   (* let orig_ty = ty in *)
   wf_typ Pos env ty;
-  let orig_flexvars = env_flexvars env lvl mark in
+  let orig_flexvars = env_flexvars env lvl in
   let vars = Vector.to_array orig_flexvars |> Array.map (fun { pos; neg; _ } ->
-    let pos_cons, pos_flow = styp_unconsv lvl mark pos in
-    let neg_cons, neg_flow = styp_unconsv lvl mark neg in
+    let pos_cons, pos_flow = styp_unconsv lvl pos in
+    let neg_cons, neg_flow = styp_unconsv lvl neg in
     { vpos = { weak = false; strong = false; cons = pos_cons; flow = pos_flow };
       vneg = { weak = false; strong = false; cons = neg_cons; flow = neg_flow };
       replacement = Unknown }) in
@@ -171,16 +171,16 @@ let garbage_collect env (lvl, mark) ty =
     end
   and visit_styp pol t =
     assert (pol = t.pol);
-    ignore (map_free_styp lvl mark 0 visit_vars_strong pol t)
+    ignore (map_free_styp lvl 0 visit_vars_strong pol t)
   and visit_vars_strong pol _ix (mark', vs) (rest : styp) =
-    Env_marker.assert_equal mark mark';
+    assert (Env_level.equal lvl (fst lvl, mark'));
     assert (is_trivial pol rest); (* Should be 1BV form already *)
     Intlist.iter vs (fun v () ->
       (var_side pol vars.(v)).strong <- true;
       visit_bound pol v);
     (* unused. Maybe I need an iter_free_styp... *)
     styp_trivial pol in
-  ignore (map_free_typ lvl mark 0 visit_vars_strong Pos ty);
+  ignore (map_free_typ lvl 0 visit_vars_strong Pos ty);
 
   (* FIXME: write tests that hit each of these cases *)
 
@@ -256,13 +256,13 @@ let garbage_collect env (lvl, mark) ty =
       end
    end);
 
-  let new_env_marker = Env_marker.make () in
+  let new_env_level = (fst lvl, Env_level.new_marker ()) in
   let num_new_vars = ref 0 in
   vars |> Array.iter (fun v ->
     if v.replacement = Unknown then begin
       let id = !num_new_vars in
       incr num_new_vars;
-      v.replacement <- Keep (new_env_marker, id)
+      v.replacement <- Keep (snd new_env_level, id)
     end);
 
   let rec replace_var pol v =
@@ -273,16 +273,16 @@ let garbage_collect env (lvl, mark) ty =
     | Link v' ->
        replace_var pol v' (* could path compress... *)
     | Keep (mark, v) ->
-       cons_styp pol (Types.vset_of_flexvar (lvl, mark) v) (ident pol)
+       cons_styp pol (Types.vset_of_flexvar (fst lvl, mark) v) (ident pol)
     | SubstPost t -> t
     | SubstPre t ->
        let t = replace_styp pol t in
        v.replacement <- SubstPost t;
        t
   and replace_styp pol t =
-    map_free_styp lvl mark 0 replace_vars pol t
+    map_free_styp lvl 0 replace_vars pol t
   and replace_vars pol _ix (mark', vs) (rest : styp) =
-    Env_marker.assert_equal mark mark';
+    assert (Env_level.equal lvl (fst lvl, mark'));
     (* no joins: if we have vs, then rest should be trivial *)
     assert (Intlist.is_singleton vs);
     assert (is_trivial pol rest);
@@ -307,19 +307,18 @@ let garbage_collect env (lvl, mark) ty =
     match v.replacement with
     | Keep (_, ix) ->
        let v' = Vector.get new_flexvars ix in
-       v'.pos <- styp_consv lvl new_env_marker (replace_styp Pos v.vpos.cons) (convert_flow v.vpos.flow);
-       v'.neg <- styp_consv lvl new_env_marker (replace_styp Neg v.vneg.cons) (convert_flow v.vneg.flow); 
+       v'.pos <- styp_consv new_env_level (replace_styp Pos v.vpos.cons) (convert_flow v.vpos.flow);
+       v'.neg <- styp_consv new_env_level (replace_styp Neg v.vneg.cons) (convert_flow v.vneg.flow); 
     | _ -> ());
-  let ty = map_free_typ lvl mark 0 replace_vars Pos ty in
+  let ty = map_free_typ lvl 0 replace_vars Pos ty in
 
   let env' =
-    let { marker = mark'; rest; _ } = env in
-    Env_marker.assert_equal mark mark';
-    { level = lvl;
-      marker = new_env_marker;
+    let { level = level'; rest; _ } = env in
+    assert (Env_level.equal lvl level');
+    { level = new_env_level;
       entry = Eflexible {vars=new_flexvars;names=Tuple_fields.SymMap.empty};
       rest } in
-  wf_env_entry env' (env_entry_at_level env' lvl new_env_marker);
+  wf_env_entry env' (env_entry_at_level env' new_env_level);
   wf_typ Pos env' ty;
   env', ty
   
@@ -371,7 +370,7 @@ let garbage_collect env (lvl, mark) ty =
     match v.subst_computed with
     | Some t -> t
     | None ->
-       let cons = map_free_styp lvl mark 0 substitute_vars pol v.cons in
+       let cons = map_free_styp lvl 0 substitute_vars pol v.cons in
        let ty = substitute_vars 0 (mark, v.flow) cons in
        v.subst_computed <- Some ty;
        mark_deleted vars.(vix);
@@ -382,21 +381,21 @@ let garbage_collect env (lvl, mark) ty =
     let keep = Intlist.filter (fun v () -> not ((var_side pol vars.(v)).should_subst)) vs in
     let subst = Intlist.filter (fun v () -> (var_side pol vars.(v)).should_subst) vs in
     List.fold_left (fun ty (v,()) ->
-      Types.join pol ty (replacement pol v)) (styp_consv lvl mark rest keep) (Intlist.to_list subst) in
+      Types.join pol ty (replacement pol v)) (styp_consv lvl rest keep) (Intlist.to_list subst) in
   vars |> Array.iter (fun v ->
     if not v.vpos.should_subst && not v.vneg.should_subst then begin
-      let pos_cons = map_free_styp lvl mark 0 substitute_vars Pos v.vpos.cons in
+      let pos_cons = map_free_styp lvl 0 substitute_vars Pos v.vpos.cons in
       let pos_subst = substitute_vars 0 (mark, v.vpos.flow) pos_cons in
-      let (pos_newcons, pos_newflow) = styp_unconsv lvl mark pos_subst in
+      let (pos_newcons, pos_newflow) = styp_unconsv lvl pos_subst in
       v.vpos.cons <- pos_newcons;
       v.vpos.flow <- pos_newflow;
-      let neg_cons = map_free_styp lvl mark 0 substitute_vars Neg v.vneg.cons in
+      let neg_cons = map_free_styp lvl 0 substitute_vars Neg v.vneg.cons in
       let neg_subst = substitute_vars 0 (mark, v.vneg.flow) neg_cons in
-      let (neg_newcons, neg_newflow) = styp_unconsv lvl mark neg_subst in
+      let (neg_newcons, neg_newflow) = styp_unconsv lvl neg_subst in
       v.vneg.cons <- neg_newcons;
       v.vneg.flow <- neg_newflow;
     end);
-  let ty = map_free_typ lvl mark 0 substitute_vars Pos ty in
+  let ty = map_free_typ lvl 0 substitute_vars Pos ty in
   vars |> Array.iter (fun v ->
     if v.vneg.should_subst then assert (v.vneg.subst_computed <> None && v.vdelete);
     if v.vpos.should_subst then assert (v.vpos.subst_computed <> None && v.vdelete));
@@ -410,8 +409,8 @@ let garbage_collect env (lvl, mark) ty =
   let new_flexvars =
     vars |>
     Array.map (fun v ->
-      { pos = styp_consv lvl mark v.vpos.cons v.vpos.flow;
-        neg = styp_consv lvl mark v.vneg.cons v.vneg.flow;
+      { pos = styp_consv lvl v.vpos.cons v.vpos.flow;
+        neg = styp_consv lvl v.vneg.cons v.vneg.flow;
         pos_match_cache = ident Pos;
         neg_match_cache = ident Neg })
     |> Vector.of_array in
@@ -456,7 +455,7 @@ type gc_outcome =
 let garbage_collect' env (lvl, mark) ty =
   let orig_ty = ty in
   wf_typ Pos env ty;
-  let flexvars = env_flexvars env lvl mark in
+  let flexvars = env_flexvars env lvl in
   let nvars = Vector.length flexvars in
   let reachable = Vector.create () in
   for i = 0 to Vector.length flexvars - 1 do
@@ -471,10 +470,10 @@ let garbage_collect' env (lvl, mark) ty =
     if is_reachable pol r then () else begin
       set_reachable pol r;
       let bound = match pol with Pos -> v.pos | Neg -> v.neg in
-      let consb, varb = styp_unconsv lvl mark bound in
+      let consb, varb = styp_unconsv lvl bound in
       let consb', varb = Types.flex_closure pol env lvl flexvars consb Intlist.empty varb in
-      let _ = map_free_styp lvl mark 0 canon pol consb' in
-      let _bound = styp_consv lvl mark consb varb in
+      let _ = map_free_styp lvl 0 canon pol consb' in
+      let _bound = styp_consv lvl consb varb in
       (* FIXME: kinda ugly invalidation here. *)
       v.pos_match_cache <- ident Pos;
       v.neg_match_cache <- ident Neg; (*
@@ -489,8 +488,8 @@ let garbage_collect' env (lvl, mark) ty =
   and canon _ix (mark', vs) (rest : styp) =
     Env_marker.assert_equal mark mark';
     visit_bounds rest.pol vs;
-    styp_consv lvl mark rest vs in
-  let ty = map_free_typ lvl mark 0 canon Pos ty in
+    styp_consv lvl rest vs in
+  let ty = map_free_typ lvl 0 canon Pos ty in
 
   let replaceable pol v =
     not (is_reachable (polneg pol) (Vector.get reachable v)) in
@@ -511,8 +510,8 @@ let garbage_collect' env (lvl, mark) ty =
     | Unprocessed ->
       let v = Vector.get flexvars vix in
       let bound = match pol with Pos -> v.pos | Neg -> v.neg in
-      let consb, varb = styp_unconsv lvl mark bound in
-      let consb = map_free_styp lvl mark 0 replace_all pol consb in
+      let consb, varb = styp_unconsv lvl bound in
+      let consb = map_free_styp lvl 0 replace_all pol consb in
       let t = replace_all 0 (mark, varb) consb in
       replacement_cache.(vix) <- Zap (pol, t);
       t
@@ -547,7 +546,7 @@ let garbage_collect' env (lvl, mark) ty =
       Types.join pol t (replacement pol v')) t in
     t in
 
-  let ty = map_free_typ lvl mark 0 replace_all Pos ty in
+  let ty = map_free_typ lvl 0 replace_all Pos ty in
 
   PPrint.ToChannel.pretty 1. 80 stdout PPrint.((group @@ group (string "*" ^^ Typedefs.pr_env env) ^^ break 1 ^^ group (utf8string "⊢" ^^ break 1 ^^ (Typedefs.pr_typ Pos orig_ty)) ^^ hardline));
   for i = 0 to nvars - 1 do
@@ -562,8 +561,8 @@ let garbage_collect' env (lvl, mark) ty =
     let v = List.hd !kept_var_worklist in
     kept_var_worklist := List.tl !kept_var_worklist;
     let fv = Vector.get flexvars v in
-    let pos = map_free_styp lvl mark 0 replace_all Pos fv.pos in
-    let neg = map_free_styp lvl mark 0 replace_all Neg fv.neg in
+    let pos = map_free_styp lvl 0 replace_all Pos fv.pos in
+    let neg = map_free_styp lvl 0 replace_all Neg fv.neg in
     match replacement_cache.(v) with
     | Keeping { id } -> replacement_cache.(v) <- Kept { id; pos; neg }
     | _ -> assert false
@@ -618,7 +617,7 @@ let canonise env (lvl, mark) ty =
      Hashing styps isn't very reliable, because tuple_fields are not canonical
      (this only causes a possible loss of sharing, though) *)
   let canon_table : (polarity * styp * (int, unit) Intlist.t, styp) Hashtbl.t = Hashtbl.create 10 in
-  let flexvars = env_flexvars env lvl mark in
+  let flexvars = env_flexvars env lvl in
   let reachable = Vector.create () in
   for i = 0 to Vector.length flexvars - 1 do
     let i' = Vector.push reachable (fresh_reachability ()) in
@@ -632,10 +631,10 @@ let canonise env (lvl, mark) ty =
     if is_reachable pol r then () else begin
       set_reachable pol r;
       let bound = match pol with Pos -> v.pos | Neg -> v.neg in
-      let consb, varb = styp_unconsv lvl mark bound in
+      let consb, varb = styp_unconsv lvl bound in
       visit_bounds pol varb;
-      let consb = map_free_styp lvl mark 0 canon pol consb in
-      let bound = styp_consv lvl mark consb varb in
+      let consb = map_free_styp lvl 0 canon pol consb in
+      let bound = styp_consv lvl consb varb in
       (* FIXME: kinda ugly invalidation here. *)
       v.pos_match_cache <- ident Pos;
       v.neg_match_cache <- ident Neg;
@@ -673,7 +672,7 @@ let canonise env (lvl, mark) ty =
             set_reachable pol r; (* bounds already 1BV *)
             let ix = Vector.push reachable r in
             assert (ix = Vector.length flexvars - 1) in
-          let t = styp_consv lvl mark rest vs in
+          let t = styp_consv lvl rest vs in
           let nofail = function [] -> () | _ -> assert false in
           let repl =
             match pol with
@@ -681,8 +680,8 @@ let canonise env (lvl, mark) ty =
             | Neg -> Types.subtype_styp env p t |> nofail; n in
           Hashtbl.add canon_table key repl;
           repl in
-  let ty = map_free_typ lvl mark 0 canon Pos ty in
-  wf_env_entry env (env_entry_at_level env lvl mark);
+  let ty = map_free_typ lvl 0 canon Pos ty in
+  wf_env_entry env (env_entry_at_level env lvl);
   wf_typ Pos env ty;
   ty, reachable
 
@@ -693,7 +692,7 @@ let canonise env (lvl, mark) ty =
    Replace mono-reachable flex vars with their unique bound, where possible *)
 let zap env (lvl, mark) reachable ty =
   wf_typ Pos env ty;
-  let flexvars = env_flexvars env lvl mark in
+  let flexvars = env_flexvars env lvl in
   let nvars = Vector.length flexvars in
   assert (Array.length reachable = nvars);
   let pos_replacements = Array.make nvars None in
@@ -708,7 +707,7 @@ let zap env (lvl, mark) reachable ty =
     let must_keep = is_reachable (polneg pol) reachable.(v) in
     let fv = Vector.get flexvars v in
     let bound = match pol with Pos -> fv.pos | Neg -> fv.neg in
-    let consb, varb = styp_unconsv lvl mark bound in
+    let consb, varb = styp_unconsv lvl bound in
     let var_replacements =
       (* FIXME: diverges on flow cycles *)
       Intlist.to_list varb

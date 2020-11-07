@@ -225,8 +225,8 @@ and approx_styp env ext pol' ({ tyvars; cons; pol } as orig) =
 *)
 
 
-let fresh_flexvar env (lvl, mark) =
-  let fv = env_flexvars env lvl mark in
+let fresh_flexvar env lvl =
+  let fv = env_flexvars env lvl in
   Vector.push fv { name = None;
                    pos = styp_trivial Pos;
                    neg = styp_trivial Neg;
@@ -243,7 +243,7 @@ let flow_of_flexvar _env l v =
 
 
 (* maps (l1, v, pol, l2) -> (_, v') when (l2,v') approximates (l1,v) w/ polarity pol *)
-type apxcache = (Env_level.t * int * polarity * Env_level.t, Env_marker.t * int) Hashtbl.t
+type apxcache = (Env_level.level * int * polarity * Env_level.level, Env_level.marker * int) Hashtbl.t
 
 (* Given a styp well-formed in ext,
    find the best approximation well-formed in the shorter environment env.
@@ -251,56 +251,57 @@ type apxcache = (Env_level.t * int * polarity * Env_level.t, Env_marker.t * int)
    This may require hoisting some flexible variables from ext to env.
 
    Pos types are approximated from above and Neg types from below. *)
-let rec approx_styp env apxcache lvl mark pol ty =
+let rec approx_styp env apxcache lvl pol ty =
   wf_styp pol env ty;
-  if env.level = lvl then ty
+  if Env_level.equal env.level lvl then ty
   else match styp_max_var_level ty with
-  | Some (lvl', mark') when lvl' > lvl ->
+  | Some (lvl', mark') when lvl' > fst lvl ->
      (* needs approx *)
-     let rest, vars = styp_unconsv lvl' mark' ty in
+     let rest, vars = styp_unconsv (lvl', mark') ty in
      vars |> Intlist.to_list |> List.fold_left (fun ty (v, ()) ->
-       join pol ty (approx_styp_var env apxcache lvl mark pol lvl' mark' v))
-       (approx_styp env apxcache lvl mark pol rest)
+       join pol ty (approx_styp_var env apxcache lvl pol (lvl', mark') v))
+       (approx_styp env apxcache lvl pol rest)
   | _ ->
      (* just approx cons, vars are fine *)
      match ty with
      | { pol = pol'; body = Styp { tyvars; cons } } ->
         assert (pol = pol');
-        { pol; body = Styp { tyvars; cons = map_head pol (approx_styp env apxcache lvl mark) cons } }
+        { pol; body = Styp { tyvars; cons = map_head pol (approx_styp env apxcache lvl) cons } }
      | _ -> assert false (* locally closed *)
 
-and approx_styp_var env apxcache lvl mark pol lvl' mark' v' =
+and approx_styp_var env apxcache lvl pol lvl' v' =
   (* approximate the variable v at (lvl', mark') to (lvl, mark) *)
-  assert (lvl < lvl');
-  match env_entry_at_level env lvl' mark' with
+  assert (fst lvl < fst lvl');
+  match env_entry_at_level env lvl' with
   | Eflexible {vars=flexvars'; _} ->
-     begin match Hashtbl.find apxcache (lvl', v', pol, lvl) with
+     let cachekey = (fst lvl', v', pol, fst lvl) in
+     begin match Hashtbl.find apxcache cachekey with
      | (mark'', v) ->
-        Env_marker.assert_equal mark mark'';
-        cons_styp pol (vset_of_flexvar (lvl, mark) v) (ident pol)
+        assert (Env_level.equal lvl (fst lvl, mark''));
+        cons_styp pol (vset_of_flexvar lvl v) (ident pol)
      | exception Not_found ->
-        let v = fresh_flexvar env (lvl, mark) in
-        Hashtbl.add apxcache (lvl', v', pol, lvl) (mark, v);
-        let fv = Vector.get (env_flexvars env lvl mark) v in
+        let v = fresh_flexvar env lvl in
+        Hashtbl.add apxcache cachekey (snd lvl, v);
+        let fv = Vector.get (env_flexvars env lvl) v in
         let fv' = Vector.get flexvars' v' in
-        let v = vset_of_flexvar (lvl, mark) v in
+        let v = vset_of_flexvar lvl v in
         begin match pol with
         | Pos ->
            (* v >= v' *)
-           let apx = approx_styp env apxcache lvl mark Pos fv'.pos in
+           let apx = approx_styp env apxcache lvl Pos fv'.pos in
            fv.pos <- join Pos fv.pos apx;
            (* preserve ε-inv *)
-           Intlist.iter (snd (styp_unconsv lvl mark apx)) (fun ev () ->
-             let efv = Vector.get (env_flexvars env lvl mark) ev in
+           Intlist.iter (snd (styp_unconsv lvl apx)) (fun ev () ->
+             let efv = Vector.get (env_flexvars env lvl) ev in
              efv.neg <- join Neg efv.neg (cons_styp Neg v (ident Neg)));
            fv'.neg <- join Neg fv'.neg (cons_styp Neg v (ident Neg))
         | Neg ->
            (* v <= v' *)
-           let apx = approx_styp env apxcache lvl mark Neg fv'.neg in
+           let apx = approx_styp env apxcache lvl Neg fv'.neg in
            fv.neg <- join Neg fv.neg apx;
            (* preserve ε-inv *)
-           Intlist.iter (snd (styp_unconsv lvl mark apx)) (fun ev () ->
-             let efv = Vector.get (env_flexvars env lvl mark) ev in
+           Intlist.iter (snd (styp_unconsv lvl apx)) (fun ev () ->
+             let efv = Vector.get (env_flexvars env lvl) ev in
              efv.pos <- join Pos efv.pos (cons_styp Pos v (ident Pos)));
            fv'.pos <- join Pos fv'.pos (cons_styp Pos v (ident Pos));
         end;
@@ -309,13 +310,13 @@ and approx_styp_var env apxcache lvl mark pol lvl' mark' v' =
   | Erigid {names=_; vars; flow=_} ->
      let rv = vars.(v') in
      let bound = match pol with Pos -> rv.rig_upper | Neg -> rv.rig_lower in
-     approx_styp env apxcache lvl mark pol bound
+     approx_styp env apxcache lvl pol bound
   | _ ->
      failwith "expected variables at this env level"
 
-let approx_styp env apxcache lvl mark pol ty =
-  let res = approx_styp env apxcache lvl mark pol ty in
-  wf_styp pol (env_at_level env lvl mark) res;
+let approx_styp env apxcache lvl pol ty =
+  let res = approx_styp env apxcache lvl pol ty in
+  wf_styp pol (env_at_level env lvl) res;
   res
 (*
 
@@ -354,7 +355,7 @@ Need to approx β to α's level, I think?
    *)
 
 
-let rec flex_closure pol env lvl mark flexvars (t : styp) vseen vnew =
+let rec flex_closure pol env lvl flexvars (t : styp) vseen vnew =
   wf_styp pol env t;
   (* FIXME head_below wf assert (Intlist.all_below lvl t.tyvars.vs_free); *)
   if Intlist.is_empty vnew then t, vseen
@@ -365,8 +366,8 @@ let rec flex_closure pol env lvl mark flexvars (t : styp) vseen vnew =
       join pol t bound) t in
     let vseen = Intlist.union (fun _k () () -> ()) vseen vnew in
     (* FIXME use uncons *)
-    let t, vnext = styp_unconsv lvl mark t in
-    flex_closure pol env lvl mark flexvars t vseen (Intlist.remove vnext vseen)
+    let t, vnext = styp_unconsv lvl t in
+    flex_closure pol env lvl flexvars t vseen (Intlist.remove vnext vseen)
   end
   
 (* The termination condition here is extremely tricky, if it's even true *)
@@ -389,32 +390,32 @@ let rec subtype_styp env (apxcache : apxcache) (p : styp) (n : styp) =
      | { body = Styp { cons = p; _ }; _ }, { body = Styp { cons = n; _ }; _ } ->
         subtype_cons Pos p n (pol_flip (subtype_styp env apxcache))
      | _ -> assert false)
-  | Some (lvl, mark) ->
-     let pcons, pvars = styp_unconsv lvl mark p in
-     let ncons, nvars = styp_unconsv lvl mark n in
-     subtype_styp_vars env apxcache lvl mark p n pcons ncons pvars nvars in
+  | Some lvl ->
+     let pcons, pvars = styp_unconsv lvl p in
+     let ncons, nvars = styp_unconsv lvl n in
+     subtype_styp_vars env apxcache lvl p n pcons ncons pvars nvars in
   (* Printf.printf "%d\n%!" (List.length errs); *)
   errs
 
 (* env ⊢ p ⊔ pv ≤ n ⊓ nv, where pv, nv same level, above anything else in p,n *)
-and subtype_styp_vars env apxcache lvl mark orig_p orig_n (p : styp) (n : styp) pvs nvs =
+and subtype_styp_vars env apxcache lvl orig_p orig_n (p : styp) (n : styp) pvs nvs =
   wf_env env;
   wf_styp Pos env p;
   wf_styp Neg env n;
-  match env_entry_at_level env lvl mark with
+  match env_entry_at_level env lvl with
   | Eflexible {vars;_} ->
      (* FIXME: avoid some calls to approx_styp for constraints that already hold! *)
      Intlist.iter pvs (fun pv () ->
        let pv = Vector.get vars pv in
-       pv.neg <- join Neg pv.neg (approx_styp env apxcache lvl mark Neg orig_n)
+       pv.neg <- join Neg pv.neg (approx_styp env apxcache lvl Neg orig_n)
      );
      Intlist.iter nvs (fun nv () ->
        let nv = Vector.get vars nv in
-       nv.pos <- join Pos nv.pos (approx_styp env apxcache lvl mark Pos orig_p)
+       nv.pos <- join Pos nv.pos (approx_styp env apxcache lvl Pos orig_p)
      );
      wf_env env;
-     let clp, _ = flex_closure Pos env lvl mark vars p Intlist.empty pvs in
-     let cln, _ = flex_closure Neg env lvl mark vars n Intlist.empty nvs in
+     let clp, _ = flex_closure Pos env lvl vars p Intlist.empty pvs in
+     let cln, _ = flex_closure Neg env lvl vars n Intlist.empty nvs in
      subtype_styp env apxcache clp cln
   | Erigid { names=_; vars; flow } ->
      (* p ⊔ pvs ≤ n ⊓ nvs splits into:
@@ -449,17 +450,17 @@ let subtype_styp env apxcache p n =
 
 (* Give a typ well-formed in ext, approx in env.
    Same as approx_styp *)
-let rec approx env lvl mark pol t =
+let rec approx env lvl pol t =
   wf_env env;
   wf_typ pol env t;
   match t with
   | Tpoly {names; bounds; flow; body} ->
      let (env, body) = enter_poly pol env names bounds flow body in
-     approx env lvl mark pol body
+     approx env lvl pol body
   | Tsimple s ->
-     approx_styp env (Hashtbl.create 1) lvl mark pol s
+     approx_styp env (Hashtbl.create 1) lvl pol s
   | Tcons cons ->
-     cons_styp pol vsnil (map_head pol (approx env lvl mark) cons)
+     cons_styp pol vsnil (map_head pol (approx env lvl) cons)
 
 (* Always Pos <= Neg *)
 let rec subtype env p n =
@@ -479,8 +480,8 @@ let rec subtype env p n =
      subtype_cons Pos s t
        (pol_flip (subtype env))
   | (Tsimple _, _) | (_, Tsimple _) ->
-     let p = approx env env.level env.marker Pos p in
-     let n = approx env env.level env.marker Neg n in
+     let p = approx env env.level Pos p in
+     let n = approx env env.level Neg n in
      subtype_styp env (Hashtbl.create 1) p n
 
 let fresh_flow env l =
@@ -491,9 +492,9 @@ let rec match_styp env (p : styp) (t : unit cons_head) : styp cons_head * confli
   wf_styp Pos env p;
   match styp_max_var_level p with
   | None -> (match p.body with Styp { cons; _ } -> cons, [] | _ -> assert false)
-  | Some (lvl, mark) ->
-     let p, vs = styp_unconsv lvl mark p in
-     match env_entry_at_level env lvl mark with
+  | Some lvl ->
+     let p, vs = styp_unconsv lvl p in
+     match env_entry_at_level env lvl with
      | Eflexible {vars=fvs;_} ->
         vs |> Intlist.to_list |> List.fold_left (fun (r, errs) (v,()) ->
           let fv = Vector.get fvs v in
@@ -501,20 +502,21 @@ let rec match_styp env (p : styp) (t : unit cons_head) : styp cons_head * confli
                        (map_head Neg (fun pol () -> styp_trivial pol) t) in
           let freshen pol t =
             if Intlist.is_empty (match t.body with Styp s -> s.tyvars | _ -> assert false) then
-              let n, p = fresh_flow env (lvl, mark) in
+              let n, p = fresh_flow env lvl in
               match pol with Neg -> n, p | Pos -> p, n
             else
-              let _lvl', (mark', vs) = Intlist.as_singleton (match t.body with Styp s -> s.tyvars | _ -> assert false) in
-              Env_marker.assert_equal mark mark';
+              let lvlc', (mark', vs) = Intlist.as_singleton (match t.body with Styp s -> s.tyvars | _ -> assert false) in
+              let lvl' = (lvlc', mark') in
+              assert (Env_level.equal lvl lvl');
               let v, () = Intlist.as_singleton vs in
-              t, cons_styp (polneg pol) (vset_of_flexvar (lvl, mark) v) (ident (polneg pol)) in
+              t, cons_styp (polneg pol) (vset_of_flexvar lvl v) (ident (polneg pol)) in
           let cons = map_head Neg freshen cons in
           let cn = map_head Neg (fun _ t -> fst t) cons in
           let cp = map_head Neg (fun _ t -> snd t) cons in
           fv.neg_match_cache <- cn;
           let errs' =
             subtype_styp env (Hashtbl.create 1)
-              (cons_styp Pos (vset_of_flexvar (lvl, mark) v) (ident Pos))
+              (cons_styp Pos (vset_of_flexvar lvl v) (ident Pos))
               (cons_styp Neg vsnil cn) in
           join_cons Pos r cp, errs @ errs'
         ) (match_styp env p t)
@@ -525,7 +527,7 @@ let rec match_styp env (p : styp) (t : unit cons_head) : styp cons_head * confli
      | _ -> intfail "expected variables here"
 
 (* match_type env t⁺ m = t⁺ ≤ m *)
-let rec match_type env (lvl, mark) (p : typ) (t : typ ref cons_head) =
+let rec match_type env lvl (p : typ) (t : typ ref cons_head) =
   wf_env env;
   wf_typ Pos env p;
   match p with
@@ -537,10 +539,10 @@ let rec match_type env (lvl, mark) (p : typ) (t : typ ref cons_head) =
        [])
   | Tpoly {names=_; bounds; flow; body} ->
      (* t is not ∀, so we need to instantiate p *)
-     let body = instantiate_flexible env lvl mark bounds flow body in
+     let body = instantiate_flexible env lvl bounds flow body in
      wf_env env;
      wf_typ Pos env body;
-     match_type env (lvl, mark) body t
+     match_type env lvl body t
   | Tsimple p ->
      let tcons, errs = match_styp env p (map_head Neg (fun _ _ -> ()) t) in
      subtype_cons Pos tcons t (fun pol p r ->

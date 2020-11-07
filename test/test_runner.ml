@@ -36,12 +36,11 @@ let run_cmd s =
   let open Lang in
   match Parse.parse_string text with
   | Ok (`Exp e) ->
-     let envZ : Typedefs.env = { level = Typedefs.Env_level.empty;
-                                 marker = Typedefs.Env_marker.make ();
+     let envZ : Typedefs.env = { level = Typedefs.Env_level.empty ();
                                  entry = Evals (Tuple_fields.SymMap.empty);
                                  rest = None } in
      let env0 : Typedefs.env = Typedefs.env_cons envZ (Eflexible {vars=Vector.create ();names=Tuple_fields.SymMap.empty}) in
-     let flex0 = (env0.level, env0.marker) in
+     let flex0 = env0.level in
      let rendered = to_string ~width:120 (PPrint.group (Print.exp e)) in
      rendered ^ "\n" ^
      (match (Parse.parse_string rendered) with
@@ -61,7 +60,7 @@ let run_cmd s =
         PPrint.ToBuffer.pretty 1. 80 b (PPrint.(group @@ group (string "*" ^^ Typedefs.pr_env env0) ^^ break 1 ^^ group (utf8string "⊢" ^^ break 1 ^^ (Typedefs.pr_typ Pos t))));
         let t = Type_simplification.remove_joins env0 flex0 t in
         let env0, t = Type_simplification.garbage_collect env0 flex0 t in
-        let t = generalise env0 (env0.level, env0.marker) t in
+        let t = generalise env0 env0.level t in
         wf_typ Pos envZ t;
         (b |> Buffer.to_bytes |> Bytes.to_string) ^
           let te = Type_print.convert envZ Pos t in
@@ -76,8 +75,7 @@ let run_cmd s =
      | exception e ->
         "typechecking error: " ^ Printexc.to_string e)
   | Ok (`Sub (t1, t2)) ->
-     let env0 : Typedefs.env = { level = Typedefs.Env_level.empty;
-                                 marker = Typedefs.Env_marker.make ();
+     let env0 : Typedefs.env = { level = Typedefs.Env_level.empty ();
                                  entry = Eflexible {vars=Vector.create ();names=Tuple_fields.SymMap.empty};
                                  rest = None } in
      let _, t1 = Check.typ_of_tyexp env0 t1 in

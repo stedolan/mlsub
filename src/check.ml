@@ -17,7 +17,7 @@ let tys_of_styp (type a) (sort : a ty_sort) (x : styp) : a =
   | Simple -> x
   | Gen -> Tsimple x
 
-let close_tys (type s) (sort : s ty_sort) lvl mark pol (t : s) : s =
+let close_tys (type s) (sort : s ty_sort) lvl pol (t : s) : s =
   let env_gen_var pol index (_mark', vs) rest =
     assert (is_trivial pol rest);
     assert (Intlist.is_singleton vs);
@@ -25,9 +25,9 @@ let close_tys (type s) (sort : s ty_sort) lvl mark pol (t : s) : s =
     { pol; body = Bound_var { index; var } } in
   match sort with
   | Simple ->
-     map_free_styp lvl mark 0 env_gen_var pol t
+     map_free_styp lvl 0 env_gen_var pol t
   | Gen ->
-     map_free_typ lvl mark 0 env_gen_var pol t
+     map_free_typ lvl 0 env_gen_var pol t
 
 (* FIXME: don't always enter Erigid during parsing! *)
 
@@ -39,8 +39,8 @@ let rec env_lookup_type : type s . s ty_sort -> env -> string -> s * s =
      (* FIXME shifting? *)
      let i = SymMap.find name names in
      let vs = Intlist.singleton i () in
-     (tys_of_styp sort (cons_styp Neg (Intlist.singleton env.level (env.marker, vs)) (ident Neg)),
-      tys_of_styp sort (cons_styp Pos (Intlist.singleton env.level (env.marker, vs)) (ident Pos)))
+     (tys_of_styp sort (cons_styp Neg (Intlist.singleton (fst env.level) ((snd env.level), vs)) (ident Neg)),
+      tys_of_styp sort (cons_styp Pos (Intlist.singleton (fst env.level) ((snd env.level), vs)) (ident Pos)))
   | _ ->
      match env.rest with
      | Some env -> env_lookup_type sort env name
@@ -82,8 +82,8 @@ and typ_of_tyexp' : type s . s ty_sort -> env -> tyexp' -> s * s =
      let names, nbounds, pbounds, flow = poly_of_typolybounds env vars in
      let env, _ = enter_poly_neg env names nbounds flow (Tcons (ident Neg)) in
      let bn, bp = typ_of_tyexp sort env body in
-     let bn = close_tys Gen env.level env.marker Neg bn in
-     let bp = close_tys Gen env.level env.marker Pos bp in
+     let bn = close_tys Gen env.level Neg bn in
+     let bp = close_tys Gen env.level Pos bp in
      Tpoly {names; bounds=nbounds; flow; body=bn},
      Tpoly {names; bounds=pbounds; flow; body=bp}
 
@@ -125,8 +125,8 @@ and poly_of_typolybounds env (vars : typolybounds) :
   }) in
   let bound_of_tyexp (ty : tyexp) =
     let n, p = typ_of_tyexp Simple env ty in
-    close_tys Simple env.level env.marker Neg n,
-    close_tys Simple env.level env.marker Pos p in
+    close_tys Simple env.level Neg n,
+    close_tys Simple env.level Pos p in
   let bounds = Vector.to_array bounds |> Array.mapi (fun i (name,bounds) ->
     let lower, upper, flow =
       Vector.fold_lefti (fun (lower, upper, flow) _ bound ->
@@ -228,7 +228,7 @@ and check' env e ty =
      check env e (Tcons (Record r))
   | Let (p, pty, e, body), _ ->
      let env = env_cons env (Eflexible {vars=Vector.create ();names=SymMap.empty}) in
-     let flex = (env.level, env.marker) in
+     let flex = env.level in
      let pty = check_or_infer env flex pty e in
      let vs = check_pat env flex SymMap.empty pty p in
      let env = env_cons env (Evals vs) in
@@ -245,7 +245,7 @@ and check' env e ty =
      (* Default case: infer and subtype.
         Using the icfp19 rule! *)
      let env' = env_cons env (Eflexible {vars=Vector.create ();names=SymMap.empty}) in
-     let flex = (env'.level, env'.marker) in
+     let flex = env'.level in
      let ty' = infer' env' flex e in
      subtype env' ty' ty |> report;
      wf_typ Neg env ty
@@ -264,7 +264,7 @@ and infer' env flex = function
      check env e (cons_typ Neg Bool);
      let tyso = infer env flex ifso and tynot = infer env flex ifnot in
      (* FIXME: join of typ? Rank1 join? *)
-     Tsimple (join Pos (approx env env.level env.marker Pos tyso) (approx env env.level env.marker Pos tynot))
+     Tsimple (join Pos (approx env env.level Pos tyso) (approx env env.level Pos tynot))
   | Proj (e, (field,_loc)) ->
      let ty = infer env flex e in
      let res = ref (Tcons Bot) in
@@ -291,7 +291,7 @@ and infer' env flex = function
        | Some (names, nbounds, _pbounds, flow) ->
           fst (enter_poly_neg env names nbounds flow (Tcons (ident Neg))) in
      let env = env_cons poly_env (Eflexible {vars=Vector.create ();names=SymMap.empty}) in
-     let flex = (env.level, env.marker) in
+     let flex = env.level in
      let params = map_fields (fun _fn (p, ty) ->
        match ty with
        | Some ty -> typ_of_tyexp env ty, p
@@ -307,13 +307,13 @@ and infer' env flex = function
      let ty = Type_simplification.remove_joins env flex ty in
      let envgc, ty = Type_simplification.garbage_collect env flex ty in
      wf_typ Pos envgc ty;
-     let ty = generalise envgc (envgc.level, envgc.marker) ty in
+     let ty = generalise envgc envgc.level ty in
      wf_typ Pos poly_env ty;
      let ty =
        match poly with
        | None -> ty
        | Some (names, _nbounds, pbounds, flow) ->
-          let ty = close_tys Gen poly_env.level poly_env.marker Pos ty in
+          let ty = close_tys Gen poly_env.level Pos ty in
           Tpoly {names; bounds=pbounds; flow; body=ty} in
      wf_typ Pos orig_env ty;
      ty
