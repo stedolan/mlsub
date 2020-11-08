@@ -200,8 +200,10 @@ if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot
 > * ⊢ (int, int, ...)
 > (int, int, ...)
 
-# FIXME: should this be allowed?
-# ((1, 2, 3) : (int, int, ...))
+((1, 2, 3) : (int, int, ...))
+> ((1, 2, 3) : (int, int, ...))
+> * ⊢ (int, int, ...)
+> (int, int, ...)
 
 
 # A checking form for projections! Isn't subtyping great?
@@ -209,6 +211,12 @@ if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot
 > ({foo: @true}.foo : bool)
 > * ⊢ bool
 > bool
+
+# Generalisation of functions allows checking against inferred argument types
+(fn(x) { if x.cond { 1 } else { 2 }})({cond: @true})
+> (fn (x) { if x.cond{1} else {2} })({cond: @true})
+> * ⊢ int
+> int
 
 #
 # Let-bindings and patterns
@@ -401,7 +409,7 @@ fn (a) { if (a.foo) { {bar: a.bar} } else { a } }
 fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { {foo: 1, cond: false} }) }
 > fn (b) { (fn (a) { if (a.cond){a} else {a} })(if true{b} else {{foo: 1, cond: false}}) }
 > * ⊢ ∀⁺ 0:[(foo: int, cond: bool),(cond: bool, ...)]. (.0.0) → .0.0
-> [A :> {foo: int, cond: bool}, A <: {cond: bool, ...}] (A) -> A
+> [A <: {cond: bool, ...}, A :> {foo: int, cond: bool}] (A) -> A
 
 fn(b) { if (b.cond) { b } else { {foo: 1, cond: false} } }
 > fn (b) { if (b.cond){b} else {{foo: 1, cond: false}} }
@@ -520,7 +528,7 @@ fn (x, wid : (([A <: {foo:int}, A :> {foo:int,bar:string}] (A) -> A) -> int)) { 
 > (
 >   ((foo: int)) → (foo: int, bar: string),
 >   (∀⁺ 0:[(foo: int, bar: string),(foo: int)]. (.0.0) → .0.0) → int) → int
-> (({foo: int}) -> {foo: int, bar: string}, ([A :> {foo: int, bar: string}, A <: {foo: int}] (A) -> A) -> int) -> int
+> (({foo: int}) -> {foo: int, bar: string}, ([A <: {foo: int}, A :> {foo: int, bar: string}] (A) -> A) -> int) -> int
 
 fn(f) { (fn(x) { 5 })(f(10)) }
 > fn (f) { (fn (x) { 5 })(f(10)) }

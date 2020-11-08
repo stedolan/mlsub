@@ -323,13 +323,6 @@ let styp_unconsv2 a b =
      else
        Vars2 {level=la; a=ra; va; b; vb=Intlist.empty}
 
-(* FIXME: is this needed any more? *)
-let styp_max_var_level = function
-  | Bound_var _ ->
-     assert false
-  | Free_vars { level; _ } -> Some level
-  | Cons _ -> None
-
 (* Open a ∀⁺ binder by instantiating its bound variables with fresh flexvars.
    Inserts variables into the current environment (no new level created) *)
 let instantiate_flexible env ?(names=SymMap.empty) lvl (vars : (string option * styp * styp) array) (flow : Flow_graph.t) (body : typ) =
@@ -398,6 +391,16 @@ let generalise env lvl ty =
         bounds;
         flow = Flow_graph.make flow;
         body = map_free_typ lvl 0 gen Pos ty}
+
+(* FIXME: explain why this is OK! *)
+let rec mark_principal_styp pol' = function
+  | Cons { pol; cons } -> assert (pol=pol'); Tcons (map_head pol mark_principal_styp cons)
+  | sty -> Tsimple sty
+
+let rec mark_principal pol = function
+  | Tcons cons -> Tcons (map_head pol mark_principal cons)
+  | Tpoly {names; bounds; flow; body} -> Tpoly {names; bounds; flow; body = mark_principal pol body}
+  | Tsimple sty -> mark_principal_styp pol sty
 
 (* Open a ∀⁻ binder, extending env with rigid variables *)
 let enter_poly_neg (env : env) names bounds flow body =

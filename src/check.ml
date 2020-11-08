@@ -308,6 +308,8 @@ and infer' env flex = function
      wf_typ Pos envgc ty;
      let ty = generalise envgc envgc.level ty in
      wf_typ Pos poly_env ty;
+     let ty = mark_principal Pos ty in
+     wf_typ Pos poly_env ty;
      let ty =
        match poly with
        | None -> ty

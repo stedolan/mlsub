@@ -104,8 +104,8 @@ let rec convert env pol (ty : Typedefs.typ) : Exp.tyexp =
            | false, true -> [name, Some (`Sup, convert_styp env pl l)]
            | true, false -> [name, Some (`Sub, convert_styp env pu u)]
            | false, false ->
-              [name, Some (`Sup, convert_styp env pl l);
-               name, Some (`Sub, convert_styp env pu u)])
+              [name, Some (`Sub, convert_styp env pu u);
+               name, Some (`Sup, convert_styp env pl l);])
          |> Array.to_list |> List.concat in
        let constraints =
          constraints @
