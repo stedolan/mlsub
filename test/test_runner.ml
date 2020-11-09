@@ -48,7 +48,7 @@ let run_cmd s =
       | Ok (`Exp e') when Exp.equal e e' -> ""
       | Ok (`Exp e') -> Printf.sprintf "MISMATCH %s\n" (to_string ~width:1000 (Print.exp e'))
       | _ -> "MISMATCH\n") ^
-     (match Check.infer env0 flex0 e with
+     (match Check.infer env0 e with
      | t ->
         (let b = Buffer.create 100 in
         let open Typedefs in
@@ -67,9 +67,10 @@ let run_cmd s =
           "\n" ^
             to_string ~width:120 (PPrint.group (Print.tyexp te)) ^
               let tn, _ = Check.typ_of_tyexp envZ te in
-              (match Check.check envZ e tn with
+              let env0 = Typedefs.env_cons envZ (Eflexible {vars=Vector.create ();names=Tuple_fields.SymMap.empty}) in
+              (match Check.check env0 e tn with
                | () -> ""
-               | exception e -> "\nRECHECK: " ^ Printexc.to_string e))
+               | exception e -> "\nRECHECK: " ^ Printexc.to_string e ^ "\n" ^ Printexc.get_backtrace ()))
      | exception ((Assert_failure _ | Types.Internal _) as e) ->
         Printexc.to_string e ^ "\n" ^ Printexc.get_backtrace ()
      | exception e ->
@@ -78,10 +79,12 @@ let run_cmd s =
      let env0 : Typedefs.env = { level = Typedefs.Env_level.empty ();
                                  entry = Eflexible {vars=Vector.create ();names=Tuple_fields.SymMap.empty};
                                  rest = None } in
-     let _, t1 = Check.typ_of_tyexp env0 t1 in
-     let t2, _ = Check.typ_of_tyexp env0 t2 in
+     (match
+       let _, t1 = Check.typ_of_tyexp env0 t1 in
+       let t2, _ = Check.typ_of_tyexp env0 t2 in
      (*PPrint.(ToChannel.pretty 1. 80 stdout (Typedefs.pr_typ Pos t1 ^^ string " <: " ^^ Typedefs.pr_typ Neg t2 ^^ hardline));*)
-     (match Types.subtype env0 t1 t2 |> Check.report with
+       Types.subtype env0 t1 t2 |> Check.report
+     with
       | () -> "ok"
       | exception e -> "typechecking error: " ^ Printexc.to_string e)
   | Error _ -> "parse error"

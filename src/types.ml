@@ -519,7 +519,7 @@ let rec match_type env lvl (p : typ) (t : typ ref cons_head) =
        [])
   | Tpoly {names=_; bounds; flow; body} ->
      (* t is not ∀, so we need to instantiate p *)
-     let body = instantiate_flexible env lvl bounds flow body in
+     let body = instantiate_flexible env (Lazy.force lvl) bounds flow body in
      wf_env env;
      wf_typ Pos env body;
      match_type env lvl body t

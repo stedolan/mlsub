@@ -77,6 +77,8 @@ and typ_of_tyexp' : type s . s ty_sort -> env -> tyexp' -> s * s =
      typ_of_tyexp sort env t
   | Tjoin _ | Tmeet _ -> unimp ()
   | Tforall (vars, body) ->
+     let () =
+       match body with Some (Tfunc _),_ ->  () | _ -> failwith "expected a function type" in
      match sort with Simple -> failwith "simple type expected" | Gen ->
      let names, nbounds, pbounds, flow = poly_of_typolybounds env vars in
      let env, _ = enter_poly_neg env names nbounds flow (Tcons (ident Neg)) in
@@ -184,17 +186,16 @@ let report errs = List.iter (function
    | Missing k -> failwith ("missing " ^ string_of_field_name k)
    | Extra _ -> failwith ("extra")) errs
 
-(* When checking a term against a template type,
-   I think it's principal to inspect a Tm_typ as long as we don't
-   inspect any styps. (???)  *)
-(* FIXME FIXME principality / boxiness ??? *)
-let inspect = function
-  | Tcons cons ->
-     Tcons cons
-  | t -> t
+let rec flex_level env =
+  match env.entry with
+  | Eflexible _ -> env.level
+  | _ ->
+     match env.rest with
+     | None -> failwith "nowhere to put a flex var"
+     | Some env -> flex_level env
 
-let fresh_flow env flex =
-  let p, n = fresh_flow env flex in
+let fresh_flow env =
+  let p, n = fresh_flow env (flex_level env) in
   Tsimple p, Tsimple n
 
 let rec check env e (ty : typ) =
@@ -203,12 +204,7 @@ let rec check env e (ty : typ) =
   | None, _ -> failwith "bad exp"
   | Some e, _ -> check' env e ty
 and check' env e ty =
-  match e, inspect ty with
-  | e, Tpoly { names = _; bounds; flow; body } ->
-     (* The names should not be in scope in the body *)
-     let env, ty = enter_poly_neg env SymMap.empty bounds flow body in
-     check' env e ty
-
+  match e, ty with
   | If (e, ifso, ifnot), _ ->
      check env e (cons_typ Neg Bool);
      check env ifso ty;
@@ -226,61 +222,64 @@ and check' env e ty =
                fopen = `Open } in
      check env e (Tcons (Record r))
   | Let (p, pty, e, body), _ ->
-     let env = env_cons env (Eflexible {vars=Vector.create ();names=SymMap.empty}) in
-     let flex = env.level in
-     let pty = check_or_infer env flex pty e in
-     let vs = check_pat env flex SymMap.empty pty p in
+     let pty = check_or_infer env pty e in
+     let vs = check_pat env SymMap.empty pty p in
      let env = env_cons env (Evals vs) in
      check env body ty
+  (* FIXME not good *)
+  | Fn _, Tpoly { names = _; bounds; flow; body } ->
+     (* The names should not be in scope in the body *)
+     let names = SymMap.empty in
+     let env, ty = enter_poly_neg env names bounds flow body in
+     check' env e ty
   | Fn (None, params, ret, body), Tcons (Func (ptypes, rtype)) ->
      (* If poly <> None, then we should infer & subtype *)
-     let vs = check_parameters env SymMap.empty ptypes params in
-     let env' = env_cons env (Evals vs) in
+     let orig_env = env in
+     let env_gen = env_cons orig_env (Eflexible {vars=Vector.create (); names=SymMap.empty}) in
+     let vs = check_parameters env_gen SymMap.empty ptypes params in
+     let env' = env_cons env_gen (Evals vs) in
      check env' body (check_annot env' ret rtype)
   | Pragma "true", Tcons Bool -> ()
   | Pragma "false", Tcons Bool -> ()
-  (* FIXME: in the Tsimple case, maybe keep an existing flex level? *)
+  (* FIXME: in the Tsimple case, maybe keep an existing level? *)
   | e, _ ->
-     (* Default case: infer and subtype.
-        Using the icfp19 rule! *)
-     let env' = env_cons env (Eflexible {vars=Vector.create ();names=SymMap.empty}) in
-     let flex = env'.level in
-     let ty' = infer' env' flex e in
-     subtype env' ty' ty |> report;
+     (* Default case: infer and subtype. *)
+     let ty' = infer' env e in
+     subtype env ty' ty |> report;
      wf_typ Neg env ty
 
-and infer env flex = function
+and infer env = function
   | None, _ -> failwith "bad exp"
-  | Some e, _ -> let ty = infer' env flex e in wf_typ Pos env ty; ty
-and infer' env flex = function
+  | Some e, _ -> let ty = infer' env e in wf_typ Pos env ty; ty
+and infer' env = function
   | Lit l -> infer_lit l
   | Var (id, _loc) -> env_lookup_var env id
   | Typed (e, ty) ->
      let tn, tp = typ_of_tyexp env ty in
      check env e tn; tp
-  | Parens e -> infer env flex e
+  | Parens e -> infer env e
   | If (e, ifso, ifnot) ->
      check env e (cons_typ Neg Bool);
-     let tyso = infer env flex ifso and tynot = infer env flex ifnot in
+     let tyso = infer env ifso and tynot = infer env ifnot in
      (* FIXME: join of typ? Rank1 join? *)
      Tsimple (join Pos (approx env env.level Pos tyso) (approx env env.level Pos tynot))
   | Proj (e, (field,_loc)) ->
-     let ty = infer env flex e in
+     let ty = infer env e in
      let res = ref (Tcons Bot) in
      let tmpl = (Record { fields = FieldMap.singleton (Field_named field) res;
                           fnames = [Field_named field]; fopen = `Open }) in
-     match_type env flex ty tmpl |> report;
+     match_type env (lazy (flex_level env)) ty tmpl |> report;
      !res
   | Tuple fields ->
-     let fields = map_fields (fun _fn e -> infer env flex e) fields in
+     let fields = map_fields (fun _fn e -> infer env e) fields in
      cons_typ Pos (Record fields)
   | Pragma "bot" -> cons_typ Pos Bot
   | Pragma s -> failwith ("pragma: " ^ s)
   | Let (p, pty, e, body) ->
-     let pty = check_or_infer env flex pty e in
-     let vs = check_pat env flex SymMap.empty pty p in
+     let pty = check_or_infer env pty e in
+     let vs = check_pat env SymMap.empty pty p in
      let env = env_cons env (Evals vs) in
-     infer env flex body
+     infer env body
   | Fn (poly, params, ret, body) ->
      let orig_env = env in
      let poly = Option.map (poly_of_typolybounds env) poly in
@@ -290,21 +289,20 @@ and infer' env flex = function
        | Some (names, nbounds, _pbounds, flow) ->
           fst (enter_poly_neg env names nbounds flow (Tcons (ident Neg))) in
      let env = env_cons poly_env (Eflexible {vars=Vector.create ();names=SymMap.empty}) in
-     let flex = env.level in
      let params = map_fields (fun _fn (p, ty) ->
        match ty with
        | Some ty -> typ_of_tyexp env ty, p
-       | None -> fresh_flow env flex, p) params in
+       | None -> fresh_flow env, p) params in
      let vs = fold_fields (fun acc fn ((_tn, tp), p) ->
        match fn, p with
-       | _, p -> check_pat env flex acc tp p) SymMap.empty params in
+       | _, p -> check_pat env acc tp p) SymMap.empty params in
      let env' = env_cons env (Evals vs) in
-     let res = check_or_infer env' flex ret body in
+     let res = check_or_infer env' ret body in
      let ty = cons_typ Pos (Func (map_fields (fun _fn ((tn,_tp),_p) -> tn) params, res)) in
      wf_typ Pos env ty; (* no dependency for now! Probably never, inferred. *)
-(*     let ty = Type_simplification.canonise env flex ty in*)
-     let ty = Type_simplification.remove_joins env flex ty in
-     let envgc, ty = Type_simplification.garbage_collect env flex ty in
+(*     let ty = Type_simplification.canonise env ty in*)
+     let ty = Type_simplification.remove_joins env env.level ty in
+     let envgc, ty = Type_simplification.garbage_collect env env.level ty in
      wf_typ Pos envgc ty;
      let ty = generalise envgc envgc.level ty in
      wf_typ Pos poly_env ty;
@@ -319,31 +317,32 @@ and infer' env flex = function
      wf_typ Pos orig_env ty;
      ty
   | App (f, args) ->
-     let fty = infer env flex f in
+     let fty = infer env f in
      let args = map_fields (fun _fn e -> e, ref (Tcons Top)) args in
      let res = ref (Tcons Bot) in
      let argtmpl = map_fields (fun _fn (_e, r) -> r) args in
-     match_type env flex fty (Func (argtmpl, res)) |> report;
+     match_type env (lazy (flex_level env)) fty (Func (argtmpl, res)) |> report;
      fold_fields (fun () _fn (e, r) -> check env e !r) () args;
      !res
 
-and check_pat_field env flex acc (ty : typ) fn p =
-  match fn, p with
-  | _, p -> check_pat env flex acc ty p
 
-and check_pat env flex acc ty = function
+and check_pat_field env acc (ty : typ) fn p =
+  match fn, p with
+  | _, p -> check_pat env acc ty p
+
+and check_pat env acc ty = function
   | None, _ -> failwith "bad pat"
-  | Some p, _ -> check_pat' env flex acc ty p
-and check_pat' env flex acc ty = function
+  | Some p, _ -> check_pat' env acc ty p
+and check_pat' env acc ty = function
   | Pvar (s,_) when SymMap.mem s acc -> failwith "duplicate bindings"
   | Pvar (s,_) -> SymMap.add s ty acc
-  | Pparens p -> check_pat env flex acc ty p
+  | Pparens p -> check_pat env acc ty p
   | Ptuple fs ->
      let fs = map_fields (fun _fn p -> p, ref (Tcons Bot)) fs in
      let trec : typ ref tuple_fields = map_fields (fun _fn (_p, r) -> r) fs in
-     match_type env flex ty (Record trec) |> report;
+     match_type env (lazy (flex_level env)) ty (Record trec) |> report;
      fold_fields (fun acc fn (p, r) ->
-         check_pat_field env flex acc !r fn p) acc fs
+         check_pat_field env acc !r fn p) acc fs
 
 and check_parameters env acc ptypes fs =
   (* FIXME: I think this also just needs subtype_cons_fields to fold? *)
@@ -362,8 +361,7 @@ and check_parameters env acc ptypes fs =
     []) |> report;
   fold_fields (fun acc _fn (p, _ty, r) ->
     let ty = match !r with Some r -> r | None -> failwith "check_pat match?" in
-    let flex = (Env_level.empty ()) in    (* FIXME hack. I think this can trigger on weird pats. *)
-    check_pat env flex acc ty p) acc fs
+    check_pat env acc ty p) acc fs
 
 and infer_lit = function
   | l, _ -> infer_lit' l
@@ -372,10 +370,10 @@ and infer_lit' = function
   | Int _ -> cons_typ Pos Int
   | String _ -> cons_typ Pos String
 
-and check_or_infer env flex ty e =
+and check_or_infer env ty e =
   match ty with
   | None ->
-     infer env flex e
+     infer env e
   | Some ty ->
      let (tn, tp) = typ_of_tyexp env ty in
      check env e tn;
