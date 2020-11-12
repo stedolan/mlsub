@@ -46,45 +46,31 @@ and join_fields pol sf tf =
   match pol with
   | Neg ->
      (* lower bound - union of fields *)
-     let same = ref true in
-     let fnames = sf.fnames @
-       List.filter (fun k -> not (FieldMap.mem k sf.fields)) tf.fnames in
-     let fields = FieldMap.merge (fun _ s t ->
-       match s, t with
-       | Some s, Some t -> Some (join pol s t)
-       | (Some _ as x), None | None, (Some _ as x) ->
-          same := false;
-          x
-       | None, None -> None) sf.fields tf.fields in
-     assert (List.length fnames = FieldMap.cardinal fields);
-     begin match sf.fopen, tf.fopen, !same with
-     | `Open, `Open, _ ->
-        Some {fnames; fields; fopen = `Open}
-     | _, _, true ->
-        (* Not both open, but same fields *)
-        Some {fnames; fields; fopen = `Closed}
-     | _, _, false ->
-        (* Neither both open nor same fields *)
-        None
+     begin match merge_fields sf tf
+       ~left:(fun _ s -> Some s)
+       ~right:(fun _ t -> Some t)
+       ~both:(fun _ s t -> Some (join pol s t))
+       ~extra:(function
+         | ((`Closed, `Extra), _)
+         | (_, (`Closed, `Extra)) -> raise_notrace Exit
+         | (`Open, _), (`Open, _) -> `Open
+         | (`Closed, `Subset), (`Closed, `Subset) -> `Closed
+         | (`Closed, `Subset), (`Open, _) -> `Closed
+         | (`Open, _), (`Closed, `Subset) -> `Closed
+       )
+     with
+     | st -> Some st
+     | exception Exit -> None
      end
   | Pos ->
      (* upper bound - intersection of fields *)
-     let same = ref true in
-     let fnames = List.filter (fun k -> FieldMap.mem k tf.fields) sf.fnames in
-     let fields = FieldMap.merge (fun _ s t ->
-       match s, t with
-       | Some s, Some t -> Some (join pol s t)
-       | None, Some _ | Some _, None ->
-          same := false;
-          None
-       | _ -> None) sf.fields tf.fields in
-     assert (List.length fnames = FieldMap.cardinal fields);
-     begin match sf.fopen, tf.fopen, !same with
-     | `Closed, `Closed, true ->
-        Some {fnames; fields; fopen = `Closed }
-     | _, _, _ ->
-        Some {fnames; fields; fopen = `Open }
-     end
+     Some (merge_fields sf tf
+       ~left:(fun _ _s -> None)
+       ~right:(fun _ _t -> None)
+       ~both:(fun _ s t -> Some (join pol s t))
+       ~extra:(function
+         | (`Closed, `Subset), (`Closed, `Subset) -> `Closed
+         | _ -> `Open))
 
 type conflict_reason =
   | Incompatible
@@ -92,6 +78,7 @@ type conflict_reason =
   | Extra of [`Fields|`Named of field_name]
 
 (* pol = Pos: <=, pol = Neg: >= *)
+(* FIXME: replace with merge_fields *)
 let subtype_cons_fields pol af bf f =
   let extra_errs =
     match pol, af.fopen, bf.fopen with

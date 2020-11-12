@@ -54,23 +54,39 @@ let fold_fields f (acc : 'acc) fs =
   List.fold_left (fun acc n ->
       f acc n (FieldMap.find n fs.fields)) acc fs.fnames
 
-let fold2_fields ~left ~both ~right (acc : 'acc) fs1 fs2 =
-  let rec named remaining2 acc names1 =
-    match names1 with
+let merge_fields ~left ~both ~right ~extra fs_l fs_r =
+  let rec go_l remaining_r accfields accnames extra_l names_l =
+    match names_l with
+    | n :: names_l ->
+       let f_l = FieldMap.find n fs_l.fields in
+       let res, extra_l, remaining_r =
+         match FieldMap.find_opt n remaining_r with
+         | Some f_r -> both n f_l f_r, extra_l, FieldMap.remove n remaining_r
+         | None -> left n f_l, `Extra, remaining_r in
+       begin match res with
+       | None -> go_l remaining_r accfields accnames extra_l names_l
+       | Some res ->
+          go_l remaining_r (FieldMap.add n res accfields) (n :: accnames) extra_l names_l
+       end
     | [] ->
-       List.fold_left (fun acc n2 ->
-         if FieldMap.mem n2 remaining2 then
-           right acc n2 (FieldMap.find n2 remaining2)
-         else
-           acc) acc fs2.fnames
-    | n1 :: names1 ->
-       if FieldMap.mem n1 remaining2 then
-         let acc = both acc n1
-                     (FieldMap.find n1 fs1.fields)
-                     (FieldMap.find n1 remaining2) in
-         named (FieldMap.remove n1 remaining2) acc names1
-       else
-         let acc = left acc n1
-                     (FieldMap.find n1 fs1.fields) in
-         named remaining2 acc names1 in
-  named fs2.fields acc fs1.fnames
+       let rec go_r remaining_r accfields accnames extra_r names_r =
+         match names_r with
+         | n :: names_r when not (FieldMap.mem n remaining_r) ->
+            go_r remaining_r accfields accnames extra_r names_r
+         | n :: names_r ->
+            assert (not (FieldMap.mem n fs_l.fields));
+            let f_r = FieldMap.find n remaining_r in
+            let remaining_r = FieldMap.remove n remaining_r in
+            let res = right n f_r in
+            begin match res with
+            | None -> go_r remaining_r accfields accnames `Extra names_r
+            | Some res ->
+               go_r remaining_r (FieldMap.add n res accfields) (n :: accnames) `Extra names_r
+            end
+         | [] ->
+            assert (List.length accnames = FieldMap.cardinal accfields);
+            { fnames = List.rev accnames;
+              fields = accfields;
+              fopen = extra ((fs_l.fopen, extra_r), (fs_r.fopen, extra_l)) } in
+       go_r remaining_r accfields accnames `Subset fs_r.fnames in
+  go_l fs_r.fields FieldMap.empty [] `Subset fs_l.fnames

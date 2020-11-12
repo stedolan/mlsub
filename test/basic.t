@@ -142,6 +142,20 @@ if (false) { {foo:1,bar:2} } else { {foo:1,baz:()} }
 > * ⊢ (foo: int, ...)
 > {foo: int, ...}
 
+((1,2,3) : (int,int))
+> ((1, 2, 3) : (int, int))
+> typechecking error: Failure("extra")
+
+((1,2,asdf) : (int, int, ...))
+> ((1, 2, asdf) : (int, int, ...))
+> typechecking error: Failure("asdf not in scope")
+
+((1,2,3) : (int, int, ...))
+> ((1, 2, 3) : (int, int, ...))
+> * ⊢ (int, int, ...)
+> (int, int, ...)
+
+
 true.foo
 > true.foo
 > typechecking error: Failure("incompat")
@@ -359,6 +373,14 @@ fn () { (fn (~x, ~y) { {x,y} }) (~y:1, ~x:()) }
 > * ⊢ () → (x: (), y: int)
 > () -> {x: (), y: int}
 
+(fn (x) { x } : (int,int) -> int)
+> (fn (x) { x } : (int, int) -> int)
+> typechecking error: Failure("missing param")
+
+(fn (x,y) { x } : (int) -> int)
+> (fn (x, y) { x } : (int) -> int)
+> typechecking error: Failure("extra param")
+
 #
 # Lambda
 #
@@ -404,6 +426,47 @@ fn (a) { if (a.foo) { {bar: a.bar} } else { a } }
 (fn (a,b) { a })(5,if 5 { 5 } else { 5 })
 > (fn (a, b) { a })(5, if 5{5} else {5})
 > typechecking error: Failure("incompat")
+
+# more tuple cases
+fn (f) { (f({x:1,y:2}), f({x:1,z:2})) }
+> fn (f) { (f({x: 1, y: 2}), f({x: 1, z: 2})) }
+> * ⊢ ∀⁺ 0:[⊥,⊤]. (((x: int, ...)) → .0.0) → (.0.0, .0.0)
+> [A] (({x: int, ...}) -> A) -> (A, A)
+
+fn (x) { if x.cond { {p:1} } else { {p:2,q:1} } }
+> fn (x) { if x.cond{{p: 1}} else {{p: 2, q: 1}} }
+> * ⊢ ((cond: bool, ...)) → (p: int, ...)
+> ({cond: bool, ...}) -> {p: int, ...}
+
+fn (x) { if x.cond { {q:2,p:1} } else { {p:2,q:1} } }
+> fn (x) { if x.cond{{q: 2, p: 1}} else {{p: 2, q: 1}} }
+> * ⊢ ((cond: bool, ...)) → (q: int, p: int)
+> ({cond: bool, ...}) -> {q: int, p: int}
+
+fn (x) { let {p,q,...}=x; x }
+> fn (x) { let {p, q, ...} = x; x }
+> * ⊢ ∀⁺ 0:[⊥,(p: ⊤, q: ⊤, ...)]. (.0.0) → .0.0
+> [A <: {p: any, q: any, ...}] (A) -> A
+
+fn (x) { let {p,q} = x; let {p,q,r} = x; {p,q} }
+> fn (x) { let {p, q} = x; let {p, q, r} = x; {p, q} }
+> * ⊢ (⊥) → (p: ⊥, q: ⊥)
+> (nothing) -> {p: nothing, q: nothing}
+
+fn (x) { let {p,q,...} = x; let {p,q,r} = x; {p,q} }
+> fn (x) { let {p, q, ...} = x; let {p, q, r} = x; {p, q} }
+> * ⊢ ∀⁺ 0:[⊥,⊤], 1:[⊥,⊤]. ((p: .0.0, q: .0.1, r: ⊤)) → (p: .0.0, q: .0.1)
+> [A, B] ({p: A, q: B, r: any}) -> {p: A, q: B}
+
+fn (x) { let {p,q} = x; let {p,q,r,...} = x; {p,q} }
+> fn (x) { let {p, q} = x; let {p, q, r, ...} = x; {p, q} }
+> * ⊢ (⊥) → (p: ⊥, q: ⊥)
+> (nothing) -> {p: nothing, q: nothing}
+
+fn (x) { let {p,q,...} = x; let {p,q,r,...} = x; {p,q} }
+> fn (x) { let {p, q, ...} = x; let {p, q, r, ...} = x; {p, q} }
+> * ⊢ ∀⁺ 0:[⊥,⊤], 1:[⊥,⊤]. ((p: .0.0, q: .0.1, r: ⊤, ...)) → (p: .0.0, q: .0.1)
+> [A, B] ({p: A, q: B, r: any, ...}) -> {p: A, q: B}
 
 
 fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { {foo: 1, cond: false} }) }
@@ -518,8 +581,8 @@ fn (f : [A] (A) -> A) { (f(1), f(true)) }
 
 fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 > fn (x, wid: (([A] (A) -> A) -> int)) { wid(fn (a) { {x: x(a), y: a}.y }) }
-> * ⊢ (⊤, (∀⁺ 0:[⊥,⊤]. (.0.0) → .0.0) → int) → int
-> (any, ([A] (A) -> A) -> int) -> int
+> * ⊢ ((⊤) → ⊤, (∀⁺ 0:[⊥,⊤]. (.0.0) → .0.0) → int) → int
+> ((any) -> any, ([A] (A) -> A) -> int) -> int
 
 fn (x, wid : (([A <: {foo:int}, A :> {foo:int,bar:string}] (A) -> A) -> int)) { wid(fn(a){x(a)}) }
 > fn (x, wid: (([A <: {foo: int}, A :> {foo: int, bar: string}] (A) -> A) -> int)) { wid(fn (a) { x(a) }) }
