@@ -55,7 +55,7 @@ let rec exp e = mayloc e @@ function
      parens (fields argument args)
   | Proj (e, f) -> exp e ^^ char '.' ^^ field_name (Field_named (fst f))
   | If (e, t, f) ->
-     string "if" ^^ break 1 ^^ exp e ^^
+     string "if" ^^ blank 1 ^^ exp e ^^
        braces (exp t) ^^ op "else" ^^
          braces (exp f)
   | Typed (e, t) -> parens (exp e ^^ opt_type_annotation (Some t))

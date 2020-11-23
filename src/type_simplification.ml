@@ -1,4 +1,5 @@
 open Typedefs
+open Elab
 
 (*
 I can see three basic ways of doing generalisation / simplification.
@@ -43,13 +44,17 @@ can be computed during the polarity DFS, by locating backedges. (weak guardednes
    FIXME: would be better to do this, because this current wastes
           time redundantly canonising useless variables.
 *)
-let remove_joins env lvl ty =
-  wf_typ Pos env ty;
+let remove_joins env lvl rq =
+  wf_elab_req env rq;
   (* FIXME: this is a poor way to key this table.
      Hashing styps isn't very reliable, because tuple_fields are not canonical
      (this only causes a possible loss of sharing, though) *)
   let canon_table : (polarity * styp * (int, unit) Intlist.t, styp) Hashtbl.t = Hashtbl.create 10 in
   let flexvars = env_flexvars env lvl in
+
+
+
+  wf_elab_req env (map_free_elab_req lvl 0 (fun _pol _ vs rest -> styp_consv lvl rest vs) rq);
 
   (* FIXME: this can probably determine recursive reachability, for rectypes *)
 
@@ -57,6 +62,7 @@ let remove_joins env lvl ty =
     map_free_styp lvl 0 canon_var pol ty
 
   and canon_var pol _ix vs (rest : styp) =
+    wf_styp pol env rest;
     (* map_free_styp should never call us with an empty vs *)
     assert (not (Intlist.is_empty vs));
     if is_trivial pol rest && Intlist.is_singleton vs then
@@ -89,10 +95,10 @@ let remove_joins env lvl ty =
     v.neg <- styp_consv lvl ncons nvar;
     v.neg_match_cache <- ident Neg
   done;
-  let ty = map_free_typ lvl 0 canon_var Pos ty in
+  let rq = map_free_elab_req lvl 0 canon_var rq in
   wf_env_entry env (env_entry_at_level env lvl);
-  wf_typ Pos env ty;
-  ty
+  wf_elab_req env rq;
+  rq
 
 
 type gc_var_side =
@@ -129,9 +135,9 @@ let var_side pol { vneg; vpos; _ } =
      α ≤ C
      γ ≤ α ≤ β ≤ D ⊢ α → (β × γ)
    α should be expanded to C ⊓ β, even in the upper bound of +-reachable γ *)
-let garbage_collect env lvl ty =
+let garbage_collect env lvl rq =
   (* let orig_ty = ty in *)
-  wf_typ Pos env ty;
+  wf_elab_req env rq;
   let orig_flexvars = env_flexvars env lvl in
   let vars = Vector.to_array orig_flexvars |> Array.map (fun { pos; neg; _ } ->
     let pos_cons, pos_flow = styp_unconsv lvl pos in
@@ -173,7 +179,7 @@ let garbage_collect env lvl ty =
       visit_bound pol v);
     (* unused. Maybe I need an iter_free_styp... *)
     styp_trivial pol in
-  ignore (map_free_typ lvl 0 visit_vars_strong Pos ty);
+  ignore (map_free_elab_req lvl 0 visit_vars_strong rq);
 
   (* FIXME: write tests that hit each of these cases *)
 
@@ -302,7 +308,7 @@ let garbage_collect env lvl ty =
        v'.pos <- styp_consv new_env_level (replace_styp Pos v.vpos.cons) (convert_flow v.vpos.flow);
        v'.neg <- styp_consv new_env_level (replace_styp Neg v.vneg.cons) (convert_flow v.vneg.flow); 
     | _ -> ());
-  let ty = map_free_typ lvl 0 replace_vars Pos ty in
+  let rq = map_free_elab_req lvl 0 replace_vars rq in
 
   let env' =
     let { level = level'; rest; _ } = env in
@@ -311,8 +317,8 @@ let garbage_collect env lvl ty =
       entry = Eflexible {vars=new_flexvars;names=Tuple_fields.SymMap.empty};
       rest } in
   wf_env_entry env' (env_entry_at_level env' new_env_level);
-  wf_typ Pos env' ty;
-  env', ty
+  wf_elab_req env' rq;
+  env', rq
   
 
     (*

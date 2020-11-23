@@ -55,6 +55,10 @@ end = struct
   let to_int = fst
 end
 
+type 'a gen_env =
+  { level : Env_level.t;
+    entry : 'a;
+    rest : 'a gen_env option }
 
 (* Entries in the typing environment *)
 type env_entry =
@@ -71,10 +75,7 @@ type env_entry =
       flow : Flow_graph.t;
     }
 
-and env =
-  { level : Env_level.t;
-    entry : env_entry;
-    rest : env option }
+and env = env_entry gen_env
 
 (* Simple types (the result of inference). No binders. *)
 and styp =
@@ -185,6 +186,7 @@ let env_rigid_flow env lvl i j =
 
 let vlist_union v1 v2 =
   Intlist.union (fun _ () () -> ()) v1 v2
+  
 
 (*
  * Opening/closing of binders
@@ -227,6 +229,26 @@ let styp_var pol level var =
 let styp_cons pol cons =
   Cons {pol; cons}
 
+let rec env_lookup_type_var env name : (styp * styp) option =
+    match env.entry with
+  | (Erigid { names; _ } | Eflexible { names; _ })
+       when SymMap.mem name names ->
+     (* FIXME shifting? *)
+     let i = SymMap.find name names in
+     Some (styp_var Neg env.level i,
+           styp_var Pos env.level i)
+  | _ ->
+     match env.rest with
+     | Some env -> env_lookup_type_var env name
+     | _ -> None
+
+let lookup_named_type = function
+  | "any" -> Some Top
+  | "nothing" -> Some Bot
+  | "bool" -> Some Bool
+  | "int" -> Some Int
+  | "string" -> Some String
+  | _ -> None
 
 (* Rewrite occurrences of the outermost bound variable *)
 let rec map_bound_styp ix rw pol' = function
@@ -325,7 +347,7 @@ let styp_unconsv2 a b =
 
 (* Open a ∀⁺ binder by instantiating its bound variables with fresh flexvars.
    Inserts variables into the current environment (no new level created) *)
-let instantiate_flexible env ?(names=SymMap.empty) lvl (vars : (string option * styp * styp) array) (flow : Flow_graph.t) (body : typ) =
+let instantiate_flexible env ?(names=SymMap.empty) lvl (vars : (string option * styp * styp) array) (flow : Flow_graph.t) =
   (* The environment already contains ≥0 flexible variables, so we need to
      renumber the new ones to avoid collisions *)
   let tyvars = env_flexvars env lvl in
@@ -361,24 +383,29 @@ let instantiate_flexible env ?(names=SymMap.empty) lvl (vars : (string option * 
       let vjcons, vjflow = styp_unconsv lvl vj.pos in
       vj.pos <- styp_consv lvl vjcons (Intlist.add vjflow id ()));
     );
-  map_bound_typ 0 inst Pos body
+  inst
 
 (* NB: a similar invariant-preservation trick needed if ∀⁻ are ever merged.
    Not sure there's any need to do that, though *)
 
 (* Open a ∀⁺ binder, extending env with flexible variables *)
-let enter_poly_pos env names vars flow body =
+let enter_poly_pos' env names vars flow =
   let env = env_cons env (Eflexible {names=SymMap.empty; vars=Vector.create ()}) in
-  env, instantiate_flexible ~names env env.level vars flow body
+  let inst = instantiate_flexible ~names env env.level vars flow in
+  env, inst
+
+let enter_poly_pos env names vars flow body =
+  let env, inst = enter_poly_pos' env names vars flow in
+  env, map_bound_typ 0 inst Pos body
 
 (* Close a ∀⁺ binder, generalising flexible variables *)
-let generalise env lvl ty =
+let generalise env lvl =
   let gen pol index vs rest =
     let var, () = Intlist.as_singleton vs in
     assert (is_trivial pol rest);
     Bound_var {pol; index; var} in
   let flexvars = env_flexvars env lvl in
-  if Vector.length flexvars = 0 then ty else
+  if Vector.length flexvars = 0 then None else
   let bounds_flow = flexvars |> Vector.to_array |> Array.map (fun {pos; neg; _} ->
     let pbound, pflow = styp_unconsv lvl pos in
     let pbound = map_free_styp lvl 0 gen Pos pbound in
@@ -387,10 +414,7 @@ let generalise env lvl ty =
     (* FIXME: name generalised variables? *)
     (None, pbound, nbound), (pflow, nflow)) in
   let bounds = Array.map fst bounds_flow and flow = Array.map snd bounds_flow in
-  Tpoly{names = SymMap.empty;
-        bounds;
-        flow = Flow_graph.make flow;
-        body = map_free_typ lvl 0 gen Pos ty}
+  Some (bounds, Flow_graph.make flow, gen)
 
 (* FIXME: explain why this is OK! *)
 let rec mark_principal_styp pol' = function
@@ -403,7 +427,7 @@ let rec mark_principal pol = function
   | Tsimple sty -> mark_principal_styp pol sty
 
 (* Open a ∀⁻ binder, extending env with rigid variables *)
-let enter_poly_neg (env : env) names bounds flow body =
+let enter_poly_neg' (env : env) names bounds flow  =
   let rigvar_level = Env_level.extend env.level in
   let inst pol v =
     styp_vars pol rigvar_level (Intlist.singleton v ()) in
@@ -411,17 +435,25 @@ let enter_poly_neg (env : env) names bounds flow body =
     { name;
       rig_lower = map_bound_styp 0 inst Neg l;
       rig_upper = map_bound_styp 0 inst Pos u }) in
-  let body = map_bound_typ 0 inst Neg body in
   let env =
     { level = rigvar_level;
       entry = Erigid { names; vars; flow };
       rest = Some env } in
-  env, body
+  env, inst
+
+let enter_poly_neg env names bounds flow body =
+  let env, inst = enter_poly_neg' env names bounds flow in
+  env, map_bound_typ 0 inst Neg body
 
 let enter_poly pol env names vars flow body =
   match pol with
   | Pos -> enter_poly_pos env names vars flow body
   | Neg -> enter_poly_neg env names vars flow body
+
+let enter_poly' pol env names vars flow =
+  match pol with
+  | Pos -> enter_poly_pos' env names vars flow
+  | Neg -> enter_poly_neg' env names vars flow
 
 (*
  * Well-formedness checks.
@@ -485,14 +517,19 @@ and wf_env_entry env = function
        assert (snd (styp_unconsv env.level rig_lower) = Intlist.empty);
        assert (snd (styp_unconsv env.level rig_upper) = Intlist.empty))
 
-and wf_styp pol' env = function
+and wf_styp_gen : 'a . (polarity -> 'a -> (int, unit) Intlist.t -> unit) -> polarity -> 'a gen_env -> styp -> unit
+ = fun wf_vars pol' env -> function
   | Bound_var _ -> assert false (* locally closed *)
   | Cons { pol; cons } ->
      assert (pol = pol');
-     wf_cons pol env wf_styp cons
+     wf_cons pol env (wf_styp_gen wf_vars) cons
   | Free_vars { level; vars; rest } ->
-     wf_vars pol' env level vars;
-     wf_styp pol' env rest
+     Intlist.wf vars;
+     assert (not (Intlist.is_empty vars));
+     wf_vars pol' (env_entry_at_level env level) vars;
+     wf_styp_gen wf_vars pol' env rest
+
+and wf_styp pol env t = wf_styp_gen wf_vars pol env t
 
 and wf_typ pol env = function
   | Tcons cons ->
@@ -509,11 +546,9 @@ and wf_typ pol env = function
      wf_env_entry env env.entry;
      wf_typ pol env body
 
-and wf_vars _pol env level vs =
-  Intlist.wf vs;
-  assert (not (Intlist.is_empty vs));
+and wf_vars _pol entry vs =
   let len =
-    match env_entry_at_level env level with
+    match entry with
     | Eflexible {vars; _} -> Vector.length vars
     | Erigid { vars; _ } -> Array.length vars
     | _ -> assert false in
@@ -576,7 +611,7 @@ and pr_bound pol (ix, (_name, lower, upper)) =
               str "," ^^
             pr_styp (polneg pol) upper)
 
-let rec pr_env { level=_; entry; rest } =
+let rec pr_env { level; entry; rest } =
   let doc =
     match rest with
     | None -> empty
@@ -586,7 +621,7 @@ let rec pr_env { level=_; entry; rest } =
      (match rest with None -> empty | Some env -> pr_env env)
   | Eflexible {vars; _} when Vector.length vars = 0 ->
      (match rest with None -> empty | Some env -> pr_env env)
-  | Evals _ -> failwith "pr_env unimplemented for Evals"
+  | Evals _ -> doc ^^ string (Printf.sprintf "<vals %d>" (Env_level.to_int level)) (*failwith "pr_env unimplemented for Evals"*)
   | Eflexible vars ->
     Vector.fold_lefti (fun doc i v ->
       doc ^^ str (Printf.sprintf "%d" i) ^^ str ":" ^^ blank 1 ^^
@@ -638,7 +673,8 @@ let test () =
   let body =
     match nested with
     | Tpoly {names=_; bounds; flow; body} ->
-       instantiate_flexible env env.level bounds flow body
+       let inst = instantiate_flexible env env.level bounds flow in
+       map_bound_typ 0 inst Pos body
     | _ -> assert false in
   PPrint.ToChannel.pretty 1. 80 stdout
     (group (pr_env env) ^^ str " ⊢ " ^^ pr_typ Pos body ^^ hardline);
@@ -646,7 +682,8 @@ let test () =
   let body =
     match body with
     | Tpoly {names=_; bounds; flow; body} ->
-       instantiate_flexible env env.level bounds flow body
+       let inst = instantiate_flexible env env.level bounds flow in
+       map_bound_typ 0 inst Pos body
     | _ -> assert false in
   PPrint.ToChannel.pretty 1. 80 stdout
     (group (pr_env env) ^^ str " ⊢ " ^^ pr_typ Pos body ^^ hardline);

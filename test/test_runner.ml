@@ -40,7 +40,6 @@ let run_cmd s =
                                  entry = Evals (Tuple_fields.SymMap.empty);
                                  rest = None } in
      let env0 : Typedefs.env = Typedefs.env_cons envZ (Eflexible {vars=Vector.create ();names=Tuple_fields.SymMap.empty}) in
-     let flex0 = env0.level in
      let rendered = to_string ~width:120 (PPrint.group (Print.exp e)) in
      rendered ^ "\n" ^
      (match (Parse.parse_string rendered) with
@@ -48,8 +47,8 @@ let run_cmd s =
       | Ok (`Exp e') when Exp.equal e e' -> ""
       | Ok (`Exp e') -> Printf.sprintf "MISMATCH %s\n" (to_string ~width:1000 (Print.exp e'))
       | _ -> "MISMATCH\n") ^
-     (match Check.infer env0 e with
-     | t ->
+     (match Check.elab_gen envZ (fun env -> Check.infer env e) with
+     | t, elab ->
         (let b = Buffer.create 100 in
         let open Typedefs in
 (*        let rec as_styp pol = function
@@ -58,18 +57,26 @@ let run_cmd s =
           | _ -> raise Exit in
         let t = match as_styp Pos t with exception Exit -> t | s -> Tsimple (Type_simplification.garbage_collect env0 Pos s) in*)
         PPrint.ToBuffer.pretty 1. 80 b (PPrint.(group @@ group (string "*" ^^ Typedefs.pr_env env0) ^^ break 1 ^^ group (utf8string "⊢" ^^ break 1 ^^ (Typedefs.pr_typ Pos t))));
+
+        let poly, elab = Elab.elaborate {level=Typedefs.Env_level.empty();entry=[||]; rest=None} elab in
+        poly |> Option.iter (fun poly ->
+          PPrint.ToBuffer.pretty 1. 80 b PPrint.(hardline ^^ string "WEAKPOLY" ^^ Print.typolybounds poly));
+        PPrint.ToBuffer.pretty 1. 80 b (PPrint.(nest 2 (hardline ^^ group (Print.exp elab))));
+(*
         let t = Type_simplification.remove_joins env0 flex0 t in
         let env0, t = Type_simplification.garbage_collect env0 flex0 t in
-        let t = generalise env0 env0.level t in
+        let t = generalise env0 env0.level t in *)
+        let envZ = env0 in
         wf_typ Pos envZ t;
         (b |> Buffer.to_bytes |> Bytes.to_string) ^
-          let te = Type_print.convert envZ Pos t in
+          let te = Type_print.convert {level=Typedefs.Env_level.empty();entry=[||]; rest=None} Pos t in
           "\n" ^
             to_string ~width:120 (PPrint.group (Print.tyexp te)) ^
+              (match
               let tn, _ = Check.typ_of_tyexp envZ te in
               let env0 = Typedefs.env_cons envZ (Eflexible {vars=Vector.create ();names=Tuple_fields.SymMap.empty}) in
-              (match Check.check env0 e tn with
-               | () -> ""
+               Check.check env0 e tn with
+               | _ -> ""
                | exception e -> "\nRECHECK: " ^ Printexc.to_string e ^ "\n" ^ Printexc.get_backtrace ()))
      | exception ((Assert_failure _ | Types.Internal _) as e) ->
         Printexc.to_string e ^ "\n" ^ Printexc.get_backtrace ()
