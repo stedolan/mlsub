@@ -96,7 +96,7 @@ let remove_joins env lvl rq =
     v.neg_match_cache <- ident Neg
   done;
   let rq = map_free_elab_req lvl 0 canon_var rq in
-  wf_env_entry env (env_entry_at_level env lvl);
+  wf_env_entry env lvl (env_entry_at_level env lvl);
   wf_elab_req env rq;
   rq
 
@@ -111,7 +111,7 @@ type replacement =
   | Unknown
   | Deleted
   | Link of int
-  | Keep of Env_level.t * int
+  | Keep of env_level * int
   | SubstPre of styp            (* in old env *)
   | SubstPost of styp           (* in new env *)
 
@@ -311,14 +311,11 @@ let garbage_collect env lvl rq =
   let rq = map_free_elab_req lvl 0 replace_vars rq in
 
   let env' =
-    let { level = level'; rest; _ } = env in
-    assert (Env_level.equal lvl level');
-    { level = new_env_level;
-      entry = Eflexible {vars=new_flexvars;names=Tuple_fields.SymMap.empty};
-      rest } in
-  wf_env_entry env' (env_entry_at_level env' new_env_level);
+    env_replace env lvl new_env_level
+      (Eflexible {vars=new_flexvars;names=Tuple_fields.SymMap.empty}) in
+  wf_env_entry env' new_env_level (env_entry_at_level env' new_env_level);
   wf_elab_req env' rq;
-  env', rq
+  env', new_env_level, rq
   
 
     (*

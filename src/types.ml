@@ -131,86 +131,6 @@ let subtype_cons pol a b f =
 let pol_flip f pol a b =
   match pol with Pos -> f a b | Neg -> f b a
 
-
-(*
-(* Hoist a flexible variable to a wider environment *)
-let rec hoist_flexible env v =
-  assert_env_prefix env v.env;
-  wf_env v.env;
-  if env == v.env then v
-  else match v.hoisted with
-  | Some v' when Env_level.extends env.level v'.env.level ->
-     hoist_flexible env v'
-  | vh ->
-     (* Write the hoisted field _before_ approxing bounds,
-        so that we terminate when hoisting a var with recursive bounds. *)
-     let v' = fresh_flexible env in
-     v'.hoisted <- vh;
-     v.hoisted <- Some v';
-     wf_env v.env;
-     let ty_pos = styp_of_vset Pos (vset_of_flexvar v') in
-     let ty_neg = styp_of_vset Neg (vset_of_flexvar v') in
-     (* I. approx bounds *)
-     let bpos = approx_styp env v.env Pos v.pos in
-     let bneg = approx_styp env v.env Neg v.neg in
-     wf_env v.env;
-     v'.pos <- bpos;
-     v'.neg <- bneg;
-     (* To maintain the ε-invariant, we may need to add other ε-edges *)
-     let _, posv = styp_uncons env Flexible bpos in
-     let _, negv = styp_uncons env Flexible bneg in
-     posv |> List.iter (fun vi ->
-       let vother = env_flexvar env vi in
-       vother.neg <- join Neg vother.neg ty_neg);
-     negv |> List.iter (fun vi ->
-       let vother = env_flexvar env vi in
-       vother.pos <- join Pos vother.pos ty_pos);
-     wf_env v.env;
-     (* II. add variable constraints *)
-     v.pos <- join Pos v.pos ty_pos;
-     v.neg <- join Neg v.neg ty_neg;
-     wf_env v.env;
-     v'
-
-and approx_vset env pol = function
-  | VSnil -> styp_of_vset pol VSnil
-  | VScons { env = env'; _ } as vs
-       when env_level env' <= env_level env ->
-     (* already valid in env *)
-     styp_of_vset pol vs
-  | VScons { env = env'; sort; vars; rest } ->
-     assert_env_prefix env env';
-     let acc = approx_vset env pol rest in
-     match sort with
-     | Rigid ->
-        failwith "rigid approx unimplemented"
-     | Flexible ->
-        List.fold_left (fun acc i ->
-          let v = hoist_flexible env (env_flexvar env' i) in
-          join pol acc (styp_of_vset pol (vset_of_flexvar v)))
-          acc vars
-
-(* Given a styp well-formed in ext,
-   find the best approximation well-formed in the shorter environment env.
-
-   This may require hoisting some flexible variables from ext to env.
-
-   Pos types are approximated from above and Neg types from below. *)
-and approx_styp env ext pol' ({ tyvars; cons; pol } as orig) =
-  assert_env_prefix env ext;
-  wf_env ext;
-  wf_styp pol' ext orig;
-  assert (pol = pol');
-  if env_equal env ext then orig
-  else
-    let cons = map_head pol (approx_styp env ext) cons in
-    let ty = join pol { pol; cons; tyvars = VSnil } (approx_vset env pol tyvars) in
-    wf_env ext;
-    wf_styp pol env ty;
-    ty
-*)
-
-
 let fresh_flexvar env lvl =
   let fv = env_flexvars env lvl in
   Vector.push fv { name = None;
@@ -224,7 +144,7 @@ let flow_of_flexvar _env l v =
   styp_vars Neg l vs, styp_vars Pos l vs
 
 (* maps (l1, v, pol, l2) -> v' when v' approximates (l1,v) w/ polarity pol *)
-type apxcache = (Env_level.t * int * polarity * Env_level.t, int) Hashtbl.t
+type apxcache = (env_level * int * polarity * env_level, int) Hashtbl.t
 
 (* Given a styp well-formed in env,
    find the best approximation well-formed at a shorter level lvl.
@@ -234,9 +154,11 @@ type apxcache = (Env_level.t * int * polarity * Env_level.t, int) Hashtbl.t
    Pos types are approximated from above and Neg types from below. *)
 let rec approx_styp env apxcache lvl pol ty =
   wf_styp pol env ty;
-  assert (Env_level.extends lvl env.level);
-  if Env_level.equal env.level lvl then ty
-  else match ty with
+  ignore (env_at_level env lvl);
+  match env with
+  | Env_cons { level; _ } when Env_level.equal lvl level -> ty
+  | _ ->
+  match ty with
   | Bound_var _ -> assert false
   | Cons { pol; cons } ->
      Cons { pol; cons = map_head pol (approx_styp env apxcache lvl) cons }
@@ -252,8 +174,9 @@ let rec approx_styp env apxcache lvl pol ty =
 
 and approx_styp_var env apxcache lvl pol lvl' v' =
   (* approximate the variable v at (lvl', mark') to (lvl, mark) *)
+  assert (Env_level.sort lvl = Esort_flexible);
   assert (Env_level.extends lvl lvl');
-  assert (Env_level.extends lvl' env.level);
+  ignore (env_at_level env lvl');
   assert (not (Env_level.equal lvl lvl'));
   match env_entry_at_level env lvl' with
   | Eflexible {vars=flexvars'; _} ->
@@ -423,7 +346,7 @@ let rec approx env lvl pol t =
   wf_typ pol env t;
   match t with
   | Tpoly {names; bounds; flow; body} ->
-     let (env, body) = enter_poly pol env names bounds flow body in
+     let (env, _, body) = enter_poly pol env names bounds flow body in
      approx env lvl pol body
   | Tsimple s ->
      approx_styp env (Hashtbl.create 1) lvl pol s
@@ -439,17 +362,20 @@ let rec subtype env p n =
   match p, n with
   (* FIXME: some sort of coherence check needed. Where? *)
   | p, Tpoly {names; bounds; flow; body} ->
-     let env, body = enter_poly_neg env names bounds flow body in
+     let env, _, body = enter_poly_neg env names bounds flow body in
      subtype env p body
   | Tpoly {names; bounds; flow; body}, n ->
-     let env, body = enter_poly_pos env names bounds flow body in
+     let env, _, body = enter_poly_pos env names bounds flow body in
      subtype env body n
   | Tcons s, Tcons t ->
      subtype_cons Pos s t
        (pol_flip (subtype env))
+
+  (* FIXME this is wrong *)
   | (Tsimple _, _) | (_, Tsimple _) ->
-     let p = approx env env.level Pos p in
-     let n = approx env env.level Neg n in
+     let level = match env with Env_cons { level; _ } -> level | _ -> assert false in
+     let p = approx env level Pos p in
+     let n = approx env level Neg n in
      subtype_styp env (Hashtbl.create 1) p n
 
 let fresh_flow env l =

@@ -16,8 +16,11 @@ let named_type s : Exp.tyexp' =
 
 (* FIXME hilariously slow *)
 let rec contains_name s (env : nenv) =
-  if Array.mem s env.entry then true
-  else Option.map (contains_name s) env.rest |> Option.value ~default:false
+  match env with
+  | Env_nil -> false
+  | Env_cons { entry; rest; level=_ } ->
+     if Array.mem s entry then true
+     else contains_name s rest
 
 (* FIXME:
    this could generate simpler types by allowing some shadowing
@@ -79,9 +82,11 @@ let enter_poly_for_convert env pol bounds flow =
     names := SymMap.add name i !names;
     (name, (l, u))) in
   let vnames = Array.map fst bounds in
-  let env = env_cons env vnames in
+  let sort = match pol with Pos -> Esort_flexible | Neg -> Esort_rigid in
+  let level = env_next_level env sort in
+  let env = Env_cons {level; entry=vnames; rest=env} in
   let inst pol v =
-    styp_vars pol env.level (Intlist.singleton v ()) in
+    styp_vars pol level (Intlist.singleton v ()) in
   let pl = pol and pu = polneg pol in
   let bound_constraints = bounds |> Array.map (fun (name, (l, u)) ->
     let name = name, loc in
@@ -93,7 +98,7 @@ let enter_poly_for_convert env pol bounds flow =
     | true, false -> [name, Some (`Sub, convert_styp env pu u)]
     | false, false ->
        [name, Some (`Sub, convert_styp env pu u);
-        name, Some (`Sup, convert_styp env pl l);])
+        name, Some (`Sup, convert_styp env pl l)])
     |> Array.to_list |> List.concat in
   let flow_constraints =
     Flow_graph.to_list flow |> List.map (fun (i,j) ->

@@ -20,42 +20,50 @@ type +'a cons_head =
   | Func of 'a tuple_fields * 'a
 
 module Env_level : sig
-  type t
+  type 'sort t
 
-  val empty : unit -> t
-  val extend : t -> t
-  val replace : t -> t
+  val initial : 's -> 's t
 
-  val equal : t -> t -> bool
-  val extends : t -> t -> bool
+  val extend : 's t -> 's -> 's t
+  val replace : 's t -> 's t
 
-  val to_int : t -> int
+  val equal : 's t -> 's t -> bool
+  val extends : 's t -> 's t -> bool
+
+  val to_int : 's t -> int
+
+  val sort : 's t -> 's
 end = struct
-  type level = int
-  type marker = unit ref
+  (* Not actually mutable, but marking it as such
+     makes physical equality work *)
+  type 'sort t =
+    { mutable level : int;
+      sort : 'sort }
 
-  type t = level * marker
+  let initial sort = { level = 0; sort }
+  let extend { level; _ } sort = { level = level + 1; sort }
+  let replace { level; sort } = { level; sort }
 
-  let new_marker () = ref ()
+  let extends {level=l1;sort=_} {level=l2;sort=_} = l1 <= l2
 
-  let empty () = 0, new_marker ()
-  let extend (l, _) = (l + 1, new_marker ())
-  let replace (l, _) = (l, new_marker ())
-
-  let extends (l1, _) (l2, _) = l1 <= l2
-  let equal ((l1, m1) : t) ((l2, m2) : t) =
-    if l1 = l2 then
-      (assert (m1 == m2); true)
+  let equal l1 l2 =
+    if l1.level = l2.level then
+      (assert (l1 == l2); true)
     else
       false
 
-  let to_int = fst
+  let to_int l = l.level
+  let sort l = l.sort
 end
 
+type env_sort = Esort_vals | Esort_flexible | Esort_rigid
+type env_level = env_sort Env_level.t
+
 type 'a gen_env =
-  { level : Env_level.t;
-    entry : 'a;
-    rest : 'a gen_env option }
+  | Env_cons of { level : env_sort Env_level.t;
+                  entry : 'a;
+                  rest : 'a gen_env }
+  | Env_nil
 
 (* Entries in the typing environment *)
 type env_entry =
@@ -77,7 +85,7 @@ and env = env_entry gen_env
 (* Simple types (the result of inference). No binders. *)
 and styp =
   | Cons of { pol: polarity; cons: styp cons_head }
-  | Free_vars of { level: Env_level.t; vars: (int, unit) Intlist.t; rest: styp }
+  | Free_vars of { level: env_level; vars: (int, unit) Intlist.t; rest: styp }
   | Bound_var of { pol: polarity; index: int; var: int }
 
 (* Flexible type variables.
@@ -141,29 +149,57 @@ let annih = function
  *)
 
 let assert_env_equal env1 env2 =
-  assert (Env_level.equal env1.level env2.level)
+  match env1, env2 with
+  | Env_nil, Env_nil -> ()
+  | Env_cons { level=l1; _ }, Env_cons { level=l2; _ } ->
+     assert (Env_level.equal l1 l2)
+  | _ -> assert false
 
-let rec env_at_level env lvl =
-  assert (Env_level.extends lvl env.level);
-  if Env_level.equal env.level lvl then
-    env
-  else
-    match env.rest with
-    | None -> assert false
-    | Some rest -> env_at_level rest lvl
+let rec env_at_level' env lvl =
+  match env with
+  | Env_nil -> failwith "malformed env: level not found"
+  | Env_cons { level; entry; _ } when Env_level.equal lvl level ->
+     env, entry
+  | Env_cons { level; rest; _ } ->
+     assert (Env_level.extends lvl level);
+     env_at_level' rest lvl
 
-(* must be an env (lvl,mark) *)
-let env_entry_at_level env lvl =
-  (env_at_level env lvl).entry
+let env_at_level env lvl = fst (env_at_level' env lvl)
+
+let env_entry_at_level env lvl = snd (env_at_level' env lvl)
 
 (* Check that one environment is an extension of another *)
 let assert_env_prefix env ext =
-  ignore (env_entry_at_level env ext.level)
+  match ext with
+  | Env_nil -> assert (env = Env_nil)
+  | Env_cons { level; _ } ->
+     ignore (env_entry_at_level env level)
 
-let env_cons env entry =
-  { level = Env_level.extend env.level;
-    entry;
-    rest = Some env }
+let env_sort_of_entry = function
+  | Evals _ -> Esort_vals
+  | Erigid _ -> Esort_rigid
+  | Eflexible _ -> Esort_flexible
+
+let env_next_level env sort =
+  match env with
+  | Env_nil -> Env_level.initial sort
+  | Env_cons { level; _ } -> Env_level.extend level sort
+
+let env_cons rest level entry =
+  assert (Env_level.sort level = env_sort_of_entry entry);
+  Env_cons { level; entry; rest }
+
+let env_cons_entry rest entry =
+  Env_cons { level = env_next_level rest (env_sort_of_entry entry);
+             entry;
+             rest }
+
+let env_replace env level newlevel entry =
+  assert (Env_level.to_int level = Env_level.to_int newlevel);
+  match env with
+  | Env_cons {level=l; entry=_; rest} when Env_level.equal level l ->
+     Env_cons {level=newlevel; entry; rest}
+  | _ -> assert false
 
 let env_flexvars env lvl =
   match env_entry_at_level env lvl with
@@ -227,17 +263,15 @@ let styp_cons pol cons =
   Cons {pol; cons}
 
 let rec env_lookup_type_var env name : (styp * styp) option =
-    match env.entry with
-  | (Erigid { names; _ } | Eflexible { names; _ })
+  match env with
+  | Env_cons { level; entry = (Erigid { names; _ } | Eflexible { names; _ }); _ }
        when SymMap.mem name names ->
      (* FIXME shifting? *)
      let i = SymMap.find name names in
-     Some (styp_var Neg env.level i,
-           styp_var Pos env.level i)
-  | _ ->
-     match env.rest with
-     | Some env -> env_lookup_type_var env name
-     | _ -> None
+     Some (styp_var Neg level i,
+           styp_var Pos level i)
+  | Env_cons { rest; _ } -> env_lookup_type_var rest name
+  | Env_nil -> None
 
 let lookup_named_type = function
   | "any" -> Some Top
@@ -318,7 +352,7 @@ let styp_unconsv lvl = function
 
 type styp_unconsv2_result =
   | Cons2 of { a: styp cons_head; b: styp cons_head }
-  | Vars2 of { level: Env_level.t;
+  | Vars2 of { level: env_level;
                a: styp; va: (int, unit) Intlist.t;
                b: styp; vb: (int, unit) Intlist.t }
 
@@ -387,13 +421,14 @@ let instantiate_flexible env ?(names=SymMap.empty) lvl (vars : (string option * 
 
 (* Open a ∀⁺ binder, extending env with flexible variables *)
 let enter_poly_pos' env names vars flow =
-  let env = env_cons env (Eflexible {names=SymMap.empty; vars=Vector.create ()}) in
-  let inst = instantiate_flexible ~names env env.level vars flow in
-  env, inst
+  let level = env_next_level env Esort_flexible in
+  let env = env_cons env level (Eflexible {names=SymMap.empty; vars=Vector.create ()}) in
+  let inst = instantiate_flexible ~names env level vars flow in
+  env, level, inst
 
 let enter_poly_pos env names vars flow body =
-  let env, inst = enter_poly_pos' env names vars flow in
-  env, map_bound_typ 0 inst Pos body
+  let env, level, inst = enter_poly_pos' env names vars flow in
+  env, level, map_bound_typ 0 inst Pos body
 
 (* Close a ∀⁺ binder, generalising flexible variables *)
 let generalise env lvl =
@@ -425,22 +460,19 @@ let rec mark_principal pol = function
 
 (* Open a ∀⁻ binder, extending env with rigid variables *)
 let enter_poly_neg' (env : env) names bounds flow  =
-  let rigvar_level = Env_level.extend env.level in
+  let rigvar_level = env_next_level env Esort_rigid in
   let inst pol v =
     styp_vars pol rigvar_level (Intlist.singleton v ()) in
   let vars = bounds |> Array.map (fun (name, l, u) ->
     { name;
       rig_lower = map_bound_styp 0 inst Neg l;
       rig_upper = map_bound_styp 0 inst Pos u }) in
-  let env =
-    { level = rigvar_level;
-      entry = Erigid { names; vars; flow };
-      rest = Some env } in
-  env, inst
+  let env = env_cons env rigvar_level (Erigid { names; vars; flow }) in
+  env, rigvar_level, inst
 
 let enter_poly_neg env names bounds flow body =
-  let env, inst = enter_poly_neg' env names bounds flow in
-  env, map_bound_typ 0 inst Neg body
+  let env, level, inst = enter_poly_neg' env names bounds flow in
+  env, level, map_bound_typ 0 inst Neg body
 
 let enter_poly pol env names vars flow body =
   match pol with
@@ -469,22 +501,25 @@ and wf_cons_fields pol env wf fields =
   assert (fnames = List.sort compare fields.fnames);
   FieldMap.iter (fun _k t -> wf pol env t) fields.fields
 
-let rec wf_env ({ level; entry; rest } as env) =
-  wf_env_entry env entry;
-  match rest with
-  | None -> assert (Env_level.to_int level = 0);
-  | Some env' ->
-     assert ((Env_level.to_int level) = (Env_level.to_int env'.level) + 1);
-     wf_env env'
+let rec wf_env = function
+  | Env_nil -> ()
+  | Env_cons { level; entry; rest } as env ->
+     wf_env_entry env level entry;
+     begin match rest with
+     | Env_nil -> assert (Env_level.to_int level = 0);
+     | Env_cons { level=level'; _} ->
+        assert ((Env_level.to_int level) = (Env_level.to_int level') + 1);
+     end;
+     wf_env rest
 
 and wf_match_cache_entry pol env = function
   | Free_vars { level; vars; rest} when is_trivial pol rest ->
-     assert (Env_level.equal env.level level);
+     (*assert (Env_level.equal env.level level);*)
      let v, () = Intlist.as_singleton vars in
-     assert (0 <= v && v < Vector.length (env_flexvars env env.level))
+     assert (0 <= v && v < Vector.length (env_flexvars env level))
   | _ -> assert false
 
-and wf_env_entry env = function
+and wf_env_entry env level = function
   | Evals vs ->
      SymMap.iter (fun _ typ ->  wf_typ Pos env typ) vs
   | Eflexible {names; vars} ->
@@ -498,8 +533,8 @@ and wf_env_entry env = function
      let head_vars =
        vars |> Vector.to_array
        |> Array.map (fun { pos; neg; _ } ->
-              snd (styp_unconsv env.level pos),
-              snd (styp_unconsv env.level neg)) in
+              snd (styp_unconsv level pos),
+              snd (styp_unconsv level neg)) in
      head_vars |> Array.iteri (fun i (pos, neg) ->
        Intlist.iter pos (fun j () ->
          assert (Intlist.contains (snd head_vars.(j)) i));
@@ -511,8 +546,8 @@ and wf_env_entry env = function
      vars |> Array.iter (fun { name=_; rig_lower; rig_upper } ->
        wf_styp Neg env rig_lower;
        wf_styp Pos env rig_upper;
-       assert (snd (styp_unconsv env.level rig_lower) = Intlist.empty);
-       assert (snd (styp_unconsv env.level rig_upper) = Intlist.empty))
+       assert (snd (styp_unconsv level rig_lower) = Intlist.empty);
+       assert (snd (styp_unconsv level rig_upper) = Intlist.empty))
 
 and wf_styp_gen : 'a . (polarity -> 'a -> (int, unit) Intlist.t -> unit) -> polarity -> 'a gen_env -> styp -> unit
  = fun wf_vars pol' env -> function
@@ -539,8 +574,8 @@ and wf_typ pol env = function
      bounds |> Array.iter (fun (_name, p, n) ->
        (match p with Bound_var _ -> assert false | _ -> ());
        (match n with Bound_var _ -> assert false | _ -> ()));
-     let env, body = enter_poly pol env names bounds flow body in
-     wf_env_entry env env.entry;
+     let env, level, body = enter_poly pol env names bounds flow body in
+     wf_env_entry env level (env_entry_at_level env level);
      wf_typ pol env body
 
 and wf_vars _pol entry vs =
@@ -608,16 +643,20 @@ and pr_bound pol (ix, (_name, lower, upper)) =
               str "," ^^
             pr_styp (polneg pol) upper)
 
-let rec pr_env { level; entry; rest } =
+
+let rec pr_env =
+  function
+  | Env_nil -> empty
+  | Env_cons { level; entry; rest} ->
   let doc =
     match rest with
-    | None -> empty
-    | Some env -> pr_env env ^^ comma ^^ break 1 in
+    | Env_nil -> empty
+    | env -> pr_env env ^^ comma ^^ break 1 in
   match entry with
   | Evals v when SymMap.is_empty v ->
-     (match rest with None -> empty | Some env -> pr_env env)
+     (match rest with Env_nil -> empty | _ -> pr_env rest)
   | Eflexible {vars; _} when Vector.length vars = 0 ->
-     (match rest with None -> empty | Some env -> pr_env env)
+     (match rest with Env_nil -> empty | _ -> pr_env rest)
   | Evals _ -> doc ^^ string (Printf.sprintf "<vals %d>" (Env_level.to_int level)) (*failwith "pr_env unimplemented for Evals"*)
   | Eflexible vars ->
     Vector.fold_lefti (fun doc i v ->
@@ -634,14 +673,12 @@ let rec pr_env { level; entry; rest } =
 
 let func a b = Func (collect_fields [Fpos a], b)
 
-let make_env () = { level = Env_level.empty ();
-                    entry = Eflexible {vars=Vector.create ();names=SymMap.empty}; rest = None }
-
 let bvars pol index var =
   Bound_var {pol; index; var}
 
 let test () =
-  let env = make_env () in
+  let level = env_next_level Env_nil Esort_flexible in
+  let env = env_cons Env_nil level (Eflexible {vars=Vector.create ();names=SymMap.empty}) in
   let choose1_pos =
     Tpoly {names=SymMap.empty;
            bounds =[| Some "A", styp_bot Pos, styp_top Neg;
@@ -670,7 +707,7 @@ let test () =
   let body =
     match nested with
     | Tpoly {names=_; bounds; flow; body} ->
-       let inst = instantiate_flexible env env.level bounds flow in
+       let inst = instantiate_flexible env level bounds flow in
        map_bound_typ 0 inst Pos body
     | _ -> assert false in
   PPrint.ToChannel.pretty 1. 80 stdout
@@ -679,7 +716,7 @@ let test () =
   let body =
     match body with
     | Tpoly {names=_; bounds; flow; body} ->
-       let inst = instantiate_flexible env env.level bounds flow in
+       let inst = instantiate_flexible env level bounds flow in
        map_bound_typ 0 inst Pos body
     | _ -> assert false in
   PPrint.ToChannel.pretty 1. 80 stdout

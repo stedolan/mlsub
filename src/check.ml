@@ -65,10 +65,10 @@ and typ_of_tyexp' : type s . s ty_sort -> env -> tyexp' -> s * s =
        match body with Some (Tfunc _),_ ->  () | _ -> failwith "expected a function type" in
      match sort with Simple -> failwith "simple type expected" | Gen ->
      let names, nbounds, pbounds, flow = poly_of_typolybounds env vars in
-     let env, _ = enter_poly_neg env names nbounds flow (Tcons (ident Neg)) in
+     let env, level, _ = enter_poly_neg env names nbounds flow (Tcons (ident Neg)) in
      let bn, bp = typ_of_tyexp sort env body in
-     let bn = close_tys Gen env.level Neg bn in
-     let bp = close_tys Gen env.level Pos bp in
+     let bn = close_tys Gen level Neg bn in
+     let bp = close_tys Gen level Pos bp in
      Tpoly {names; bounds=nbounds; flow; body=bn},
      Tpoly {names; bounds=pbounds; flow; body=bp}
 
@@ -100,7 +100,8 @@ and poly_of_typolybounds env (vars : typolybounds) :
     | Tjoin _ | Tmeet _ -> unimp ()
     | Tforall _ -> failwith "expected styp" in
   let nvars = Vector.length bounds in
-  let env = env_cons env (Erigid {
+  let level = env_next_level env Esort_rigid in
+  let env = env_cons env level (Erigid {
     names = var_ix;
     vars = bounds |> Vector.to_array |> Array.map (fun (name,_) ->
       { name = Some name;
@@ -110,8 +111,8 @@ and poly_of_typolybounds env (vars : typolybounds) :
   }) in
   let bound_of_tyexp (ty : tyexp) =
     let n, p = typ_of_tyexp Simple env ty in
-    close_tys Simple env.level Neg n,
-    close_tys Simple env.level Pos p in
+    close_tys Simple level Neg n,
+    close_tys Simple level Pos p in
   let bounds = Vector.to_array bounds |> Array.mapi (fun i (name,bounds) ->
     let lower, upper, flow =
       Vector.fold_lefti (fun (lower, upper, flow) _ bound ->
@@ -154,16 +155,14 @@ let typ_of_tyexp env t =
   (tn, tp)
 
 let rec env_lookup_var env v =
-  match env.entry with
-  | Evals vs when SymMap.mem v.label vs ->
+  match env with
+  | Env_nil -> failwith (v.label ^ " not in scope")
+  | Env_cons { entry = Evals vs; rest; _ }
+       when SymMap.mem v.label vs ->
      if v.shift = 0 then SymMap.find v.label vs else
-       env_lookup_var_rest env { v with shift = v.shift - 1 }
-  | _ -> env_lookup_var_rest env v
-and env_lookup_var_rest env v =
-  match env.rest with
-  | None -> failwith (v.label ^ " not in scope")
-  | Some env -> env_lookup_var env v
-
+       env_lookup_var rest { v with shift = v.shift - 1 }
+  | Env_cons { rest; _ } ->
+     env_lookup_var rest v
 
 let report errs = List.iter (function
    | Incompatible -> failwith "incompat"
@@ -171,12 +170,10 @@ let report errs = List.iter (function
    | Extra _ -> failwith ("extra")) errs
 
 let rec flex_level env =
-  match env.entry with
-  | Eflexible _ -> env.level
-  | _ ->
-     match env.rest with
-     | None -> failwith "nowhere to put a flex var"
-     | Some env -> flex_level env
+  match env with
+  | Env_cons { entry = Eflexible _; level; _ } -> level
+  | Env_cons { rest; _ } -> flex_level rest
+  | _ -> failwith "nowhere to put a flex var"
 
 let fresh_flow env =
   let p, n = fresh_flow env (flex_level env) in
@@ -186,24 +183,25 @@ let fresh_flow env =
 open Elab
 
 let elab_gen env (fn : env -> typ * 'a elab) : typ * (typolybounds option * 'a) elab =
-  let env' = env_cons env (Eflexible {vars=Vector.create(); names=SymMap.empty}) in
+  let level' = env_next_level env Esort_flexible in
+  let env' = env_cons env level' (Eflexible {vars=Vector.create(); names=SymMap.empty}) in
   let ty, (Elab (erq, ek)) = fn env' in
   wf_typ Pos env' ty;
   (* FIXME hack *)
   let rq = Pair(erq, Typ (Pos, ty)) in
-  let rq = try Type_simplification.remove_joins env' env'.level rq 
+  let rq = try Type_simplification.remove_joins env' level' rq 
            with e ->  (*PPrint.ToChannel.pretty 1. 80 stderr PPrint.(pr_env env' ^^ hardline ^^ Elab.pr_elab_req rq); *)raise e in
 
-  let envgc, rq = Type_simplification.garbage_collect env' env'.level rq in
+  let envgc, envgc_level, rq = Type_simplification.garbage_collect env' level' rq in
   wf_elab_req envgc rq;
-  match generalise envgc envgc.level with
+  match generalise envgc envgc_level with
   | None ->
      (* nothing to generalise *)
      wf_elab_req env rq;
      let erq, ty = match rq with Pair(erq, Typ (Pos, ty)) -> erq, ty | _ -> assert false in
      ty, Elab (erq, fun e -> None, ek e)
   | Some (bounds, flow, gen) ->
-     let rq = map_free_elab_req envgc.level 0 gen rq in
+     let rq = map_free_elab_req envgc_level 0 gen rq in
      let erq, ty = match rq with Pair(erq, Typ (Pos, ty)) -> erq, ty | _ -> assert false in
      let ty = Tpoly { names = SymMap.empty; bounds; flow; body = ty } in
      let erq = Gen { pol = Pos; bounds; flow; body = erq } in
@@ -218,15 +216,15 @@ let elab_poly env poly (fn : env -> typ * 'a elab) : typ * (typolybounds option 
      ty, let* elab = elab in None, elab
   | Some poly ->
      let names, nbounds, pbounds, flow = poly_of_typolybounds env poly in
-     let env', _inst = enter_poly_neg' env names nbounds flow in
+     let env', level', _inst = enter_poly_neg' env names nbounds flow in
      let ty, (Elab (erq, ek)) = fn env' in
 
      (* hack *)
      let rq = Pair (erq, Typ(Pos, ty)) in
-     let rq = map_free_elab_req env'.level 0 env_gen_var rq in
+     let rq = map_free_elab_req level' 0 env_gen_var rq in
      let erq, ty = match rq with Pair(erq, Typ(Pos, ty)) -> erq, ty | _ -> assert false in
 
-     let ty = close_tys Gen env'.level Pos ty in
+     let ty = close_tys Gen level' Pos ty in
      let ty = Tpoly { names; bounds = pbounds; flow; body =  ty } in
      (* FIXME: what's the right pol here? *)
      let erq = Gen { pol = Pos; bounds = pbounds; flow; body = erq } in
@@ -274,7 +272,7 @@ and check' env e ty =
   | Let (p, pty, e, body), _ ->
      let pty, e = check_or_infer env pty e in
      let vs = check_pat env SymMap.empty pty p in
-     let env = env_cons env (Evals vs) in
+     let env = env_cons_entry env (Evals vs) in
      let* e, ety = e and* body = check env body ty in
      Let(p, Some ety, e, body)
   (* FIXME not good *)
@@ -322,7 +320,8 @@ and infer' env : exp' -> typ * exp' elab = function
      and tyso, ifso = infer env ifso
      and tynot, ifnot = infer env ifnot in
      (* FIXME: join of typ? Rank1 join? *)
-     Tsimple (join Pos (approx env env.level Pos tyso) (approx env env.level Pos tynot)),
+     let level = flex_level env in
+     Tsimple (join Pos (approx env level Pos tyso) (approx env level Pos tynot)),
      let* e = e and* ifso = ifso and* ifnot = ifnot in
      If (e, ifso, ifnot)
   | Proj (e, (field, loc)) ->
@@ -342,7 +341,7 @@ and infer' env : exp' -> typ * exp' elab = function
   | Let (p, pty, e, body) ->
      let pty, e = check_or_infer env pty e in
      let vs = check_pat env SymMap.empty pty p in
-     let env = env_cons env (Evals vs) in
+     let env = env_cons_entry env (Evals vs) in
      let res, body = infer env body in
      res,
      let* e, ety = e and* body = body in
@@ -358,7 +357,7 @@ and infer' env : exp' -> typ * exp' elab = function
          let vs = fold_fields (fun acc fn ((_tn, tp), p) ->
            match fn, p with
            | _, p -> check_pat env acc tp p) SymMap.empty params in
-         let env' = env_cons env (Evals vs) in
+         let env' = env_cons_entry env (Evals vs) in
          let res, body = check_or_infer env' ret body in
          cons_typ Pos (Func (map_fields (fun _fn ((tn, _tp),_) -> tn) params, res)),
          let* params =
