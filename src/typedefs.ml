@@ -20,10 +20,7 @@ type +'a cons_head =
   | Func of 'a tuple_fields * 'a
 
 module Env_level : sig
-  type level
-  type marker
-
-  type t = level * marker
+  type t
 
   val empty : unit -> t
   val extend : t -> t

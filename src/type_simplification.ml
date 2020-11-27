@@ -111,7 +111,7 @@ type replacement =
   | Unknown
   | Deleted
   | Link of int
-  | Keep of Env_level.marker * int
+  | Keep of Env_level.t * int
   | SubstPre of styp            (* in old env *)
   | SubstPost of styp           (* in new env *)
 
@@ -261,7 +261,7 @@ let garbage_collect env lvl rq =
     if v.replacement = Unknown then begin
       let id = !num_new_vars in
       incr num_new_vars;
-      v.replacement <- Keep (snd new_env_level, id)
+      v.replacement <- Keep (new_env_level, id)
     end);
 
   let rec replace_var pol v =
@@ -271,8 +271,8 @@ let garbage_collect env lvl rq =
     | Deleted -> assert false
     | Link v' ->
        replace_var pol v' (* could path compress... *)
-    | Keep (mark, v) ->
-       styp_var pol (fst lvl, mark) v
+    | Keep (nlvl, v) ->
+       styp_var pol nlvl v
     | SubstPost t -> t
     | SubstPre t ->
        let t = replace_styp pol t in

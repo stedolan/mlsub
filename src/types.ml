@@ -223,8 +223,8 @@ let flow_of_flexvar _env l v =
   let vs = Intlist.singleton v () in
   styp_vars Neg l vs, styp_vars Pos l vs
 
-(* maps (l1, v, pol, l2) -> (_, v') when (l2,v') approximates (l1,v) w/ polarity pol *)
-type apxcache = (Env_level.level * int * polarity * Env_level.level, Env_level.marker * int) Hashtbl.t
+(* maps (l1, v, pol, l2) -> v' when v' approximates (l1,v) w/ polarity pol *)
+type apxcache = (Env_level.t * int * polarity * Env_level.t, int) Hashtbl.t
 
 (* Given a styp well-formed in env,
    find the best approximation well-formed at a shorter level lvl.
@@ -257,14 +257,13 @@ and approx_styp_var env apxcache lvl pol lvl' v' =
   assert (not (Env_level.equal lvl lvl'));
   match env_entry_at_level env lvl' with
   | Eflexible {vars=flexvars'; _} ->
-     let cachekey = (fst lvl', v', pol, fst lvl) in
+     let cachekey = (lvl', v', pol, lvl) in
      begin match Hashtbl.find apxcache cachekey with
-     | (mark'', v) ->
-        assert (Env_level.equal lvl (fst lvl, mark''));
+     | v ->
         styp_var pol lvl v
      | exception Not_found ->
         let v = fresh_flexvar env lvl in
-        Hashtbl.add apxcache cachekey (snd lvl, v);
+        Hashtbl.add apxcache cachekey v;
         let fv = Vector.get (env_flexvars env lvl) v in
         let fv' = Vector.get flexvars' v' in
         begin match pol with
