@@ -17,18 +17,18 @@ let tys_of_styp (type a) (sort : a ty_sort) (x : styp) : a =
   | Simple -> x
   | Gen -> Tsimple x
 
-let env_gen_var pol index vs rest =
+let env_gen_var sort pol index vs rest =
   assert (is_trivial pol rest);
   assert (Intlist.is_singleton vs);
   let (var, ()) = Intlist.as_singleton vs in
-  Bound_var { pol; index; var }
+  Bound_var { sort; pol; index; var }
 
-let close_tys (type s) (sort : s ty_sort) lvl pol (t : s) : s =
+let close_tys (type s) (sort : s ty_sort) lvl vsort pol (t : s) : s =
   match sort with
   | Simple ->
-     map_free_styp lvl 0 env_gen_var pol t
+     map_free_styp lvl 0 (env_gen_var vsort) pol t
   | Gen ->
-     map_free_typ lvl 0 env_gen_var pol t
+     map_free_typ lvl 0 (env_gen_var vsort) pol t
 
 (* FIXME: don't always enter Erigid during parsing! *)
 
@@ -65,10 +65,12 @@ and typ_of_tyexp' : type s . s ty_sort -> env -> tyexp' -> s * s =
        match body with Some (Tfunc _),_ ->  () | _ -> failwith "expected a function type" in
      match sort with Simple -> failwith "simple type expected" | Gen ->
      let names, nbounds, pbounds, flow = poly_of_typolybounds env vars in
+     (* FIXME: slightly horrible to use a Neg context here.
+        Possible fixes: have a just-names envsort, or have two envs *)
      let env, level, _ = enter_poly_neg env names nbounds flow (Tcons (ident Neg)) in
      let bn, bp = typ_of_tyexp sort env body in
-     let bn = close_tys Gen level Neg bn in
-     let bp = close_tys Gen level Pos bp in
+     let bn = close_tys Gen level Esort_rigid Neg bn in
+     let bp = close_tys Gen level Esort_flexible Pos bp in
      Tpoly {names; bounds=nbounds; flow; body=bn},
      Tpoly {names; bounds=pbounds; flow; body=bp}
 
@@ -109,10 +111,10 @@ and poly_of_typolybounds env (vars : typolybounds) :
         rig_upper = styp_trivial Pos });
     flow = Flow_graph.empty (Vector.length bounds);
   }) in
-  let bound_of_tyexp (ty : tyexp) =
+  let bound_of_tyexp nsort psort (ty : tyexp) =
     let n, p = typ_of_tyexp Simple env ty in
-    close_tys Simple level Neg n,
-    close_tys Simple level Pos p in
+    close_tys Simple level nsort Neg n,
+    close_tys Simple level psort Pos p in
   let bounds = Vector.to_array bounds |> Array.mapi (fun i (name,bounds) ->
     let lower, upper, flow =
       Vector.fold_lefti (fun (lower, upper, flow) _ bound ->
@@ -128,10 +130,10 @@ and poly_of_typolybounds env (vars : typolybounds) :
             | `Sub, _, Some _ -> failwith "duplicate upper bounds"
             | `Sup, Some _, _ -> failwith "duplicate lower bounds"
             | `Sub, _, None ->
-               let upper = Some (bound_of_tyexp bound) in
+               let upper = Some (bound_of_tyexp Esort_flexible Esort_rigid bound) in
                lower, upper, flow
             | `Sup, None, _ ->
-               let lower = Some (bound_of_tyexp bound) in
+               let lower = Some (bound_of_tyexp Esort_rigid Esort_flexible bound) in
                lower, upper, flow
       ) (None, None, []) bounds in
     (Some name, lower, upper, flow)) in
@@ -221,11 +223,10 @@ let elab_poly env poly (fn : env -> typ * 'a elab) : typ * (typolybounds option 
 
      (* hack *)
      let rq = Pair (erq, Typ(Pos, ty)) in
-     let rq = map_free_elab_req level' 0 env_gen_var rq in
+     let rq = map_free_elab_req level' 0 (env_gen_var Esort_flexible) rq in
      let erq, ty = match rq with Pair(erq, Typ(Pos, ty)) -> erq, ty | _ -> assert false in
 
-     let ty = close_tys Gen level' Pos ty in
-     let ty = Tpoly { names; bounds = pbounds; flow; body =  ty } in
+     let ty = Tpoly { names; bounds = pbounds; flow; body = ty } in
      (* FIXME: what's the right pol here? *)
      let erq = Gen { pol = Pos; bounds = pbounds; flow; body = erq } in
      wf_typ Pos env ty;

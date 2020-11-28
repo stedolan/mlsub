@@ -25,7 +25,7 @@ module Env_level : sig
   val initial : 's -> 's t
 
   val extend : 's t -> 's -> 's t
-  val replace : 's t -> 's t
+  val replace : 's t -> 's -> 's t
 
   val equal : 's t -> 's t -> bool
   val extends : 's t -> 's t -> bool
@@ -42,7 +42,7 @@ end = struct
 
   let initial sort = { level = 0; sort }
   let extend { level; _ } sort = { level = level + 1; sort }
-  let replace { level; sort } = { level; sort }
+  let replace { level; sort=_ } sort = { level; sort }
 
   let extends {level=l1;sort=_} {level=l2;sort=_} = l1 <= l2
 
@@ -86,7 +86,7 @@ and env = env_entry gen_env
 and styp =
   | Cons of { pol: polarity; cons: styp cons_head }
   | Free_vars of { level: env_level; vars: (int, unit) Intlist.t; rest: styp }
-  | Bound_var of { pol: polarity; index: int; var: int }
+  | Bound_var of { pol: polarity; index: int; sort: env_sort; var: int }
 
 (* Flexible type variables.
    Maintain the ε-invariant:
@@ -281,30 +281,34 @@ let lookup_named_type = function
   | "string" -> Some String
   | _ -> None
 
+let binder_sort = function
+  | Pos -> Esort_flexible
+  | Neg -> Esort_rigid
+
 (* Rewrite occurrences of the outermost bound variable *)
-let rec map_bound_styp ix rw pol' = function
+let rec map_bound_styp sort' ix rw pol' = function
   | Cons { pol; cons } ->
      assert (pol = pol');
-     Cons { pol; cons = map_head pol (map_bound_styp ix rw) cons }
+     Cons { pol; cons = map_head pol (map_bound_styp sort' ix rw) cons }
   | Free_vars { level; vars; rest } ->
-     Free_vars { level; vars; rest = map_bound_styp ix rw pol' rest }
-  | Bound_var { pol; index; var } when index = ix ->
-     assert (pol = pol');
+     Free_vars { level; vars; rest = map_bound_styp sort' ix rw pol' rest }
+  | Bound_var { pol; sort; index; var } when index = ix ->
+     assert (pol = pol'); assert (sort = sort');
      rw pol var
   | Bound_var _ as ty -> ty
 
-let rec map_bound_typ ix rw pol = function
-  | Tsimple s -> Tsimple (map_bound_styp ix rw pol s)
-  | Tcons cons -> Tcons (map_head pol (map_bound_typ ix rw) cons)
+let rec map_bound_typ sort ix rw pol = function
+  | Tsimple s -> Tsimple (map_bound_styp sort ix rw pol s)
+  | Tcons cons -> Tcons (map_head pol (map_bound_typ sort ix rw) cons)
   | Tpoly {names; bounds; flow; body} ->
      let ix = ix + 1 in
      Tpoly {names;
             bounds = Array.map (fun (name, l, u) ->
                 name,
-                map_bound_styp ix rw pol l,
-                map_bound_styp ix rw (polneg pol) u) bounds;
+                map_bound_styp sort ix rw pol l,
+                map_bound_styp sort ix rw (polneg pol) u) bounds;
             flow;
-            body = map_bound_typ ix rw pol body}
+            body = map_bound_typ sort ix rw pol body}
 
 (* Rewrite occurrences of the outermost free variable *)
 let rec map_free_styp lvl ix rw pol' = function
@@ -398,8 +402,8 @@ let instantiate_flexible env ?(names=SymMap.empty) lvl (vars : (string option * 
     let cons_neg, eps_neg = styp_unconsv lvl u in
     let flow_pos = Intlist.increase_keys delta flow.(i).pred in
     let flow_neg = Intlist.increase_keys delta flow.(i).succ in
-    let pos = styp_consv lvl (map_bound_styp 0 inst Pos cons_pos) (disjoint_union eps_pos flow_pos) in
-    let neg = styp_consv lvl (map_bound_styp 0 inst Neg cons_neg) (disjoint_union eps_neg flow_neg) in
+    let pos = styp_consv lvl (map_bound_styp Esort_flexible 0 inst Pos cons_pos) (disjoint_union eps_pos flow_pos) in
+    let neg = styp_consv lvl (map_bound_styp Esort_flexible 0 inst Neg cons_neg) (disjoint_union eps_neg flow_neg) in
     let v = { name; pos; neg;
               pos_match_cache = ident Pos; neg_match_cache = ident Neg } in
     let id = Vector.push tyvars v in
@@ -428,14 +432,14 @@ let enter_poly_pos' env names vars flow =
 
 let enter_poly_pos env names vars flow body =
   let env, level, inst = enter_poly_pos' env names vars flow in
-  env, level, map_bound_typ 0 inst Pos body
+  env, level, map_bound_typ Esort_flexible 0 inst Pos body
 
 (* Close a ∀⁺ binder, generalising flexible variables *)
 let generalise env lvl =
   let gen pol index vs rest =
     let var, () = Intlist.as_singleton vs in
     assert (is_trivial pol rest);
-    Bound_var {pol; index; var} in
+    Bound_var {pol; sort=Esort_flexible; index; var} in
   let flexvars = env_flexvars env lvl in
   if Vector.length flexvars = 0 then None else
   let bounds_flow = flexvars |> Vector.to_array |> Array.map (fun {pos; neg; _} ->
@@ -465,14 +469,14 @@ let enter_poly_neg' (env : env) names bounds flow  =
     styp_vars pol rigvar_level (Intlist.singleton v ()) in
   let vars = bounds |> Array.map (fun (name, l, u) ->
     { name;
-      rig_lower = map_bound_styp 0 inst Neg l;
-      rig_upper = map_bound_styp 0 inst Pos u }) in
+      rig_lower = map_bound_styp Esort_rigid 0 inst Neg l;
+      rig_upper = map_bound_styp Esort_rigid 0 inst Pos u }) in
   let env = env_cons env rigvar_level (Erigid { names; vars; flow }) in
   env, rigvar_level, inst
 
 let enter_poly_neg env names bounds flow body =
   let env, level, inst = enter_poly_neg' env names bounds flow in
-  env, level, map_bound_typ 0 inst Neg body
+  env, level, map_bound_typ Esort_rigid 0 inst Neg body
 
 let enter_poly pol env names vars flow body =
   match pol with
@@ -613,7 +617,7 @@ and pr_cons_fields pol pr fields =
   parens (group (nest 2 (break 0 ^^ separate (comma ^^ break 1) (named_fields @ cl))))
 
 let rec pr_styp pol = function
-  | Bound_var { pol=_; index; var } ->
+  | Bound_var { pol=_; sort=_; index; var } ->
      string (Printf.sprintf ".%d.%d" index var)
   | Cons { pol=_; cons } ->
      pr_cons pol pr_styp cons
@@ -673,8 +677,8 @@ let rec pr_env =
 
 let func a b = Func (collect_fields [Fpos a], b)
 
-let bvars pol index var =
-  Bound_var {pol; index; var}
+let bvar pol sort index var =
+  Bound_var {pol; sort; index; var}
 
 let test () =
   let level = env_next_level Env_nil Esort_flexible in
@@ -686,10 +690,10 @@ let test () =
                       Some "C", styp_bot Pos, styp_top Neg |];
            flow=Flow_graph.of_list 3 [(0,2); (1,2)];
            body=Tsimple (styp_cons Pos (func
-                 (bvars Neg 0 0)
+                 (bvar Neg Esort_flexible 0 0)
                  (styp_cons Pos (func
-                   (bvars Neg 0 1)
-                   (bvars Pos 0 2)))))} in
+                   (bvar Neg Esort_flexible 0 1)
+                   (bvar Pos Esort_flexible 0 2)))))} in
   wf_typ Pos env choose1_pos;
   PPrint.ToChannel.pretty 1. 80 stdout
     (pr_typ Pos choose1_pos ^^ hardline);
@@ -698,9 +702,9 @@ let test () =
            bounds=[| Some "A", styp_bot Pos, styp_top Neg |];
            flow=Flow_graph.of_list 1 [];
            body=Tpoly {names=SymMap.empty;
-                       bounds=[| Some "B", styp_bot Pos, bvars Neg 1 0 |];
+                       bounds=[| Some "B", styp_bot Pos, bvar Neg Esort_flexible 1 0 |];
                        flow=Flow_graph.of_list 1 [];
-                       body=Tsimple (bvars Pos 0 0)}} in
+                       body=Tsimple (bvar Pos Esort_flexible 0 0)}} in
   wf_typ Pos env nested;
   PPrint.ToChannel.pretty 1. 80 stdout
     (pr_env env ^^ str " ⊢ " ^^ pr_typ Pos nested ^^ hardline);
@@ -708,7 +712,7 @@ let test () =
     match nested with
     | Tpoly {names=_; bounds; flow; body} ->
        let inst = instantiate_flexible env level bounds flow in
-       map_bound_typ 0 inst Pos body
+       map_bound_typ Esort_flexible 0 inst Pos body
     | _ -> assert false in
   PPrint.ToChannel.pretty 1. 80 stdout
     (group (pr_env env) ^^ str " ⊢ " ^^ pr_typ Pos body ^^ hardline);
@@ -717,7 +721,7 @@ let test () =
     match body with
     | Tpoly {names=_; bounds; flow; body} ->
        let inst = instantiate_flexible env level bounds flow in
-       map_bound_typ 0 inst Pos body
+       map_bound_typ Esort_flexible 0 inst Pos body
     | _ -> assert false in
   PPrint.ToChannel.pretty 1. 80 stdout
     (group (pr_env env) ^^ str " ⊢ " ^^ pr_typ Pos body ^^ hardline);

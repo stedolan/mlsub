@@ -255,7 +255,7 @@ let garbage_collect env lvl rq =
       end
    end);
 
-  let new_env_level = Env_level.replace lvl in
+  let new_env_level = Env_level.replace lvl (Env_level.sort lvl) in
   let num_new_vars = ref 0 in
   vars |> Array.iter (fun v ->
     if v.replacement = Unknown then begin

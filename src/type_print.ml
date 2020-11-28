@@ -82,7 +82,7 @@ let enter_poly_for_convert env pol bounds flow =
     names := SymMap.add name i !names;
     (name, (l, u))) in
   let vnames = Array.map fst bounds in
-  let sort = match pol with Pos -> Esort_flexible | Neg -> Esort_rigid in
+  let sort = binder_sort pol in
   let level = env_next_level env sort in
   let env = Env_cons {level; entry=vnames; rest=env} in
   let inst pol v =
@@ -90,8 +90,8 @@ let enter_poly_for_convert env pol bounds flow =
   let pl = pol and pu = polneg pol in
   let bound_constraints = bounds |> Array.map (fun (name, (l, u)) ->
     let name = name, loc in
-    let l = map_bound_styp 0 inst pl l in
-    let u = map_bound_styp 0 inst pu u in
+    let l = map_bound_styp sort 0 inst pl l in
+    let u = map_bound_styp sort 0 inst pu u in
     match (l = styp_bot pl), (u = styp_top pu) with
     | true, true -> [name, None]
     | false, true -> [name, Some (`Sup, convert_styp env pl l)]
@@ -113,7 +113,7 @@ let rec convert (env : nenv) pol (ty : Typedefs.typ) : Exp.tyexp =
     | Tsimple sty -> convert_styp' env pol sty
     | Tpoly {names=_; bounds; flow; body} ->
        let env, constraints, inst = enter_poly_for_convert env pol bounds flow in
-       let body = map_bound_typ 0 inst pol body in
+       let body = map_bound_typ (binder_sort pol) 0 inst pol body in
        Tforall (constraints, convert env pol body)
   in
   Some tyexp, loc

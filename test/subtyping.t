@@ -140,15 +140,15 @@ fn[A,B](x:A, y:B) { if true { x } else { y } }
 > fn [A, B](x: A, y: B) { if true{x} else {y} }
 > File "src/check.ml", line 22, characters 2-8: Assertion failed
 > Raised at Lang__Check.env_gen_var in file "src/check.ml", line 22, characters 2-34
-> Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 328, characters 25-56
+> Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 332, characters 25-56
 > Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 240, characters 46-55
-> Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 329, characters 24-68
+> Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 333, characters 24-68
 > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 43, characters 15-43
 > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
-> Called from Lang__Check.elab_poly in file "src/check.ml", line 224, characters 14-55
-> Called from Lang__Check.infer' in file "src/check.ml", line 351, characters 7-803
-> Called from Lang__Check.infer in file "src/check.ml", line 306, characters 17-29
-> Called from Lang__Check.elab_gen in file "src/check.ml", line 188, characters 29-36
+> Called from Lang__Check.elab_poly in file "src/check.ml", line 226, characters 14-72
+> Called from Lang__Check.infer' in file "src/check.ml", line 352, characters 7-803
+> Called from Lang__Check.infer in file "src/check.ml", line 307, characters 17-29
+> Called from Lang__Check.elab_gen in file "src/check.ml", line 190, characters 29-36
 > Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 54, characters 17-70
 
 fn[A,B,R, A<:R, B<:R](x : A, y : B) : R { if true { x } else { y } }
@@ -195,61 +195,64 @@ let ch = fn[A,B,R, A<:R, B<:R](x : A, y : B) : R { if true { x } else { y } }; f
 
 # debugging
 
-let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let () = f(x); x.foo}) }
-> let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) }; fn (f) { wid(fn (x) { let () = f(x); x.foo }) }
-> File "src/typedefs.ml", line 554, characters 19-25: Assertion failed
-> Raised at Lang__Typedefs.wf_styp_gen in file "src/typedefs.ml", line 554, characters 19-31
-> Called from Stdlib__map.Make.iter in file "map.ml", line 296, characters 20-25
-> Called from Lang__Type_simplification.remove_joins.canon_var in file "src/type_simplification.ml", line 65, characters 4-24
-> Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 328, characters 25-56
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 43, characters 15-43
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 40, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 51, characters 16-48
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 40, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 40, characters 11-40
-> Called from Lang__Type_simplification.remove_joins in file "src/type_simplification.ml", line 98, characters 11-47
-> Called from Lang__Check.elab_gen in file "src/check.ml", line 192, characters 15-62
-> Re-raised at Lang__Check.elab_gen in file "src/check.ml", line 193, characters 120-127
-> Called from Lang__Check.elab_poly in file "src/check.ml", line 215, characters 20-26
-> Called from Lang__Check.infer' in file "src/check.ml", line 351, characters 7-803
-> Called from Lang__Check.infer in file "src/check.ml", line 306, characters 17-29
-> Called from Lang__Check.infer' in file "src/check.ml", line 345, characters 21-35
-> Called from Lang__Check.infer in file "src/check.ml", line 306, characters 17-29
-> Called from Lang__Check.elab_gen in file "src/check.ml", line 188, characters 29-36
-> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 54, characters 17-70
-
-let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let z = f({bar:x}); x.foo}) }
-> let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) }; fn (f) { wid(fn (x) { let z = f({bar: x}); x.foo }) }
-> File "src/typedefs.ml", line 554, characters 19-25: Assertion failed
-> Raised at Lang__Typedefs.wf_styp_gen in file "src/typedefs.ml", line 554, characters 19-31
-> Called from Stdlib__map.Make.iter in file "map.ml", line 296, characters 20-25
-> Called from Lang__Type_simplification.remove_joins.canon_var in file "src/type_simplification.ml", line 65, characters 4-24
-> Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 328, characters 25-56
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 43, characters 15-43
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 40, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 51, characters 16-48
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 40, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 40, characters 11-40
-> Called from Lang__Type_simplification.remove_joins in file "src/type_simplification.ml", line 98, characters 11-47
-> Called from Lang__Check.elab_gen in file "src/check.ml", line 192, characters 15-62
-> Re-raised at Lang__Check.elab_gen in file "src/check.ml", line 193, characters 120-127
-> Called from Lang__Check.elab_poly in file "src/check.ml", line 215, characters 20-26
-> Called from Lang__Check.infer' in file "src/check.ml", line 351, characters 7-803
-> Called from Lang__Check.infer in file "src/check.ml", line 306, characters 17-29
-> Called from Lang__Check.infer' in file "src/check.ml", line 345, characters 21-35
-> Called from Lang__Check.infer in file "src/check.ml", line 306, characters 17-29
-> Called from Lang__Check.elab_gen in file "src/check.ml", line 188, characters 29-36
-> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 54, characters 17-70
+# FIXME
+#FIXME 
+#FIXME let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let () = f(x); x.foo}) }
+#FIXME > let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) }; fn (f) { wid(fn (x) { let () = f(x); x.foo }) }
+#FIXME > File "src/typedefs.ml", line 558, characters 19-25: Assertion failed
+#FIXME > Raised at Lang__Typedefs.wf_styp_gen in file "src/typedefs.ml", line 558, characters 19-31
+#FIXME > Called from Stdlib__map.Make.iter in file "map.ml", line 296, characters 20-25
+#FIXME > Called from Lang__Type_simplification.remove_joins.canon_var in file "src/type_simplification.ml", line 65, characters 4-24
+#FIXME > Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 332, characters 25-56
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 43, characters 15-43
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 40, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 51, characters 16-48
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 40, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 40, characters 11-40
+#FIXME > Called from Lang__Type_simplification.remove_joins in file "src/type_simplification.ml", line 98, characters 11-47
+#FIXME > Called from Lang__Check.elab_gen in file "src/check.ml", line 194, characters 15-62
+#FIXME > Re-raised at Lang__Check.elab_gen in file "src/check.ml", line 195, characters 120-127
+#FIXME > Called from Lang__Check.elab_poly in file "src/check.ml", line 217, characters 20-26
+#FIXME > Called from Lang__Check.infer' in file "src/check.ml", line 352, characters 7-803
+#FIXME > Called from Lang__Check.infer in file "src/check.ml", line 307, characters 17-29
+#FIXME > Called from Lang__Check.infer' in file "src/check.ml", line 346, characters 21-35
+#FIXME > Called from Lang__Check.infer in file "src/check.ml", line 307, characters 17-29
+#FIXME > Called from Lang__Check.elab_gen in file "src/check.ml", line 190, characters 29-36
+#FIXME > Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 54, characters 17-70
+#FIXME 
+#FIXME let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let z = f({bar:x}); x.foo}) }
+#FIXME > let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) }; fn (f) { wid(fn (x) { let z = f({bar: x}); x.foo }) }
+#FIXME > File "src/typedefs.ml", line 558, characters 19-25: Assertion failed
+#FIXME > Raised at Lang__Typedefs.wf_styp_gen in file "src/typedefs.ml", line 558, characters 19-31
+#FIXME > Called from Stdlib__map.Make.iter in file "map.ml", line 296, characters 20-25
+#FIXME > Called from Lang__Type_simplification.remove_joins.canon_var in file "src/type_simplification.ml", line 65, characters 4-24
+#FIXME > Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 332, characters 25-56
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 43, characters 15-43
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 40, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 51, characters 16-48
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 40, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
+#FIXME > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 40, characters 11-40
+#FIXME > Called from Lang__Type_simplification.remove_joins in file "src/type_simplification.ml", line 98, characters 11-47
+#FIXME > Called from Lang__Check.elab_gen in file "src/check.ml", line 194, characters 15-62
+#FIXME > Re-raised at Lang__Check.elab_gen in file "src/check.ml", line 195, characters 120-127
+#FIXME > Called from Lang__Check.elab_poly in file "src/check.ml", line 217, characters 20-26
+#FIXME > Called from Lang__Check.infer' in file "src/check.ml", line 352, characters 7-803
+#FIXME > Called from Lang__Check.infer in file "src/check.ml", line 307, characters 17-29
+#FIXME > Called from Lang__Check.infer' in file "src/check.ml", line 346, characters 21-35
+#FIXME > Called from Lang__Check.infer in file "src/check.ml", line 307, characters 17-29
+#FIXME > Called from Lang__Check.elab_gen in file "src/check.ml", line 190, characters 29-36
+#FIXME > Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 54, characters 17-70
+#FIXME 
 
 let id = fn(x) { x }; fn () { (id (id), id) }
 > let id = fn (x) { x }; fn () { (id(id), id) }
