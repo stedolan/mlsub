@@ -64,14 +64,14 @@ let wf_vars_named _pol names vs =
    In such types, all stypes are lone variables *)
 let rec convert_styp' (env : nenv) pol (ty : Typedefs.styp) : Exp.tyexp' =
   wf_styp_gen wf_vars_named pol env ty;
-  match ty with
-  | Bound_var _ -> failwith "locally closed"
-  | Cons { pol=_; cons } ->
-     convert_cons convert_styp env pol cons
-  | Free_vars { level=lvl; rest; vars=vs } ->
-     assert (is_trivial pol rest);
-     let v, () = Intlist.as_singleton vs in
-     named_type (env_entry_at_level env lvl).(v)
+  assert (ty.bound = []);
+  match ty.free with
+  | [] ->
+     convert_cons convert_styp env pol ty.cons
+  | Free_vars {level; vars} :: free ->
+     assert (free = []); assert (ty.cons = ident pol);
+     let v, () = Intlist.as_singleton vars in
+     named_type (env_entry_at_level env level).(v)
 and convert_styp env pol ty =
   Some (convert_styp' env pol ty), loc
 
@@ -85,8 +85,8 @@ let enter_poly_for_convert env pol bounds flow =
   let sort = binder_sort pol in
   let level = env_next_level env sort in
   let env = Env_cons {level; entry=vnames; rest=env} in
-  let inst pol v =
-    styp_vars pol level (Intlist.singleton v ()) in
+  let inst _pol v t =
+    styp_consv level t (Intlist.singleton v ()) in
   let pl = pol and pu = polneg pol in
   let bound_constraints = bounds |> Array.map (fun (name, (l, u)) ->
     let name = name, loc in

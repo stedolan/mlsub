@@ -8,9 +8,9 @@ let () = Printexc.register_printer (function Internal s -> Some ("internal error
 (* join Pos = ⊔, join Neg = ⊓ (meet) *)
 let rec join pol (a : styp) (b: styp) =
   match styp_unconsv2 a b with
-  | Cons2 { a; b } -> Cons { pol; cons = join_cons pol a b }
+  | Cons2 { a; b } -> styp_cons pol (join_cons pol a b)
   | Vars2 { level; a; va; b; vb } ->
-     Free_vars { level; vars = vlist_union va vb; rest = join pol a b }
+     styp_consv level (join pol a b) (vlist_union va vb)
 
 and join_cons pol s t =
   match s, t with
@@ -158,15 +158,14 @@ let rec approx_styp env apxcache lvl pol ty =
   match env with
   | Env_cons { level; _ } when Env_level.equal lvl level -> ty
   | _ ->
-  match ty with
-  | Bound_var _ -> assert false
-  | Cons { pol; cons } ->
-     Cons { pol; cons = map_head pol (approx_styp env apxcache lvl) cons }
+  match Styp.de pol ty with
+  | Cons cons ->
+     Styp.mk pol (Cons (map_head pol (approx_styp env apxcache lvl) cons))
   | Free_vars { level; vars; rest } ->
      let rest = approx_styp env apxcache lvl pol rest in
      if Env_level.extends level lvl then
        (* can keep *)
-       Free_vars { level; vars; rest }
+       Styp.mk pol (Free_vars { level; vars; rest })
      else
        (* needs approx *)
        vars |> Intlist.to_list |> List.fold_left (fun ty (v, ()) ->
@@ -384,9 +383,8 @@ let fresh_flow env l =
 let rec match_styp env (p : styp) (t : unit cons_head) : styp cons_head * conflict_reason list =
   wf_env env;
   wf_styp Pos env p;
-  match p with
-  | Bound_var _ -> assert false
-  | Cons { pol=_; cons } -> cons, []
+  match Styp.de Pos p with
+  | Cons cons -> cons, []
   | Free_vars { level = lvl; rest = p; vars = vs } ->
      match env_entry_at_level env lvl with
      | Eflexible {vars=fvs;_} ->
@@ -395,10 +393,10 @@ let rec match_styp env (p : styp) (t : unit cons_head) : styp cons_head * confli
           let cons = join_cons Neg fv.neg_match_cache
                        (map_head Neg (fun pol () -> styp_trivial pol) t) in
           let freshen pol t =
-            match t with
+            match Styp.de pol t with
             | Free_vars { level; vars; rest } when is_trivial pol rest ->
                t, styp_vars (polneg pol) level vars
-            | t when is_trivial pol t ->
+            | _ when is_trivial pol t ->
               let n, p = fresh_flow env lvl in
               (match pol with Neg -> n, p | Pos -> p, n)
             | _ -> assert false in

@@ -21,7 +21,7 @@ let env_gen_var sort pol index vs rest =
   assert (is_trivial pol rest);
   assert (Intlist.is_singleton vs);
   let (var, ()) = Intlist.as_singleton vs in
-  Bound_var { sort; pol; index; var }
+  styp_bvar pol sort index var
 
 let close_tys (type s) (sort : s ty_sort) lvl vsort pol (t : s) : s =
   match sort with

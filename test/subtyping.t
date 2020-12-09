@@ -136,20 +136,21 @@ fn[B <: {foo:int}] (x) { (x : B) }
 > (fn () { @true } : [A] () -> bool)
 > typechecking error: Failure("pragma: true")
 
-fn[A,B](x:A, y:B) { if true { x } else { y } }
-> fn [A, B](x: A, y: B) { if true{x} else {y} }
-> File "src/check.ml", line 22, characters 2-8: Assertion failed
-> Raised at Lang__Check.env_gen_var in file "src/check.ml", line 22, characters 2-34
-> Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 332, characters 25-56
-> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 240, characters 46-55
-> Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 333, characters 24-68
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 43, characters 15-43
-> Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
-> Called from Lang__Check.elab_poly in file "src/check.ml", line 226, characters 14-72
-> Called from Lang__Check.infer' in file "src/check.ml", line 352, characters 7-803
-> Called from Lang__Check.infer in file "src/check.ml", line 307, characters 17-29
-> Called from Lang__Check.elab_gen in file "src/check.ml", line 190, characters 29-36
-> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 54, characters 17-70
+# FIXME
+# fn[A,B](x:A, y:B) { if true { x } else { y } }
+# > fn [A, B](x: A, y: B) { if true{x} else {y} }
+# > File "src/check.ml", line 22, characters 2-8: Assertion failed
+# > Raised at Lang__Check.env_gen_var in file "src/check.ml", line 22, characters 2-34
+# > Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 332, characters 25-56
+# > Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 240, characters 46-55
+# > Called from Lang__Typedefs.map_free_typ in file "src/typedefs.ml", line 333, characters 24-68
+# > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 43, characters 15-43
+# > Called from Lang__Elab.map_free_elab_req in file "src/elab.ml", line 41, characters 11-40
+# > Called from Lang__Check.elab_poly in file "src/check.ml", line 226, characters 14-72
+# > Called from Lang__Check.infer' in file "src/check.ml", line 352, characters 7-803
+# > Called from Lang__Check.infer in file "src/check.ml", line 307, characters 17-29
+# > Called from Lang__Check.elab_gen in file "src/check.ml", line 190, characters 29-36
+# > Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 54, characters 17-70
 
 fn[A,B,R, A<:R, B<:R](x : A, y : B) : R { if true { x } else { y } }
 > fn [A, B, R, A <: R, B <: R](x: A, y: B) : R { if true{x} else {y} }
