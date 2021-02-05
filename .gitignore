@@ -2,3 +2,4 @@ _build
 *.bak
 .merlin
 src/TODO
+notes
