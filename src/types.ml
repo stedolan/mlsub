@@ -132,10 +132,15 @@ let contains_var (v : styp_var) vs =
 
 let rec flexvar_cons_bound (fv : flexvar) =
   match fv.upper with
+  | UBnone ->
+     (* switch to repr (II), to prevent this ever becoming UBvar *)
+     let triv : _ ctor_rig = { cons = Top; rigvars = [] } in
+     fv.upper <- UBcons triv;
+     triv
   | UBcons c -> c
   | UBvar v ->
      (* Switch to representation (II) *)
-     assert (Env_level.equal fv.level v.level);
+     assert (Env_level.equal fv.level v.level); (* FIXME not true! should hoist here *)
      v.lower <- { v.lower with vars = Vflex fv :: v.lower.vars }; (* FIXME: duplicate possible? *)
      fv.upper <- v.upper;
      (* May recurse several times. FIXME: how do we avoid cycles? *)
@@ -159,7 +164,7 @@ let classify_styp_neg (n : styp) =
 
 
 let map_ctor_rig f { cons; rigvars } = { cons = map_head Pos (fun _pol x -> f x) cons; rigvars }
-let map_styp_neg f = function UBvar v -> UBvar v | UBcons c -> UBcons (map_ctor_rig f c)
+let map_styp_neg f = function UBnone | UBvar _ as x -> x | UBcons c -> UBcons (map_ctor_rig f c)
 
 (* FIXME: why do match_bound and update_lower_bound look so different? *)
 
@@ -189,7 +194,14 @@ let noerror _ = failwith "subtyping error should not be possible here!"
 let rec update_lower_bound env (lower : flex_lower_bound) level (p : styp) =
   match p with
   | Sjoin (p, q) -> update_lower_bound env (update_lower_bound env lower level p) level q
-  | Svar a -> if contains_var a lower.vars then lower else { lower with vars = a :: lower.vars }
+  | Svar (Vbound _) -> failwith "should be locally closed"
+  | Svar a when contains_var a lower.vars -> lower
+  | Svar ((Vrigid _) as a) -> { lower with vars = a :: lower.vars }
+  | Svar ((Vflex fv) as a) ->
+     (* fv is constrained from above, make sure it is not UBvar *)
+     (* FIXME: check if the equivalent happens in contravariant parts of negative bounds *)
+     ignore (flexvar_cons_bound fv);
+     { lower with vars = a :: lower.vars }
   | Scons cons ->
      let cons = join_cons
        ~nleft:id
@@ -210,7 +222,7 @@ and subtype_styp_var ~error env (p : styp) (nv : flexvar) =
   | Sjoin (a, b) -> subtype_styp_var ~error env a nv; subtype_styp_var ~error env b nv
   | Svar Vflex { upper = UBvar nv'; _ } when nv == nv' ->
      assert (styp_equal nv.lower (update_lower_bound env nv.lower nv.level p))
-  | Svar Vflex ({ upper = UBcons { cons = Top; _ }; _} as pv)
+  | Svar Vflex ({ upper = UBnone; _} as pv)
      when Env_level.equal pv.level nv.level ->
      (* Flexible-flexible constraint, representation (I) works. *)
      (*nv.lower <- sjoin nv.lower lower;*)
@@ -247,6 +259,7 @@ and subtype_var_cons ~error env (pv : styp_var) (cn : styp ctor_rig) =
 (* Constraint LB(a) <= UB(b) *)
 and subtype_flex_bounds ~error env (p : flex_lower_bound) (n : flexvar styp_neg) =
   match n with
+  | UBnone -> ()
   | UBvar nv ->
      subtype_styp_var ~error env (styp_of_flex_lower_bound p) nv
   | UBcons n ->
@@ -262,6 +275,7 @@ and subtype_cons_cons ~error env cp cn =
   subtype_cons ~error ~pos:(subtype_styp ~error env) ~neg:(subtype_styp ~error env) cp cn.cons
 
 and subtype_styp_styp_neg ~error env p = function
+  | UBnone -> ()
   | UBvar nv -> subtype_styp_var ~error env p nv
   | UBcons cn -> subtype_styp_cons ~error env p cn
 
@@ -326,7 +340,6 @@ type gen_state = {
   mutable neg : bool;
   mutable pos_expansion : pos_replacement option;
 }
-
 (*
 let gen level t =
   let module M = struct type flexvar_state += Gen of gen_state end in
@@ -396,9 +409,9 @@ and say γ ≤ C, γ ≤ β. Is that enough?
     | Neg -> asdf
   in
   walk Pos t
-  
 
 *)
+  
 
 (*
 

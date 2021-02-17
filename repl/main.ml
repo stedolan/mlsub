@@ -16,6 +16,7 @@ let dump t =
     else Printf.sprintf "_%d" (id - Array.length names) in
 
   let rec styp_of_styp_neg = function
+    | UBnone -> Scons Top
     | UBvar v -> Svar (Vflex v)
     | UBcons { cons; rigvars = [] } -> Scons cons
     | UBcons { cons; rigvars = v :: rigvars } ->
@@ -111,19 +112,22 @@ let choosy () =
   dump (styp_cons (func [f;g;x] res))
 
 let lbs () =
+  next_flexvar_id := 0;
   let env = Env_nil and lvl = Env_level.initial () in
   let error _ = failwith "nope" in
   let f = fresh_flexvar lvl |> styp_flexvar in
   let d1 = fresh_flexvar lvl |> styp_flexvar in
   let d2 = fresh_flexvar lvl |> styp_flexvar in
   let r1 = fresh_flexvar lvl |> styp_flexvar in
+  let r1' = fresh_flexvar lvl |> styp_flexvar in
   let r2 = fresh_flexvar lvl |> styp_flexvar in
+  subtype_styp ~error env r1 r1';
   subtype_styp ~error env (Scons (func [d1] r1)) f;
   subtype_styp ~error env (Scons (func [d2] r2)) f;
-  dump (styp_cons (func [r1;r2] (styp_cons (tuple [f;d1;d2]))))
+  dump (styp_cons (func [r1;r2;r1'] (styp_cons (tuple [f;d1;d2]))))
 
 
-(*let () = choosy ()*)
+let () = choosy ()
 let () = lbs ()
   
 (*

@@ -119,7 +119,12 @@ and 'a ctor_rig =
 (* FIXME: should I separate Top and Bot constraints
    At least Top, lots of UBcons { cons = Top; _ } cases otherwise *)
 and 'a styp_neg =
+    (* f.lower = UBnone: no upper bound *)
+  | UBnone
+    (* f.lower = UBvar v: *only* upper bound is v.
+       in particular, f does not appear in covariant parts of LB or contravariant in other UB *)
   | UBvar of flexvar
+    (* arbitrary upper bound. NB: may also appear in other vars' LB *)
   | UBcons of 'a ctor_rig
 
 
@@ -271,7 +276,7 @@ let next_flexvar_id = ref 0
 let fresh_flexvar level : flexvar =
   let id = !next_flexvar_id in
   incr next_flexvar_id;
-  { level; upper = UBcons { cons = Top; rigvars = [] }; lower = { cons = Bot; vars = [] }; id; state = No_flexvar_state }
+  { level; upper = UBnone; lower = { cons = Bot; vars = [] }; id; state = No_flexvar_state }
 
 
 (*
