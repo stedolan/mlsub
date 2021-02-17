@@ -13,7 +13,7 @@ type conflict_reason =
 (* FIXME: too much poly compare in this file *)
 (* let (=) (x : int) (y : int) = x = y *)
 
-let subtype_cons_fields' ~error f af bf =
+let subtype_cons_fields ~error f af bf =
   if bf.fopen = `Closed then begin
     if af.fopen = `Open then error (Extra `Fields);
     (* check dom a ⊆ dom b *)
@@ -27,73 +27,17 @@ let subtype_cons_fields' ~error f af bf =
     | exception Not_found -> error (Missing k)
     | a -> f a b) bf.fields
 
-let subtype_cons' ~error ~pos ~neg a b =
+let subtype_cons ~error ~pos ~neg a b =
   match a, b with
   | Bot, _ | _, Top -> ()
   | Bool, Bool -> ()
   | Int, Int -> ()
   | String, String -> ()
   | Func (args, res), Func (args', res') ->
-     subtype_cons_fields' ~error neg args' args; pos res res'
+     subtype_cons_fields ~error neg args' args; pos res res'
   | Record fs, Record fs' ->
-     subtype_cons_fields' ~error pos fs fs'
+     subtype_cons_fields ~error pos fs fs'
   | _,_ -> error Incompatible
-
-
-
-(* pol = Pos: <=, pol = Neg: >= *)
-(* FIXME: replace with merge_fields *)
-(* FIXME: delete this version *)
-let subtype_cons_fields ~error pol af bf f =
-  let () =
-    match pol, af.fopen, bf.fopen with
-    | Pos, `Open, `Closed
-    | Neg, `Closed, `Open -> error (Extra `Fields)
-    | _ -> () in
-  let () =
-    match pol, af.fopen, bf.fopen with
-    | Pos, _, `Closed ->
-       (* check dom a ⊆ dom b *)
-       List.iter (fun k ->
-         match FieldMap.find k bf.fields with
-         | exception Not_found -> error (Extra (`Named k))
-         | _ -> ()) af.fnames
-    | Neg, `Closed, _ ->
-       (* check dom b ⊆ dom a *)
-       List.iter (fun k ->
-         match FieldMap.find k af.fields with
-         | exception Not_found -> error (Extra (`Named k))
-         | _ -> ()) bf.fnames
-    | _ -> () in
-  match pol with
-  | Pos ->
-    FieldMap.iter (fun k b ->
-      match FieldMap.find k af.fields with
-      | exception Not_found -> error (Missing k)
-      | a -> f pol k a b) bf.fields
-  | Neg ->
-     FieldMap.iter (fun k a ->
-      match FieldMap.find k bf.fields with
-      | exception Not_found -> error (Missing k)
-      | b -> f pol k a b) af.fields
-
-let subtype_cons ~error pol a b f =
-  match pol, a, b with
-  | _, Bool, Bool -> ()
-  | _, Int, Int -> ()
-  | _, String, String -> ()
-  | pol, Func (args, res), Func (args', res') ->
-     subtype_cons_fields ~error (polneg pol) args args' (fun pol _fn -> f pol); f pol res res'
-  | pol, Record fs, Record fs' ->
-     subtype_cons_fields ~error pol fs fs' (fun pol _fn -> f pol)
-  | Pos, Bot, _
-  | Neg, _, Bot
-  | Pos, _, Top
-  | Neg, Top, _ -> ()
-  | _,_,_ -> error Incompatible
-
-
-
 
 let meet_cons ~left ~right ~both a b =
   match a, b with
@@ -308,14 +252,14 @@ and subtype_flex_bounds ~error env (p : flex_lower_bound) (n : flexvar styp_neg)
   | UBcons n ->
      p.vars |> List.iter (fun pv ->
        subtype_var_cons ~error env pv (map_ctor_rig styp_flexvar n));
-     subtype_cons' ~error
+     subtype_cons ~error
        ~pos:(fun pb nv -> subtype_flex_bounds ~error env pb (UBvar nv))
        ~neg:(fun nv pv -> subtype_styp_var ~error env (Svar (Vflex nv)) pv)
        p.cons n.cons
 
 (* Constraint C <= C *)
 and subtype_cons_cons ~error env cp cn =
-  subtype_cons' ~error ~pos:(subtype_styp ~error env) ~neg:(subtype_styp ~error env) cp cn.cons
+  subtype_cons ~error ~pos:(subtype_styp ~error env) ~neg:(subtype_styp ~error env) cp cn.cons
 
 and subtype_styp_styp_neg ~error env p = function
   | UBvar nv -> subtype_styp_var ~error env p nv
@@ -358,7 +302,7 @@ let rec match_styp ~error env p (t : (styp Ivar.put, styp Ivar.put) cons_head) :
   match p with
   | Sjoin _ -> failwith "waiting for join/meet to be implemented"
   | Scons c ->
-     subtype_cons ~error Pos c t (fun _pol p' t' -> Ivar.put t' p')
+     subtype_cons ~error ~pos:(fun p' t' -> Ivar.put t' p') ~neg:(fun t' p' -> Ivar.put t' p') c t
   | Svar Vbound _ -> assert false (* should be locally closed *)
   | Svar Vrigid {level;var} ->
      match_styp ~error env (env_rigid_bound env level var) t
@@ -368,7 +312,7 @@ let rec match_styp ~error env p (t : (styp Ivar.put, styp Ivar.put) cons_head) :
      let pb' = match_bound pb pv.level {cons=t; rigvars=[]} in
      pv.upper <- UBcons pb';
      subtype_flex_bounds ~error env pv.lower pv.upper;
-     subtype_cons ~error Pos pb'.cons t (fun _pol p' t' -> Ivar.put t' (styp_flexvar p'))
+     subtype_cons ~error ~pos:(fun p' t' -> Ivar.put t' (styp_flexvar p')) ~neg:(fun t' p' -> Ivar.put t' (styp_flexvar p')) pb'.cons t
      
 
 type pos_replacement = {
