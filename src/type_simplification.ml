@@ -1,3 +1,4 @@
+(*
 open Typedefs
 open Elab
 
@@ -890,4 +891,5 @@ let garbage_collect env pol ty =
     In what way is it different? Could the complexity matter even in principle?
 
    *)
+*)
 *)

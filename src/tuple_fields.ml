@@ -90,3 +90,31 @@ let merge_fields ~left ~both ~right ~extra fs_l fs_r =
               fopen = extra ((fs_l.fopen, extra_r), (fs_r.fopen, extra_l)) } in
        go_r remaining_r accfields accnames `Subset fs_r.fnames in
   go_l fs_r.fields FieldMap.empty [] `Subset fs_l.fnames
+
+(* May fail, if one side has extra fields and the other is closed *)
+let union ~left ~right ~both sf tf =
+  begin match merge_fields sf tf
+    ~left:(fun _ s -> Some (left s))
+    ~right:(fun _ t -> Some (right t))
+    ~both:(fun _ s t -> Some (both s t))
+    ~extra:(function
+      | ((`Closed, `Extra), _)
+      | (_, (`Closed, `Extra)) -> raise_notrace Exit
+      | (`Open, _), (`Open, _) -> `Open
+      | (`Closed, `Subset), (`Closed, `Subset) -> `Closed
+      | (`Closed, `Subset), (`Open, _) -> `Closed
+      | (`Open, _), (`Closed, `Subset) -> `Closed
+    )
+  with
+  | st -> Some st
+  | exception Exit -> None
+  end
+
+let inter ~both sf tf =
+  (merge_fields sf tf
+     ~left:(fun _ _s -> None)
+     ~right:(fun _ _t -> None)
+     ~both:(fun _ s t -> Some (both s t))
+     ~extra:(function
+       | (`Closed, `Subset), (`Closed, `Subset) -> `Closed
+       | _ -> `Open))

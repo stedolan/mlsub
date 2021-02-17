@@ -1,3 +1,4 @@
+(*
 open Tuple_fields
 open Exp
 open Typedefs
@@ -458,3 +459,4 @@ and check_annot env annot ty =
      let tn, tp = typ_of_tyexp env ty' in
      subtype env tp ty |> report;
      tn
+*)

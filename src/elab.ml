@@ -1,3 +1,4 @@
+(*
 open Tuple_fields
 open Typedefs
 open Exp
@@ -21,8 +22,8 @@ let elab_map g (Elab (r, f)) = Elab (r, fun x -> g (f x))
 let elab_pair (Elab (a, f)) (Elab (b, g)) = Elab (Pair (a, b), fun (a, b) -> f a, g b)
 let elab_typ pol ty = Elab (Typ (pol, ty), fun x -> x)
 
-let (let*) x f = elab_map f x
-let (and*) a b = elab_pair a b
+let (let* ) x f = elab_map f x
+let (and* ) a b = elab_pair a b
 
 let elab_fields (f : 'a elab tuple_fields) : 'a tuple_fields elab =
   let fields =
@@ -105,3 +106,5 @@ let rec pr_elab_req : type a . a elab_req -> document = function
   | Typ (pol, t) -> pr_typ pol t ^^ hardline
   | Gen {pol; bounds=_; flow=_; body} ->
      utf8string "∀" ^^ (match pol with Pos -> utf8string "⁺" | Neg -> utf8string "⁻") ^^ nest 2 (hardline ^^ pr_elab_req body)
+
+*)

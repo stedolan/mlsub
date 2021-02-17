@@ -4,47 +4,62 @@
 
 module StrMap = Map.Make (struct type t = string let compare = compare end)
 
+(* FIXME move *)
+module Ivar : sig
+  type 'a put
+  type 'a get
+  val make : unit -> 'a put * 'a get
+  val put : 'a put -> 'a -> unit
+  val get : 'a get -> 'a
+end = struct
+  type 'a put = 'a option ref
+  type 'a get = 'a option ref
+  let make () = let r = ref None in r,r
+  let put r x =
+    assert (!r = None);
+    r := Some x
+  let get r =
+    Option.get !r
+end
+
 open Tuple_fields
 
 type polarity = Pos | Neg
 
 (* Head type constructors. These do not bind type variables. *)
-type +'a cons_head =
+type (+'neg, +'pos) cons_head =
   | Top
   | Bot
   (* FIXME: maybe delete these once abstypes exist? *)
   | Bool
   | Int
   | String
-  | Record of 'a tuple_fields
-  | Func of 'a tuple_fields * 'a
+  | Record of 'pos tuple_fields
+  | Func of 'neg tuple_fields * 'pos
 
 module Env_level : sig
-  type 'sort t
+  type t
 
-  val initial : 's -> 's t
+  val initial : unit -> t
 
-  val extend : 's t -> 's -> 's t
-  val replace : 's t -> 's -> 's t
+  val extend : t -> t
+  val replace : t -> t
 
-  val equal : 's t -> 's t -> bool
-  val extends : 's t -> 's t -> bool
+  val equal : t -> t -> bool
+  val extends : t -> t -> bool
 
-  val to_int : 's t -> int
-
-  val sort : 's t -> 's
+  val to_int : t -> int
 end = struct
   (* Not actually mutable, but marking it as such
      makes physical equality work *)
-  type 'sort t =
-    { mutable level : int;
-      sort : 'sort }
+  type t =
+    { mutable level : int }
 
-  let initial sort = { level = 0; sort }
-  let extend { level; _ } sort = { level = level + 1; sort }
-  let replace { level; sort=_ } sort = { level; sort }
+  let initial () = { level = 0 }
+  let extend { level } = { level = level + 1 }
+  let replace { level } = { level }
 
-  let extends {level=l1;sort=_} {level=l2;sort=_} = l1 <= l2
+  let extends {level=l1} {level=l2} = l1 <= l2
 
   let equal l1 l2 =
     if l1.level = l2.level then
@@ -53,100 +68,115 @@ end = struct
       false
 
   let to_int l = l.level
-  let sort l = l.sort
 end
 
-type env_sort = Esort_vals | Esort_flexible | Esort_rigid
-type env_level = env_sort Env_level.t
+type env_level = Env_level.t
 
-type 'a gen_env =
-  | Env_cons of { level : env_sort Env_level.t;
-                  entry : 'a;
-                  rest : 'a gen_env }
-  | Env_nil
+(* Simple types (the result of inference). No binders.
+
+   There are some rules about joins:
+    - No bound variables in contravariant joins
+    - No flexible variables in negative joins
+    - At most one Scons in negative or contravariant joins
+ *)
+type styp =
+  | Scons of (styp, styp) cons_head
+  | Sjoin of styp * styp
+  | Svar of styp_var
+
+and styp_var =
+  | Vflex of flexvar
+  | Vrigid of rigvar
+  | Vbound of { index: int; var: int }
+
+(* Flexvars are mutable but only in one direction.
+     - level may decrease
+     - bounds may become tighter (upper decreases, lower increases) *)
+and flexvar =
+  { mutable level: env_level;
+    mutable upper: flexvar styp_neg;
+    mutable lower: flex_lower_bound;
+    (* used for printing *)
+    id: int;
+    mutable state: flexvar_state }
+
+and flexvar_state = ..
+
+(* Rigid variables are immutable.
+   Their bounds are stored in the environment (FIXME: should they be?) *)
+and rigvar =
+  { level: env_level;
+    var: int }
+
+(* A ctor_rig is a join of a constructed type and some rigid variables *)
+and 'a ctor_rig =
+  { cons: ('a,'a) cons_head; rigvars: rigvar list }
+
+(* A well-formed negative styp is either:
+     - a single flexible variable
+     - a constructed type, possibly joined with some rigid variables
+   Here, the type parameter 'a determines the makeup of constructed types *)
+(* FIXME: should I separate Top and Bot constraints
+   At least Top, lots of UBcons { cons = Top; _ } cases otherwise *)
+and 'a styp_neg =
+  | UBvar of flexvar
+  | UBcons of 'a ctor_rig
+
+
+(* Matchability constraint: the contravariant parts of a flexible variable's lower bound must be flexible variables *)
+and flex_lower_bound =
+  { cons: (flexvar, flex_lower_bound) cons_head; vars: styp_var list }
+
+
+(* General polymorphic types.  Inference may produce these after
+   generalisation, but never instantiates a variable with one. *)
+type typ =
+  | Tsimple of styp
+  | Tcons of (typ,typ) cons_head
+  (* Forall *)
+  (* FIXME: maybe change to (poly, body)? *)
+  | Tpoly of {
+    names : int SymMap.t;  (* may be incomplete *)
+    bounds : styp array;   (* FIXME names? *)
+    body : typ }
+
 
 (* Entries in the typing environment *)
 type env_entry =
   (* Binding x : τ *)
   | Evals of typ SymMap.t
-  (* Flexible variables (inferred polymorphism, instantiated ∀⁺) *)
-  | Eflexible of { mutable names : int SymMap.t; vars : flexvar Vector.t }
+  (* Flexible variables (inferred polymorphism, instantiated ∀⁺)
+     FIXME: should these have a separate environment entry at all? *)
+  | Eflexible
   (* Rigid type variables (abstract types, checked forall) *)
   | Erigid of {
       (* all fields immutable, despite array/table *)
       (* FIXME: explain why predicativity matters here *)
       names : int SymMap.t;
-      vars : rigvar array;
-      flow : Flow_graph.t;
+      vars : rigvar_defn array;
     }
 
-and env = env_entry gen_env
 
-(* Simple types (the result of inference). No binders. *)
-and styp =
-  { pol: polarity; bound: styp_bvar list; free: styp_fvars list; cons: styp cons_head }
+and env =
+  | Env_cons of { level : env_level;
+                  entry : env_entry;
+                  rest : env }
+  | Env_nil
 
-and styp_fvars =
-  | Free_vars of { level: env_level; vars: (int, unit) Intlist.t }
 
-and styp_bvar =
-  | Bound_var of { index: int; sort: env_sort; var: int }
-
-(* Flexible type variables.
-   Maintain the ε-invariant:
-   for flexible variables α, β from the same binding group,
-   β ∈ α.pos.tyvars iff α ∈ β.neg.tyvars *)
-and flexvar = {
-    name : string option;
-    (* positive component, lower bound *)
-    mutable pos : styp;
-    (* negative component, upper bound *)
-    mutable neg : styp;
-
-    (* Match cache styps are either ident or a single flexible variable at the same level *)
-    (* FIXME: should be an int or var cons_head?  *)
-    mutable pos_match_cache : styp cons_head;
-    mutable neg_match_cache : styp cons_head;
-  }
 
 (* Rigid type variables.
    Maintain the head-invariant:
    the bounds of a rigid variable a do not mention other variables
    from the same binding group except under type constructors *)
-and rigvar = {
+and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string option;
-  (* lower bound / negative component *)
-  rig_lower : styp;
-  (* upper bound / positive component *)
-  rig_upper : styp;
+  upper : styp;
 }
 
-(* General polymorphic types.  Inference may produce these after
-   generalisation, but never instantiates a variable with one. *)
-and typ =
-  | Tsimple of styp
-  | Tcons of typ cons_head
-  (* Forall *)
-  (* FIXME: maybe change to (poly, body)? *)
-  | Tpoly of {
-    names : int SymMap.t;  (* may be incomplete *)
-    bounds : (string option * styp * styp) array;
-    flow : Flow_graph.t;
-    body : typ }
-
 let polneg = function Pos -> Neg | Neg -> Pos
-
-(* Underconstrained. Might be anything. Identity of meet/join. *)
-let ident = function
-  | Pos -> Bot
-  | Neg -> Top
-
-(* Overconstrained. Must be everything. Annihilator of meet/join. *)
-let annih = function
-  | Pos -> Top
-  | Neg -> Bot
 
 (*
  * Environment ordering
@@ -179,22 +209,16 @@ let assert_env_prefix env ext =
   | Env_cons { level; _ } ->
      ignore (env_entry_at_level env level)
 
-let env_sort_of_entry = function
-  | Evals _ -> Esort_vals
-  | Erigid _ -> Esort_rigid
-  | Eflexible _ -> Esort_flexible
-
-let env_next_level env sort =
+let env_next_level env =
   match env with
-  | Env_nil -> Env_level.initial sort
-  | Env_cons { level; _ } -> Env_level.extend level sort
+  | Env_nil -> Env_level.initial ()
+  | Env_cons { level; _ } -> Env_level.extend level
 
 let env_cons rest level entry =
-  assert (Env_level.sort level = env_sort_of_entry entry);
   Env_cons { level; entry; rest }
 
 let env_cons_entry rest entry =
-  Env_cons { level = env_next_level rest (env_sort_of_entry entry);
+  Env_cons { level = env_next_level rest;
              entry;
              rest }
 
@@ -205,25 +229,13 @@ let env_replace env level newlevel entry =
      Env_cons {level=newlevel; entry; rest}
   | _ -> assert false
 
-let env_flexvars env lvl =
-  match env_entry_at_level env lvl with
-  | Eflexible {vars;_} -> vars
-  | _ -> failwith "error: no flexible vars here"
-
 let env_rigid_vars env lvl =
   match env_entry_at_level env lvl with
-  | Erigid r -> (r.vars, r.flow)
+  | Erigid r -> r.vars
   | _ -> failwith "error: no rigid vars here"
 
-let env_rigid_flow env lvl i j =
-  let vars, flow = env_rigid_vars env lvl in
-  assert (0 <= i && i < Array.length vars);
-  assert (0 <= j && j < Array.length vars);
-  Flow_graph.mem flow i j
-
-let vlist_union v1 v2 =
-  Intlist.union (fun _ () () -> ()) v1 v2
-  
+let env_rigid_bound env lvl var =
+  (env_rigid_vars env lvl).(var).upper
 
 (*
  * Opening/closing of binders
@@ -245,63 +257,25 @@ let map_head pol f = function
 
 let cons_typ _pol cons = Tcons cons
 
-
-let styp_pos_bot = {pol=Pos; bound=[]; free=[]; cons=Bot}
-let styp_neg_bot = {pol=Neg; bound=[]; free=[]; cons=Bot}
-let styp_bot = function Pos -> styp_pos_bot | Neg -> styp_neg_bot
-let styp_pos_top = {pol=Pos; bound=[]; free=[]; cons=Top}
-let styp_neg_top = {pol=Neg; bound=[]; free=[]; cons=Top}
-let styp_top = function Pos -> styp_pos_top | Neg -> styp_neg_top
-
-let styp_trivial pol = {pol; bound=[]; free=[]; cons=ident pol}
-
-let is_trivial pol' = function
-  | { pol; free=[]; bound=[]; cons } ->
-     assert (pol = pol'); cons = ident pol
-  | _ -> false
+let styp_bot = Scons Bot
+let styp_top = Scons Top
 
 (* FIXME: not ident if vars are ⊓ *)
-let styp_vars pol level vars =
-  { pol; bound = []; free = [Free_vars { level; vars }]; cons=ident pol }
-let styp_var pol level var =
-  styp_vars pol level (Intlist.singleton var ())
-let styp_cons pol cons =
-  {pol; bound=[]; free=[]; cons}
+let styp_flexvar fv = Svar (Vflex fv)
+let styp_rigvar level var = Svar (Vrigid {level; var})
+let styp_boundvar index var = Svar (Vbound {index; var})
+let styp_cons cons = Scons cons
 
-let styp_bvar pol sort index var =
-  { pol; bound = [Bound_var {sort; index; var}]; free=[]; cons=ident pol }
-
-type styp_unconsv2_result =
-  | Cons2 of { a: styp cons_head; b: styp cons_head }
-  | Vars2 of { level: env_level;
-               a: styp; va: (int, unit) Intlist.t;
-               b: styp; vb: (int, unit) Intlist.t }
-
-let styp_unconsv2 a b =
-  assert (a.bound = []); assert (b.bound = []);
-  match a.free, b.free with
-  | [], [] ->
-     Cons2 {a=a.cons; b=b.cons}
-  | Free_vars {level; vars=va} :: afree, [] ->
-     Vars2 {level; a={a with free=afree}; va; b; vb=Intlist.empty}
-  | [], Free_vars {level; vars=vb} :: bfree ->
-     Vars2 {level; a; va=Intlist.empty; b={b with free=bfree}; vb}
-  | Free_vars {level=lvla; vars=va} :: afree,
-    Free_vars {level=lvlb; vars=vb} :: bfree ->
-     if Env_level.equal lvla lvlb then
-       Vars2 {level=lvla;
-              a={a with free=afree}; va;
-              b={b with free=bfree}; vb}
-     else if Env_level.extends lvla lvlb then
-       Vars2 {level=lvlb;
-              a; va=Intlist.empty;
-              b={b with free=bfree}; vb}
-     else
-       Vars2 {level=lvla;
-              a={a with free=afree}; va;
-              b; vb=Intlist.empty}
+type flexvar_state += No_flexvar_state
+let next_flexvar_id = ref 0
+let fresh_flexvar level : flexvar =
+  let id = !next_flexvar_id in
+  incr next_flexvar_id;
+  { level; upper = UBcons { cons = Top; rigvars = [] }; lower = { cons = Bot; vars = [] }; id; state = No_flexvar_state }
 
 
+(*
+FIXME del?
 module Styp = struct
   let below_level lvl ty =
     assert (ty.bound = []);
@@ -333,7 +307,9 @@ module Styp = struct
     | [] ->
        Cons ty.cons
 end
+*)
 
+(*
 (* FIXME: Make these only work on flex vars *)
 let styp_consv level t vars =
   if Intlist.is_empty vars then t
@@ -344,7 +320,10 @@ let styp_unconsv lvl t =
   | Free_vars { level; vars; rest } when Env_level.equal lvl level ->
      rest, vars
   | _ -> t, Intlist.empty
+*)
 
+(*
+FIXME: this is needed for parsing. Even flexible variables can be looked up!
 
 let rec env_lookup_type_var env name : (styp * styp) option =
   match env with
@@ -356,6 +335,7 @@ let rec env_lookup_type_var env name : (styp * styp) option =
            styp_var Pos level i)
   | Env_cons { rest; _ } -> env_lookup_type_var rest name
   | Env_nil -> None
+*)
 
 let lookup_named_type = function
   | "any" -> Some Top
@@ -365,14 +345,13 @@ let lookup_named_type = function
   | "string" -> Some String
   | _ -> None
 
-let binder_sort = function
-  | Pos -> Esort_flexible
-  | Neg -> Esort_rigid
 
+(*
 (* Rewrite occurrences of the outermost bound variable *)
-let rec map_bound_styp sort' ix rw pol t =
-  assert (t.pol = pol);
-  let cons = map_head pol (map_bound_styp sort' ix rw) t.cons in
+let rec map_bound_styp ix rw { cons; vars } =
+  let cons = map_head Pos (fun _pol t -> map_bound_styp ix rw t) cons in
+  
+
   match t.bound with
   | Bound_var { index; sort; var } :: bound when index = ix ->
      assert (sort = sort');
@@ -490,17 +469,18 @@ let generalise env lvl =
   let bounds = Array.map fst bounds_flow and flow = Array.map snd bounds_flow in
   Some (bounds, Flow_graph.make flow, gen)
 
+*)
+
 (* FIXME: explain why this is OK! *)
-let rec mark_principal_styp pol' = function
-  | { pol; free=[]; bound=[]; cons } ->
-     assert (pol=pol'); Tcons (map_head pol mark_principal_styp cons)
+let rec mark_principal_styp pol = function
+  | Scons cons -> Tcons (map_head pol mark_principal_styp cons)
   | sty -> Tsimple sty
 
 let rec mark_principal pol = function
   | Tcons cons -> Tcons (map_head pol mark_principal cons)
-  | Tpoly {names; bounds; flow; body} -> Tpoly {names; bounds; flow; body = mark_principal pol body}
+  | Tpoly {names; bounds; body} -> Tpoly {names; bounds; body = mark_principal pol body}
   | Tsimple sty -> mark_principal_styp pol sty
-
+(*
 (* Open a ∀⁻ binder, extending env with rigid variables *)
 let enter_poly_neg' (env : env) names bounds flow  =
   let rigvar_level = env_next_level env Esort_rigid in
@@ -527,10 +507,14 @@ let enter_poly' pol env names vars flow =
   | Pos -> enter_poly_pos' env names vars flow
   | Neg -> enter_poly_neg' env names vars flow
 
+*)
+
 (*
  * Well-formedness checks.
  * The wf_foo functions also check for local closure.
  *)
+
+(*
 
 let rec wf_cons pol env wf = function
   | Bot | Top | Bool | Int | String -> ()
@@ -770,3 +754,36 @@ let test () =
     (group (pr_env env) ^^ str " ⊢ " ^^ pr_typ Pos body ^^ hardline);
   wf_env env; wf_typ Pos env body
   
+*)
+
+
+let loc : Exp.location =
+ { source = "<none>";
+   loc_start = {pos_fname="";pos_lnum=0;pos_cnum=0;pos_bol=0};
+   loc_end = {pos_fname="";pos_lnum=0;pos_cnum=0;pos_bol=0} }
+
+let named_type s : Exp.tyexp' =
+  Tnamed ({label=s; shift=0}, loc)
+
+let rec unparse_styp' ~flexvar = function
+  | Scons Top -> named_type "any"
+  | Scons Bot -> named_type "nothing"
+  | Scons Bool -> named_type "bool"
+  | Scons Int -> named_type "int"
+  | Scons String -> named_type "string"
+  | Scons Record fs ->
+     Trecord (Tuple_fields.map_fields (fun _ t -> unparse_styp ~flexvar t) fs)
+  | Scons Func (args, ret) ->
+     Tfunc (Tuple_fields.map_fields (fun _ t -> unparse_styp ~flexvar t) args,
+            unparse_styp ~flexvar ret)
+  | Sjoin (a, b) ->
+     let a = unparse_styp ~flexvar a in
+     let b = unparse_styp ~flexvar b in
+     Tjoin (a, b)
+  | Svar (Vbound _) -> failwith "unparse: vbound"
+  | Svar (Vrigid _) -> failwith "unparse: vrigid"
+  | Svar (Vflex fv) -> flexvar fv
+       
+and unparse_styp ~flexvar t =
+  Some (unparse_styp' ~flexvar t), loc
+
