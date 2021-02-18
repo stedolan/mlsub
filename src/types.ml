@@ -194,21 +194,18 @@ let bottom = {ctor={cons=Bot;rigvars=[]};flexvars=[]}
 (* FIXME hoisting is absent here *)
 
 let rec subtype_t_var ~error ~changed env (p : flex_lower_bound) (nv : flexvar) =
-  List.iter (fun pv -> subtype_flex_flex ~error ~changed env pv nv) p.flexvars;
+  p.flexvars |> List.iter (fun pv -> subtype_flex_flex ~error ~changed env pv nv);
   subtype_cons_flex ~error ~changed env p.ctor nv
 
 and subtype_t_cons ~error ~changed env (p : flex_lower_bound) (cn : (flex_lower_bound, flexvar) ctor_ty) =
-  List.iter (fun pv -> subtype_flex_cons ~error ~changed env pv cn) p.flexvars;
-  subtype_cons_cons ~error ~changed env p.ctor cn
-
-and subtype_cons_cons ~error ~changed env (cp : (flexvar, flex_lower_bound) ctor_ty) (cn : (flex_lower_bound, flexvar) ctor_ty) =
-  cp.rigvars |> List.iter (fun pv ->
+  p.flexvars |> List.iter (fun pv -> subtype_flex_cons ~error ~changed env pv cn);
+  p.ctor.rigvars |> List.iter (fun pv ->
     if cn.cons = Top || contains_rigvar pv cn.rigvars then ()
     else subtype_t_cons ~error ~changed env (env_rigid_bound env pv.level pv.var) cn);
   subtype_cons ~error
     ~neg:(subtype_t_var ~error ~changed env)
     ~pos:(subtype_t_var ~error ~changed env)
-    cp.cons cn.cons
+    p.ctor.cons cn.cons
 
 and subtype_flex_flex ~error ~changed env (pv : flexvar) (nv : flexvar) =
   match pv.upper with
@@ -250,8 +247,8 @@ and flex_cons_upper ~changed env (fv : flexvar) : (flex_lower_bound, flexvar) ct
 
 and subtype_flex_cons ~error ~changed env pv cn =
   let cp = ensure_upper_matches ~error ~changed env pv (map_ctor_rig id ignore cn) in
-  (* FIXME: duplicate rigvars code from subtype_cons_cons *)
-  (* FIXME: is the rigvars logic (here/subtype_cons_cons/ensure_upper_matches) actually correct? *)
+  (* FIXME: duplicate rigvars code from subtype_t_cons *)
+  (* FIXME: is the rigvars logic (here/subtype_t_cons/ensure_upper_matches) actually correct? *)
   cp.rigvars |> List.iter (fun pv ->
     if cn.cons = Top || contains_rigvar pv cn.rigvars then ()
     else subtype_t_cons ~error ~changed env (env_rigid_bound env pv.level pv.var) cn);
