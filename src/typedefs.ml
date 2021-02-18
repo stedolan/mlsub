@@ -94,8 +94,8 @@ and styp_var =
      - bounds may become tighter (upper decreases, lower increases) *)
 and flexvar =
   { mutable level: env_level;
-    mutable upper: (flexvar, flexvar) styp_neg;
-    mutable lower: flex_lower_bound;
+    mutable upper: (flex_lower_bound, flexvar) styp_neg; (* strictly covariant parts are matchable *)
+    mutable lower: flex_lower_bound; (* If lower is nontrivial, then upper must be UBcons. FIXME: encode this? *)
     (* used for printing *)
     id: int;
     mutable state: flexvar_state }

@@ -54,21 +54,24 @@ let subtype_cons ~error ~pos ~neg a b =
      subtype_cons_fields ~error pos fs fs'
   | _,_ -> error Incompatible
 
+(* NB: nleft/nright/nboth = contravariant
+   Since meet is used on negative types, these will be *positive* *)
 let meet_cons
-  ~left ~right ~both
+  ~nleft ~nright ~nboth
+  ~pleft ~pright ~pboth
   a b =
   match a, b with
   | Bot, _ -> Bot
   | _, Bot -> Bot
-  | c, Top -> map_head Neg (fun _pol v -> left v) c
-  | Top, c' -> map_head Neg (fun _pol v -> right v) c'
+  | c, Top -> map_head' nleft pleft c
+  | Top, c' -> map_head' nright pright c'
   | Bool, Bool -> Bool
   | Int, Int -> Int
   | String, String -> String
   | (Bool|Int|String), _ | _, (Bool|Int|String) -> Bot
   | Record _, Func _ | Func _, Record _ -> Bot
   | Record c, Record c' ->
-     begin match Tuple_fields.union ~left ~right ~both c c' with
+     begin match Tuple_fields.union ~left:pleft ~right:pright ~both:pboth c c' with
      | Some r -> Record r
      | None -> Bot
      end
@@ -77,8 +80,8 @@ let meet_cons
         Simpler to do it anyway, though *)
      (* FIXME: fail here rather than assuming variadic functions?
         Could/should enforce that functions are always `Closed *)
-     let args = Tuple_fields.inter ~both args args' in
-     Func (args, both res res')
+     let args = Tuple_fields.inter ~both:nboth args args' in
+     Func (args, pboth res res')
 
 let join_cons
   ~nleft ~nright ~nboth
@@ -181,10 +184,9 @@ let classify_styp_neg (n : styp) =
 let map_ctor_rig neg pos { cons; rigvars } = { cons = map_head' neg pos cons; rigvars }
 let map_styp_neg neg pos = function UBnone | UBvar _ as x -> x | UBcons c -> UBcons (map_ctor_rig neg pos c)
 
-let flexlb_fv fv = { ctor = { cons = Bot; rigvars = [] }; flexvars = [fv] }
-
 let noerror _ = failwith "subtyping error should not be possible here!"
 
+let bottom = {ctor={cons=Bot;rigvars=[]};flexvars=[]}
 
 (*
  * Core subtyping functions
@@ -195,17 +197,17 @@ let rec subtype_t_var ~error ~changed env (p : flex_lower_bound) (nv : flexvar) 
   List.iter (fun pv -> subtype_flex_flex ~error ~changed env pv nv) p.flexvars;
   subtype_cons_flex ~error ~changed env p.ctor nv
 
-and subtype_t_cons ~error ~changed env (p : flex_lower_bound) (cn : (flexvar, flexvar) ctor_ty) =
+and subtype_t_cons ~error ~changed env (p : flex_lower_bound) (cn : (flex_lower_bound, flexvar) ctor_ty) =
   List.iter (fun pv -> subtype_flex_cons ~error ~changed env pv cn) p.flexvars;
   subtype_cons_cons ~error ~changed env p.ctor cn
 
-and subtype_cons_cons ~error ~changed env (cp : (flexvar, flex_lower_bound) ctor_ty) (cn : (flexvar, flexvar) ctor_ty) =
+and subtype_cons_cons ~error ~changed env (cp : (flexvar, flex_lower_bound) ctor_ty) (cn : (flex_lower_bound, flexvar) ctor_ty) =
   cp.rigvars |> List.iter (fun pv ->
     if cn.cons = Top || contains_rigvar pv cn.rigvars then ()
     else subtype_t_cons ~error ~changed env (env_rigid_bound env pv.level pv.var) cn);
   subtype_cons ~error
+    ~neg:(subtype_t_var ~error ~changed env)
     ~pos:(subtype_t_var ~error ~changed env)
-    ~neg:(subtype_flex_flex ~error ~changed env)
     cp.cons cn.cons
 
 and subtype_flex_flex ~error ~changed env (pv : flexvar) (nv : flexvar) =
@@ -225,7 +227,7 @@ and subtype_flex_flex ~error ~changed env (pv : flexvar) (nv : flexvar) =
      let bound = flex_cons_upper ~changed env nv in
      subtype_flex_cons ~error ~changed env pv bound
 
-and flex_cons_upper ~changed env (fv : flexvar) =
+and flex_cons_upper ~changed env (fv : flexvar) : (flex_lower_bound, flexvar) ctor_ty =
   match fv.upper with
   | UBcons c -> c
   | UBnone ->
@@ -236,35 +238,46 @@ and flex_cons_upper ~changed env (fv : flexvar) =
   | UBvar v ->
      v.lower <- join_flexvars ~changed env v.level v.lower [fv];
      let upper = flex_cons_upper ~changed env v in
-     (* To preserve matchability, need to freshen the variables in pv.upper.
-        FIXME: maybe change this for the contravar parts? *)
+     (* To preserve matchability, need to freshen the strictly covariant variables in pv.upper. *)
      (* FIXME: fv.level? Can that change during subtype_flex_flex because hoisting? *)
      let upper = 
        map_ctor_rig
-         (fun v -> let v' = fresh_flexvar fv.level in
-                   subtype_flex_flex ~error:noerror ~changed env v v'; v')
+         id
          (fun v -> let v' = fresh_flexvar fv.level in
                    subtype_flex_flex ~error:noerror ~changed env v' v; v') upper in
      fv.upper <- UBcons upper;
      upper
 
 and subtype_flex_cons ~error ~changed env pv cn =
-  let cp = ensure_upper_matches ~error ~changed env pv (map_ctor_rig ignore ignore cn) in
-  subtype_cons_cons ~error ~changed env (map_ctor_rig id flexlb_fv cp) cn
+  let cp = ensure_upper_matches ~error ~changed env pv (map_ctor_rig id ignore cn) in
+  (* FIXME: duplicate rigvars code from subtype_cons_cons *)
+  (* FIXME: is the rigvars logic (here/subtype_cons_cons/ensure_upper_matches) actually correct? *)
+  cp.rigvars |> List.iter (fun pv ->
+    if cn.cons = Top || contains_rigvar pv cn.rigvars then ()
+    else subtype_t_cons ~error ~changed env (env_rigid_bound env pv.level pv.var) cn);
+  subtype_cons ~error
+    ~neg:(fun _ () -> () (* already done in ensure_upper_matches *))
+    ~pos:(subtype_flex_flex ~error ~changed env)
+    cp.cons cn.cons
 
 (* Ensure pv has a UBcons upper bound whose head is below a given ctor.
    Returns the constructed upper bound.
    FIXME: poly rather than unit for cn's type *)
-and ensure_upper_matches ~error ~changed env (pv : flexvar) (cn : (unit, unit) ctor_ty) : (flexvar, flexvar) ctor_ty =
+and ensure_upper_matches ~error ~changed env (pv : flexvar) (cn : (flex_lower_bound, unit) ctor_ty) : (unit, flexvar) ctor_ty =
   let cp = flex_cons_upper ~changed env pv in
+  let changed' = ref false in
   let cons =
     meet_cons
-      ~left:id
-      ~right:(fun _ -> fresh_flexvar pv.level)
-      ~both:(fun v _ -> v)
+      ~nleft:id
+      ~nright:id
+      ~nboth:(fun a b -> join_lower ~changed:changed' env pv.level a b)
+      ~pleft:id
+      ~pright:(fun _ -> fresh_flexvar pv.level)
+      ~pboth:(fun v _ -> v)
       cp.cons cn.cons in
   (* FIXME: there are better ways to compute this *)
-  let changed' = ref (map_head' (fun _ -> ()) (fun _ -> ()) cp.cons <> map_head' (fun _ -> ()) (fun _ -> ()) cons) in
+  if (map_head' (fun _ -> ()) (fun _ -> ()) cp.cons <> map_head' (fun _ -> ()) (fun _ -> ()) cons)
+   then changed' := true;
   let rigvars =
     match cp.cons, cn.cons with
     | _, Top -> cp.rigvars
@@ -282,7 +295,7 @@ and ensure_upper_matches ~error ~changed env (pv : flexvar) (cn : (unit, unit) c
     pv.upper <- UBcons bound;
     subtype_t_cons ~error ~changed env pv.lower bound
   end;
-  { cons; rigvars }
+  { cons = map_head' ignore id cons; rigvars }
 
 and subtype_cons_flex ~error ~changed env (cp : (flexvar, flex_lower_bound) ctor_ty) (nv : flexvar) =
   let changed' = ref false in
@@ -310,7 +323,7 @@ and join_ctor ~changed env level lower cp =
        ~pleft:id
        (* NB: pright is not id, because we need fresh variables for contravariant parts,
           to preserve matchability *)
-       ~pright:(fun x -> join_lower ~changed env level {ctor={cons=Bot;rigvars=[]};flexvars=[]} x)
+       ~pright:(fun x -> join_lower ~changed env level bottom x)
        ~pboth:(fun x y -> join_lower ~changed env level x y)
        lower.ctor.cons cp.cons in
   if (map_head' ignore ignore lower.ctor.cons <> map_head' ignore ignore cons) then changed := true;
@@ -332,7 +345,7 @@ and join_lower ~changed env level lower p =
 (* slightly higher level functions operating on styps
    very incomplete atm, just enough to run tests *)
 
-let subtype ~error ~changed env (p : flex_lower_bound) (n : (flexvar, flexvar) styp_neg) =
+let subtype ~error ~changed env (p : flex_lower_bound) (n : (flex_lower_bound, flexvar) styp_neg) =
   match n with
   | UBnone -> ()
   | UBvar nv -> subtype_t_var ~error ~changed env p nv
@@ -348,11 +361,16 @@ let rec lower_of_styp = function
      let upper = function (Svar (Vflex fv)) -> fv | _ -> failwith "unimp" in
      { ctor = { cons = map_head' upper lower_of_styp cons; rigvars = []}; flexvars=  [] }
 
+
+let flexlb_fv fv = { ctor = { cons = Bot; rigvars = [] }; flexvars = [fv] }
+
+
 let upper_of_styp = function
   | Svar (Vflex fv) -> UBvar fv
   | Scons cons ->
-     let getfv = function Svar (Vflex fv) -> fv | _ -> failwith "unimp" in
-     UBcons { cons = map_head' getfv getfv cons;  rigvars = [] }
+     let ngetfv = function Svar (Vflex fv) -> flexlb_fv fv | _ -> failwith "unimp" in
+     let pgetfv = function Svar (Vflex fv) -> fv | _ -> failwith "unimp" in
+     UBcons { cons = map_head' ngetfv pgetfv cons;  rigvars = [] }
   | _ -> failwith "unimp"
 
 let subtype_styp ~error env a b =
@@ -364,10 +382,20 @@ let subtype_styp ~error env a b =
   assert (not !changed)
 
 
-let match_styp ~error env p head =
+let match_styp ~error env p orig_head =
   let fv = match p with Svar (Vflex fv) -> fv | _ -> failwith "unimp" in
-  let m = ensure_upper_matches ~error ~changed:(ref false) env fv {cons=(map_head' ignore ignore head);rigvars=[]} in
-  subtype_cons ~error:noerror  ~pos:(fun p' t' -> Ivar.put t' (styp_flexvar p')) ~neg:(fun t' p' -> Ivar.put t' (styp_flexvar p')) m.cons head
+  let head =
+    map_head'
+      (fun iv -> let v = fresh_flexvar fv.level in
+                 Ivar.put iv (styp_flexvar v);
+                 flexlb_fv v)
+      ignore
+      orig_head in
+  let m = ensure_upper_matches ~error ~changed:(ref false) env fv {cons=head;rigvars=[]} in
+  subtype_cons ~error:noerror
+     ~neg:(fun _t () -> () (*already filled*))
+     ~pos:(fun p' t' -> Ivar.put t' (styp_flexvar p'))
+     m.cons orig_head
 
 
 

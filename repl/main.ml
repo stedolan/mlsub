@@ -36,7 +36,7 @@ let dump t =
          | l -> Some (unparse (styp_of_flex_lower_bound l)) in
        let u =
          match fv.upper with
-         | u -> Some (unparse (styp_of_styp_neg (map_styp_neg styp_flexvar styp_flexvar u))) in
+         | u -> Some (unparse (styp_of_styp_neg (map_styp_neg styp_of_flex_lower_bound styp_flexvar u))) in
        Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
        named_type fv_name
   and unparse t =
@@ -155,7 +155,7 @@ let match_bug () =
   let b1, b2 = match_as_fn ~error env b in
   let a1, a2 = match_as_fn ~error env a in
   subtype_styp ~error env a2 (Scons Bot);
-  dump (styp_cons (func [a1; b1] (styp_cons (tuple [a2; b2]))))
+  dump (styp_cons (func [a1; b1; a] (styp_cons (tuple [a2; b2; b]))))
   
 
 let chain () =
