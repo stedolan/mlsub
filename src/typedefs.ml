@@ -94,7 +94,7 @@ and styp_var =
      - bounds may become tighter (upper decreases, lower increases) *)
 and flexvar =
   { mutable level: env_level;
-    mutable upper: flexvar styp_neg;
+    mutable upper: (flexvar, flexvar) styp_neg;
     mutable lower: flex_lower_bound;
     (* used for printing *)
     id: int;
@@ -108,9 +108,9 @@ and rigvar =
   { level: env_level;
     var: int }
 
-(* A ctor_rig is a join of a constructed type and some rigid variables *)
-and 'a ctor_rig =
-  { cons: ('a,'a) cons_head; rigvars: rigvar list }
+(* A ctor_ty is a join of a constructed type and some rigid variables *)
+and ('neg,'pos) ctor_ty =
+  { cons: ('neg,'pos) cons_head; rigvars: rigvar list }
 
 (* A well-formed negative styp is either:
      - a single flexible variable
@@ -118,19 +118,22 @@ and 'a ctor_rig =
    Here, the type parameter 'a determines the makeup of constructed types *)
 (* FIXME: should I separate Top and Bot constraints
    At least Top, lots of UBcons { cons = Top; _ } cases otherwise *)
-and 'a styp_neg =
+and ('neg,'pos) styp_neg =
     (* f.lower = UBnone: no upper bound *)
   | UBnone
     (* f.lower = UBvar v: *only* upper bound is v.
        in particular, f does not appear in covariant parts of LB or contravariant in other UB *)
   | UBvar of flexvar
     (* arbitrary upper bound. NB: may also appear in other vars' LB *)
-  | UBcons of 'a ctor_rig
+  | UBcons of ('neg,'pos) ctor_ty
 
 
-(* Matchability constraint: the contravariant parts of a flexible variable's lower bound must be flexible variables *)
+(* Matchability constraint: the contravariant parts of a flexible variable's lower bound must be flexible variables.
+   Flexible variables appearing in vars must not have UBvar upper bounds, as they are also constrained above here.
+   Flexible variables appearing negatively in ctor might well have UBvar upper bounds.
+ *)
 and flex_lower_bound =
-  { cons: (flexvar, flex_lower_bound) cons_head; vars: styp_var list }
+  { ctor: (flexvar, flex_lower_bound) ctor_ty; flexvars: flexvar list }
 
 
 (* General polymorphic types.  Inference may produce these after
@@ -178,7 +181,7 @@ and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string option;
-  upper : styp;
+  upper : flex_lower_bound;
 }
 
 let polneg = function Pos -> Neg | Neg -> Pos
@@ -276,7 +279,7 @@ let next_flexvar_id = ref 0
 let fresh_flexvar level : flexvar =
   let id = !next_flexvar_id in
   incr next_flexvar_id;
-  { level; upper = UBnone; lower = { cons = Bot; vars = [] }; id; state = No_flexvar_state }
+  { level; upper = UBnone; lower = { ctor = { cons = Bot; rigvars = [] } ; flexvars = [] }; id; state = No_flexvar_state }
 
 
 (*
@@ -792,3 +795,9 @@ let rec unparse_styp' ~flexvar = function
 and unparse_styp ~flexvar t =
   Some (unparse_styp' ~flexvar t), loc
 
+
+let flexvar_name fv =
+  let names = [| "α"; "β"; "γ"; "δ"; "ε"; "ζ"; "η"; "θ"; "κ"; "ν"; "ξ"; "π"; "ρ" |] in
+  let id = fv.id in
+  if id < Array.length names then names.(id)
+  else Printf.sprintf "_%d" (id - Array.length names)

@@ -3,18 +3,18 @@ open Typedefs
 open Types
 
 
+
+let rec styp_of_flex_lower_bound (p : flex_lower_bound) =
+  let cons = map_head' styp_flexvar styp_of_flex_lower_bound p.ctor.cons in
+  let ty = List.fold_left (fun a b -> sjoin a (Svar (Vrigid b))) (Scons cons) p.ctor.rigvars in
+  let ty = List.fold_left (fun a b -> sjoin a (Svar (Vflex b))) ty p.flexvars in
+  ty
+
+
 let dump t =
   let fvs = Hashtbl.create 20 in
   let fv_list = ref [] in
   let _name_ix = ref 0 in
-  let names = [| "α"; "β"; "γ"; "δ"; "ε"; "ζ"; "η"; "θ"; "κ"; "ν"; "ξ"; "π"; "ρ" |] in
-  let fresh_name fv =
-    (*let id = !name_ix in
-    incr name_ix;*)
-    let id = fv.id in
-    if id < Array.length names then names.(id)
-    else Printf.sprintf "_%d" (id - Array.length names) in
-
   let rec styp_of_styp_neg = function
     | UBnone -> Scons Top
     | UBvar v -> Svar (Vflex v)
@@ -27,16 +27,16 @@ let dump t =
     match Hashtbl.find fvs fv.id with
     | name, _ -> named_type name
     | exception Not_found ->
-       let fv_name = fresh_name fv in
+       let fv_name = flexvar_name fv in
        Hashtbl.add fvs fv.id (fv_name, None);
        fv_list := fv.id :: !fv_list;
        let l =
          match fv.lower with
-         | {cons=Bot; vars=[]} -> None
+         | {ctor={cons=Bot; rigvars=[]}; flexvars=[]} -> None
          | l -> Some (unparse (styp_of_flex_lower_bound l)) in
        let u =
          match fv.upper with
-         | u -> Some (unparse (styp_of_styp_neg (map_styp_neg styp_flexvar u))) in
+         | u -> Some (unparse (styp_of_styp_neg (map_styp_neg styp_flexvar styp_flexvar u))) in
        Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
        named_type fv_name
   and unparse t =
@@ -109,7 +109,13 @@ let choosy () =
   let gx = apply g x in
   subtype_styp ~error env fx res;
   subtype_styp ~error env gx res;
-  dump (styp_cons (func [f;g;x] res))
+  let ty = styp_cons (func [f;g;x] res) in
+  dump ty
+(*
+  let root = gen env lvl ty in
+  dump (styp_of_flex_lower_bound root.lower);
+  dump (gen_subst env lvl root)
+*)           
 
 let lbs () =
   next_flexvar_id := 0;
@@ -124,11 +130,68 @@ let lbs () =
   subtype_styp ~error env r1 r1';
   subtype_styp ~error env (Scons (func [d1] r1)) f;
   subtype_styp ~error env (Scons (func [d2] r2)) f;
-  dump (styp_cons (func [r1;r2;r1'] (styp_cons (tuple [f;d1;d2]))))
+  let ty = (styp_cons (func [r1;r2] (styp_cons (tuple [f;d1;d2])))) in
+  dump ty
+(*
+  let root = gen env lvl ty in
+  dump (styp_of_flex_lower_bound root.lower);
+  dump (gen_subst env lvl root)
+*)
 
+let match_as_fn ~error env f =
+  let argp, arg = Ivar.make () in
+  let resp, res = Ivar.make () in
+  match_styp ~error env f (func [argp] resp);
+  Ivar.get arg, Ivar.get res
+
+
+let match_bug () =
+  next_flexvar_id := 0;
+  let env = Env_nil and lvl = Env_level.initial () in
+  let error _ = failwith "nope" in
+  let a = fresh_flexvar lvl |> styp_flexvar in
+  let b = fresh_flexvar lvl |> styp_flexvar in
+  subtype_styp ~error env a b;
+  let b1, b2 = match_as_fn ~error env b in
+  let a1, a2 = match_as_fn ~error env a in
+  subtype_styp ~error env a2 (Scons Bot);
+  dump (styp_cons (func [a1; b1] (styp_cons (tuple [a2; b2]))))
+  
+
+let chain () =
+  next_flexvar_id := 0;
+  let env = Env_nil and lvl = Env_level.initial () in
+  let error _ = failwith "nope" in
+  let a = Array.init 10 (fun _ -> fresh_flexvar lvl |> styp_flexvar) in
+  subtype_styp ~error env a.(5) (Scons Top);
+  subtype_styp ~error env a.(4) a.(5);
+  subtype_styp ~error env a.(3) a.(4);
+  subtype_styp ~error env a.(8) a.(9);
+  subtype_styp ~error env a.(5) a.(6);
+  subtype_styp ~error env a.(0) a.(1);
+  subtype_styp ~error env a.(3) (Scons Top);
+  subtype_styp ~error env a.(2) a.(3);
+  subtype_styp ~error env a.(1) a.(2);
+  subtype_styp ~error env a.(7) a.(8);
+  subtype_styp ~error env a.(6) a.(7);
+  dump (styp_cons (func [a.(0)] a.(9)))
+
+let dirbug () =
+  next_flexvar_id := 0;
+  let env = Env_nil and lvl = Env_level.initial () in
+  let error _ = failwith "nope" in
+  let a = fresh_flexvar lvl |> styp_flexvar in
+  let b = fresh_flexvar lvl |> styp_flexvar in
+  let c = fresh_flexvar lvl |> styp_flexvar in
+  let d = fresh_flexvar lvl |> styp_flexvar in
+  subtype_styp ~error env (styp_cons (func [a] b)) (styp_cons (func [c] d));
+  dump (styp_cons (func [styp_cons (func [a] b)] (styp_cons (func [c] d))))
 
 let () = choosy ()
 let () = lbs ()
+let () = match_bug ()
+let () = chain ()
+let () = dirbug ()
   
 (*
 open Parse
