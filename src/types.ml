@@ -405,13 +405,80 @@ let match_styp ~error env p orig_head =
 
 
 
+(*
+ * Generalisation
+ *)
+
+(* visit counters: odd = visiting, even = done *)
+
+let begin_visit_pos visit fv =
+  assert (fv.pos_visit_count <= visit);
+  if fv.pos_visit_count = visit - 1 then
+    intfail "pos cycle found on %s but rec types not implemented!" (flexvar_name fv)
+  else if fv.pos_visit_count = visit then false
+  else (fv.pos_visit_count <- visit - 1; true)
+
+let end_visit_pos visit fv =
+  assert (fv.pos_visit_count = visit - 1);
+  fv.pos_visit_count <- visit
+
+let begin_visit_neg visit fv =
+  assert (fv.neg_visit_count <= visit);
+  if fv.neg_visit_count = visit - 1 then
+    intfail "neg cycle found on %s but rec types not implemented!" (flexvar_name fv)
+  else if fv.neg_visit_count = visit then false
+  else (fv.neg_visit_count <- visit - 1; true)
+
+let end_visit_neg visit fv =
+  assert (fv.neg_visit_count = visit - 1);
+  fv.neg_visit_count <- visit
+
+
+let rec expand visit ~changed env level (p : flex_lower_bound) =
+  let ctor = map_ctor_rig (expand_fv_neg visit ~changed env level) (expand visit ~changed env level) p.ctor in
+  let flexvars = p.flexvars in
+  flexvars |> List.iter (fun pv ->
+    if begin_visit_pos visit pv then begin
+      pv.lower <- expand visit ~changed env level pv.lower;
+      end_visit_pos visit pv
+    end);
+  List.fold_left (fun p v -> join_lower ~changed env level p v.lower) { ctor; flexvars } flexvars
+
+and expand_fv_neg visit ~changed env level nv =
+  if begin_visit_neg visit nv then begin
+    begin match nv.upper with
+    | UBnone -> ()
+    | UBvar v -> ignore (expand_fv_neg visit ~changed env level v)
+    | UBcons cn ->
+       nv.upper <- UBcons (map_ctor_rig (expand visit ~changed env level) (expand_fv_neg visit ~changed env level) cn)
+    end;
+    end_visit_neg visit nv
+  end;
+  nv
 
 
 
+let is_visited_pos visit fv =
+  assert (fv.pos_visit_count land 1 = 0);
+  fv.pos_visit_count = visit
 
+let is_visited_neg visit fv =
+  assert (fv.neg_visit_count land 1 = 0);
+  fv.neg_visit_count = visit
 
+let rec substn visit (p : flex_lower_bound) =
+  let ctor = map_ctor_rig (substn_fv_neg visit) (substn visit) p.ctor in
+  let flexvars = p.flexvars |> List.filter (fun pv ->
+    assert (is_visited_pos visit pv); is_visited_neg visit pv) in
+  { ctor; flexvars }
 
-
+and substn_fv_neg visit nv =
+  assert (is_visited_neg visit nv);
+  if is_visited_pos visit nv then nv
+  else match nv.upper with
+  | UBvar v -> substn_fv_neg visit v
+  | _ -> nv (* hack, kinda wrong *)
+  
 
 
 

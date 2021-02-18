@@ -98,9 +98,8 @@ and flexvar =
     mutable lower: flex_lower_bound; (* If lower is nontrivial, then upper must be UBcons. FIXME: encode this? *)
     (* used for printing *)
     id: int;
-    mutable state: flexvar_state }
-
-and flexvar_state = ..
+    mutable pos_visit_count : int;
+    mutable neg_visit_count : int }
 
 (* Rigid variables are immutable.
    Their bounds are stored in the environment (FIXME: should they be?) *)
@@ -274,12 +273,12 @@ let styp_rigvar level var = Svar (Vrigid {level; var})
 let styp_boundvar index var = Svar (Vbound {index; var})
 let styp_cons cons = Scons cons
 
-type flexvar_state += No_flexvar_state
 let next_flexvar_id = ref 0
 let fresh_flexvar level : flexvar =
   let id = !next_flexvar_id in
   incr next_flexvar_id;
-  { level; upper = UBnone; lower = { ctor = { cons = Bot; rigvars = [] } ; flexvars = [] }; id; state = No_flexvar_state }
+  { level; upper = UBnone; lower = { ctor = { cons = Bot; rigvars = [] } ; flexvars = [] }; id;
+    pos_visit_count = 0; neg_visit_count = 0 }
 
 
 (*

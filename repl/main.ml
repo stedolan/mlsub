@@ -51,19 +51,39 @@ let dump t =
     nest 2 (blank 2 ^^ separate_map hardline (fun (n, (l, u)) -> group @@ 
       (match l with
        | None -> empty
-       | Some l -> Print.tyexp l ^^ blank 1 ^^ utf8string "<:" ^^ blank 1)
+       | Some l -> Print.tyexp l ^^ blank 1 ^^ utf8string "≤" ^^ blank 1)
       ^^
       utf8string n
       ^^
       (match u with
        | None -> empty
-       | Some u -> blank 1 ^^ utf8string "<:" ^^ blank 1 ^^ Print.tyexp u))
+       | Some u -> blank 1 ^^ utf8string "≤" ^^ blank 1 ^^ Print.tyexp u))
           fvs) ^^ hardline in
   PPrint.ToChannel.pretty 1. 120 stdout doc
 
 let func a b = Func (Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) a)), b)
 
 let tuple xs = Record (Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) xs)))
+
+
+let dump env level t =
+  dump t;
+  let fl = lower_of_styp t in
+  let changed = ref false in
+  let fl = expand 2 ~changed env level fl in
+  Printf.printf "changed: %b\n" !changed;
+  dump (styp_of_flex_lower_bound fl);
+  if !changed then begin
+  let changed = ref false in
+  let fl = expand 4 ~changed env level fl in
+  Printf.printf "changed: %b\n" !changed;
+  dump (styp_of_flex_lower_bound fl);
+
+  let fl = substn 4 fl in
+  dump (styp_of_flex_lower_bound fl);
+  end;
+  print_endline ""
+
 
 (*
 let () = 
@@ -110,7 +130,7 @@ let choosy () =
   subtype_styp ~error env fx res;
   subtype_styp ~error env gx res;
   let ty = styp_cons (func [f;g;x] res) in
-  dump ty
+  dump env lvl ty
 (*
   let root = gen env lvl ty in
   dump (styp_of_flex_lower_bound root.lower);
@@ -131,7 +151,7 @@ let lbs () =
   subtype_styp ~error env (Scons (func [d1] r1)) f;
   subtype_styp ~error env (Scons (func [d2] r2)) f;
   let ty = (styp_cons (func [r1;r2] (styp_cons (tuple [f;d1;d2])))) in
-  dump ty
+  dump env lvl ty
 (*
   let root = gen env lvl ty in
   dump (styp_of_flex_lower_bound root.lower);
@@ -155,7 +175,7 @@ let match_bug () =
   let b1, b2 = match_as_fn ~error env b in
   let a1, a2 = match_as_fn ~error env a in
   subtype_styp ~error env a2 (Scons Bot);
-  dump (styp_cons (func [a1; b1; a] (styp_cons (tuple [a2; b2; b]))))
+  dump env lvl (styp_cons (func [a1; b1; a] (styp_cons (tuple [a2; b2; b]))))
   
 
 let chain () =
@@ -174,7 +194,7 @@ let chain () =
   subtype_styp ~error env a.(1) a.(2);
   subtype_styp ~error env a.(7) a.(8);
   subtype_styp ~error env a.(6) a.(7);
-  dump (styp_cons (func [a.(0)] a.(9)))
+  dump env lvl (styp_cons (func [a.(0)] a.(9)))
 
 let dirbug () =
   next_flexvar_id := 0;
@@ -185,7 +205,7 @@ let dirbug () =
   let c = fresh_flexvar lvl |> styp_flexvar in
   let d = fresh_flexvar lvl |> styp_flexvar in
   subtype_styp ~error env (styp_cons (func [a] b)) (styp_cons (func [c] d));
-  dump (styp_cons (func [styp_cons (func [a] b)] (styp_cons (func [c] d))))
+  dump env lvl (styp_cons (tuple [styp_cons (func [a] b); styp_cons (func [c] d)]))
 
 let () = choosy ()
 let () = lbs ()
