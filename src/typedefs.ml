@@ -24,8 +24,6 @@ end
 
 open Tuple_fields
 
-type polarity = Pos | Neg
-
 (* Head type constructors. These do not bind type variables. *)
 type (+'neg, +'pos) cons_head =
   | Top
@@ -36,6 +34,17 @@ type (+'neg, +'pos) cons_head =
   | String
   | Record of 'pos tuple_fields
   | Func of 'neg tuple_fields * 'pos
+
+let map_head neg pos = function
+  | Top -> Top
+  | Bot -> Bot
+  | Bool -> Bool
+  | Int -> Int
+  | String -> String
+  | Record fields -> Record (map_fields (fun _fn x -> pos x) fields)
+  | Func (args, res) ->
+     Func (map_fields (fun _fn x -> neg x) args, pos res)
+
 
 module Env_level : sig
   type t
@@ -72,60 +81,44 @@ end
 
 type env_level = Env_level.t
 
-(* Simple types (the result of inference). No binders.
-
-   There are some rules about joins:
-    - No bound variables in contravariant joins
-    - No flexible variables in negative joins
-    - At most one Scons in negative or contravariant joins
- *)
-type styp =
-  | Scons of (styp, styp) cons_head
-  | Sjoin of styp * styp
-  | Svar of styp_var
-
-and styp_var =
-  | Vflex of flexvar
-  | Vrigid of rigvar
-  | Vbound of { index: int; var: int }
-
-(* Flexvars are mutable but only in one direction.
-     - level may decrease
-     - bounds may become tighter (upper decreases, lower increases) *)
-and flexvar =
-  { mutable level: env_level;
-    mutable upper: (flex_lower_bound, flexvar) styp_neg; (* strictly covariant parts are matchable *)
-    mutable lower: flex_lower_bound; (* If lower is nontrivial, then upper must be UBcons. FIXME: encode this? *)
-    (* used for printing *)
-    id: int;
-    mutable pos_visit_count : int;
-    mutable neg_visit_count : int }
-
 (* Rigid variables are immutable.
    Their bounds are stored in the environment (FIXME: should they be?) *)
-and rigvar =
+type rigvar =
   { level: env_level;
     var: int }
 
 (* A ctor_ty is a join of a constructed type and some rigid variables *)
-and ('neg,'pos) ctor_ty =
+type ('neg,'pos) ctor_ty =
   { cons: ('neg,'pos) cons_head; rigvars: rigvar list }
+
+let map_ctor_rig neg pos { cons; rigvars } = { cons = map_head neg pos cons; rigvars }
+
+
+
+(* Flexvars are mutable but only in one direction.
+     - level may decrease
+     - bounds may become tighter (upper decreases, lower increases) *)
+type flexvar =
+  { mutable level: env_level;
+    mutable upper: styp_neg; (* strictly covariant parts are matchable *)
+    mutable lower: flex_lower_bound; (* If lower is nontrivial, then upper must be UBcons. FIXME: encode this? *)
+    (* used for printing *)
+    id: int;
+    (* used during generalisation *)
+    mutable pos_visit_count : int;
+    mutable neg_visit_count : int }
 
 (* A well-formed negative styp is either:
      - a single flexible variable
      - a constructed type, possibly joined with some rigid variables
    Here, the type parameter 'a determines the makeup of constructed types *)
-(* FIXME: should I separate Top and Bot constraints
-   At least Top, lots of UBcons { cons = Top; _ } cases otherwise *)
-and ('neg,'pos) styp_neg =
-    (* f.lower = UBnone: no upper bound *)
+and styp_neg =
+    (* f.upper = UBnone: no upper bound *)
   | UBnone
-    (* f.lower = UBvar v: *only* upper bound is v.
-       in particular, f does not appear in covariant parts of LB or contravariant in other UB *)
+    (* f.upper = UBvar v: *only* upper bound is v. *)
   | UBvar of flexvar
-    (* arbitrary upper bound. NB: may also appear in other vars' LB *)
-  | UBcons of ('neg,'pos) ctor_ty
-
+    (* arbitrary upper bound *)
+  | UBcons of (flex_lower_bound, flexvar) ctor_ty
 
 (* Matchability constraint: the contravariant parts of a flexible variable's lower bound must be flexible variables.
    Flexible variables appearing in vars must not have UBvar upper bounds, as they are also constrained above here.
@@ -133,6 +126,38 @@ and ('neg,'pos) styp_neg =
  *)
 and flex_lower_bound =
   { ctor: (flexvar, flex_lower_bound) ctor_ty; flexvars: flexvar list }
+
+
+
+type polarity = Pos | Neg
+
+
+(* Simple types (the result of inference). No binders.
+
+   There are some rules about joins:
+    - No bound variables in contravariant joins
+    - No flexible variables in negative joins
+    - At most one Scons in negative or contravariant joins
+ *)
+
+
+type styp =
+  | Scons of (styp, styp) cons_head
+  | Sjoin of styp * styp
+  | Svar of styp_var
+
+and styp_var =
+  | Vrigid of rigvar
+  | Vflex of flexvar
+  | Vbound of { index: int; var: int }
+
+(* FIXME:
+try something more like this:
+
+type boundvar = { index: int; var: int }
+type styp =
+  { scons: (styp, styp) ctor_ty; sflex: flexvar list; sbound: boundvar list }
+*)
 
 
 (* General polymorphic types.  Inference may produce these after
@@ -251,16 +276,6 @@ let env_rigid_bound env lvl var =
 
 let map_head_cons pol f fields =
   map_fields (fun _fn x -> f pol x) fields
-
-let map_head pol f = function
-  | Top -> Top
-  | Bot -> Bot
-  | Bool -> Bool
-  | Int -> Int
-  | String -> String
-  | Record fields -> Record (map_head_cons pol f fields)
-  | Func (args, res) ->
-     Func (map_head_cons (polneg pol) f args, f pol res)
 
 let cons_typ _pol cons = Tcons cons
 
@@ -479,6 +494,7 @@ let generalise env lvl =
 *)
 
 (* FIXME: explain why this is OK! *)
+(*
 let rec mark_principal_styp pol = function
   | Scons cons -> Tcons (map_head pol mark_principal_styp cons)
   | sty -> Tsimple sty
@@ -487,6 +503,8 @@ let rec mark_principal pol = function
   | Tcons cons -> Tcons (map_head pol mark_principal cons)
   | Tpoly {names; bounds; body} -> Tpoly {names; bounds; body = mark_principal pol body}
   | Tsimple sty -> mark_principal_styp pol sty
+*)
+
 (*
 (* Open a ∀⁻ binder, extending env with rigid variables *)
 let enter_poly_neg' (env : env) names bounds flow  =

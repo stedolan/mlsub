@@ -15,17 +15,6 @@ type conflict_reason =
   | Missing of field_name
   | Extra of [`Fields|`Named of field_name]
 
-
-let map_head' neg pos = function
-  | Top -> Top
-  | Bot -> Bot
-  | Bool -> Bool
-  | Int -> Int
-  | String -> String
-  | Record fields -> Record (map_fields (fun _fn x -> pos x) fields)
-  | Func (args, res) ->
-     Func (map_fields (fun _fn x -> neg x) args, pos res)
-
 let id x = x
 
 let subtype_cons_fields ~error f af bf =
@@ -63,8 +52,8 @@ let meet_cons
   match a, b with
   | Bot, _ -> Bot
   | _, Bot -> Bot
-  | c, Top -> map_head' nleft pleft c
-  | Top, c' -> map_head' nright pright c'
+  | c, Top -> map_head nleft pleft c
+  | Top, c' -> map_head nright pright c'
   | Bool, Bool -> Bool
   | Int, Int -> Int
   | String, String -> String
@@ -76,8 +65,6 @@ let meet_cons
      | None -> Bot
      end
   | Func (args, res), Func (args', res') ->
-     (* FIXME: matching isn't really needed on contravariant components.
-        Simpler to do it anyway, though *)
      (* FIXME: fail here rather than assuming variadic functions?
         Could/should enforce that functions are always `Closed *)
      let args = Tuple_fields.inter ~both:nboth args args' in
@@ -89,8 +76,8 @@ let join_cons
   a b =
   match a, b with
   | Top, _ | _, Top -> Top
-  | c, Bot -> map_head' nleft pleft c
-  | Bot, c' -> map_head' nright pright c'
+  | c, Bot -> map_head nleft pleft c
+  | Bot, c' -> map_head nright pright c'
   | Bool, Bool -> Bool
   | Int, Int -> Int
   | String, String -> String
@@ -181,8 +168,7 @@ let classify_styp_neg (n : styp) =
      UBcons (collect n)
 *)
 
-let map_ctor_rig neg pos { cons; rigvars } = { cons = map_head' neg pos cons; rigvars }
-let map_styp_neg neg pos = function UBnone | UBvar _ as x -> x | UBcons c -> UBcons (map_ctor_rig neg pos c)
+
 
 let noerror _ = failwith "subtyping error should not be possible here!"
 
@@ -273,14 +259,14 @@ and ensure_upper_matches ~error ~changed env (pv : flexvar) (cn : (flex_lower_bo
       ~pboth:(fun v _ -> v)
       cp.cons cn.cons in
   (* FIXME: there are better ways to compute this *)
-  if (map_head' (fun _ -> ()) (fun _ -> ()) cp.cons <> map_head' (fun _ -> ()) (fun _ -> ()) cons)
+  if (map_head (fun _ -> ()) (fun _ -> ()) cp.cons <> map_head (fun _ -> ()) (fun _ -> ()) cons)
    then changed' := true;
   let rigvars =
     match cp.cons, cn.cons with
     | _, Top -> cp.rigvars
     | Top, _ ->
        assert (!changed'); (* Top meet not-Top = not-Top *)
-       List.filter (fun rv -> Env_level.extends rv.level pv.level) cn.rigvars
+       List.filter (fun (rv : rigvar) -> Env_level.extends rv.level pv.level) cn.rigvars
     | _, _ ->
        match List.partition (fun rv -> contains_rigvar rv cn.rigvars) cp.rigvars with
        | [], inter -> inter
@@ -292,7 +278,7 @@ and ensure_upper_matches ~error ~changed env (pv : flexvar) (cn : (flex_lower_bo
     pv.upper <- UBcons bound;
     subtype_t_cons ~error ~changed env pv.lower bound
   end;
-  { cons = map_head' ignore id cons; rigvars }
+  { cons = map_head ignore id cons; rigvars }
 
 and subtype_cons_flex ~error ~changed env (cp : (flexvar, flex_lower_bound) ctor_ty) (nv : flexvar) =
   let changed' = ref false in
@@ -323,7 +309,7 @@ and join_ctor ~changed env level lower cp =
        ~pright:(fun x -> join_lower ~changed env level bottom x)
        ~pboth:(fun x y -> join_lower ~changed env level x y)
        lower.ctor.cons cp.cons in
-  if (map_head' ignore ignore lower.ctor.cons <> map_head' ignore ignore cons) then changed := true;
+  if (map_head ignore ignore lower.ctor.cons <> map_head ignore ignore cons) then changed := true;
   let rigvars =
     match List.filter (fun v -> not (contains_rigvar v lower.ctor.rigvars)) cp.rigvars with
     | [] -> lower.ctor.rigvars
@@ -342,7 +328,7 @@ and join_lower ~changed env level lower p =
 (* slightly higher level functions operating on styps
    very incomplete atm, just enough to run tests *)
 
-let subtype ~error ~changed env (p : flex_lower_bound) (n : (flex_lower_bound, flexvar) styp_neg) =
+let subtype ~error ~changed env (p : flex_lower_bound) (n : styp_neg) =
   match n with
   | UBnone -> ()
   | UBvar nv -> subtype_t_var ~error ~changed env p nv
@@ -356,7 +342,7 @@ let rec lower_of_styp = function
   | Svar (Vbound _) -> assert false
   | Scons cons ->
      let upper = function (Svar (Vflex fv)) -> fv | _ -> failwith "unimp" in
-     { ctor = { cons = map_head' upper lower_of_styp cons; rigvars = []}; flexvars=  [] }
+     { ctor = { cons = map_head upper lower_of_styp cons; rigvars = []}; flexvars=  [] }
 
 
 let flexlb_fv fv = { ctor = { cons = Bot; rigvars = [] }; flexvars = [fv] }
@@ -367,7 +353,7 @@ let upper_of_styp = function
   | Scons cons ->
      let ngetfv = function Svar (Vflex fv) -> flexlb_fv fv | _ -> failwith "unimp" in
      let pgetfv = function Svar (Vflex fv) -> fv | _ -> failwith "unimp" in
-     UBcons { cons = map_head' ngetfv pgetfv cons;  rigvars = [] }
+     UBcons { cons = map_head ngetfv pgetfv cons;  rigvars = [] }
   | _ -> failwith "unimp"
 
 let subtype_styp ~error env a b =
@@ -382,7 +368,7 @@ let subtype_styp ~error env a b =
 let match_styp ~error env p orig_head =
   let fv = match p with Svar (Vflex fv) -> fv | _ -> failwith "unimp" in
   let head =
-    map_head'
+    map_head
       (fun iv -> let v = fresh_flexvar fv.level in
                  Ivar.put iv (styp_flexvar v);
                  flexlb_fv v)
@@ -561,7 +547,7 @@ let match_bound (pb : _ ctor_rig) level (bound : _ ctor_rig) =
 
 (* FIXME: get rid of this *)
 let rec styp_of_flex_lower_bound (p : flex_lower_bound) =
-  let cons = map_head' styp_flexvar styp_of_flex_lower_bound p.cons in
+  let cons = map_head styp_flexvar styp_of_flex_lower_bound p.cons in
   List.fold_left (fun a b -> sjoin a (Svar b)) (Scons cons) p.vars
 
 
@@ -837,7 +823,7 @@ Here goes:
   and visit_flexlb_pos { cons; vars } =
     (* FIXME: try to ensure that variables created during update_lower_bound get visited
        appropriately. Maybe visit again afterwards? *)
-    let cons = map_head' visit_neg visit_flexlb_pos cons in
+    let cons = map_head visit_neg visit_flexlb_pos cons in
     List.fold_left (fun s v ->
        let s =
          match v with
@@ -858,7 +844,7 @@ Here goes:
        | Unvisited ->
           state.neg <- Visiting;
           let {cons; rigvars} = bound in
-          let cons = map_head' (fun v -> visit_fv_pos v; v) visit_neg cons in
+          let cons = map_head (fun v -> visit_fv_pos v; v) visit_neg cons in
           fv.upper <- UBcons {cons; rigvars};
           state.neg <- Visited;
           fv
@@ -874,7 +860,7 @@ let gen_subst _env _level root =
     subst_flexlb_pos (join_var fv.lower (Vflex fv))
   
   and subst_flexlb_pos { cons; vars } =
-    let cons = map_head' subst_fv_neg subst_flexlb_pos cons in
+    let cons = map_head subst_fv_neg subst_flexlb_pos cons in
     let vars = List.filter (function Vflex fv -> assert ((fv_state fv).pos = Visited); (fv_state fv).neg = Visited | _ -> true) vars in
     List.fold_left (fun c v -> sjoin c (Svar v)) (Scons cons) vars
 
@@ -887,7 +873,7 @@ let gen_subst _env _level root =
       | UBvar _ -> assert false (* should have been removed earlier *)
       | UBnone -> styp_cons Top
       | UBcons {cons;rigvars} ->
-         let cons = map_head' subst_fv_pos subst_fv_neg cons in
+         let cons = map_head subst_fv_pos subst_fv_neg cons in
          List.fold_left (fun c v -> sjoin c (Svar (Vrigid v))) (styp_cons cons) rigvars
   in
 

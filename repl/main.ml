@@ -5,7 +5,7 @@ open Types
 
 
 let rec styp_of_flex_lower_bound (p : flex_lower_bound) =
-  let cons = map_head' styp_flexvar styp_of_flex_lower_bound p.ctor.cons in
+  let cons = map_head styp_flexvar styp_of_flex_lower_bound p.ctor.cons in
   let ty = List.fold_left (fun a b -> sjoin a (Svar (Vrigid b))) (Scons cons) p.ctor.rigvars in
   let ty = List.fold_left (fun a b -> sjoin a (Svar (Vflex b))) ty p.flexvars in
   ty
@@ -15,12 +15,10 @@ let dump t =
   let fvs = Hashtbl.create 20 in
   let fv_list = ref [] in
   let _name_ix = ref 0 in
-  let rec styp_of_styp_neg = function
-    | UBnone -> Scons Top
-    | UBvar v -> Svar (Vflex v)
-    | UBcons { cons; rigvars = [] } -> Scons cons
-    | UBcons { cons; rigvars = v :: rigvars } ->
-       Sjoin (styp_of_styp_neg (UBcons {cons; rigvars}),
+  let rec styp_of_ctor_rig = function
+    | { cons; rigvars = [] } -> Scons cons
+    | { cons; rigvars = v :: rigvars } ->
+       Sjoin (styp_of_ctor_rig {cons; rigvars},
               Svar (Vrigid v))
   in
   let rec flexvar fv =
@@ -36,8 +34,10 @@ let dump t =
          | l -> Some (unparse (styp_of_flex_lower_bound l)) in
        let u =
          match fv.upper with
-         | u -> Some (unparse (styp_of_styp_neg (map_styp_neg styp_of_flex_lower_bound styp_flexvar u))) in
-       Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
+         | UBnone -> Scons Top
+         | UBvar v -> Svar (Vflex v)
+         | UBcons c ->  (styp_of_ctor_rig (map_ctor_rig styp_of_flex_lower_bound styp_flexvar c)) in
+       Hashtbl.replace fvs fv.id (fv_name, Some (l, Some (unparse u)));
        named_type fv_name
   and unparse t =
     unparse_styp ~flexvar t
