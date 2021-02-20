@@ -1,0 +1,177 @@
+(α, β, γ) -> δ
+where
+  δ ≤ any
+  α ≤ (ε) -> ζ
+  ζ ≤ δ
+  γ ≤ ε ≤ any
+  γ ≤ any
+  β ≤ (η) -> θ
+  θ ≤ δ
+  γ ≤ η ≤ any
+changed: true
+(α, β, γ) -> δ
+where
+  δ ≤ any
+  α ≤ (ε | γ) -> ζ
+  ζ ≤ δ
+  γ ≤ ε ≤ any
+  γ ≤ any
+  β ≤ (η | γ) -> θ
+  θ ≤ δ
+  γ ≤ η ≤ any
+changed: false
+(α, β, γ) -> δ
+where
+  δ ≤ any
+  α ≤ (ε | γ) -> ζ
+  ζ ≤ δ
+  γ ≤ ε ≤ any
+  γ ≤ any
+  β ≤ (η | γ) -> θ
+  θ ≤ δ
+  γ ≤ η ≤ any
+(α, β, γ) -> δ
+where
+  δ ≤ any
+  α ≤ (ε | γ) -> ζ
+  ζ ≤ δ
+  γ ≤ ε ≤ any
+  γ ≤ any
+  β ≤ (η | γ) -> θ
+  θ ≤ δ
+  γ ≤ η ≤ any
+
+(δ, ζ) -> (α, β, γ)
+where
+  (η) -> δ | ζ ≤ α ≤ any
+  δ ≤ ε
+  ε ≤ any
+  ζ ≤ any
+  η ≤ any
+  η ≤ β ≤ any
+  η ≤ γ ≤ any
+changed: true
+(δ, ζ) -> ((θ) -> δ | ζ | α, β | η, γ | η)
+where
+  δ ≤ any
+  ζ ≤ any
+  θ ≤ η
+  η ≤ any
+  (η) -> δ | ζ ≤ α ≤ any
+  η ≤ β ≤ any
+  η ≤ γ ≤ any
+changed: false
+(δ, ζ) -> ((θ) -> δ | ζ | α, β | η, γ | η)
+where
+  δ ≤ any
+  ζ ≤ any
+  θ ≤ η
+  η ≤ any
+  (η) -> δ | ζ ≤ α ≤ any
+  η ≤ β ≤ any
+  η ≤ γ ≤ any
+(δ, ζ) -> ((η) -> δ | ζ, η, η)
+where
+  δ ≤ any
+  ζ ≤ any
+  η ≤ any
+
+(ε, γ, α) -> (ζ, δ, β)
+where
+  ζ ≤ nothing
+  ζ ≤ δ ≤ any
+  α ≤ β ≤ (γ) -> δ
+  α ≤ (γ | ε) -> ζ
+  γ ≤ any
+  ε ≤ any
+changed: true
+(ε, γ, α) -> (ζ, δ | ζ, β | α)
+where
+  ζ ≤ nothing
+  ζ ≤ δ ≤ any
+  α ≤ β ≤ (γ) -> δ
+  α ≤ (γ | ε) -> ζ
+  γ ≤ any
+  ε ≤ any
+changed: false
+(ε, γ, α) -> (ζ, δ | ζ, β | α)
+where
+  ζ ≤ nothing
+  ζ ≤ δ ≤ any
+  α ≤ β ≤ (γ) -> δ
+  α ≤ (γ | ε) -> ζ
+  γ ≤ any
+  ε ≤ any
+(ε, γ, α) -> (ζ, ζ, α)
+where
+  ζ ≤ nothing
+  α ≤ (γ | ε) -> ζ
+  γ ≤ any
+  ε ≤ any
+
+(α) -> ν
+where
+  κ ≤ ν ≤ any
+  θ ≤ κ ≤ any
+  η ≤ θ ≤ any
+  ζ ≤ η ≤ any
+  ε ≤ ζ ≤ any
+  δ ≤ ε ≤ any
+  δ ≤ any
+  α ≤ β
+  β ≤ γ
+  γ ≤ δ
+changed: true
+(α) -> ν | κ | θ | η | ζ | ε | δ
+where
+  κ | θ | η | ζ | ε | δ ≤ ν ≤ any
+  θ | η | ζ | ε | δ ≤ κ ≤ any
+  η | ζ | ε | δ ≤ θ ≤ any
+  ζ | ε | δ ≤ η ≤ any
+  ε | δ ≤ ζ ≤ any
+  δ ≤ ε ≤ any
+  δ ≤ any
+  α ≤ β
+  β ≤ γ
+  γ ≤ δ
+changed: false
+(α) -> ν | κ | θ | η | ζ | ε | δ
+where
+  κ | θ | η | ζ | ε | δ ≤ ν ≤ any
+  θ | η | ζ | ε | δ ≤ κ ≤ any
+  η | ζ | ε | δ ≤ θ ≤ any
+  ζ | ε | δ ≤ η ≤ any
+  ε | δ ≤ ζ ≤ any
+  δ ≤ ε ≤ any
+  δ ≤ any
+  α ≤ β
+  β ≤ γ
+  γ ≤ δ
+(δ) -> δ
+where
+  δ ≤ any
+
+((α) -> β, (γ) -> δ)
+where
+  β ≤ δ
+  δ ≤ any
+  α ≤ any
+  γ ≤ α
+changed: true
+((α) -> β, (γ) -> δ | β)
+where
+  β ≤ any
+  α ≤ any
+  β ≤ δ ≤ any
+  γ ≤ α
+changed: false
+((α) -> β, (γ) -> δ | β)
+where
+  β ≤ any
+  α ≤ any
+  β ≤ δ ≤ any
+  γ ≤ α
+((α) -> nothing, (α) -> nothing)
+where
+  α ≤ any
+
