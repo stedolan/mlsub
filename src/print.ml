@@ -135,7 +135,6 @@ and tyexp t = mayloc t @@ function
       typolybounds bounds ^^ space ^^ tyexp body
   | Tparen t -> parens (tyexp t)
   | Tjoin (s, t) -> tyexp s ^^ op "|" ^^ tyexp t
-  | Tmeet (s, t) -> tyexp s ^^ op "&" ^^ tyexp t
 
 and argtype ~pos fn ty =
   if pos then tyexp ty
@@ -144,7 +143,6 @@ and argtype ~pos fn ty =
 and typolybounds bs =
   let bound = function
     | (a, None) -> symbol a
-    | (a, Some (dir, ty)) ->
-       let dir = match dir with `Sub -> "<:" | `Sup -> ":>" in
-       symbol a ^^ op dir ^^ tyexp ty in
+    | (a, Some ty ) ->
+       symbol a ^^ op "<:" ^^ tyexp ty in
   brackets (separate (comma ^^ break 1) (List.map bound bs))

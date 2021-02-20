@@ -4,26 +4,13 @@ open Types
 
 
 
-let rec styp_of_flex_lower_bound (p : flex_lower_bound) =
-  let cons = map_head styp_flexvar styp_of_flex_lower_bound p.ctor.cons in
-  let ty = List.fold_left (fun a b -> sjoin a (Svar (Vrigid b))) (Scons cons) p.ctor.rigvars in
-  let ty = List.fold_left (fun a b -> sjoin a (Svar (Vflex b))) ty p.flexvars in
-  ty
-
-
-let dump t =
+let dump (t : ptyp) =
   let fvs = Hashtbl.create 20 in
   let fv_list = ref [] in
   let _name_ix = ref 0 in
-  let rec styp_of_ctor_rig = function
-    | { cons; rigvars = [] } -> Scons cons
-    | { cons; rigvars = v :: rigvars } ->
-       Sjoin (styp_of_ctor_rig {cons; rigvars},
-              Svar (Vrigid v))
-  in
   let rec flexvar fv =
     match Hashtbl.find fvs fv.id with
-    | name, _ -> named_type name
+    | name, _ -> mktyexp (named_type name)
     | exception Not_found ->
        let fv_name = flexvar_name fv in
        Hashtbl.add fvs fv.id (fv_name, None);
@@ -31,16 +18,16 @@ let dump t =
        let l =
          match fv.lower with
          | {ctor={cons=Bot; rigvars=[]}; flexvars=[]} -> None
-         | l -> Some (unparse (styp_of_flex_lower_bound l)) in
+         | l -> Some (unparse_flex_lower_bound ~flexvar l) in
        let u =
          match fv.upper with
-         | UBnone -> Scons Top
-         | UBvar v -> Svar (Vflex v)
-         | UBcons c ->  (styp_of_ctor_rig (map_ctor_rig styp_of_flex_lower_bound styp_flexvar c)) in
-       Hashtbl.replace fvs fv.id (fv_name, Some (l, Some (unparse u)));
-       named_type fv_name
+         | UBvar v -> flexvar v
+         | UBnone -> unparse (Tcons { cons = Top; rigvars = [] })
+         | UBcons c -> unparse_ctor_ty ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:flexvar c in
+       Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
+       mktyexp (named_type fv_name)
   and unparse t =
-    unparse_styp ~flexvar t
+    unparse_ptyp ~flexvar t
   in
   let t = unparse t in
   let fvs = !fv_list |> List.rev |> List.map (fun i -> let (n, t) = (Hashtbl.find fvs i) in n, Option.get t) in
@@ -55,9 +42,7 @@ let dump t =
       ^^
       utf8string n
       ^^
-      (match u with
-       | None -> empty
-       | Some u -> blank 1 ^^ utf8string "≤" ^^ blank 1 ^^ Print.tyexp u))
+      (blank 1 ^^ utf8string "≤" ^^ blank 1 ^^ Print.tyexp u))
           fvs) ^^ hardline in
   PPrint.ToChannel.pretty 1. 120 stdout doc
 
@@ -65,22 +50,23 @@ let func a b = Func (Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) a)
 
 let tuple xs = Record (Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) xs)))
 
+let tcons cons = Tcons { cons ; rigvars = [] }
 
-let dump env level t =
+let dump env level (t : ptyp) =
   dump t;
-  let fl = lower_of_styp t in
+  let fl = approx_ptyp env t in
   let changed = ref false in
   let fl = expand 2 ~changed env level fl in
   Printf.printf "changed: %b\n" !changed;
-  dump (styp_of_flex_lower_bound fl);
+  dump (Tsimple fl);
   if !changed then begin
   let changed = ref false in
   let fl = expand 4 ~changed env level fl in
   Printf.printf "changed: %b\n" !changed;
-  dump (styp_of_flex_lower_bound fl);
+  dump (Tsimple fl);
 
   let fl = substn 4 fl in
-  dump (styp_of_flex_lower_bound fl);
+  dump (Tsimple fl);
   end;
   print_endline ""
 
@@ -115,21 +101,21 @@ let () =
 let choosy () =
   let env =  Env_nil and lvl = Env_level.initial () in
   let error _ = failwith "nope" in
-  let f = fresh_flexvar lvl |> styp_flexvar in
-  let g = fresh_flexvar lvl |> styp_flexvar in
-  let x = fresh_flexvar lvl |> styp_flexvar in
-  let res = fresh_flexvar lvl |> styp_flexvar in
+  let fn, fp = fresh_flow lvl in
+  let gn, gp = fresh_flow lvl in
+  let xn, xp = fresh_flow lvl in
+  let resn, resp = fresh_flow lvl in
   let apply f x =
     let argp, arg = Ivar.make () in
     let resp, res = Ivar.make () in
-    match_styp ~error env f (func [argp] resp);
-    subtype_styp ~error env x (Ivar.get arg);
+    match_typ ~error env lvl f (func [argp] resp);
+    subtype ~error env x (Ivar.get arg);
     Ivar.get res in
-  let fx = apply f x in
-  let gx = apply g x in
-  subtype_styp ~error env fx res;
-  subtype_styp ~error env gx res;
-  let ty = styp_cons (func [f;g;x] res) in
+  let fx = apply fp xp in
+  let gx = apply gp xp in
+  subtype ~error env fx resn;
+  subtype ~error env gx resn;
+  let ty = tcons (func [fn;gn;xn] resp) in
   dump env lvl ty
 (*
   let root = gen env lvl ty in
@@ -141,16 +127,16 @@ let lbs () =
   next_flexvar_id := 0;
   let env = Env_nil and lvl = Env_level.initial () in
   let error _ = failwith "nope" in
-  let f = fresh_flexvar lvl |> styp_flexvar in
-  let d1 = fresh_flexvar lvl |> styp_flexvar in
-  let d2 = fresh_flexvar lvl |> styp_flexvar in
-  let r1 = fresh_flexvar lvl |> styp_flexvar in
-  let r1' = fresh_flexvar lvl |> styp_flexvar in
-  let r2 = fresh_flexvar lvl |> styp_flexvar in
-  subtype_styp ~error env r1 r1';
-  subtype_styp ~error env (Scons (func [d1] r1)) f;
-  subtype_styp ~error env (Scons (func [d2] r2)) f;
-  let ty = (styp_cons (func [r1;r2] (styp_cons (tuple [f;d1;d2])))) in
+  let fn, fp = fresh_flow lvl in
+  let d1n, d1p = fresh_flow lvl in
+  let d2n, d2p = fresh_flow lvl in
+  let r1n, r1p = fresh_flow lvl in
+  let r1'n, _r1'p = fresh_flow lvl in
+  let r2n, r2p = fresh_flow lvl in
+  subtype ~error env r1p r1'n;
+  subtype ~error env (tcons (func [d1n] r1p)) fn;
+  subtype ~error env (tcons (func [d2n] r2p)) fn;
+  let ty = (tcons (func [r1n;r2n] (tcons (tuple [fp;d1p;d2p])))) in
   dump env lvl ty
 (*
   let root = gen env lvl ty in
@@ -158,10 +144,10 @@ let lbs () =
   dump (gen_subst env lvl root)
 *)
 
-let match_as_fn ~error env f =
+let match_as_fn ~error env lvl f =
   let argp, arg = Ivar.make () in
   let resp, res = Ivar.make () in
-  match_styp ~error env f (func [argp] resp);
+  match_typ ~error env lvl f (func [argp] resp);
   Ivar.get arg, Ivar.get res
 
 
@@ -169,43 +155,44 @@ let match_bug () =
   next_flexvar_id := 0;
   let env = Env_nil and lvl = Env_level.initial () in
   let error _ = failwith "nope" in
-  let a = fresh_flexvar lvl |> styp_flexvar in
-  let b = fresh_flexvar lvl |> styp_flexvar in
-  subtype_styp ~error env a b;
-  let b1, b2 = match_as_fn ~error env b in
-  let a1, a2 = match_as_fn ~error env a in
-  subtype_styp ~error env a2 (Scons Bot);
-  dump env lvl (styp_cons (func [a1; b1; a] (styp_cons (tuple [a2; b2; b]))))
+  let an, ap = fresh_flow lvl in
+  let bn, bp = fresh_flow lvl in
+  subtype ~error env ap bn;
+  let b1, b2 = match_as_fn ~error env lvl bp in
+  let a1, a2 = match_as_fn ~error env lvl ap in
+  subtype ~error env a2 (tcons Bot);
+  dump env lvl (tcons (func [a1; b1; an] (tcons (tuple [a2; b2; bp]))))
   
 
 let chain () =
   next_flexvar_id := 0;
   let env = Env_nil and lvl = Env_level.initial () in
   let error _ = failwith "nope" in
-  let a = Array.init 10 (fun _ -> fresh_flexvar lvl |> styp_flexvar) in
-  subtype_styp ~error env a.(5) (Scons Top);
-  subtype_styp ~error env a.(4) a.(5);
-  subtype_styp ~error env a.(3) a.(4);
-  subtype_styp ~error env a.(8) a.(9);
-  subtype_styp ~error env a.(5) a.(6);
-  subtype_styp ~error env a.(0) a.(1);
-  subtype_styp ~error env a.(3) (Scons Top);
-  subtype_styp ~error env a.(2) a.(3);
-  subtype_styp ~error env a.(1) a.(2);
-  subtype_styp ~error env a.(7) a.(8);
-  subtype_styp ~error env a.(6) a.(7);
-  dump env lvl (styp_cons (func [a.(0)] a.(9)))
+  let a = Array.init 10 (fun _ -> fresh_flow lvl) in
+  let n = Array.map fst a and p = Array.map snd a in
+  subtype ~error env p.(5) (tcons Top);
+  subtype ~error env p.(4) n.(5);
+  subtype ~error env p.(3) n.(4);
+  subtype ~error env p.(8) n.(9);
+  subtype ~error env p.(5) n.(6);
+  subtype ~error env p.(0) n.(1);
+  subtype ~error env p.(3) (tcons Top);
+  subtype ~error env p.(2) n.(3);
+  subtype ~error env p.(1) n.(2);
+  subtype ~error env p.(7) n.(8);
+  subtype ~error env p.(6) n.(7);
+  dump env lvl (tcons (func [n.(0)] p.(9)))
 
 let dirbug () =
   next_flexvar_id := 0;
   let env = Env_nil and lvl = Env_level.initial () in
   let error _ = failwith "nope" in
-  let a = fresh_flexvar lvl |> styp_flexvar in
-  let b = fresh_flexvar lvl |> styp_flexvar in
-  let c = fresh_flexvar lvl |> styp_flexvar in
-  let d = fresh_flexvar lvl |> styp_flexvar in
-  subtype_styp ~error env (styp_cons (func [a] b)) (styp_cons (func [c] d));
-  dump env lvl (styp_cons (tuple [styp_cons (func [a] b); styp_cons (func [c] d)]))
+  let an, _ap = fresh_flow lvl in
+  let _bn, bp = fresh_flow lvl in
+  let cn, cp = fresh_flow lvl in
+  let dn, dp = fresh_flow lvl in
+  subtype ~error env (tcons (func [an] bp)) (tcons (func [cp] dn));
+  dump env lvl (tcons (tuple [tcons (func [an] bp); tcons (func [cn] dp)]))
 
 let () = choosy ()
 let () = lbs ()

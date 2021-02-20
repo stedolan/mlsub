@@ -1,12 +1,6 @@
 open Tuple_fields
 open Typedefs
 
-exception Internal of string
-let intfail fmt =
-  Printf.ksprintf (fun s -> raise (Internal s)) fmt
-
-let () = Printexc.register_printer (function Internal s -> Some ("internal error: " ^ s) | _ -> None)
-
 (* FIXME: too much poly compare in this file *)
 (* let (=) (x : int) (y : int) = x = y *)
 
@@ -91,35 +85,8 @@ let join_cons
      | None -> Top
      end
 
-
-let styp_equal a b =
-  (a = b) (* FIXME FIXME very wrong for flexvars *)
-
-(* Check whether ty = j | ..., modulo some identities on | (but not looking under ctors) *)
-let rec contains_joinand j ty =
-  match j with
-  | Sjoin (a, b) ->
-     contains_joinand a ty && contains_joinand b ty
-  | j ->
-     match ty with
-     | Sjoin (a, b) -> contains_joinand j a || contains_joinand j b
-     | ty -> styp_equal j ty
-
-(* FIXME: maybe also do joinand checks? *)
-(* FIXME: exact spec here - not quite symmetric *)
-let rec sjoin a b =
-  match a, b with
-  | a, Sjoin(b1, b2) -> sjoin (sjoin a b1) b2
-  | Scons Top, _ | _, Scons Top -> Scons Top
-  | Scons Bot, x | x, Scons Bot -> x
-  | a, b when contains_joinand b a -> a
-  | a, b -> Sjoin (a, b)
-
 let contains_rigvar (v : rigvar) vs =
   List.exists (fun rv -> rv = v) vs
-
-let contains_var (v : styp_var) vs =
-  List.exists (fun v' -> v = v') vs
 
 (*
 let join_var (fb : flex_lower_bound) v =
@@ -175,11 +142,11 @@ let noerror _ = failwith "subtyping error should not be possible here!"
 let bottom = {ctor={cons=Bot;rigvars=[]};flexvars=[]}
 
 
-(* FIMXE: more specific type for this? gen isn't very interesting... *)
-let rec subtype_ctor_rig ~error env ~neg ~pos cp cn =
+(* FIXME: does this need separate ~neg and ~pos? *)
+let rec subtype_ctor_rig ~error ~bound ~neg ~pos cp cn =
   cp.rigvars |> List.iter (fun pv ->
     if cn.cons = Top || contains_rigvar pv cn.rigvars then ()
-    else subtype_ctor_rig ~error env ~neg ~pos (env_rigid_bound env pv.level pv.var) cn);
+    else subtype_ctor_rig ~error ~bound ~neg ~pos (bound pv) cn);
   subtype_cons ~error ~neg ~pos cp.cons cn.cons
 
 
@@ -194,7 +161,7 @@ let rec subtype_t_var ~error ~changed env (p : flex_lower_bound) (nv : flexvar) 
 
 and subtype_t_cons ~error ~changed env (p : flex_lower_bound) (cn : (flex_lower_bound, flexvar) ctor_ty) =
   p.flexvars |> List.iter (fun pv -> subtype_flex_cons ~error ~changed env pv cn);
-  subtype_ctor_rig ~error env ~neg:(subtype_t_var ~error ~changed env) ~pos:(subtype_t_var ~error ~changed env) p.ctor cn
+  subtype_ctor_rig ~error ~bound:(env_rigid_bound env) ~neg:(subtype_t_var ~error ~changed env) ~pos:(subtype_t_var ~error ~changed env) p.ctor cn
 
 and subtype_flex_flex ~error ~changed env (pv : flexvar) (nv : flexvar) =
   match pv.upper with
@@ -309,6 +276,7 @@ and join_ctor ~changed env level lower cp =
        ~pboth:(fun x y -> join_lower ~changed env level x y)
        lower.ctor.cons cp.cons in
   if (map_head ignore ignore lower.ctor.cons <> map_head ignore ignore cons) then changed := true;
+  (* FIXME: Top case of rigvars? check. *)
   let rigvars =
     match List.filter (fun v -> not (contains_rigvar v lower.ctor.rigvars)) cp.rigvars with
     | [] -> lower.ctor.rigvars
@@ -321,11 +289,55 @@ and join_lower ~changed env level lower p =
 
 
 
+(*
+ * Subtyping on typs (polymorphism)
+ *)
+
+let flexlb_fv fv = { ctor = { cons = Bot; rigvars = [] }; flexvars = [fv] }
+
+let fresh_flow lvl : ntyp * ptyp =
+  let fv = fresh_flexvar lvl in
+  Tsimple fv, Tsimple (flexlb_fv fv)
 
 
+let rec approx_ptyp env : ptyp -> flex_lower_bound = function
+  | Tsimple t -> t
+  | Tcons cp -> { ctor = map_ctor_rig (approx_ntyp env) (approx_ptyp env) cp; flexvars = [] }
+  | _ -> unimp "approx_ptyp"
+
+and approx_ntyp env : ntyp -> flexvar = function
+  | Tsimple t -> t
+  | Tcons cn ->
+     let cn = map_ctor_rig (approx_ptyp env) (approx_ntyp env) cn in
+     let fv = fresh_flexvar (flex_level env) in
+     subtype_flex_cons ~error:noerror ~changed:(ref false) env fv cn;
+     fv
+  | _ -> unimp "approx_ntyp"
+
+let rec subtype ~error env (p : ptyp) (n : ntyp) =
+  match p, n with
+  | Tbjoin _, _ | _, Tbjoin _ ->
+     intfail "should be locally closed"
+  | Tcons cp, Tcons cn ->
+     subtype_ctor_rig ~error
+       ~bound:(fun _rv -> unimp "rigid bounds in typ")
+       ~neg:(subtype ~error env)
+       ~pos:(subtype ~error env)
+       cp cn
+  | _, Tpoly _ -> unimp "rigid poly"
+  | Tpoly _, _ -> unimp "flex poly"
+  | p, Tcons cn ->
+     (* FIXME duplicate subtype_t_cons and subtype_flex_cons for better matching behaviour here *)
+     subtype_t_var ~error ~changed:(ref false) env (approx_ptyp env p) (approx_ntyp env (Tcons cn))
+  | p, Tsimple n -> subtype_t_var ~error ~changed:(ref false) env (approx_ptyp env p) n
+
+
+
+(*
 
 (* slightly higher level functions operating on styps
    very incomplete atm, just enough to run tests *)
+
 
 let subtype ~error ~changed env (p : flex_lower_bound) (n : styp_neg) =
   match n with
@@ -344,8 +356,6 @@ let rec lower_of_styp = function
      { ctor = { cons = map_head upper lower_of_styp cons; rigvars = []}; flexvars=  [] }
 
 
-let flexlb_fv fv = { ctor = { cons = Bot; rigvars = [] }; flexvars = [fv] }
-
 
 let upper_of_styp = function
   | Svar (Vflex fv) -> UBvar fv
@@ -362,25 +372,30 @@ let subtype_styp ~error env a b =
   let changed = ref false in
   subtype ~error ~changed env a b;
   assert (not !changed)
+*)
 
 
-let match_styp ~error env p orig_head =
-  let fv = match p with Svar (Vflex fv) -> fv | _ -> failwith "unimp" in
-  let head =
-    map_head
-      (fun iv -> let v = fresh_flexvar fv.level in
-                 Ivar.put iv (styp_flexvar v);
-                 flexlb_fv v)
-      ignore
-      orig_head in
-  (* FIXME: unify with subtype_flex_cons? *)
-  let m = ensure_upper_matches ~error ~changed:(ref false) env fv {cons=head;rigvars=[]} in
-  subtype_cons ~error:noerror
-     ~neg:(fun _t () -> () (*already filled*))
-     ~pos:(fun p' t' -> Ivar.put t' (styp_flexvar p'))
-     m orig_head
-
-
+let match_typ ~error env lvl (p : ptyp) (orig_head : (ntyp Ivar.put, ptyp Ivar.put) cons_head) =
+  match p with
+  | Tbjoin _ -> intfail "should be locally closed"
+  | Tsimple {ctor; flexvars} ->
+     let head =
+       map_head
+         (fun iv -> let v = fresh_flexvar lvl in
+                    Ivar.put iv (Tsimple v);
+                    flexlb_fv v)
+         ignore
+         orig_head in
+     let fv = match ctor, flexvars with { cons = Bot; rigvars = []}, [fv] -> fv | _ -> unimp "match" in
+     (* FIXME: unify with subtype_flex_cons? *)
+     let m = ensure_upper_matches ~error ~changed:(ref false) env fv {cons=head;rigvars=[]} in
+     subtype_cons ~error:noerror
+       ~neg:(fun _t () -> () (*already filled*))
+       ~pos:(fun p' t' -> Ivar.put t' (Tsimple (flexlb_fv p')))
+       m orig_head
+  | Tcons _c ->
+     unimp "Tcons match"
+  | Tpoly _ -> unimp "instantiate on poly match"
 
 
 

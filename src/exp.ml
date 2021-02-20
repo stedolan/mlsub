@@ -64,10 +64,9 @@ and tyexp = tyexp' mayloc and tyexp' =
   | Tfunc of tyexp tuple_fields * tyexp
   | Tparen of tyexp
   | Tjoin of tyexp * tyexp
-  | Tmeet of tyexp * tyexp
 
 and typolybounds =
-  (symbol * ([`Sub|`Sup] * tyexp) option) list
+  (symbol * tyexp option) list
 
 
 module Strip_locations = struct
@@ -108,10 +107,9 @@ module Strip_locations = struct
     | Tfunc (args, ret) -> Tfunc (map_fields (fun _ ty -> tyexp ty) args, tyexp ret)
     | Tparen t -> Tparen (tyexp t)
     | Tjoin (a, b) -> Tjoin (tyexp a, tyexp b)
-    | Tmeet (a, b) -> Tmeet (tyexp a, tyexp b)
   and typolybounds (bounds : typolybounds) =
     bounds |> List.map (fun ((s,_), b) ->
-      ((s,noloc), (b |> Option.map (fun (dir, ty) -> dir, tyexp ty))))
+      ((s,noloc), Option.map tyexp b))
 end
 
 let equal e1 e2 = Strip_locations.(exp e1 = exp e2)

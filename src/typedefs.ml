@@ -4,6 +4,17 @@
 
 module StrMap = Map.Make (struct type t = string let compare = compare end)
 
+exception Internal of string
+let intfail fmt =
+  Printf.ksprintf (fun s -> raise (Internal s)) fmt
+let () = Printexc.register_printer (function Internal s -> Some ("internal error: " ^ s) | _ -> None)
+
+exception Unimplemented of string
+let unimp fmt =
+  Printf.ksprintf (fun s -> raise (Unimplemented s)) fmt
+let () = Printexc.register_printer (function Unimplemented s -> Some ("unimplemented: " ^ s) | _ -> None)
+
+
 (* FIXME move *)
 module Ivar : sig
   type 'a put
@@ -64,7 +75,9 @@ end = struct
   type t =
     { mutable level : int }
 
-  let initial () = { level = 0 }
+  (* FIXME hack. Unfuck env levels soon *)
+  let initlvl = { level = 0 }
+  let initial () = initlvl
   let extend { level } = { level = level + 1 }
   let replace { level } = { level }
 
@@ -128,6 +141,17 @@ and flex_lower_bound =
   { ctor: (flexvar, flex_lower_bound) ctor_ty; flexvars: flexvar list }
 
 
+type ('neg, 'pos) typ =
+  | Tsimple of 'pos
+  | Tcons of (('pos, 'neg) typ, ('neg, 'pos) typ) ctor_ty
+  | Tbjoin of { rest : ('neg, 'pos) typ; index : int; var : int }
+  | Tpoly of {
+     names : int SymMap.t; (* may be incomplete *)
+     bound : ('pos, 'neg) typ array; (* typ because bound variables allowed *)
+     body : ('neg, 'pos) typ }
+
+type ptyp = (flexvar, flex_lower_bound) typ
+type ntyp = (flex_lower_bound, flexvar) typ
 
 type polarity = Pos | Neg
 
@@ -140,7 +164,7 @@ type polarity = Pos | Neg
     - At most one Scons in negative or contravariant joins
  *)
 
-
+(*
 type styp =
   | Scons of (styp, styp) cons_head
   | Sjoin of styp * styp
@@ -150,6 +174,7 @@ and styp_var =
   | Vrigid of rigvar
   | Vflex of flexvar
   | Vbound of { index: int; var: int }
+*)
 
 (* FIXME:
 try something more like this:
@@ -159,7 +184,7 @@ type styp =
   { scons: (styp, styp) ctor_ty; sflex: flexvar list; sbound: boundvar list }
 *)
 
-
+(*
 (* General polymorphic types.  Inference may produce these after
    generalisation, but never instantiates a variable with one. *)
 type typ =
@@ -171,12 +196,12 @@ type typ =
     names : int SymMap.t;  (* may be incomplete *)
     bounds : styp array;   (* FIXME names? *)
     body : typ }
-
+*)
 
 (* Entries in the typing environment *)
 type env_entry =
   (* Binding x : τ *)
-  | Evals of typ SymMap.t
+  | Evals of ptyp SymMap.t
   (* Flexible variables (inferred polymorphism, instantiated ∀⁺)
      FIXME: should these have a separate environment entry at all? *)
   | Eflexible
@@ -266,8 +291,8 @@ let env_rigid_vars env lvl =
   | Erigid r -> r.vars
   | _ -> failwith "error: no rigid vars here"
 
-let env_rigid_bound env lvl var =
-  (env_rigid_vars env lvl).(var).upper
+let env_rigid_bound env (rv : rigvar) =
+  (env_rigid_vars env rv.level).(rv.var).upper
 
 (*
  * Opening/closing of binders
@@ -279,6 +304,7 @@ let map_head_cons pol f fields =
 
 let cons_typ _pol cons = Tcons cons
 
+(*
 let styp_bot = Scons Bot
 let styp_top = Scons Top
 
@@ -287,6 +313,17 @@ let styp_flexvar fv = Svar (Vflex fv)
 let styp_rigvar level var = Svar (Vrigid {level; var})
 let styp_boundvar index var = Svar (Vbound {index; var})
 let styp_cons cons = Scons cons
+*)
+
+
+(* FIXME: bit weird. Should every env level have flex vars (again?) *)
+let rec flex_level env =
+  match env with
+  | Env_cons { entry = Eflexible; level; _ } -> level
+  | Env_cons { rest; _ } -> flex_level rest
+  | _ -> Env_level.initial () (* FIXME hack *)
+(*  | _ -> failwith "nowhere to put a flex var" *) 
+
 
 let next_flexvar_id = ref 0
 let fresh_flexvar level : flexvar =
@@ -781,36 +818,68 @@ let test () =
   
 *)
 
+(*
+ * Unparsing: converting a typ back to a Exp.tyexp
+ *)
 
 let loc : Exp.location =
  { source = "<none>";
    loc_start = {pos_fname="";pos_lnum=0;pos_cnum=0;pos_bol=0};
    loc_end = {pos_fname="";pos_lnum=0;pos_cnum=0;pos_bol=0} }
 
+let mktyexp t = (Some t, loc)
+
 let named_type s : Exp.tyexp' =
   Tnamed ({label=s; shift=0}, loc)
 
-let rec unparse_styp' ~flexvar = function
-  | Scons Top -> named_type "any"
-  | Scons Bot -> named_type "nothing"
-  | Scons Bool -> named_type "bool"
-  | Scons Int -> named_type "int"
-  | Scons String -> named_type "string"
-  | Scons Record fs ->
-     Trecord (Tuple_fields.map_fields (fun _ t -> unparse_styp ~flexvar t) fs)
-  | Scons Func (args, ret) ->
-     Tfunc (Tuple_fields.map_fields (fun _ t -> unparse_styp ~flexvar t) args,
-            unparse_styp ~flexvar ret)
-  | Sjoin (a, b) ->
-     let a = unparse_styp ~flexvar a in
-     let b = unparse_styp ~flexvar b in
-     Tjoin (a, b)
-  | Svar (Vbound _) -> failwith "unparse: vbound"
-  | Svar (Vrigid _) -> failwith "unparse: vrigid"
-  | Svar (Vflex fv) -> flexvar fv
-       
-and unparse_styp ~flexvar t =
-  Some (unparse_styp' ~flexvar t), loc
+let unparse_ctor_ty ~neg ~pos ty =
+  let t = match ty.cons with
+    | Top -> named_type "any"
+    | Bot -> named_type "nothing"
+    | Bool -> named_type "bool"
+    | Int -> named_type "int"
+    | String -> named_type "string"
+    | Record fs ->
+       Trecord (Tuple_fields.map_fields (fun _ t -> pos t) fs)
+    | Func (args, ret) ->
+       Tfunc (Tuple_fields.map_fields (fun _ t -> neg t) args,
+              pos ret) in
+  List.fold_left (fun _t _rv ->
+    failwith "rig var name lookup unimplemented") (mktyexp t) ty.rigvars
+
+let rec unparse_gen_typ :
+  'neg 'pos . neg:('neg -> Exp.tyexp) -> pos:('pos -> Exp.tyexp) ->
+             ('neg,'pos) typ -> Exp.tyexp =
+  fun ~neg ~pos ty -> match ty with
+  | Tsimple t -> pos t
+  | Tcons c -> unparse_ctor_ty ~neg:(unparse_gen_typ ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~neg ~pos) c
+  | Tbjoin { rest=_; index=_; var=_ } ->
+     unimp "unparse bound vars"
+  | Tpoly { names=_; bound=_; body=_ } ->
+     unimp "unparse Tpoly"
+
+let never _ = assert false
+
+let rec unparse_flex_lower_bound ~flexvar { ctor; flexvars } =
+  let t =
+    match ctor with
+    | { cons = Bot; rigvars = [] } -> None
+    | ctor -> Some (unparse_ctor_ty ~neg:flexvar ~pos:(unparse_flex_lower_bound ~flexvar) ctor) in
+  let tjoin a b =
+    match a with
+    | None -> Some b
+    | Some a -> Some (mktyexp (Exp.Tjoin (a, b))) in
+  match
+    List.fold_left (fun t fv -> tjoin t (flexvar fv)) t flexvars
+  with
+  | Some t -> t
+  | None -> unparse_ctor_ty ~neg:never ~pos:never {cons=Bot;rigvars=[]}
+
+
+let unparse_ptyp ~flexvar (t : ptyp) =
+  unparse_gen_typ ~neg:flexvar ~pos:(unparse_flex_lower_bound ~flexvar) t
+let unparse_ntyp ~flexvar (t : ntyp) =
+  unparse_gen_typ ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:flexvar t
 
 
 let flexvar_name fv =

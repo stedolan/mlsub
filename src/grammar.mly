@@ -10,7 +10,6 @@
 %token SUBTYPE SUPTYPE
 
 %nonassoc ARROW
-%left AMPER
 %left VBAR
 %right AS 
 
@@ -187,8 +186,6 @@ tyexp_:
   { Tfunc (parse_tyfields t, r) }
 | t1 = tyexp; VBAR; t2 = tyexp
   { Tjoin(t1, t2) }
-| t1 = tyexp; AMPER; t2 = tyexp
-  { Tmeet(t1, t2) }
 | t = typolybounds; b = tyexp %prec AS (* kinda hack *)
   { Tforall(t, b) }
 
@@ -199,8 +196,6 @@ named_field_typ:
   { Fdots }
 
 typolybound:
-| s = symbol;
-  t = id(SUBTYPE {`Sub} | SUPTYPE {`Sup});
-  b = tyexp
-  { s, Some (t, b) }
+| s = symbol; SUBTYPE;  b = tyexp
+  { s, Some b }
 | s = symbol { s, None }
