@@ -63,8 +63,11 @@ let dump env level (t : ptyp) =
   Printf.printf "changed: %b\n" !changed;
   dump (Tsimple fl);
 
-  let fl = substn 4 fl in
-  dump (Tsimple fl);
+  let bvars = Vector.create () in
+  let fl = substn 4 bvars fl in
+  dump fl;
+  Vector.iteri bvars (fun ix (_, r) ->
+    PPrint.ToChannel.pretty 1. 120 stdout PPrint.(utf8string (Printf.sprintf "  $%d ≤ " ix) ^^ group (Print.tyexp (unparse_ntyp ~flexvar:never !r)) ^^ hardline));
   end;
   print_endline ""
 

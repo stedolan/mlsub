@@ -468,18 +468,36 @@ let is_visited_neg visit fv =
   assert (fv.neg_visit_count land 1 = 0);
   fv.neg_visit_count = visit
 
-let rec substn visit (p : flex_lower_bound) =
-  let ctor = map_ctor_rig (substn_fv_neg visit) (substn visit) p.ctor in
-  let flexvars = p.flexvars |> List.filter (fun pv ->
-    assert (is_visited_pos visit pv); is_visited_neg visit pv) in
-  { ctor; flexvars }
+(* FIXME: index=0 is incorrect once we generalise under binders.
+   (I think this is a sane thing to do ....) *)
 
-and substn_fv_neg visit nv =
+let rec substn visit bvars (p : flex_lower_bound) : ptyp =
+  let ctor = map_ctor_rig (substn_fv_neg visit bvars) (substn visit bvars) p.ctor in
+  let flexvars = p.flexvars |> List.filter_map (fun pv ->
+    if is_visited_neg visit pv then Some (substn_bvar visit bvars pv) else None) in
+  List.fold_left (fun rest var -> Tbjoin { rest; index = 0; var }) (Tcons ctor) flexvars
+
+and substn_fv_neg visit bvars nv : ntyp =
   assert (is_visited_neg visit nv);
-  if is_visited_pos visit nv then nv
-  else match nv.upper with
-  | UBvar v -> substn_fv_neg visit v
-  | _ -> nv (* hack, kinda wrong *)
+  if is_visited_pos visit nv then
+    Tbjoin { rest = Tcons { cons = Bot; rigvars = [] }; index = 0;
+             var = substn_bvar visit bvars nv }
+  else substn_upper visit bvars nv.upper
+
+and substn_upper visit bvars = function
+  | UBvar v -> substn_fv_neg visit bvars v
+  | UBnone -> Tcons { cons = Top; rigvars = [] }
+  | UBcons c -> Tcons (map_ctor_rig (substn visit bvars) (substn_fv_neg visit bvars) c)
+
+and substn_bvar visit bvars fv =
+  assert (is_visited_neg visit fv && is_visited_pos visit fv);
+  if fv.bound_var <> -1 then fv.bound_var else begin
+    let r = ref (Tcons {cons = Top; rigvars = []}) in
+    let n = Vector.push bvars (fv, r) in
+    fv.bound_var <- n;
+    r := substn_upper visit bvars fv.upper;
+    n
+  end
   
 
 

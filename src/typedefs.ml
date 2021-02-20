@@ -119,7 +119,8 @@ type flexvar =
     id: int;
     (* used during generalisation *)
     mutable pos_visit_count : int;
-    mutable neg_visit_count : int }
+    mutable neg_visit_count : int;
+    mutable bound_var : int; }
 
 (* A well-formed negative styp is either:
      - a single flexible variable
@@ -330,7 +331,7 @@ let fresh_flexvar level : flexvar =
   let id = !next_flexvar_id in
   incr next_flexvar_id;
   { level; upper = UBnone; lower = { ctor = { cons = Bot; rigvars = [] } ; flexvars = [] }; id;
-    pos_visit_count = 0; neg_visit_count = 0 }
+    pos_visit_count = 0; neg_visit_count = 0; bound_var = -1 }
 
 
 (*
@@ -847,14 +848,19 @@ let unparse_ctor_ty ~neg ~pos ty =
   List.fold_left (fun _t _rv ->
     failwith "rig var name lookup unimplemented") (mktyexp t) ty.rigvars
 
+let unparse_bound_var index var =
+  mktyexp (named_type (if index = 0 then Printf.sprintf "$%d" var else Printf.sprintf "$%d.%d" index var))
+
 let rec unparse_gen_typ :
   'neg 'pos . neg:('neg -> Exp.tyexp) -> pos:('pos -> Exp.tyexp) ->
              ('neg,'pos) typ -> Exp.tyexp =
   fun ~neg ~pos ty -> match ty with
   | Tsimple t -> pos t
   | Tcons c -> unparse_ctor_ty ~neg:(unparse_gen_typ ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~neg ~pos) c
-  | Tbjoin { rest=_; index=_; var=_ } ->
-     unimp "unparse bound vars"
+  | Tbjoin { rest= Tcons { cons = Bot; rigvars = [] }; index; var } ->
+     unparse_bound_var index var
+  | Tbjoin { rest; index; var } ->
+     mktyexp (Exp.Tjoin (unparse_gen_typ ~neg ~pos rest, unparse_bound_var index var))
   | Tpoly { names=_; bound=_; body=_ } ->
      unimp "unparse Tpoly"
 
