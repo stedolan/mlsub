@@ -205,7 +205,7 @@ and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string option;
-  upper : flex_lower_bound;
+  upper : (flexvar, flex_lower_bound) ctor_ty;
 }
 
 let polneg = function Pos -> Neg | Neg -> Pos

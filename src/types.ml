@@ -174,6 +174,15 @@ let noerror _ = failwith "subtyping error should not be possible here!"
 
 let bottom = {ctor={cons=Bot;rigvars=[]};flexvars=[]}
 
+
+(* FIMXE: more specific type for this? gen isn't very interesting... *)
+let rec subtype_ctor_rig ~error env ~neg ~pos cp cn =
+  cp.rigvars |> List.iter (fun pv ->
+    if cn.cons = Top || contains_rigvar pv cn.rigvars then ()
+    else subtype_ctor_rig ~error env ~neg ~pos (env_rigid_bound env pv.level pv.var) cn);
+  subtype_cons ~error ~neg ~pos cp.cons cn.cons
+
+
 (*
  * Core subtyping functions
  *)
@@ -185,13 +194,7 @@ let rec subtype_t_var ~error ~changed env (p : flex_lower_bound) (nv : flexvar) 
 
 and subtype_t_cons ~error ~changed env (p : flex_lower_bound) (cn : (flex_lower_bound, flexvar) ctor_ty) =
   p.flexvars |> List.iter (fun pv -> subtype_flex_cons ~error ~changed env pv cn);
-  p.ctor.rigvars |> List.iter (fun pv ->
-    if cn.cons = Top || contains_rigvar pv cn.rigvars then ()
-    else subtype_t_cons ~error ~changed env (env_rigid_bound env pv.level pv.var) cn);
-  subtype_cons ~error
-    ~neg:(subtype_t_var ~error ~changed env)
-    ~pos:(subtype_t_var ~error ~changed env)
-    p.ctor.cons cn.cons
+  subtype_ctor_rig ~error env ~neg:(subtype_t_var ~error ~changed env) ~pos:(subtype_t_var ~error ~changed env) p.ctor cn
 
 and subtype_flex_flex ~error ~changed env (pv : flexvar) (nv : flexvar) =
   match pv.upper with
@@ -233,20 +236,15 @@ and flex_cons_upper ~changed env (fv : flexvar) : (flex_lower_bound, flexvar) ct
 
 and subtype_flex_cons ~error ~changed env pv cn =
   let cp = ensure_upper_matches ~error ~changed env pv (map_ctor_rig id ignore cn) in
-  (* FIXME: duplicate rigvars code from subtype_t_cons *)
-  (* FIXME: is the rigvars logic (here/subtype_t_cons/ensure_upper_matches) actually correct? *)
-  cp.rigvars |> List.iter (fun pv ->
-    if cn.cons = Top || contains_rigvar pv cn.rigvars then ()
-    else subtype_t_cons ~error ~changed env (env_rigid_bound env pv.level pv.var) cn);
   subtype_cons ~error
     ~neg:(fun _ () -> () (* already done in ensure_upper_matches *))
     ~pos:(subtype_flex_flex ~error ~changed env)
-    cp.cons cn.cons
+    cp cn.cons
 
 (* Ensure pv has a UBcons upper bound whose head is below a given ctor.
    Returns the constructed upper bound.
    FIXME: poly rather than unit for cn's type *)
-and ensure_upper_matches ~error ~changed env (pv : flexvar) (cn : (flex_lower_bound, unit) ctor_ty) : (unit, flexvar) ctor_ty =
+and ensure_upper_matches ~error ~changed env (pv : flexvar) (cn : (flex_lower_bound, unit) ctor_ty) : (unit, flexvar) cons_head =
   let cp = flex_cons_upper ~changed env pv in
   let changed' = ref false in
   let cons =
@@ -261,6 +259,7 @@ and ensure_upper_matches ~error ~changed env (pv : flexvar) (cn : (flex_lower_bo
   (* FIXME: there are better ways to compute this *)
   if (map_head (fun _ -> ()) (fun _ -> ()) cp.cons <> map_head (fun _ -> ()) (fun _ -> ()) cons)
    then changed' := true;
+  (* FIXME check rigvars logic (also in subtype_ctor_rig) *)
   let rigvars =
     match cp.cons, cn.cons with
     | _, Top -> cp.rigvars
@@ -278,7 +277,7 @@ and ensure_upper_matches ~error ~changed env (pv : flexvar) (cn : (flex_lower_bo
     pv.upper <- UBcons bound;
     subtype_t_cons ~error ~changed env pv.lower bound
   end;
-  { cons = map_head ignore id cons; rigvars }
+  map_head ignore id cons
 
 and subtype_cons_flex ~error ~changed env (cp : (flexvar, flex_lower_bound) ctor_ty) (nv : flexvar) =
   let changed' = ref false in
@@ -374,11 +373,12 @@ let match_styp ~error env p orig_head =
                  flexlb_fv v)
       ignore
       orig_head in
+  (* FIXME: unify with subtype_flex_cons? *)
   let m = ensure_upper_matches ~error ~changed:(ref false) env fv {cons=head;rigvars=[]} in
   subtype_cons ~error:noerror
      ~neg:(fun _t () -> () (*already filled*))
      ~pos:(fun p' t' -> Ivar.put t' (styp_flexvar p'))
-     m.cons orig_head
+     m orig_head
 
 
 
@@ -425,6 +425,7 @@ let rec expand visit ~changed env level (p : flex_lower_bound) =
   let flexvars = p.flexvars in
   flexvars |> List.iter (fun pv ->
     if begin_visit_pos visit pv then begin
+      ignore (flex_cons_upper ~changed env pv); (* ensure upper not UBvar *)
       pv.lower <- expand visit ~changed env level pv.lower;
       end_visit_pos visit pv
     end);
