@@ -144,60 +144,16 @@ and flex_lower_bound =
 
 type ('neg, 'pos) typ =
   | Tsimple of 'pos
-  | Tcons of (('pos, 'neg) typ, ('neg, 'pos) typ) ctor_ty
+  | Tcons of ('neg, 'pos) cons_typ
   | Tbjoin of { rest : ('neg, 'pos) typ; index : int; var : int }
   | Tpoly of {
      names : int SymMap.t; (* may be incomplete *)
-     bound : ('pos, 'neg) typ array; (* typ because bound variables allowed *)
+     bound : ('pos, 'neg) cons_typ array;
      body : ('neg, 'pos) typ }
+and ('neg, 'pos) cons_typ = (('pos, 'neg) typ, ('neg, 'pos) typ) ctor_ty
 
 type ptyp = (flexvar, flex_lower_bound) typ
 type ntyp = (flex_lower_bound, flexvar) typ
-
-type polarity = Pos | Neg
-
-
-(* Simple types (the result of inference). No binders.
-
-   There are some rules about joins:
-    - No bound variables in contravariant joins
-    - No flexible variables in negative joins
-    - At most one Scons in negative or contravariant joins
- *)
-
-(*
-type styp =
-  | Scons of (styp, styp) cons_head
-  | Sjoin of styp * styp
-  | Svar of styp_var
-
-and styp_var =
-  | Vrigid of rigvar
-  | Vflex of flexvar
-  | Vbound of { index: int; var: int }
-*)
-
-(* FIXME:
-try something more like this:
-
-type boundvar = { index: int; var: int }
-type styp =
-  { scons: (styp, styp) ctor_ty; sflex: flexvar list; sbound: boundvar list }
-*)
-
-(*
-(* General polymorphic types.  Inference may produce these after
-   generalisation, but never instantiates a variable with one. *)
-type typ =
-  | Tsimple of styp
-  | Tcons of (typ,typ) cons_head
-  (* Forall *)
-  (* FIXME: maybe change to (poly, body)? *)
-  | Tpoly of {
-    names : int SymMap.t;  (* may be incomplete *)
-    bounds : styp array;   (* FIXME names? *)
-    body : typ }
-*)
 
 (* Entries in the typing environment *)
 type env_entry =
@@ -234,7 +190,6 @@ and rigvar_defn = {
   upper : (flexvar, flex_lower_bound) ctor_ty;
 }
 
-let polneg = function Pos -> Neg | Neg -> Pos
 
 (*
  * Environment ordering
@@ -303,7 +258,49 @@ let env_rigid_bound env (rv : rigvar) =
 let map_head_cons pol f fields =
   map_fields (fun _fn x -> f pol x) fields
 
-let cons_typ _pol cons = Tcons cons
+let cons_ptyp (cons : (ntyp,ptyp) cons_head) : ptyp = Tcons { cons ; rigvars = [] }
+let cons_ntyp (cons : (ptyp,ntyp) cons_head) : ntyp = Tcons { cons ; rigvars = [] }
+
+
+let rec open_typ :
+  'neg 'pos .
+     neg:(('pos,'neg) typ -> int -> ('pos,'neg) typ) ->
+     pos:(('neg,'pos) typ -> int -> ('neg,'pos) typ) ->
+     int -> ('neg,'pos) typ -> ('neg,'pos) typ =
+  fun ~neg ~pos ix t -> match t with
+  | Tsimple _ as s -> s
+  | Tcons c -> Tcons (map_ctor_rig (open_typ ~neg:pos ~pos:neg ix) (open_typ ~neg ~pos ix) c)
+  | Tbjoin { rest; index; var } ->
+     let rest = open_typ ~neg ~pos ix rest in
+     assert (index <= ix);
+     if index = ix then pos rest var
+     else Tbjoin { rest; index; var }
+  | Tpoly { names; bound; body } ->
+     let ix = ix + 1 in
+     Tpoly { names;
+             bound = Array.map (map_ctor_rig (open_typ ~neg ~pos ix)
+                                  (open_typ ~neg:pos ~pos:neg ix)) bound;
+             body = open_typ ~neg ~pos ix body }
+
+let rec map_typ :
+  'neg 'pos 'neg2 'pos2 .
+     neg:(int -> 'neg -> ('pos2, 'neg2) typ) ->
+     pos:(int -> 'pos -> ('neg2, 'pos2) typ) ->
+     int -> ('neg,'pos) typ -> ('neg2,'pos2) typ =
+  fun ~neg ~pos ix t -> match t with
+  | Tsimple s -> pos ix s
+  | Tcons c -> Tcons (map_ctor_rig (map_typ ~neg:pos ~pos:neg ix) (map_typ ~neg ~pos ix) c)
+  | Tbjoin {rest; index; var} ->
+     Tbjoin {rest = map_typ ~neg ~pos ix rest; index; var}
+  | Tpoly {names; bound; body} ->
+     let ix = ix + 1 in
+     Tpoly { names;
+             bound = Array.map (map_ctor_rig (map_typ ~neg ~pos ix)
+                                  (map_typ ~neg:pos ~pos:neg ix)) bound;
+             body = map_typ ~neg ~pos ix body }
+ 
+
+
 
 (*
 let styp_bot = Scons Bot

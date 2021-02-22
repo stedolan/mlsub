@@ -1,6 +1,7 @@
 open Lang
 open Typedefs
 open Types
+module SymMap = Tuple_fields.SymMap
 
 let dump (t : ptyp) =
   let fvs = Hashtbl.create 20 in
@@ -72,32 +73,6 @@ let dump env level (t : ptyp) =
   print_endline ""
 
 
-(*
-let () = 
-  let env = Env_nil in
-  let lvl = Env_level.initial () in
-  let error _ = failwith "nope" in
-  let a = fresh_flexvar lvl in
-  let b = fresh_flexvar lvl in
-  let c = fresh_flexvar lvl in
-  let d = fresh_flexvar lvl in
-  let e = fresh_flexvar lvl in
-  let f = fresh_flexvar lvl in
-  let st p q = subtype_styp ~error env (styp_flexvar p) (UBvar q) in
-  let stcons p c = subtype_styp ~error env (styp_flexvar p) (UBcons {cons=c;rigvars=[]}) in
-  st a b;
-  st d e;
-  stcons c Int;
-  st c d;
-  st e f;
-  stcons e (func (styp_flexvar a) (styp_flexvar b));
-  stcons e (func (styp_flexvar c) (styp_flexvar d));
-  st b c;
-  dump (sjoin (styp_flexvar a) (styp_flexvar f));
-  stcons e (func (styp_flexvar c) (styp_flexvar d));
-  dump (sjoin (styp_flexvar a) (styp_flexvar f))
-*)
-
 (* λ f, g, x . f x or g x *)
 let choosy () =
   let env =  Env_nil and lvl = Env_level.initial () in
@@ -139,11 +114,6 @@ let lbs () =
   subtype ~error env (tcons (func [d2n] r2p)) fn;
   let ty = (tcons (func [r1n;r2n] (tcons (tuple [fp;d1p;d2p])))) in
   dump env lvl ty
-(*
-  let root = gen env lvl ty in
-  dump (styp_of_flex_lower_bound root.lower);
-  dump (gen_subst env lvl root)
-*)
 
 let match_as_fn ~error env lvl f =
   let argp, arg = Ivar.make () in
@@ -195,9 +165,30 @@ let dirbug () =
   subtype ~error env (tcons (func [an] bp)) (tcons (func [cp] dn));
   dump env lvl (tcons (tuple [tcons (func [an] bp); tcons (func [cn] dp)]))
 
+let poly () =
+  next_flexvar_id := 0;
+  let env = Env_nil and _lvl = Env_level.initial () in
+  let error _ = failwith "nope" in
+  let bvar ?(rest=tcons Bot) var = Tbjoin { rest; index=0; var } in
+  let t1 () =
+    Tpoly {names=SymMap.empty;
+           bound = [| {cons=Top;rigvars=[]}; {cons=Top;rigvars=[]} |];
+           body= tcons (func
+                   [bvar 0]
+                   (tcons (func
+                     [bvar 1]
+                     (bvar 1 ~rest:(bvar 0))))) } in
+  let t2 () =
+    Tpoly {names=SymMap.empty;
+           bound = [| {cons= Top; rigvars=[]} |];
+           body = tcons (func [bvar 0] (tcons (func [bvar 0] (bvar 0))))} in
+  subtype ~error env (t1 ()) (t2 ());
+  ()
+  
+
 let () = choosy ()
 let () = lbs ()
 let () = match_bug ()
 let () = chain ()
 let () = dirbug ()
-  
+let () = poly ()

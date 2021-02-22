@@ -11,6 +11,10 @@ type conflict_reason =
 
 let id x = x
 
+(*
+ * Subtyping, meet and join on constructed types
+ *)
+
 let subtype_cons_fields ~error f af bf =
   if bf.fopen = `Closed then begin
     if af.fopen = `Open then error (Extra `Fields);
@@ -88,53 +92,10 @@ let join_cons
 let contains_rigvar (v : rigvar) vs =
   List.exists (fun rv -> rv = v) vs
 
-(*
-let join_var (fb : flex_lower_bound) v =
-  match v with
-  | Vbound _ -> failwith "unexpected Vbound"
-  | v ->
-     if contains_var v fb.vars then fb
-     else { fb with vars = v :: fb.vars }
-*)
 
 (* There are two ways to represent a constraint α ≤ β between two flexible variables.
    (I). Make the upper bound of α be UBvar β. (Ensure also that LB(β) contains LB(α))
    (II). Make the lower bound of β contain α. (Ensure also that UB(α) contains UB(β)) *)
-
-(*
-let rec flexvar_cons_bound (fv : flexvar) =
-  match fv.upper with
-  | UBnone ->
-     (* switch to repr (II), to prevent this ever becoming UBvar *)
-     let triv = { cons = Top; rigvars = [] } in
-     fv.upper <- UBcons triv;
-     triv
-  | UBcons c -> c
-  | UBvar v ->
-     (* Switch to representation (II) *)
-     assert (Env_level.equal fv.level v.level); (* FIXME not true! should hoist here *)
-     v.lower <- join_var v.lower (Vflex fv);
-     fv.upper <- v.upper;
-     (* May recurse several times. FIXME: how do we avoid cycles? *)
-     flexvar_cons_bound fv
-
-let classify_styp_neg (n : styp) =
-  match n with
-  | Svar Vflex nv -> UBvar nv
-  | n ->
-     let rec collect = function
-       | Svar (Vbound _ | Vflex _) -> assert false
-       | Scons cons -> { cons; rigvars = [] }
-       | Svar Vrigid v -> { cons = Bot; rigvars = [v] }
-       | Sjoin (a, b) ->
-          match collect a, collect b with
-          | { cons = Bot; rigvars = v1 }, { cons; rigvars = v2 }
-          | { cons; rigvars = v1 }, { cons = Bot; rigvars = v2 } ->
-             { cons; rigvars = v1 @ v2 }
-          | _ -> assert false in
-     UBcons (collect n)
-*)
-
 
 
 let noerror _ = failwith "subtyping error should not be possible here!"
@@ -256,7 +217,7 @@ and subtype_cons_flex ~error ~changed env (cp : (flexvar, flex_lower_bound) ctor
   end
 
 and join_flexvars ~changed env level lower vs =
-  ignore env; ignore level; (* FIXME hoisting! *)
+  ignore env; ignore level; (* FIXME hoisting! FIXME: really? Surely not? *)
   if lower.ctor.cons = Top then lower
   else
     match List.filter (fun v -> not (List.memq v lower.flexvars)) vs with
@@ -332,49 +293,6 @@ let rec subtype ~error env (p : ptyp) (n : ntyp) =
   | p, Tsimple n -> subtype_t_var ~error ~changed:(ref false) env (approx_ptyp env p) n
 
 
-
-(*
-
-(* slightly higher level functions operating on styps
-   very incomplete atm, just enough to run tests *)
-
-
-let subtype ~error ~changed env (p : flex_lower_bound) (n : styp_neg) =
-  match n with
-  | UBnone -> ()
-  | UBvar nv -> subtype_t_var ~error ~changed env p nv
-  | UBcons cn -> subtype_t_cons ~error ~changed env p cn
-
-
-let rec lower_of_styp = function
-  | Sjoin _ -> failwith "unimp"
-  | Svar (Vflex fv) -> { ctor= { cons = Bot; rigvars = [] }; flexvars = [fv] }
-  | Svar (Vrigid rv) -> { ctor = { cons = Bot; rigvars = [rv] }; flexvars = [] }
-  | Svar (Vbound _) -> assert false
-  | Scons cons ->
-     let upper = function (Svar (Vflex fv)) -> fv | _ -> failwith "unimp" in
-     { ctor = { cons = map_head upper lower_of_styp cons; rigvars = []}; flexvars=  [] }
-
-
-
-let upper_of_styp = function
-  | Svar (Vflex fv) -> UBvar fv
-  | Scons cons ->
-     let ngetfv = function Svar (Vflex fv) -> flexlb_fv fv | _ -> failwith "unimp" in
-     let pgetfv = function Svar (Vflex fv) -> fv | _ -> failwith "unimp" in
-     UBcons { cons = map_head ngetfv pgetfv cons;  rigvars = [] }
-  | _ -> failwith "unimp"
-
-let subtype_styp ~error env a b =
-  let a = lower_of_styp a in
-  let b = upper_of_styp b in
-  subtype ~error ~changed:(ref false) env a b;
-  let changed = ref false in
-  subtype ~error ~changed env a b;
-  assert (not !changed)
-*)
-
-
 let match_typ ~error env lvl (p : ptyp) (orig_head : (ntyp Ivar.put, ptyp Ivar.put) cons_head) =
   match p with
   | Tbjoin _ -> intfail "should be locally closed"
@@ -434,6 +352,14 @@ let end_visit_neg visit fv =
   assert (fv.neg_visit_count = visit - 1);
   fv.neg_visit_count <- visit
 
+let is_visited_pos visit fv =
+  assert (fv.pos_visit_count land 1 = 0);
+  fv.pos_visit_count = visit
+
+let is_visited_neg visit fv =
+  assert (fv.neg_visit_count land 1 = 0);
+  fv.neg_visit_count = visit
+
 
 let rec expand visit ~changed env level (p : flex_lower_bound) =
   let ctor = map_ctor_rig (expand_fv_neg visit ~changed env level) (expand visit ~changed env level) p.ctor in
@@ -459,14 +385,6 @@ and expand_fv_neg visit ~changed env level nv =
   nv
 
 
-
-let is_visited_pos visit fv =
-  assert (fv.pos_visit_count land 1 = 0);
-  fv.pos_visit_count = visit
-
-let is_visited_neg visit fv =
-  assert (fv.neg_visit_count land 1 = 0);
-  fv.neg_visit_count = visit
 
 (* FIXME: index=0 is incorrect once we generalise under binders.
    (I think this is a sane thing to do ....) *)
@@ -503,6 +421,44 @@ and substn_bvar visit bvars fv =
 
 
 
+
+
+
+
+
+
+
+
+
+
+let open_ptyp env (vars : flexvar array) (t : ptyp) : ptyp =
+  let neg typ v =
+    match typ with
+    | Tcons { cons = Bot; rigvars = [] } -> Tsimple vars.(v)
+    | _ -> intfail "open_ptyp: contravariant join" in
+  let pos typ v =
+    (* FIXME: not really approx.
+       How do we prevent typ=Tpoly? Should maybe match & error? *)
+    let typ = approx_ptyp env typ in
+    (* FIXME: join_flexvars should be simpler than this. *)
+    Tsimple (join_flexvars ~changed:(ref false) env (flex_level env) typ [vars.(v)]) in
+  open_typ ~neg ~pos 0 t
+
+let open_ntyp (vars : rigvar array) (t : ntyp) : ntyp =
+  let rec neg (typ : ntyp) v =
+    match typ with
+    | Tcons { cons; rigvars } ->
+       if contains_rigvar vars.(v) rigvars then typ
+       else Tcons { cons; rigvars = vars.(v) :: rigvars }
+    | Tsimple _ -> intfail "open_ntyp: negative flexvar join"
+    | Tbjoin { rest; index; var } -> Tbjoin { rest = neg rest v; index; var }
+    | Tpoly _ -> intfail "Tpoly should not be joined" in
+  let pos (typ : ptyp) v : ptyp =
+    match typ with
+    | Tcons { cons = Bot; rigvars = [] } ->
+       Tsimple { ctor = { cons = Bot; rigvars = [vars.(v)] }; flexvars = [] }
+    | _ -> intfail "open_ntyp: contravariant join" in
+  open_typ ~neg:pos ~pos:neg 0 t
 
 
 
