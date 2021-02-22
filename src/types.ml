@@ -260,43 +260,114 @@ let fresh_flow lvl : ntyp * ptyp =
   let fv = fresh_flexvar lvl in
   Tsimple fv, Tsimple (flexlb_fv fv)
 
+let fresh_below env cn =
+  let fv = fresh_flexvar (env_level env) in
+  subtype_flex_cons ~error:noerror ~changed:(ref false) env fv cn;
+  fv
+
+let rec simple_ptyp env : ptyp -> flex_lower_bound = function
+  | Tsimple t -> t
+  | Tcons cp -> { ctor = map_ctor_rig (simple_ntyp_var env) (simple_ptyp env) cp; flexvars = [] }
+  | Tpoly _ -> intfail "simple_ptyp: Tpoly is not simple"
+  | Tvjoin (_, Vbound _) | Tvar (Vbound _) -> intfail "simple_ptyp: not locally closed"
+  | Tvar (Vflex fv) -> { ctor = {cons=Bot;rigvars=[]}; flexvars = [fv] }
+  | Tvar (Vrigid rv) -> { ctor = {cons=Bot; rigvars=[rv]}; flexvars = [] }
+  | Tvjoin (t, Vflex fv) ->
+     join_flexvars ~changed:(ref false) env (env_level env) (simple_ptyp env t) [fv]
+  | Tvjoin (t, Vrigid rv) ->
+     let {ctor={cons;rigvars};flexvars} = simple_ptyp env t in
+     {ctor={cons;rigvars=if contains_rigvar rv rigvars then rigvars else rv::rigvars};flexvars}
+
+and simple_ntyp env : ntyp -> styp_neg = function
+  | Tsimple t -> UBvar t
+  | Tcons {cons=Top; rigvars=_} -> UBnone
+  | Tcons cn ->
+     UBcons (map_ctor_rig (simple_ptyp env) (simple_ntyp_var env) cn)
+  | Tpoly _ -> intfail "simple_ntyp: Tpoly is not simple"
+  | Tvjoin (_, Vbound _) | Tvar (Vbound _) -> intfail "simple_ntyp: not locally closed"
+  | Tvar (Vflex fv) -> UBvar fv
+  | Tvar (Vrigid rv) -> UBcons {cons=Bot; rigvars=[rv]}
+  | Tvjoin (_, Vflex _) -> intfail "simple_ntyp: negative join"
+  | Tvjoin (t, Vrigid rv) ->
+     match simple_ntyp env t with
+     | UBnone -> UBnone
+     | UBvar _ -> intfail "simple_ntyp: rigid/flex negative join"
+     | UBcons {cons;rigvars} ->
+        let rigvars = if contains_rigvar rv rigvars then rigvars else rv::rigvars in
+        UBcons {cons;rigvars}
+
+and simple_ntyp_var env (t : ntyp) : flexvar =
+  match simple_ntyp env t with
+  | UBnone -> fresh_flexvar (env_level env)
+  | UBvar v -> v
+  | UBcons cn -> fresh_below env cn
 
 let rec approx_ptyp env : ptyp -> flex_lower_bound = function
-  | Tsimple t -> t
   | Tcons cp -> { ctor = map_ctor_rig (approx_ntyp env) (approx_ptyp env) cp; flexvars = [] }
-  | _ -> unimp "approx_ptyp"
+  | Tpoly _ -> unimp "approx_ptyp: Tpoly"
+  | (Tvar _ | Tvjoin _ | Tsimple _) as t -> simple_ptyp env t
 
 and approx_ntyp env : ntyp -> flexvar = function
-  | Tsimple t -> t
   | Tcons cn ->
      let cn = map_ctor_rig (approx_ptyp env) (approx_ntyp env) cn in
-     let fv = fresh_flexvar (flex_level env) in
+     let fv = fresh_flexvar (env_level env) in
      subtype_flex_cons ~error:noerror ~changed:(ref false) env fv cn;
      fv
-  | _ -> unimp "approx_ntyp"
+  | Tpoly _ -> unimp "approx_ntyp: Tpoly"
+  | (Tvar _ | Tvjoin _ | Tsimple _) as t -> simple_ntyp_var env t
+
+
+let open_typ_rigid vars t =
+  open_typ (fun i -> Vrigid vars.(i)) 0 t
+let open_typ_flex vars t =
+  open_typ (fun i -> Vflex vars.(i)) 0 t
 
 let rec subtype ~error env (p : ptyp) (n : ntyp) =
   match p, n with
-  | Tbjoin _, _ | _, Tbjoin _ ->
-     intfail "should be locally closed"
   | Tcons cp, Tcons cn ->
      subtype_ctor_rig ~error
        ~bound:(fun _rv -> unimp "rigid bounds in typ")
        ~neg:(subtype ~error env)
        ~pos:(subtype ~error env)
        cp cn
-  | _, Tpoly _ -> unimp "rigid poly"
-  | Tpoly _, _ -> unimp "flex poly"
+  | p, Tpoly {names=_; bound; body} ->
+     let level = Env_level.extend (env_level env) in
+     let vars = Array.init (Array.length bound) (fun var -> {level; var}) in
+     let rig_defns = Array.map (fun _ -> { name = None; upper = {cons=Top;rigvars=[]}}) bound in
+     let env = Env_types { level; rig_names = SymMap.empty; rig_defns; rest = env} in
+     for i = 0 to Array.length bound - 1 do
+       rig_defns.(i) <- { name = None;
+                          upper = map_ctor_rig (fun t -> simple_ntyp_var env (open_typ_rigid vars t))
+                                    (fun t -> simple_ptyp env (open_typ_rigid vars t)) bound.(i) }
+     done;
+     let body = open_typ_rigid vars body in
+     let env' = Env_types { level; rig_names = SymMap.empty; rig_defns; rest = env } in
+     subtype ~error env' p body
+  | Tpoly {names=_; bound; body}, n ->
+     let level = Env_level.extend (env_level env) in
+     let env = Env_types { level; rig_names = SymMap.empty; rig_defns = [| |]; rest = env } in
+     let vars = Array.init (Array.length bound) (fun _ -> fresh_flexvar level) in
+     Array.iter2 (fun fv b ->
+       let b = map_ctor_rig
+                 (fun t -> simple_ptyp env (open_typ_flex vars t))
+                 (fun t -> simple_ntyp_var env (open_typ_flex vars t)) b in
+       subtype_t_cons ~error:noerror ~changed:(ref false) env (flexlb_fv fv) b
+     ) vars bound;
+     let body = open_typ_flex vars body in
+     subtype ~error env body n
   | p, Tcons cn ->
      (* FIXME duplicate subtype_t_cons and subtype_flex_cons for better matching behaviour here *)
      subtype_t_var ~error ~changed:(ref false) env (approx_ptyp env p) (approx_ntyp env (Tcons cn))
-  | p, Tsimple n -> subtype_t_var ~error ~changed:(ref false) env (approx_ptyp env p) n
+  | p, n -> subtype_t_var ~error ~changed:(ref false) env (approx_ptyp env p) (approx_ntyp env n)
 
 
 let match_typ ~error env lvl (p : ptyp) (orig_head : (ntyp Ivar.put, ptyp Ivar.put) cons_head) =
   match p with
-  | Tbjoin _ -> intfail "should be locally closed"
-  | Tsimple {ctor; flexvars} ->
+  | Tcons _c ->
+     unimp "Tcons match"
+(* FIXME unneeded, approx_ptyp works?  | Tpoly _ -> unimp "instantiate on poly match" *)
+  | t ->
+     let {ctor; flexvars} = approx_ptyp env t in
      let head =
        map_head
          (fun iv -> let v = fresh_flexvar lvl in
@@ -311,9 +382,6 @@ let match_typ ~error env lvl (p : ptyp) (orig_head : (ntyp Ivar.put, ptyp Ivar.p
        ~neg:(fun _t () -> () (*already filled*))
        ~pos:(fun p' t' -> Ivar.put t' (Tsimple (flexlb_fv p')))
        m orig_head
-  | Tcons _c ->
-     unimp "Tcons match"
-  | Tpoly _ -> unimp "instantiate on poly match"
 
 
 
@@ -393,13 +461,13 @@ let rec substn visit bvars (p : flex_lower_bound) : ptyp =
   let ctor = map_ctor_rig (substn_fv_neg visit bvars) (substn visit bvars) p.ctor in
   let flexvars = p.flexvars |> List.filter_map (fun pv ->
     if is_visited_neg visit pv then Some (substn_bvar visit bvars pv) else None) in
-  List.fold_left (fun rest var -> Tbjoin { rest; index = 0; var }) (Tcons ctor) flexvars
+  List.fold_left (fun rest var -> Tvjoin (rest, Vbound {index = 0; var})) (Tcons ctor) flexvars
 
 and substn_fv_neg visit bvars nv : ntyp =
   assert (is_visited_neg visit nv);
   if is_visited_pos visit nv then
-    Tbjoin { rest = Tcons { cons = Bot; rigvars = [] }; index = 0;
-             var = substn_bvar visit bvars nv }
+    Tvar (Vbound { index = 0;
+                   var = substn_bvar visit bvars nv })
   else substn_upper visit bvars nv.upper
 
 and substn_upper visit bvars = function
@@ -430,35 +498,6 @@ and substn_bvar visit bvars fv =
 
 
 
-
-let open_ptyp env (vars : flexvar array) (t : ptyp) : ptyp =
-  let neg typ v =
-    match typ with
-    | Tcons { cons = Bot; rigvars = [] } -> Tsimple vars.(v)
-    | _ -> intfail "open_ptyp: contravariant join" in
-  let pos typ v =
-    (* FIXME: not really approx.
-       How do we prevent typ=Tpoly? Should maybe match & error? *)
-    let typ = approx_ptyp env typ in
-    (* FIXME: join_flexvars should be simpler than this. *)
-    Tsimple (join_flexvars ~changed:(ref false) env (flex_level env) typ [vars.(v)]) in
-  open_typ ~neg ~pos 0 t
-
-let open_ntyp (vars : rigvar array) (t : ntyp) : ntyp =
-  let rec neg (typ : ntyp) v =
-    match typ with
-    | Tcons { cons; rigvars } ->
-       if contains_rigvar vars.(v) rigvars then typ
-       else Tcons { cons; rigvars = vars.(v) :: rigvars }
-    | Tsimple _ -> intfail "open_ntyp: negative flexvar join"
-    | Tbjoin { rest; index; var } -> Tbjoin { rest = neg rest v; index; var }
-    | Tpoly _ -> intfail "Tpoly should not be joined" in
-  let pos (typ : ptyp) v : ptyp =
-    match typ with
-    | Tcons { cons = Bot; rigvars = [] } ->
-       Tsimple { ctor = { cons = Bot; rigvars = [vars.(v)] }; flexvars = [] }
-    | _ -> intfail "open_ntyp: contravariant join" in
-  open_typ ~neg:pos ~pos:neg 0 t
 
 
 

@@ -75,7 +75,7 @@ let dump env level (t : ptyp) =
 
 (* λ f, g, x . f x or g x *)
 let choosy () =
-  let env =  Env_nil and lvl = Env_level.initial () in
+  let env =  Env_nil and lvl = Env_level.initial in
   let error _ = failwith "nope" in
   let fn, fp = fresh_flow lvl in
   let gn, gp = fresh_flow lvl in
@@ -101,7 +101,7 @@ let choosy () =
 
 let lbs () =
   next_flexvar_id := 0;
-  let env = Env_nil and lvl = Env_level.initial () in
+  let env = Env_nil and lvl = Env_level.initial in
   let error _ = failwith "nope" in
   let fn, fp = fresh_flow lvl in
   let d1n, d1p = fresh_flow lvl in
@@ -124,7 +124,7 @@ let match_as_fn ~error env lvl f =
 
 let match_bug () =
   next_flexvar_id := 0;
-  let env = Env_nil and lvl = Env_level.initial () in
+  let env = Env_nil and lvl = Env_level.initial in
   let error _ = failwith "nope" in
   let an, ap = fresh_flow lvl in
   let bn, bp = fresh_flow lvl in
@@ -137,7 +137,7 @@ let match_bug () =
 
 let chain () =
   next_flexvar_id := 0;
-  let env = Env_nil and lvl = Env_level.initial () in
+  let env = Env_nil and lvl = Env_level.initial in
   let error _ = failwith "nope" in
   let a = Array.init 10 (fun _ -> fresh_flow lvl) in
   let n = Array.map fst a and p = Array.map snd a in
@@ -156,7 +156,7 @@ let chain () =
 
 let dirbug () =
   next_flexvar_id := 0;
-  let env = Env_nil and lvl = Env_level.initial () in
+  let env = Env_nil and lvl = Env_level.initial in
   let error _ = failwith "nope" in
   let an, _ap = fresh_flow lvl in
   let _bn, bp = fresh_flow lvl in
@@ -167,9 +167,12 @@ let dirbug () =
 
 let poly () =
   next_flexvar_id := 0;
-  let env = Env_nil and _lvl = Env_level.initial () in
+  let env = Env_nil and _lvl = Env_level.initial in
   let error _ = failwith "nope" in
-  let bvar ?(rest=tcons Bot) var = Tbjoin { rest; index=0; var } in
+  let bvar ?(index=0) ?(rest) var =
+    match rest with
+    | None -> Tvar (Vbound {index; var})
+    | Some rest -> Tvjoin (rest, Vbound{index; var}) in
   let t1 () =
     Tpoly {names=SymMap.empty;
            bound = [| {cons=Top;rigvars=[]}; {cons=Top;rigvars=[]} |];
@@ -182,7 +185,24 @@ let poly () =
     Tpoly {names=SymMap.empty;
            bound = [| {cons= Top; rigvars=[]} |];
            body = tcons (func [bvar 0] (tcons (func [bvar 0] (bvar 0))))} in
+  let t3 () =
+    Tpoly {names=SymMap.empty;
+           bound = [| {cons=Top; rigvars=[]} |];
+           body = tcons (func [bvar 0] (
+             Tpoly {names=SymMap.empty;
+                    bound=[| {cons=Top; rigvars=[]} |];
+                    body = tcons (func [bvar 0] (bvar ~index:1 ~rest:(bvar 0) 0))}))} in
+  print_endline "t1 = t2";
   subtype ~error env (t1 ()) (t2 ());
+  subtype ~error env (t2 ()) (t1 ());
+  print_endline "t3 <= t1, t2";
+  subtype ~error env (t3 ()) (t2 ());
+  subtype ~error env (t3 ()) (t1 ());
+  let sub = ref true in
+  subtype ~error:(fun _ -> sub := false) env (t1 ()) (t3 ());
+  Printf.printf "t1 <= t3: %b\n" !sub;
+            
+(*  subtype ~error env (t2 ()) (t3 ());*)
   ()
   
 
