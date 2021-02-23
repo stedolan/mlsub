@@ -333,16 +333,13 @@ let rec subtype ~error env (p : ptyp) (n : ntyp) =
   | p, Tpoly {names=_; bound; body} ->
      let level = Env_level.extend (env_level env) in
      let vars = Array.init (Array.length bound) (fun var -> {level; var}) in
-     let rig_defns = Array.map (fun _ -> { name = None; upper = {cons=Top;rigvars=[]}}) bound in
-     let env = Env_types { level; rig_names = SymMap.empty; rig_defns; rest = env} in
-     for i = 0 to Array.length bound - 1 do
-       rig_defns.(i) <- { name = None;
-                          upper = map_ctor_rig (fun t -> simple_ntyp_var env (open_typ_rigid vars t))
-                                    (fun t -> simple_ptyp env (open_typ_rigid vars t)) bound.(i) }
-     done;
+     let rig_defns = Array.map (fun b ->
+       { name = None;
+         upper = map_ctor_rig (fun t -> simple_ntyp_var env (open_typ_rigid vars t))
+                   (fun t -> simple_ptyp env (open_typ_rigid vars t)) b }) bound in
      let body = open_typ_rigid vars body in
-     let env' = Env_types { level; rig_names = SymMap.empty; rig_defns; rest = env } in
-     subtype ~error env' p body
+     let env = Env_types { level; rig_names = SymMap.empty; rig_defns; rest = env} in
+     subtype ~error env p body
   | Tpoly {names=_; bound; body}, n ->
      let level = Env_level.extend (env_level env) in
      let env = Env_types { level; rig_names = SymMap.empty; rig_defns = [| |]; rest = env } in

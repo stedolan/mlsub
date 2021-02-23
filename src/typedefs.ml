@@ -93,7 +93,7 @@ end
 type env_level = Env_level.t
 
 (* Rigid variables are immutable.
-   Their bounds are stored in the environment (FIXME: should they be?) *)
+   Their bounds are stored in the environment. *)
 type rigvar =
   { level: env_level;
     var: int }
