@@ -606,54 +606,59 @@ let enter_poly' pol env names vars flow =
  * Well-formedness checks.
  *)
 
-let rec wf_flexvar env lvl (fv : flexvar) =
+let rec wf_flexvar ~seen env lvl (fv : flexvar) =
+  if Hashtbl.mem seen fv.id then () else begin
+  Hashtbl.add seen fv.id ();
   assert (Env_level.extends fv.level lvl);
   if not (Env_level.equal fv.level Env_level.initial) then
     ignore (env_rigid_vars env fv.level);
   (* FIXME rectypes *)
-  wf_flex_lower_bound env fv.level fv.lower;
+  List.iter (fun fv' -> assert (fv != fv')) fv.lower.flexvars;
+  wf_flex_lower_bound ~seen env fv.level fv.lower;
   match fv.upper with
   | UBnone -> assert (fv.lower = {ctor={cons=Bot;rigvars=[]};flexvars=[]})
   | UBvar v ->
      assert (fv.lower = {ctor={cons=Bot;rigvars=[]};flexvars=[]});
      (* FIXME: same level? *)
-     wf_flexvar env fv.level v
+     wf_flexvar ~seen env fv.level v
   | UBcons cn ->
-     map_ctor_rig (wf_flex_lower_bound env fv.level) (wf_flexvar env fv.level) cn |> ignore
+     map_ctor_rig (wf_flex_lower_bound ~seen env fv.level) (wf_flexvar ~seen env fv.level) cn |> ignore
+  end
 
 and wf_rigvar env lvl (rv : rigvar) =
   assert (Env_level.extends rv.level lvl);
   let rvs = env_rigid_vars env rv.level in
   assert (0 <= rv.var && rv.var < IArray.length rvs)
 
-and wf_flex_lower_bound env lvl ({ctor={cons;rigvars}; flexvars} : flex_lower_bound) =
+and wf_flex_lower_bound ~seen env lvl ({ctor={cons;rigvars}; flexvars} : flex_lower_bound) =
   (* FIXME check for duplicate vars? (Not really a problem, but annoying) *)
-  List.iter (wf_flexvar env lvl) flexvars;
+  List.iter (wf_flexvar ~seen env lvl) flexvars;
   List.iter (wf_rigvar env lvl) rigvars;
-  map_head (wf_flexvar env lvl) (wf_flex_lower_bound env lvl) cons |> ignore
+  map_head (wf_flexvar ~seen env lvl) (wf_flex_lower_bound ~seen env lvl) cons |> ignore
 
 
 
-let wf_var env ext = function
-  | Vflex fv -> wf_flexvar env fv.level fv
+let wf_var ~seen env ext = function
+  | Vflex fv -> wf_flexvar ~seen env fv.level fv
   | Vrigid rv -> wf_rigvar env rv.level rv
   | Vbound {index; var} ->
      assert (0 <= index && index < List.length ext);
      assert (0 <= var && var < snd (List.nth ext index))
 
 let rec wf_typ : 'pos 'neg .
+  seen:_ ->
   neg:('neg -> unit) ->
   pos:('pos -> unit) ->
   ispos:bool -> env -> (bool * int) list -> ('neg, 'pos) typ -> unit =
-  fun ~neg ~pos ~ispos env ext ty ->
+  fun ~seen ~neg ~pos ~ispos env ext ty ->
   match ty with
   | Tsimple s -> pos s
   | Tcons c ->
-     map_head (wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) (wf_typ ~neg ~pos ~ispos env ext) c |> ignore
-  | Tvar v -> wf_var env ext v
+     map_head (wf_typ ~seen ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) (wf_typ ~seen ~neg ~pos ~ispos env ext) c |> ignore
+  | Tvar v -> wf_var ~seen env ext v
   | Tvjoin (t, v) ->
-     wf_typ ~neg ~pos ~ispos env ext t;
-     wf_var env ext v;
+     wf_typ ~seen ~neg ~pos ~ispos env ext t;
+     wf_var ~seen env ext v;
      begin match v with
      | Vbound v -> assert (fst (List.nth ext v.index) = ispos); (* covariant *)
      | Vflex _ -> assert ispos; (* positive *)
@@ -666,13 +671,15 @@ let rec wf_typ : 'pos 'neg .
      IArray.iter (fun (_, c) ->
        (* FIXME: constraints on c. Can it be e.g. Tsimple?
           Not Vflex, at least. Prob not same binder either. *)
-       wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext c) vars;
-     wf_typ ~neg ~pos ~ispos env ext body
+       wf_typ ~seen ~neg:pos ~pos:neg ~ispos:(not ispos) env ext c) vars;
+     wf_typ ~seen ~neg ~pos ~ispos env ext body
 
 let wf_ptyp env (t : ptyp) =
-  wf_typ ~neg:(wf_flexvar env (env_level env)) ~pos:(wf_flex_lower_bound env (env_level env)) ~ispos:true env [] t
+  let seen = Hashtbl.create 10 in
+  wf_typ ~seen ~neg:(wf_flexvar ~seen env (env_level env)) ~pos:(wf_flex_lower_bound ~seen env (env_level env)) ~ispos:true env [] t
 let wf_ntyp env (t : ntyp) =
-  wf_typ ~neg:(wf_flex_lower_bound env (env_level env)) ~pos:(wf_flexvar env (env_level env)) ~ispos:false env [] t
+  let seen = Hashtbl.create 10 in 
+  wf_typ ~seen ~neg:(wf_flex_lower_bound ~seen env (env_level env)) ~pos:(wf_flexvar ~seen env (env_level env)) ~ispos:false env [] t
 
 
 

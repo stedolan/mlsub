@@ -87,7 +87,7 @@ let run_cmd s =
        Types.subtype ~error:Check.report Env_nil t1 t2
      with
       | () -> println "ok"
-      | exception ((Assert_failure _ | Typedefs.Internal _) as e) ->
+      | exception ((Assert_failure _ | Typedefs.Internal _ | Stack_overflow) as e) ->
          println "exception: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
       | exception e -> println "typechecking error: %s" (Printexc.to_string e))
   | Error _ -> println "parse error"

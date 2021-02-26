@@ -114,20 +114,11 @@ let bottom = {ctor={cons=Bot;rigvars=[]};flexvars=[]}
 
 
 
-let join_flexvars ~changed lower vs =
-  if lower.ctor.cons = Top then lower
-  else
-    match List.filter (fun v -> not (List.memq v lower.flexvars)) vs with
-    | [] -> lower
-    | vs -> changed := true; { lower with flexvars = lower.flexvars @ vs }
-
-
 let fresh_flexvar level = fresh_flexvar_gen level UBnone
 
-(* equivalent to making a fresh var and constraining <= fv *)
+(* equivalent to making a fresh var and constraining <= fv
+   fv must be at or below lvl *)
 let fresh_below_var lvl fv =
-  (* FIXME does this need a level equality check? Can UBvar cross levels?
-     Hard to avoid because hoisting. *)
   assert (Env_level.extends fv.level lvl);
   fresh_flexvar_gen lvl (UBvar fv)
 
@@ -142,8 +133,44 @@ let fresh_below_cons lvl {cons;rigvars} =
   let cons = map_head id (fresh_below_var lvl) cons in
   fresh_flexvar_gen lvl (UBcons {cons;rigvars})
 
+(* add some flexvars to a join.
+   does not check levels, so level of resulting join may increase *)
+let join_flexvars ~changed lower vs =
+  if lower.ctor.cons = Top then lower
+  else
+    match List.filter (fun v -> not (List.memq v lower.flexvars)) vs with
+    | [] -> lower
+    | vs -> changed := true; { lower with flexvars = lower.flexvars @ vs }
 
-(* FIXME hoisting is absent here *)
+(* Convert a flexvar's upper bound to UBcons form. May decrease levels. *)
+let rec flex_cons_upper ~changed env (fv : flexvar) : (flex_lower_bound, flexvar) ctor_ty =
+  match fv.upper with
+  | UBcons c -> c
+  | UBnone ->
+     let triv = { cons = Top; rigvars = [] } in
+     changed := true;
+     fv.upper <- UBcons triv;
+     triv
+  | UBvar v ->
+     (* FIXME rectypes & ordering. Prevent UBvar cycles somehow? *)
+     changed := true;
+     assert (fv.lower = { ctor = { cons = Bot; rigvars = [] } ; flexvars = [] });
+     assert (Env_level.extends v.level fv.level);
+     let upper = flex_cons_upper ~changed env v in (* NB: may hoist v! *)
+     if not (Env_level.equal v.level fv.level) then begin
+       (* Hoist fv. Bounds known trivial, so no work needed there *)
+       fv.level <- v.level
+     end;
+     v.lower <- join_flexvars ~changed v.lower [fv]; (* wf: levels equal *)
+     (* To preserve matchability, need to freshen the strictly covariant variables in pv.upper. *)
+     (* FIXME: why only strictly covariant? Is there a bug here?
+        How are the non-strictly-covariant ones joined?
+        See also fresh_below_cons, same deal. *)
+     (* No hoisting needed since we're at the same level as v *)
+     let upper = map_ctor_rig id (fresh_below_var fv.level) upper in
+     fv.upper <- UBcons upper;
+     upper
+
 
 let rec subtype_t_var ~error ~changed env (p : flex_lower_bound) (nv : flexvar) =
   p.flexvars |> List.iter (fun pv -> subtype_flex_flex ~error ~changed env pv nv);
@@ -164,40 +191,23 @@ and subtype_ctor_rig ~error ~changed env cp cn =
 and subtype_flex_flex ~error ~changed env (pv : flexvar) (nv : flexvar) =
   match pv.upper with
   | _ when List.memq pv nv.lower.flexvars -> ()
-  | UBvar nv' when nv == nv' -> ()
-  | UBnone when Env_level.equal pv.level nv.level ->
-     (* FIXME: is the level check needed? *)
+  | UBvar nv' when nv == nv' ->
+     (* FIXME there are more cases we could ignore! *)
+     ()
+  | UBnone when Env_level.extends nv.level pv.level ->
      changed := true;
      pv.upper <- UBvar nv; (* FIXME: can this make a cycle? *)
      subtype_t_var ~error ~changed env pv.lower nv
   | _ ->
-     changed := true;
+     (* FIXME detect other no-op cases *)
      (* FIXME rectypes support affected by ordering here *)
-     (* FIXME hoisting *)
+     let upper = flex_cons_upper ~changed env nv in
      nv.lower <- join_flexvars ~changed nv.lower [pv];
-     let bound = flex_cons_upper ~changed env nv in
-     subtype_flex_cons ~error ~changed env pv bound
-
-and flex_cons_upper ~changed env (fv : flexvar) : (flex_lower_bound, flexvar) ctor_ty =
-  match fv.upper with
-  | UBcons c -> c
-  | UBnone ->
-     let triv = { cons = Top; rigvars = [] } in
-     changed := true;
-     fv.upper <- UBcons triv;
-     triv
-  | UBvar v ->
-     v.lower <- join_flexvars ~changed v.lower [fv];
-     let upper = flex_cons_upper ~changed env v in
-     (* To preserve matchability, need to freshen the strictly covariant variables in pv.upper. *)
-     (* FIXME: fv.level? Can that change during subtype_flex_flex because hoisting? *)
-     let upper = 
-       map_ctor_rig
-         id
-         (fun v -> let v' = fresh_flexvar fv.level in
-                   subtype_flex_flex ~error:noerror ~changed env v' v; v') upper in
-     fv.upper <- UBcons upper;
-     upper
+     (* FIXME: maybe flex_cons_upper should return level? TOCTOU otherwise *)
+     (* FIXME: ordering of side-effects here *)
+     hoist_flex ~changed env nv.level pv;
+     assert (Env_level.extends pv.level nv.level);
+     subtype_flex_cons ~error ~changed env pv upper
 
 and subtype_flex_cons ~error ~changed env pv cn =
   let cp = ensure_upper_matches ~error ~changed env pv (map_ctor_rig id ignore cn) in
@@ -234,7 +244,7 @@ and ensure_upper_matches ~error ~changed env (pv : flexvar) (cn : (flex_lower_bo
       ~nright:id
       ~nboth:(fun _ cn -> cn)
       ~pleft:(fun _ -> assert false)
-      ~pright:(fun _ -> fresh_flexvar (env_level env))
+      ~pright:(fun _ -> fresh_flexvar (env_level env)) (* ignore, but var required *)
       ~pboth:(fun v () -> v)
       cons cn.cons in
   assert (map_head ignore ignore cn.cons = map_head ignore ignore cn');
@@ -260,6 +270,7 @@ and ensure_upper_matches ~error ~changed env (pv : flexvar) (cn : (flex_lower_bo
     let cnrig =
       cn.rigvars |> List.filter (fun vn ->
         if contains_rigvar vn cb.rigvars then false (* already included *)
+        else if not (Env_level.extends vn.level pv.level) then false (* scope escape *)
         else spec_sub vn cb) in
     cbrig @ cnrig in
   if rigvars <> cb.rigvars then changed' := true;
@@ -269,6 +280,7 @@ and ensure_upper_matches ~error ~changed env (pv : flexvar) (cn : (flex_lower_bo
   if !changed' then begin
     changed := true;
     let bound = { cons; rigvars } in
+    (* FIXME is this all still wf, despite hoisting? *)
     pv.upper <- UBcons bound;
     subtype_t_cons ~error ~changed env pv.lower bound
   end;
@@ -278,6 +290,8 @@ and subtype_cons_flex ~error ~changed env (cp : (flexvar, flex_lower_bound) ctor
   let changed' = ref false in
   nv.lower <- join_ctor ~changed:changed' env nv.level nv.lower cp;
   (* FIXME: should it be enough to compare cp instead of nv.lower? *)
+  (* FIXME: nv.lower updated too soon, probably a bug *)
+  (* FIXME hoisting nv level can change here? *)
   if !changed' then begin
     changed := true;
     let bound = flex_cons_upper ~changed env nv in
@@ -286,10 +300,14 @@ and subtype_cons_flex ~error ~changed env (cp : (flexvar, flex_lower_bound) ctor
 
 and join_ctor ~changed env level lower cp =
   (* lower is already wf at level, cp may not be *)
+  (* FIXME hoisting: hoist cp flexvars if needed *)
   let cons =
     join_cons
        ~nleft:id
-       ~nright:(fun y -> let v = fresh_flexvar level in subtype_flex_flex ~error:noerror ~changed env v y; v)
+       ~nright:(fun y ->
+         (* Not fresh_below_var, as hoisting may be needed.
+            FIXME test this *)
+         let v = fresh_flexvar level in subtype_flex_flex ~error:noerror ~changed env v y; v)
        ~nboth:(fun x y -> subtype_flex_flex ~error:noerror ~changed env x y; x)
        ~pleft:id
        (* NB: pright is not id, because we need fresh variables for contravariant parts,
@@ -308,10 +326,35 @@ and join_ctor ~changed env level lower cp =
       join_ctor ~changed env level c (env_rigid_bound env rv))
     { ctor = {cons; rigvars = lower.ctor.rigvars }; flexvars = lower.flexvars}  cp.rigvars
   
-and join_lower ~changed env level lower p =
-  join_flexvars ~changed (join_ctor ~changed env level lower p.ctor) p.flexvars
+and join_lower ~changed env level lower {ctor; flexvars} =
+  (* FIXME hoisting: requires hoisting of p.flexvars, don't just join them *)
+  let ctor = join_ctor ~changed env level lower ctor in
+  List.iter (hoist_flex ~changed env level) flexvars;
+  join_flexvars ~changed ctor flexvars
 
 
+and hoist_flex ~changed env level v =
+  if Env_level.extends v.level level then ()
+  else match v.upper with
+    | UBnone ->
+       changed := true; v.level <- level
+    | UBvar v' when Env_level.extends v'.level level ->
+       changed := true; v.level <- level
+    | _ ->
+       let cn = flex_cons_upper ~changed env v in
+       (* FIXME hoist vs. copy differs slightly for contravariant components.
+          Does this matter? *)
+       if Env_level.extends v.level level then
+         intfail "everything's fine, but hitting this case is impressive"
+       else begin
+         changed := true;
+         v.level <- level;
+         v.upper <- UBcons (map_ctor_rig (join_lower ~changed env level bottom) (fun v -> hoist_flex ~changed env level v; v) cn);
+         v.lower <- join_lower ~changed env level bottom v.lower;
+         (* FIXME hoisting: recheck *)
+       end
+
+(* FIXME hoisting below here *)
 
 
 (*
