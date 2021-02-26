@@ -14,6 +14,11 @@ let unimp fmt =
   Printf.ksprintf (fun s -> raise (Unimplemented s)) fmt
 let () = Printexc.register_printer (function Unimplemented s -> Some ("unimplemented: " ^ s) | _ -> None)
 
+let id x = x
+
+type zero = |
+let never : zero -> 'a = function _ -> .
+
 
 (* FIXME move *)
 module Ivar : sig
@@ -32,6 +37,40 @@ end = struct
   let get r =
     Option.get !r
 end
+
+(* Immutable arrays *)
+module IArray : sig
+  type +'a t
+  val empty : 'a t
+  val make : 'a array -> 'a t
+  val get : 'a t -> int -> 'a
+  val length : 'a t -> int
+  val of_list : 'a list -> 'a t
+  val of_array : 'a array -> 'a t
+  val to_list : 'a t -> 'a list
+  val to_array : 'a t -> 'a array
+  val mapi : (int -> 'a -> 'b) -> 'a t -> 'b t
+  val map : ('a -> 'b) -> 'a t -> 'b t
+  val iter : ('a -> unit) -> 'a t -> unit
+  val iter2 : ('a -> 'b -> unit) -> 'a t -> 'b t -> unit
+end = struct
+  type +'a t = Mk : 'b array * ('b -> 'a) -> 'a t
+  let acopy a = Array.map id a
+  let empty = Mk ([| |], id)
+  let make x = Mk (Array.map id x, id)
+  let get (Mk (a, r)) i = r a.(i)
+  let length (Mk (a, _r)) = Array.length a
+  let of_list l = make (Array.of_list l)
+  let of_array a = Mk(acopy a, id)
+  let to_array (Mk (a, r)) = Array.map r a
+  let to_list x = to_array x |> Array.to_list
+  let map f (Mk (a, r)) = Mk (Array.init (Array.length a) (fun i -> f (r a.(i))), id)
+  let mapi f (Mk (a, r)) = Mk (Array.init (Array.length a) (fun i -> f i (r a.(i))), id)
+  let iter2 f (Mk (a, ra)) (Mk (b, rb)) =
+    Array.iter2 (fun a b -> f (ra a) (rb b)) a b
+  let iter f (Mk (a, r)) = Array.iter (fun x -> f (r x)) a
+end
+type 'a iarray = 'a IArray.t
 
 open Tuple_fields
 
@@ -99,7 +138,7 @@ type rigvar =
     var: int }
 
 (* A ctor_ty is a join of a constructed type and some rigid variables *)
-type ('neg,'pos) ctor_ty =
+type (+'neg,+'pos) ctor_ty =
   { cons: ('neg,'pos) cons_head; rigvars: rigvar list }
 
 let map_ctor_rig neg pos { cons; rigvars } = { cons = map_head neg pos cons; rigvars }
@@ -139,64 +178,37 @@ and styp_neg =
 and flex_lower_bound =
   { ctor: (flexvar, flex_lower_bound) ctor_ty; flexvars: flexvar list }
 
-
-(* it returns... *)
-(*
-type ('neg, 'pos) styp_bound =
-  | Scons of (('pos, 'neg) styp_bound, ('neg, 'pos) styp_bound) ctor_ty
-  | Sbjoin of { rest : ('neg, 'pos) styp_bound; index: int; var: int }
-  | Svjoin of { rest : ('neg, 'pos) styp_bound; var: 'pos }
-*)
-
 type typ_var =
   | Vbound of {index: int; var:int}
   | Vflex of flexvar
   | Vrigid of rigvar
 
-type ('neg, 'pos) typ =
+type (+'neg, +'pos) typ =
   | Tsimple of 'pos
   | Tcons of ('neg, 'pos) cons_typ
   | Tvar of typ_var
   | Tvjoin of ('neg, 'pos) typ * typ_var
   | Tpoly of {
-     names : int SymMap.t; (* may be incomplete *)
-     bound : ('pos, 'neg) cons_typ array;
+     (* names must be distinct *)
+     (* bound must be a constructed type, possibly joined with some rigid/bound vars *)
+     vars : (string * ('pos, 'neg) typ) iarray;
      body : ('neg, 'pos) typ }
-and ('neg, 'pos) cons_typ = (('pos, 'neg) typ, ('neg, 'pos) typ) ctor_ty
+and (+'neg, +'pos) cons_typ = (('pos, 'neg) typ, ('neg, 'pos) typ) cons_head
 
 type ptyp = (flexvar, flex_lower_bound) typ
 type ntyp = (flex_lower_bound, flexvar) typ
 
-(*
-(* Entries in the typing environment *)
-type env_entry =
-  (* Binding x : τ *)
-  | Evals of ptyp SymMap.t
-  (* Flexible variables (inferred polymorphism, instantiated ∀⁺)
-     FIXME: should these have a separate environment entry at all? *)
-  | Eflexible
-  (* Rigid type variables (abstract types, checked forall) *)
-  | Erigid of {
-      (* all fields immutable, despite array/table *)
-      (* FIXME: explain why predicativity matters here *)
-      names : int SymMap.t;
-      vars : rigvar_defn array;
-    }
-*)
-
 type env =
   | Env_vals of { vals : ptyp SymMap.t; rest : env }
-  | Env_types of { level : env_level; rig_names : int SymMap.t; rig_defns : rigvar_defn array; rest : env }
+  | Env_types of { level : env_level; rig_names : int SymMap.t; rig_defns : rigvar_defn iarray; rest : env }
   | Env_nil
 
-(* Rigid type variables.
-   Maintain the head-invariant:
-   the bounds of a rigid variable a do not mention other variables
-   from the same binding group except under type constructors *)
+(* Rigid type variables. *)
 and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
-  name : string option;
+  name : string;
+  (* FIXME: ctor_ty? Are rigid vars allowed in upper bound heads? *)
   upper : (flexvar, flex_lower_bound) ctor_ty;
 }
 
@@ -256,7 +268,7 @@ let rec env_rigid_vars env lvl =
   | Env_nil -> intfail "no rigid vars here"
 
 let env_rigid_bound env (rv : rigvar) =
-  (env_rigid_vars env rv.level).(rv.var).upper
+  (IArray.get (env_rigid_vars env rv.level) rv.var).upper
 
 let rec env_level env =
   match env with
@@ -272,28 +284,55 @@ let rec env_level env =
 let map_head_cons pol f fields =
   map_fields (fun _fn x -> f pol x) fields
 
-let cons_ptyp (cons : (ntyp,ptyp) cons_head) : ptyp = Tcons { cons ; rigvars = [] }
-let cons_ntyp (cons : (ptyp,ntyp) cons_head) : ntyp = Tcons { cons ; rigvars = [] }
-
-
 let open_typ_var f ix = function
   | Vbound {index; var} when index >= ix ->
      assert (index = ix); f var
   | v -> v
 
-
 let rec open_typ :
   'neg 'pos . (int -> typ_var) -> int -> ('neg, 'pos) typ -> ('neg, 'pos) typ =
   fun var ix t -> match t with
   | Tsimple _ as s -> s
-  | Tcons c -> Tcons (map_ctor_rig (open_typ var ix) (open_typ var ix) c)
+  | Tcons c -> Tcons (map_head (open_typ var ix) (open_typ var ix) c)
   | Tvar v -> Tvar (open_typ_var var ix v)
   | Tvjoin (t, v) -> Tvjoin(open_typ var ix t, open_typ_var var ix v)
-  | Tpoly {names; bound; body} ->
+  | Tpoly {vars; body} ->
      let ix = ix + 1 in
-     Tpoly {names;
-            bound = Array.map (map_ctor_rig (open_typ var ix) (open_typ var ix)) bound;
+     Tpoly {vars = IArray.map (fun (n, b) -> n, open_typ var ix b) vars;
             body = open_typ var ix body}
+
+let open_typ_rigid vars t =
+  open_typ (fun i -> Vrigid (IArray.get vars i)) 0 t
+let open_typ_flex vars t =
+  open_typ (fun i -> Vflex (IArray.get vars i)) 0 t
+
+
+let close_typ_var lvl f index = function
+  | Vrigid {level; _} as v when Env_level.equal lvl level ->
+     Vbound {index; var = f v}
+  | Vflex fv as v when Env_level.equal lvl fv.level ->
+     Vbound {index; var = f v}
+  | v -> v
+
+(* Can only be used on typs without Tsimple nodes.
+   (This limits it to use during parsing, which does not generate Tsimple) *)
+let rec close_typ : 
+  'a 'b . env_level -> (typ_var -> int) -> int -> (zero, zero) typ -> ('a, 'b) typ
+  = fun lvl var ix ty -> match ty with
+  | Tsimple z -> never z
+  | Tcons c -> Tcons (map_head (close_typ lvl var ix) (close_typ lvl var ix) c)
+  | Tvar v -> Tvar (close_typ_var lvl var ix v)
+  | Tvjoin (t, v) -> Tvjoin(close_typ lvl var ix t, close_typ_var lvl var ix v)
+  | Tpoly {vars; body} -> 
+     let ix = ix + 1 in
+     Tpoly {vars = IArray.map (fun (n, b) -> n, close_typ lvl var ix b) vars;
+            body = close_typ lvl var ix body}
+
+let close_typ_rigid level ty =
+  let close_var = function
+    | Vrigid v when Env_level.equal v.level level -> v.var
+    | _ -> intfail "close_typ_rigid: not a rigid variable" in
+  close_typ level close_var 0 ty
 
 (*
 let styp_bot = Scons Bot
@@ -308,12 +347,11 @@ let styp_cons cons = Scons cons
 
 
 let next_flexvar_id = ref 0
-let fresh_flexvar level : flexvar =
+let fresh_flexvar_gen level upper : flexvar =
   let id = !next_flexvar_id in
   incr next_flexvar_id;
-  { level; upper = UBnone; lower = { ctor = { cons = Bot; rigvars = [] } ; flexvars = [] }; id;
+  { level; upper; lower = { ctor = { cons = Bot; rigvars = [] } ; flexvars = [] }; id;
     pos_visit_count = 0; neg_visit_count = 0; bound_var = -1 }
-
 
 (*
 FIXME del?
@@ -377,6 +415,17 @@ let rec env_lookup_type_var env name : (styp * styp) option =
   | Env_cons { rest; _ } -> env_lookup_type_var rest name
   | Env_nil -> None
 *)
+
+
+let rec env_lookup_type_var env name : rigvar option =
+  match env with
+  | Env_vals vs -> env_lookup_type_var vs.rest name
+  | Env_types ts ->
+     begin match SymMap.find name ts.rig_names with
+     | var -> Some {level = ts.level; var}
+     | exception Not_found -> env_lookup_type_var ts.rest name
+     end
+  | Env_nil -> None
 
 let lookup_named_type = function
   | "any" -> Some Top
@@ -555,8 +604,77 @@ let enter_poly' pol env names vars flow =
 
 (*
  * Well-formedness checks.
- * The wf_foo functions also check for local closure.
  *)
+
+let rec wf_flexvar env lvl (fv : flexvar) =
+  assert (Env_level.extends fv.level lvl);
+  if not (Env_level.equal fv.level Env_level.initial) then
+    ignore (env_rigid_vars env fv.level);
+  (* FIXME rectypes *)
+  wf_flex_lower_bound env fv.level fv.lower;
+  match fv.upper with
+  | UBnone -> assert (fv.lower = {ctor={cons=Bot;rigvars=[]};flexvars=[]})
+  | UBvar v ->
+     assert (fv.lower = {ctor={cons=Bot;rigvars=[]};flexvars=[]});
+     (* FIXME: same level? *)
+     wf_flexvar env fv.level v
+  | UBcons cn ->
+     map_ctor_rig (wf_flex_lower_bound env fv.level) (wf_flexvar env fv.level) cn |> ignore
+
+and wf_rigvar env lvl (rv : rigvar) =
+  assert (Env_level.extends rv.level lvl);
+  let rvs = env_rigid_vars env rv.level in
+  assert (0 <= rv.var && rv.var < IArray.length rvs)
+
+and wf_flex_lower_bound env lvl ({ctor={cons;rigvars}; flexvars} : flex_lower_bound) =
+  (* FIXME check for duplicate vars? (Not really a problem, but annoying) *)
+  List.iter (wf_flexvar env lvl) flexvars;
+  List.iter (wf_rigvar env lvl) rigvars;
+  map_head (wf_flexvar env lvl) (wf_flex_lower_bound env lvl) cons |> ignore
+
+
+
+let wf_var env ext = function
+  | Vflex fv -> wf_flexvar env fv.level fv
+  | Vrigid rv -> wf_rigvar env rv.level rv
+  | Vbound {index; var} ->
+     assert (0 <= index && index < List.length ext);
+     assert (0 <= var && var < snd (List.nth ext index))
+
+let rec wf_typ : 'pos 'neg .
+  neg:('neg -> unit) ->
+  pos:('pos -> unit) ->
+  ispos:bool -> env -> (bool * int) list -> ('neg, 'pos) typ -> unit =
+  fun ~neg ~pos ~ispos env ext ty ->
+  match ty with
+  | Tsimple s -> pos s
+  | Tcons c ->
+     map_head (wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) (wf_typ ~neg ~pos ~ispos env ext) c |> ignore
+  | Tvar v -> wf_var env ext v
+  | Tvjoin (t, v) ->
+     wf_typ ~neg ~pos ~ispos env ext t;
+     wf_var env ext v;
+     begin match v with
+     | Vbound v -> assert (fst (List.nth ext v.index) = ispos); (* covariant *)
+     | Vflex _ -> assert ispos; (* positive *)
+     | Vrigid _ -> ()
+     end
+  | Tpoly {vars; body} ->
+     let n_unique_vars = IArray.to_list vars |> List.map fst |> List.sort_uniq String.compare |> List.length in
+     assert (n_unique_vars = IArray.length vars);
+     let ext = (ispos, IArray.length vars) :: ext in
+     IArray.iter (fun (_, c) ->
+       (* FIXME: constraints on c. Can it be e.g. Tsimple?
+          Not Vflex, at least. Prob not same binder either. *)
+       wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext c) vars;
+     wf_typ ~neg ~pos ~ispos env ext body
+
+let wf_ptyp env (t : ptyp) =
+  wf_typ ~neg:(wf_flexvar env (env_level env)) ~pos:(wf_flex_lower_bound env (env_level env)) ~ispos:true env [] t
+let wf_ntyp env (t : ntyp) =
+  wf_typ ~neg:(wf_flex_lower_bound env (env_level env)) ~pos:(wf_flexvar env (env_level env)) ~ispos:false env [] t
+
+
 
 (*
 
@@ -814,8 +932,8 @@ let mktyexp t = (Some t, loc)
 let named_type s : Exp.tyexp' =
   Tnamed ({label=s; shift=0}, loc)
 
-let unparse_ctor_ty ~neg ~pos ty =
-  let t = match ty.cons with
+let unparse_cons ~neg ~pos ty =
+  let ty = match ty with
     | Top -> named_type "any"
     | Bot -> named_type "nothing"
     | Bool -> named_type "bool"
@@ -826,8 +944,7 @@ let unparse_ctor_ty ~neg ~pos ty =
     | Func (args, ret) ->
        Tfunc (Tuple_fields.map_fields (fun _ t -> neg t) args,
               pos ret) in
-  List.fold_left (fun _t _rv ->
-    failwith "rig var name lookup unimplemented") (mktyexp t) ty.rigvars
+  mktyexp ty
 
 let unparse_bound_var index var =
   mktyexp (named_type (if index = 0 then Printf.sprintf "$%d" var else Printf.sprintf "$%d.%d" index var))
@@ -843,28 +960,30 @@ let unparse_var = function
   | Vflex fv -> mktyexp (named_type (flexvar_name fv))
   | Vrigid {level;var} -> mktyexp (named_type (Printf.sprintf "%d.%d" (Env_level.to_int level) var))
 
+let unparse_join ty rigvars =
+  List.fold_left (fun c r -> mktyexp (Exp.Tjoin (c, unparse_var (Vrigid r)))) ty rigvars
+
 let rec unparse_gen_typ :
   'neg 'pos . neg:('neg -> Exp.tyexp) -> pos:('pos -> Exp.tyexp) ->
              ('neg,'pos) typ -> Exp.tyexp =
   fun ~neg ~pos ty -> match ty with
   | Tsimple t -> pos t
-  | Tcons c -> unparse_ctor_ty ~neg:(unparse_gen_typ ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~neg ~pos) c
-
+  | Tcons c -> unparse_cons ~neg:(unparse_gen_typ ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~neg ~pos) c
   | Tvar var
-  | Tvjoin (Tcons { cons = Bot; rigvars = [] }, var) ->
+  | Tvjoin (Tcons Bot, var) ->
      unparse_var var
   | Tvjoin (rest, var) ->
      mktyexp (Exp.Tjoin (unparse_gen_typ ~neg ~pos rest, unparse_var var))
-  | Tpoly { names=_; bound=_; body=_ } ->
+  | Tpoly { vars=_; body=_ } ->
      unimp "unparse Tpoly"
-
-let never _ = assert false
 
 let rec unparse_flex_lower_bound ~flexvar { ctor; flexvars } =
   let t =
     match ctor with
     | { cons = Bot; rigvars = [] } -> None
-    | ctor -> Some (unparse_ctor_ty ~neg:flexvar ~pos:(unparse_flex_lower_bound ~flexvar) ctor) in
+    | { cons; rigvars } ->
+       let cons = unparse_cons ~neg:flexvar ~pos:(unparse_flex_lower_bound ~flexvar) cons in
+       Some (unparse_join cons rigvars) in
   let tjoin a b =
     match a with
     | None -> Some b
@@ -873,7 +992,7 @@ let rec unparse_flex_lower_bound ~flexvar { ctor; flexvars } =
     List.fold_left (fun t fv -> tjoin t (flexvar fv)) t flexvars
   with
   | Some t -> t
-  | None -> unparse_ctor_ty ~neg:never ~pos:never {cons=Bot;rigvars=[]}
+  | None -> unparse_cons ~neg:never ~pos:never Bot
 
 
 let unparse_ptyp ~flexvar (t : ptyp) =

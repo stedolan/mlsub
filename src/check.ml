@@ -1,11 +1,111 @@
-(*
 open Tuple_fields
 open Exp
 open Typedefs
 open Types
 
-let unimp () = failwith "unimplemented"
+let report = function
+  | Incompatible -> failwith "incompat"
+  | Missing k -> failwith ("missing " ^ string_of_field_name k)
+  | Extra _ -> failwith ("extra")
 
+
+let rec split_tjoin env cons vars rest =
+  match rest with
+  | [] -> cons, vars
+  | (None, _) :: _ -> failwith "type syntax error"
+  | (Some ty, _) as ty' :: rest ->
+     match ty with
+     | Tjoin (a, b) ->
+        split_tjoin env cons vars (a :: b :: rest)
+     | Tparen a ->
+        split_tjoin env cons vars (a :: rest)
+     | Tforall _ -> failwith "Tforall in join"
+     | ty ->
+        let as_var =
+          match ty with
+          | Tnamed (name, _) ->
+             (* FIXME shifting? *)
+             env_lookup_type_var env name.label
+          | _ -> None in
+        match as_var with
+        | Some v -> split_tjoin env cons (v :: vars) rest
+        | None ->
+           match cons with
+           | None -> split_tjoin env (Some ty') vars rest
+           | Some _ -> failwith "multiple cons in join"
+     
+
+let rec typ_of_tyexp : 'a 'b . env -> tyexp -> ('a, 'b) typ =
+  fun env ty -> match ty with
+  | None, _ -> failwith "type syntax error"
+  | Some t, _ -> typ_of_tyexp' env t
+and typ_of_tyexp' : 'a 'b . env -> tyexp' -> ('a, 'b) typ =
+  fun env ty -> match ty with
+  | Tnamed (name, _) ->
+     (* FIXME shifting? *)
+     let name = name.label in
+     begin match lookup_named_type name with
+     | Some cons -> Tcons cons
+     | None ->
+        match env_lookup_type_var env name with
+        | Some v -> Tvar (Vrigid v)
+        | None -> failwith ("unknown type " ^ name)
+     end
+  | Trecord fields ->
+     Tcons (Record (typs_of_tuple_tyexp env fields))
+  | Tfunc (args, res) ->
+     Tcons (Func (typs_of_tuple_tyexp env args, typ_of_tyexp env res))
+  | Tparen t ->
+     typ_of_tyexp env t
+  | Tjoin (a, b) ->
+     let cons, rigvars = split_tjoin env None [] [a;b] in
+     let cons =
+       match cons with
+       | None -> Bot
+       | Some c ->
+          match typ_of_tyexp env c with
+          | Tcons c -> c
+          | _ -> failwith "Expected a constructed type" in
+     tcons {cons; rigvars}
+  | Tforall (vars, body) ->
+     let vars, name_ix = enter_polybounds env vars in
+     let level = Env_level.extend (env_level env) in
+     let rigvars = IArray.mapi (fun var _ -> {level;var}) vars in
+     let rig_defns = vars |> IArray.map (fun (name, bound) ->
+       { name; upper = simple_ptyp_bound level (open_typ_rigid rigvars bound) }) in
+     let env = Env_types { level; rig_names = name_ix; rig_defns; rest = env } in
+     let body = close_typ_rigid level (typ_of_tyexp env body) in
+     Tpoly { vars; body }
+
+and typs_of_tuple_tyexp : 'a 'b . env -> tyexp tuple_fields -> ('a, 'b) typ tuple_fields =
+  fun env ts -> map_fields (fun _fn t -> typ_of_tyexp env t) ts
+
+and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iarray * int SymMap.t =
+  fun env vars ->
+  let name_ix =
+    vars
+    |> List.mapi (fun i ((n, _), _bound) -> i, n)
+    |> List.fold_left (fun smap ((i : int), n) ->
+      if SymMap.mem n smap then failwith ("duplicate rigvar name " ^ n);
+      SymMap.add n i smap) SymMap.empty in
+  let level = Env_level.extend (env_level env) in
+  let stubs =
+    vars
+    |> List.map (fun ((name,_),_) -> {name; upper={cons=Top;rigvars=[]}})
+    |> IArray.of_list in
+  let temp_env = Env_types { level; rig_names = name_ix; rig_defns = stubs; rest = env } in
+  let mkbound bound =
+    match bound with
+    | None -> Tcons Top
+    | Some b ->
+       match close_typ_rigid level (typ_of_tyexp temp_env b) with
+       | Tcons c -> Tcons c
+       (* FIXME: some vjoin cases are also fine. Var even? *)
+       | _ -> failwith "rig var bounds must be Tcons" in
+  let vars = IArray.map (fun ((name,_), bound) -> name, mkbound bound) (IArray.of_list vars) in
+  vars, name_ix
+
+(*
 type _ ty_sort =
   | Simple : styp ty_sort
   | Gen : typ ty_sort
@@ -166,11 +266,6 @@ let rec env_lookup_var env v =
        env_lookup_var rest { v with shift = v.shift - 1 }
   | Env_cons { rest; _ } ->
      env_lookup_var rest v
-
-let report errs = List.iter (function
-   | Incompatible -> failwith "incompat"
-   | Missing k -> failwith ("missing " ^ string_of_field_name k)
-   | Extra _ -> failwith ("extra")) errs
 
 let rec flex_level env =
   match env with

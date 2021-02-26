@@ -38,10 +38,11 @@ let run_cmd s =
   let println fmt =
     Printf.ksprintf (fun s ->
       Buffer.add_string outbuf s; Buffer.add_char outbuf '\n') fmt in
-  let pprintln ?(width=120) d =
+  let _pprintln ?(width=120) d =
     PPrint.ToBuffer.pretty 1. width outbuf PPrint.(PPrint.group d ^^ hardline) in
   begin match Parse.parse_string text with
-  | Ok (`Exp e) ->
+  | Ok (`Exp _e) ->
+     (*
      let rendered = to_string (Print.exp e) in
      println "%s" rendered;
      begin match Parse.parse_string rendered with
@@ -76,14 +77,18 @@ let run_cmd s =
      | exception e ->
         println "typechecking error: %s" (Printexc.to_string e)
      end
+      *)
+     ()
   | Ok (`Sub (t1, t2)) ->
      (match
-       let _, t1 = Check.typ_of_tyexp Env_nil t1 in
-       let t2, _ = Check.typ_of_tyexp Env_nil t2 in
+       let t1 = Check.typ_of_tyexp Env_nil t1 in
+       let t2 = Check.typ_of_tyexp Env_nil t2 in
        (*PPrint.(ToChannel.pretty 1. 80 stdout (Typedefs.pr_typ Pos t1 ^^ string " <: " ^^ Typedefs.pr_typ Neg t2 ^^ hardline));*)
-       Types.subtype Env_nil t1 t2 |> Check.report
+       Types.subtype ~error:Check.report Env_nil t1 t2
      with
       | () -> println "ok"
+      | exception ((Assert_failure _ | Typedefs.Internal _) as e) ->
+         println "exception: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
       | exception e -> println "typechecking error: %s" (Printexc.to_string e))
   | Error _ -> println "parse error"
   | exception (Failure s) -> println "parser failure: %s" s

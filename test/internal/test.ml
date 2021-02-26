@@ -21,8 +21,10 @@ let dump (t : ptyp) =
        let u =
          match fv.upper with
          | UBvar v -> flexvar v
-         | UBnone -> unparse (Tcons { cons = Top; rigvars = [] })
-         | UBcons c -> unparse_ctor_ty ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:flexvar c in
+         | UBnone -> unparse (Tcons Top)
+         | UBcons {cons;rigvars} ->
+            let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:flexvar cons in
+            unparse_join cons rigvars in
        Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
        mktyexp (named_type fv_name)
   and unparse t =
@@ -49,7 +51,7 @@ let func a b = Func (Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) a)
 
 let tuple xs = Record (Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) xs)))
 
-let tcons cons = Tcons { cons ; rigvars = [] }
+let nope _ = assert false
 
 let dump env level (t : ptyp) =
   dump t;
@@ -68,7 +70,7 @@ let dump env level (t : ptyp) =
   let fl = substn 4 bvars fl in
   dump fl;
   Vector.iteri bvars (fun ix (_, r) ->
-    PPrint.ToChannel.pretty 1. 120 stdout PPrint.(utf8string (Printf.sprintf "  $%d ≤ " ix) ^^ group (Print.tyexp (unparse_ntyp ~flexvar:never !r)) ^^ hardline));
+    PPrint.ToChannel.pretty 1. 120 stdout PPrint.(utf8string (Printf.sprintf "  $%d ≤ " ix) ^^ group (Print.tyexp (unparse_ntyp ~flexvar:nope !r)) ^^ hardline));
   end;
   print_endline ""
 
@@ -91,7 +93,7 @@ let choosy () =
   let gx = apply gp xp in
   subtype ~error env fx resn;
   subtype ~error env gx resn;
-  let ty = tcons (func [fn;gn;xn] resp) in
+  let ty = Tcons (func [fn;gn;xn] resp) in
   dump env lvl ty
 (*
   let root = gen env lvl ty in
@@ -110,9 +112,9 @@ let lbs () =
   let r1'n, _r1'p = fresh_flow lvl in
   let r2n, r2p = fresh_flow lvl in
   subtype ~error env r1p r1'n;
-  subtype ~error env (tcons (func [d1n] r1p)) fn;
-  subtype ~error env (tcons (func [d2n] r2p)) fn;
-  let ty = (tcons (func [r1n;r2n] (tcons (tuple [fp;d1p;d2p])))) in
+  subtype ~error env (Tcons (func [d1n] r1p)) fn;
+  subtype ~error env (Tcons (func [d2n] r2p)) fn;
+  let ty = (Tcons (func [r1n;r2n] (Tcons (tuple [fp;d1p;d2p])))) in
   dump env lvl ty
 
 let match_as_fn ~error env lvl f =
@@ -131,8 +133,8 @@ let match_bug () =
   subtype ~error env ap bn;
   let b1, b2 = match_as_fn ~error env lvl bp in
   let a1, a2 = match_as_fn ~error env lvl ap in
-  subtype ~error env a2 (tcons Bot);
-  dump env lvl (tcons (func [a1; b1; an] (tcons (tuple [a2; b2; bp]))))
+  subtype ~error env a2 (Tcons Bot);
+  dump env lvl (Tcons (func [a1; b1; an] (Tcons (tuple [a2; b2; bp]))))
   
 
 let chain () =
@@ -141,18 +143,18 @@ let chain () =
   let error _ = failwith "nope" in
   let a = Array.init 10 (fun _ -> fresh_flow lvl) in
   let n = Array.map fst a and p = Array.map snd a in
-  subtype ~error env p.(5) (tcons Top);
+  subtype ~error env p.(5) (Tcons Top);
   subtype ~error env p.(4) n.(5);
   subtype ~error env p.(3) n.(4);
   subtype ~error env p.(8) n.(9);
   subtype ~error env p.(5) n.(6);
   subtype ~error env p.(0) n.(1);
-  subtype ~error env p.(3) (tcons Top);
+  subtype ~error env p.(3) (Tcons Top);
   subtype ~error env p.(2) n.(3);
   subtype ~error env p.(1) n.(2);
   subtype ~error env p.(7) n.(8);
   subtype ~error env p.(6) n.(7);
-  dump env lvl (tcons (func [n.(0)] p.(9)))
+  dump env lvl (Tcons (func [n.(0)] p.(9)))
 
 let dirbug () =
   next_flexvar_id := 0;
@@ -162,8 +164,8 @@ let dirbug () =
   let _bn, bp = fresh_flow lvl in
   let cn, cp = fresh_flow lvl in
   let dn, dp = fresh_flow lvl in
-  subtype ~error env (tcons (func [an] bp)) (tcons (func [cp] dn));
-  dump env lvl (tcons (tuple [tcons (func [an] bp); tcons (func [cn] dp)]))
+  subtype ~error env (Tcons (func [an] bp)) (Tcons (func [cp] dn));
+  dump env lvl (Tcons (tuple [Tcons (func [an] bp); Tcons (func [cn] dp)]))
 
 let poly () =
   next_flexvar_id := 0;
@@ -174,24 +176,20 @@ let poly () =
     | None -> Tvar (Vbound {index; var})
     | Some rest -> Tvjoin (rest, Vbound{index; var}) in
   let t1 () =
-    Tpoly {names=SymMap.empty;
-           bound = [| {cons=Top;rigvars=[]}; {cons=Top;rigvars=[]} |];
-           body= tcons (func
+    Tpoly {vars = IArray.of_array [| "A", Tcons Top; "B", Tcons Top |];
+           body= Tcons (func
                    [bvar 0]
-                   (tcons (func
+                   (Tcons (func
                      [bvar 1]
                      (bvar 1 ~rest:(bvar 0))))) } in
   let t2 () =
-    Tpoly {names=SymMap.empty;
-           bound = [| {cons= Top; rigvars=[]} |];
-           body = tcons (func [bvar 0] (tcons (func [bvar 0] (bvar 0))))} in
+    Tpoly {vars = IArray.of_array [| "X", Tcons Top |];
+           body = Tcons (func [bvar 0] (Tcons (func [bvar 0] (bvar 0))))} in
   let t3 () =
-    Tpoly {names=SymMap.empty;
-           bound = [| {cons=Top; rigvars=[]} |];
-           body = tcons (func [bvar 0] (
-             Tpoly {names=SymMap.empty;
-                    bound=[| {cons=Top; rigvars=[]} |];
-                    body = tcons (func [bvar 0] (bvar ~index:1 ~rest:(bvar 0) 0))}))} in
+    Tpoly {vars = IArray.of_array [| "P", Tcons Top |];
+           body = Tcons (func [bvar 0] (
+             Tpoly {vars=IArray.of_array [| "Q", Tcons Top |];
+                    body = Tcons (func [bvar 0] (bvar ~index:1 ~rest:(bvar 0) 0))}))} in
   print_endline "t1 = t2";
   subtype ~error env (t1 ()) (t2 ());
   subtype ~error env (t2 ()) (t1 ());
