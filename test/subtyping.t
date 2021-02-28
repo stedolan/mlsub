@@ -91,3 +91,4 @@
 
 # scope escape check
 : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
+> typechecking error: Failure("incompat")

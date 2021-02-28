@@ -9,7 +9,7 @@ let dump (t : ptyp) =
   let _name_ix = ref 0 in
   let rec flexvar fv =
     match Hashtbl.find fvs fv.id with
-    | name, _ -> mktyexp (named_type name)
+    | _ -> ()
     | exception Not_found ->
        let fv_name = flexvar_name fv in
        Hashtbl.add fvs fv.id (fv_name, None);
@@ -20,13 +20,13 @@ let dump (t : ptyp) =
          | l -> Some (unparse_flex_lower_bound ~flexvar l) in
        let u =
          match fv.upper with
-         | UBvar v -> flexvar v
+         | UBvar v -> unparse_flexvar ~flexvar v
          | UBnone -> unparse (Tcons Top)
          | UBcons {cons;rigvars} ->
-            let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:flexvar cons in
+            let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) cons in
             unparse_join cons rigvars in
        Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
-       mktyexp (named_type fv_name)
+       ()
   and unparse t =
     unparse_ptyp ~flexvar t
   in
@@ -73,6 +73,11 @@ let dump env level (t : ptyp) =
     PPrint.ToChannel.pretty 1. 120 stdout PPrint.(utf8string (Printf.sprintf "  $%d ≤ " ix) ^^ group (Print.tyexp (unparse_ntyp ~flexvar:nope !r)) ^^ hardline));
   end;
   print_endline ""
+
+let fresh_flow lvl =
+  let fv = fresh_flexvar lvl in
+(*  Tsimple fv, Tsimple (flexlb_fv fv)*)
+  Tvar (Vflex fv), Tvar (Vflex fv)
 
 
 (* λ f, g, x . f x or g x *)

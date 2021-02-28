@@ -9,6 +9,16 @@ let report = function
   | Extra _ -> failwith ("extra")
 
 
+let rec env_lookup_var env v =
+  match env with
+  | Env_nil -> failwith (v.label ^ " not in scope")
+  | Env_vals { vals = vs; rest; _ }
+       when SymMap.mem v.label vs ->
+     if v.shift = 0 then SymMap.find v.label vs else
+       env_lookup_var rest { v with shift = v.shift - 1 }
+  | Env_types { rest; _ } | Env_vals {rest; _}->
+     env_lookup_var rest v
+
 let rec split_tjoin env cons vars rest =
   match rest with
   | [] -> cons, vars
@@ -105,17 +115,25 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
   let vars = IArray.map (fun ((name,_), bound) -> name, mkbound bound) (IArray.of_list vars) in
   vars, name_ix
 
-(*
 
 open Elab
 
-let elab_gen env (fn : env -> typ * 'a elab) : typ * (typolybounds option * 'a) elab =
+let elab_gen (env:env) (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds option * 'a) elab =
+  let level = Env_level.extend (env_level env) in
+  let env' = Env_types { level; rig_names = SymMap.empty; rig_defns = IArray.empty; rest = env } in
+  let ty, Elab (erq, ek) = fn env' in
+  wf_ptyp env' ty;
+  (* FIXME *)
+  let ty = ty in
+  ty, Elab (erq, fun e -> None, ek e)
+  
+(*
   let level' = env_next_level env Esort_flexible in
   let env' = env_cons env level' (Eflexible {vars=Vector.create(); names=SymMap.empty}) in
   let ty, (Elab (erq, ek)) = fn env' in
-  wf_typ Pos env' ty;
+  wf_ptyp env' ty;
   (* FIXME hack *)
-  let rq = Pair(erq, Typ (Pos, ty)) in
+  let rq = Pair(erq, Ptyp ty) in
   let rq = try Type_simplification.remove_joins env' level' rq 
            with e ->  (*PPrint.ToChannel.pretty 1. 80 stderr PPrint.(pr_env env' ^^ hardline ^^ Elab.pr_elab_req rq); *)raise e in
 
@@ -135,8 +153,15 @@ let elab_gen env (fn : env -> typ * 'a elab) : typ * (typolybounds option * 'a) 
      wf_typ Pos env ty;
      wf_elab_req env erq;
      ty, Elab (erq, fun (poly, e) -> Some poly, ek e)
+*)
 
-let elab_poly env poly (fn : env -> typ * 'a elab) : typ * (typolybounds option * 'a) elab =
+let fresh_flow env =
+  let fv = fresh_flexvar (env_level env) in
+  Tvar (Vflex fv)
+
+
+(*
+let elab_poly env poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds option * 'a) elab =
   match poly with
   | None ->
      let ty, elab = fn env in
@@ -147,19 +172,20 @@ let elab_poly env poly (fn : env -> typ * 'a elab) : typ * (typolybounds option 
      let ty, (Elab (erq, ek)) = fn env' in
 
      (* hack *)
-     let rq = Pair (erq, Typ(Pos, ty)) in
+     let rq = Pair (erq, Ptyp ty) in
      let rq = map_free_elab_req level' 0 (env_gen_var Esort_flexible) rq in
-     let erq, ty = match rq with Pair(erq, Typ(Pos, ty)) -> erq, ty | _ -> assert false in
+     let erq, ty = match rq with Pair(erq, Ptyp ty) -> erq, ty | _ -> assert false in
 
      let ty = Tpoly { names; bounds = pbounds; flow; body = ty } in
      (* FIXME: what's the right pol here? *)
      let erq = Gen { pol = Pos; bounds = pbounds; flow; body = erq } in
-     wf_typ Pos env ty;
+     wf_ptyp env ty;
      wf_elab_req env erq;
      ty, Elab (erq, fun (poly, e) -> Some poly, ek e)
+*)
 
-let rec check env e (ty : typ) : exp elab =
-  wf_typ Neg env ty;
+let rec check env e (ty : ntyp) : exp elab =
+  wf_ntyp env ty;
   match e with
   | None, _ -> failwith "bad exp"
   | Some e, loc ->
@@ -168,7 +194,7 @@ let rec check env e (ty : typ) : exp elab =
 and check' env e ty =
   match e, ty with
   | If (e, ifso, ifnot), _ ->
-     let* e = check env e (cons_typ Neg Bool)
+     let* e = check env e (Tcons Bool)
      and* ifso = check env ifso ty
      and* ifnot = check env ifnot ty in
      If (e, ifso, ifnot)
@@ -198,7 +224,7 @@ and check' env e ty =
   | Let (p, pty, e, body), _ ->
      let pty, e = check_or_infer env pty e in
      let vs = check_pat env SymMap.empty pty p in
-     let env = env_cons_entry env (Evals vs) in
+     let env = Env_vals { vals = vs; rest = env } in
      let* e, ety = e and* body = check env body ty in
      Let(p, Some ety, e, body)
   (* FIXME not good *)
@@ -222,79 +248,77 @@ and check' env e ty =
   | e, _ ->
      (* Default case: infer and subtype. *)
      let ty', e = infer' env e in
-     subtype env ty' ty |> report;
-     wf_typ Neg env ty;
+     subtype ~error:report env ty' ty;
+     wf_ntyp env ty;
      let* e = e in e
 
-and infer env : exp -> typ * exp elab = function
+and infer env : exp -> ptyp * exp elab = function
   | None, _ -> failwith "bad exp"
   | Some e, loc ->
      let ty, e = infer' env e in
-     wf_typ Pos env ty;
+     wf_ptyp env ty;
      ty, (let* e = e in Some e, loc)
-and infer' env : exp' -> typ * exp' elab = function
+and infer' env : exp' -> ptyp * exp' elab = function
   | Lit l -> infer_lit l
   | Var (id, _loc) as e -> env_lookup_var env id, elab_pure e
   | Typed (e, ty) ->
-     let tn, tp = typ_of_tyexp env ty in
-     tp, let* e = check env e tn in Typed (e, ty)
+     let t = typ_of_tyexp env ty in
+     t, let* e = check env e t in Typed (e, ty)
   | Parens e ->
      let ty, e = infer env e in
      ty, let* e = e in Parens e
   | If (e, ifso, ifnot) ->
-     let e = check env e (cons_typ Neg Bool)
+     let e = check env e (Tcons Bool)
      and tyso, ifso = infer env ifso
      and tynot, ifnot = infer env ifnot in
-     (* FIXME: join of typ? Rank1 join? *)
-     let level = flex_level env in
-     Tsimple (join Pos (approx env level Pos tyso) (approx env level Pos tynot)),
+     join_ptyp env tyso tynot,
      let* e = e and* ifso = ifso and* ifnot = ifnot in
      If (e, ifso, ifnot)
   | Proj (e, (field, loc)) ->
      let ty, e = infer env e in
-     let res = ref (Tcons Bot) in
-     let tmpl = (Record { fields = FieldMap.singleton (Field_named field) res;
+     let resp, res = Ivar.make () in
+     let tmpl = (Record { fields = FieldMap.singleton (Field_named field) resp;
                           fnames = [Field_named field]; fopen = `Open }) in
-     match_type env (lazy (flex_level env)) ty tmpl |> report;
-     !res, let* e = e in Proj (e, (field,loc))
+     match_typ ~error:report env (env_level env) ty tmpl;
+     Ivar.get res, let* e = e in Proj (e, (field,loc))
   | Tuple fields ->
      let fields = map_fields (fun _fn e -> infer env e) fields in
-     cons_typ Pos (Record (map_fields (fun _ (ty, _e) -> ty) fields)),
+     Tcons (Record (map_fields (fun _ (ty, _e) -> ty) fields)),
      let* fields = elab_fields (map_fields (fun _fn (_ty, e) -> e) fields) in
      Tuple fields
-  | Pragma "bot" as e -> cons_typ Pos Bot, elab_pure e
+  | Pragma "bot" as e -> Tcons Bot, elab_pure e
   | Pragma s -> failwith ("pragma: " ^ s)
   | Let (p, pty, e, body) ->
      let pty, e = check_or_infer env pty e in
-     let vs = check_pat env SymMap.empty pty p in
-     let env = env_cons_entry env (Evals vs) in
+     let vals = check_pat env SymMap.empty pty p in
+     let env = Env_vals { rest=env; vals } in
      let res, body = infer env body in
      res,
      let* e, ety = e and* body = body in
      Let(p, Some ety, e, body)
   | Fn (poly, params, ret, body) ->
      let ty, elab =
-       elab_poly env poly (fun env ->
+ignore poly;((*FIXME       elab_poly env poly (fun env ->*)
          elab_gen env (fun env ->
          let params = map_fields (fun _fn (p, ty) ->
            match ty with
            | Some ty -> typ_of_tyexp env ty, p
            | None -> fresh_flow env, p) params in
-         let vs = fold_fields (fun acc fn ((_tn, tp), p) ->
+         let vs = fold_fields (fun acc fn (t, p) ->
            match fn, p with
-           | _, p -> check_pat env acc tp p) SymMap.empty params in
-         let env' = env_cons_entry env (Evals vs) in
+           | _, p -> check_pat env acc t p) SymMap.empty params in
+         let env' = Env_vals { vals = vs; rest = env } in
          let res, body = check_or_infer env' ret body in
-         cons_typ Pos (Func (map_fields (fun _fn ((tn, _tp),_) -> tn) params, res)),
+         Tcons (Func (map_fields (fun _fn (t,_) -> t) params, res)),
          let* params =
-           elab_fields (map_fields (fun _fn ((tn, _tp), pat) ->
-             elab_pair (elab_pure pat) (elab_typ Neg tn)) params)
+           elab_fields (map_fields (fun _fn (t, pat) ->
+             elab_pair (elab_pure pat) (elab_ntyp t)) params)
          and* body = body in
          params, body)) in
      ty,
-     let* poly_annot, (poly_inf, (params, (body, ret))) = elab in
+     let* (*poly_annot, *) (poly_inf, (params, (body, ret))) = elab in
      let poly =
-       match poly_annot, poly_inf with
+       match (*poly_annot,*) None, poly_inf with
        | None, None -> None
        | Some p, None | None, Some p -> Some p
        | Some p, Some q ->
@@ -308,17 +332,17 @@ and infer' env : exp' -> typ * exp' elab = function
          body)
   | App (f, args) ->
      let fty, f = infer env f in
-     let args = map_fields (fun _fn e -> e, ref (Tcons Top)) args in
-     let res = ref (Tcons Bot) in
-     let argtmpl = map_fields (fun _fn (_e, r) -> r) args in
-     match_type env (lazy (flex_level env)) fty (Func (argtmpl, res)) |> report;
-     let args = map_fields (fun _fn (e, r) -> check env e !r) args in
-     !res,
+     let args = map_fields (fun _fn e -> e, Ivar.make ()) args in
+     let resp, res = Ivar.make () in
+     let argtmpl = map_fields (fun _fn (_e, (r, _)) -> r) args in
+     match_typ ~error:report env (env_level env) fty (Func (argtmpl, resp));
+     let args = map_fields (fun _fn (e, (_,r)) -> check env e (Ivar.get r)) args in
+     Ivar.get res,
      let* f = f and* args = elab_fields args in
      App(f, args)
 
 
-and check_pat_field env acc (ty : typ) fn p =
+and check_pat_field env acc (ty : ptyp) fn p =
   match fn, p with
   | _, p -> check_pat env acc ty p
 
@@ -330,11 +354,11 @@ and check_pat' env acc ty = function
   | Pvar (s,_) -> SymMap.add s ty acc
   | Pparens p -> check_pat env acc ty p
   | Ptuple fs ->
-     let fs = map_fields (fun _fn p -> p, ref (Tcons Bot)) fs in
-     let trec : typ ref tuple_fields = map_fields (fun _fn (_p, r) -> r) fs in
-     match_type env (lazy (flex_level env)) ty (Record trec) |> report;
-     fold_fields (fun acc fn (p, r) ->
-         check_pat_field env acc !r fn p) acc fs
+     let fs = map_fields (fun _fn p -> p, Ivar.make ()) fs in
+     let trec : _ tuple_fields = map_fields (fun _fn (_p, (r,_)) -> r) fs in
+     match_typ ~error:report env (env_level env) ty (Record trec);
+     fold_fields (fun acc fn (p, (_,r)) ->
+         check_pat_field env acc (Ivar.get r) fn p) acc fs
 
 and check_parameters env acc params ptypes =
   let merged =
@@ -344,9 +368,9 @@ and check_parameters env acc params ptypes =
           match aty with
           | None -> typ
           | Some ty ->
-             let (tn, tp) = typ_of_tyexp env ty in
-             subtype env typ tn |> report;
-             tp in
+             let t = typ_of_tyexp env ty in
+             subtype ~error:report env typ t;
+             t in
         Some (p, ty))
       ~left:(fun _fn (_p, _aty) -> failwith "extra param")
       ~right:(fun _fn _typ -> failwith "missing param")
@@ -357,30 +381,29 @@ and check_parameters env acc params ptypes =
 and infer_lit = function
   | l, loc -> infer_lit' l, elab_pure (Lit (l, loc))
 and infer_lit' = function
-  | Bool _ -> cons_typ Pos Bool
-  | Int _ -> cons_typ Pos Int
-  | String _ -> cons_typ Pos String
+  | Bool _ -> Tcons Bool
+  | Int _ -> Tcons Int
+  | String _ -> Tcons String
 
-and check_or_infer env ty e : typ * (exp * tyexp) elab =
+and check_or_infer env ty e : ptyp * (exp * tyexp) elab =
   match ty with
   | None ->
      let ty, e = infer env e in
      ty,
-     let* e = e and* ty = elab_typ Pos ty in
+     let* e = e and* ty = elab_ptyp ty in
      e, ty
   | Some ty ->
-     let (tn, tp) = typ_of_tyexp env ty in
-     tp,
-     let* e = check env e tn
+     let t = typ_of_tyexp env ty in
+     t,
+     let* e = check env e t
      and* ty = elab_pure ty in
      e, ty
 
 and check_annot env annot ty =
-  wf_typ Neg env ty;
+  wf_ntyp env ty;
   match annot with
   | None -> ty
   | Some ty' ->
-     let tn, tp = typ_of_tyexp env ty' in
-     subtype env tp ty |> report;
-     tn
-*)
+     let t = typ_of_tyexp env ty' in
+     subtype ~error:report env t ty;
+     t

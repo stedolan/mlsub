@@ -962,25 +962,31 @@ let flexvar_name fv =
   if id < Array.length names then names.(id)
   else Printf.sprintf "_%d" (id - Array.length names)
 
-let unparse_var = function
+let unparse_rigid_var {level;var} =
+  mktyexp (named_type (Printf.sprintf "%d.%d" (Env_level.to_int level) var))
+
+let unparse_flexvar ~flexvar fv =
+  flexvar fv; mktyexp (named_type (flexvar_name fv))
+
+let unparse_var ~flexvar = function
   | Vbound {index; var} -> unparse_bound_var index var
-  | Vflex fv -> mktyexp (named_type (flexvar_name fv))
-  | Vrigid {level;var} -> mktyexp (named_type (Printf.sprintf "%d.%d" (Env_level.to_int level) var))
+  | Vflex fv -> unparse_flexvar ~flexvar fv
+  | Vrigid rv -> unparse_rigid_var rv
 
 let unparse_join ty rigvars =
-  List.fold_left (fun c r -> mktyexp (Exp.Tjoin (c, unparse_var (Vrigid r)))) ty rigvars
+  List.fold_left (fun c r -> mktyexp (Exp.Tjoin (c, unparse_rigid_var r))) ty rigvars
 
 let rec unparse_gen_typ :
-  'neg 'pos . neg:('neg -> Exp.tyexp) -> pos:('pos -> Exp.tyexp) ->
+  'neg 'pos . flexvar:_ -> neg:('neg -> Exp.tyexp) -> pos:('pos -> Exp.tyexp) ->
              ('neg,'pos) typ -> Exp.tyexp =
-  fun ~neg ~pos ty -> match ty with
+  fun ~flexvar ~neg ~pos ty -> match ty with
   | Tsimple t -> pos t
-  | Tcons c -> unparse_cons ~neg:(unparse_gen_typ ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~neg ~pos) c
+  | Tcons c -> unparse_cons ~neg:(unparse_gen_typ ~flexvar ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~flexvar ~neg ~pos) c
   | Tvar var
   | Tvjoin (Tcons Bot, var) ->
-     unparse_var var
+     unparse_var ~flexvar var
   | Tvjoin (rest, var) ->
-     mktyexp (Exp.Tjoin (unparse_gen_typ ~neg ~pos rest, unparse_var var))
+     mktyexp (Exp.Tjoin (unparse_gen_typ ~flexvar ~neg ~pos rest, unparse_var ~flexvar var))
   | Tpoly { vars=_; body=_ } ->
      unimp "unparse Tpoly"
 
@@ -989,20 +995,20 @@ let rec unparse_flex_lower_bound ~flexvar { ctor; flexvars } =
     match ctor with
     | { cons = Bot; rigvars = [] } -> None
     | { cons; rigvars } ->
-       let cons = unparse_cons ~neg:flexvar ~pos:(unparse_flex_lower_bound ~flexvar) cons in
+       let cons = unparse_cons ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) cons in
        Some (unparse_join cons rigvars) in
   let tjoin a b =
     match a with
     | None -> Some b
     | Some a -> Some (mktyexp (Exp.Tjoin (a, b))) in
   match
-    List.fold_left (fun t fv -> tjoin t (flexvar fv)) t flexvars
+    List.fold_left (fun t fv -> tjoin t (unparse_flexvar ~flexvar fv)) t flexvars
   with
   | Some t -> t
   | None -> unparse_cons ~neg:never ~pos:never Bot
 
 
 let unparse_ptyp ~flexvar (t : ptyp) =
-  unparse_gen_typ ~neg:flexvar ~pos:(unparse_flex_lower_bound ~flexvar) t
+  unparse_gen_typ ~flexvar ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) t
 let unparse_ntyp ~flexvar (t : ntyp) =
-  unparse_gen_typ ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:flexvar t
+  unparse_gen_typ ~flexvar ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) t

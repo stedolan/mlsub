@@ -363,10 +363,6 @@ and hoist_flex ~changed env level v =
 
 let flexlb_fv fv = { ctor = { cons = Bot; rigvars = [] }; flexvars = [fv] }
 
-let fresh_flow lvl : ntyp * ptyp =
-  let fv = fresh_flexvar lvl in
-  Tsimple fv, Tsimple (flexlb_fv fv)
-
 (* argument must be a simple type well-formed at lvl *)
 let rec simple_ptyp lvl : ptyp -> flex_lower_bound = function
   | Tsimple t -> t
@@ -472,8 +468,8 @@ let rec subtype ~error env (p : ptyp) (n : ntyp) =
 
 let match_typ ~error env lvl (p : ptyp) (orig_head : (ntyp Ivar.put, ptyp Ivar.put) cons_head) =
   match p with
-  | Tcons _c ->
-     unimp "Tcons match"
+  | Tcons c ->
+     subtype_cons ~error ~neg:(fun v t -> Ivar.put v t) ~pos:(fun t v -> Ivar.put v t) c orig_head
 (* FIXME unneeded, approx_ptyp works?  | Tpoly _ -> unimp "instantiate on poly match" *)
   | t ->
      let {ctor; flexvars} = approx_ptyp env t in
@@ -491,6 +487,15 @@ let match_typ ~error env lvl (p : ptyp) (orig_head : (ntyp Ivar.put, ptyp Ivar.p
        ~neg:(fun _t () -> () (*already filled*))
        ~pos:(fun p' t' -> Ivar.put t' (Tsimple (flexlb_fv p')))
        m orig_head
+
+(* FIXME: rank1 joins maybe?
+   FIXME: keep types as Tcons if possible? Better inference. Can this matter? *)
+let join_ptyp env (p : ptyp) (q : ptyp) : ptyp =
+  let p = approx_ptyp env p and q = approx_ptyp env q in
+  let r = bottom in
+  let r = join_lower ~changed:(ref false) env (env_level env) r p in
+  let r = join_lower ~changed:(ref false) env (env_level env) r q in
+  Tsimple r
 
 
 
@@ -560,6 +565,31 @@ and expand_fv_neg visit ~changed env level nv =
     end_visit_neg visit nv
   end;
   nv
+(*
+let rec expand_ptyp visit ~changed env level (p : ptyp) =
+  match p with
+  | Tcons c -> Tcons (map_head (expand_ntyp visit ~changed env level) (expand_ptyp visit ~changed env level) c)
+  | Tsimple s -> Tsimple (expand visit ~changed env level s)
+  | Tvar (Vflex fv) when Env_level.equal fv.level level ->
+     Tsimple (expand visit ~changed env level fv)
+  | Tvar v -> Tvar v
+  | Tvjoin (
+
+and expand_ntyp visit ~changed env level (n : ntyp) =
+  match n with
+  | Tcons c -> Tcons (map_head (expand_ptyp visit ~changed env level) (expand_ntyp visit ~changed env level) c)
+  | Tsimple s -> Tsimple (expand_fv_neg visit ~changed env level s)
+  | Tvar (Vflex fv) when Env_level.equal fv.level level ->
+     Tvar (Vflex (expand_fv_neg visit ~changed env level fv))
+  | Tvar v -> Tvar v
+  | Tvjoin (t, (Vbound _ | Vrigid _ as v)) ->
+     Tvjoin (expand_ntyp visit ~changed env level t, v)
+  | Tvjoin (_, Vflex _) -> intfail "expand_ntyp: unexpected Vflex"
+  | Tpoly {vars; body} ->
+     let vars = IArray.map (fun (s, t) -> s, expand_ptyp visit ~changed env level t) vars in
+     let body = expand_ntyp visit ~changed env level body in
+     Tpoly {vars; body}
+*)
 
 
 

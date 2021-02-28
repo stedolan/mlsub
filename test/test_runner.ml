@@ -38,11 +38,10 @@ let run_cmd s =
   let println fmt =
     Printf.ksprintf (fun s ->
       Buffer.add_string outbuf s; Buffer.add_char outbuf '\n') fmt in
-  let _pprintln ?(width=120) d =
+  let pprintln ?(width=120) d =
     PPrint.ToBuffer.pretty 1. width outbuf PPrint.(PPrint.group d ^^ hardline) in
   begin match Parse.parse_string text with
-  | Ok (`Exp _e) ->
-     (*
+  | Ok (`Exp e) ->
      let rendered = to_string (Print.exp e) in
      println "%s" rendered;
      begin match Parse.parse_string rendered with
@@ -55,30 +54,28 @@ let run_cmd s =
      begin match Check.elab_gen Env_nil (fun env -> Check.infer env e) with
      | t, elab ->
         begin
-        pprintln PPrint.(utf8string "* ⊢" ^^ break 1 ^^ (Typedefs.pr_typ Pos t));
+        pprintln PPrint.(utf8string "* ⊢" ^^ break 1 ^^ (Print.tyexp (Typedefs.unparse_ptyp ~flexvar:ignore t)));
         let poly, elab = Elab.elaborate Env_nil elab in
         poly |> Option.iter (fun poly ->
           pprintln PPrint.(string "WEAKPOLY" ^^ Print.typolybounds poly));
         pprintln ~width:80 (PPrint.(nest 2 (blank 2 ^^ Print.exp elab)));
 
-        let env0 = env_cons_entry Env_nil (Eflexible {vars=Vector.create ();names=Tuple_fields.SymMap.empty}) in
-        wf_typ Pos env0 t;
-        let te = Type_print.convert Env_nil Pos t in
+        let env0 = Env_nil in
+        let te = Typedefs.unparse_ptyp ~flexvar:ignore (*Env_nil*) t in
         pprintln (Print.tyexp te);
         try
-          let tn, _ = Check.typ_of_tyexp env0 te in
-          let env0 = Typedefs.env_cons_entry env0 (Eflexible {vars=Vector.create ();names=Tuple_fields.SymMap.empty}) in
-          Check.check env0 e tn |> ignore
+          wf_ptyp env0 t;
+          let t = Check.typ_of_tyexp env0 te in
+          let env0 = env0 in
+          Check.check env0 e t |> ignore
         with e ->
             println "RECHECK: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
         end
-     | exception ((Assert_failure _ | Types.Internal _) as e) ->
+     | exception ((Assert_failure _ | Typedefs.Internal _) as e) ->
         println "%s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
      | exception e ->
         println "typechecking error: %s" (Printexc.to_string e)
      end
-      *)
-     ()
   | Ok (`Sub (t1, t2)) ->
      (match
        let t1 = Check.typ_of_tyexp Env_nil t1 in
