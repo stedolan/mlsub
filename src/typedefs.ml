@@ -188,6 +188,7 @@ type (+'neg, +'pos) typ =
   | Tcons of ('neg, 'pos) cons_typ
   | Tvar of typ_var
   | Tvjoin of ('neg, 'pos) typ * typ_var
+     (* Tvjoin(t,v): t must be well-scoped at level of var *)
   | Tpoly of {
      (* names must be distinct *)
      (* bound must be a constructed type, possibly joined with some rigid/bound vars *)
@@ -259,13 +260,20 @@ let env_replace env level newlevel entry =
   | _ -> assert false
 *)
 
-let rec env_rigid_vars env lvl =
+let rec env_at_level env lvl =
   match env with
-  | Env_vals { vals=_; rest } -> env_rigid_vars rest lvl
-  | Env_types tys when Env_level.equal tys.level lvl -> tys.rig_defns
+  | Env_vals { vals=_; rest } -> env_at_level rest lvl
+  | Env_types tys when Env_level.equal tys.level lvl -> env
   | Env_types tys ->
-     assert (Env_level.extends lvl tys.level); env_rigid_vars tys.rest lvl
-  | Env_nil -> intfail "no rigid vars here"
+     assert (Env_level.extends lvl tys.level); env_at_level tys.rest lvl
+  | Env_nil when Env_level.equal Env_level.initial lvl -> Env_nil
+  | Env_nil -> intfail "env level not found"
+ 
+let env_rigid_vars env lvl =
+  match env_at_level env lvl with
+  | Env_types tys ->
+     assert (Env_level.equal tys.level lvl); tys.rig_defns
+  | _ -> intfail "env_rigid_vars"
 
 let env_rigid_bound env (rv : rigvar) =
   (IArray.get (env_rigid_vars env rv.level) rv.var).upper
@@ -657,12 +665,17 @@ let rec wf_typ : 'pos 'neg .
      map_head (wf_typ ~seen ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) (wf_typ ~seen ~neg ~pos ~ispos env ext) c |> ignore
   | Tvar v -> wf_var ~seen env ext v
   | Tvjoin (t, v) ->
-     wf_typ ~seen ~neg ~pos ~ispos env ext t;
      wf_var ~seen env ext v;
      begin match v with
-     | Vbound v -> assert (fst (List.nth ext v.index) = ispos); (* covariant *)
-     | Vflex _ -> assert ispos; (* positive *)
-     | Vrigid _ -> ()
+     | Vbound v ->
+        assert (fst (List.nth ext v.index) = ispos); (* covariant *)
+        (* FIXME: should trim ext somehow, smaller indexes of ext are not valid in t *)
+        wf_typ ~seen ~neg ~pos ~ispos env ext t
+     | Vflex fv ->
+        assert ispos; (* positive *)
+        wf_typ ~seen ~neg ~pos ~ispos (env_at_level env fv.level) [] t
+     | Vrigid rv ->
+        wf_typ ~seen ~neg ~pos ~ispos (env_at_level env rv.level) [] t
      end
   | Tpoly {vars; body} ->
      let n_unique_vars = IArray.to_list vars |> List.map fst |> List.sort_uniq String.compare |> List.length in
@@ -953,8 +966,15 @@ let unparse_cons ~neg ~pos ty =
               pos ret) in
   mktyexp ty
 
-let unparse_bound_var index var =
-  mktyexp (named_type (if index = 0 then Printf.sprintf "$%d" var else Printf.sprintf "$%d.%d" index var))
+let unparse_bound_var ~ext index var =
+  let name =
+    if index < List.length ext then
+      IArray.get (List.nth ext index) var
+    else
+      match index - List.length ext with
+      | 0 -> Printf.sprintf "$%d" var
+      | n -> Printf.sprintf "$%d.%d" n var in
+  mktyexp (named_type name)
 
 let flexvar_name fv =
   let names = [| "α"; "β"; "γ"; "δ"; "ε"; "ζ"; "η"; "θ"; "κ"; "ν"; "ξ"; "π"; "ρ" |] in
@@ -968,8 +988,8 @@ let unparse_rigid_var {level;var} =
 let unparse_flexvar ~flexvar fv =
   flexvar fv; mktyexp (named_type (flexvar_name fv))
 
-let unparse_var ~flexvar = function
-  | Vbound {index; var} -> unparse_bound_var index var
+let unparse_var ~flexvar ~ext = function
+  | Vbound {index; var} -> unparse_bound_var ~ext index var
   | Vflex fv -> unparse_flexvar ~flexvar fv
   | Vrigid rv -> unparse_rigid_var rv
 
@@ -977,18 +997,34 @@ let unparse_join ty rigvars =
   List.fold_left (fun c r -> mktyexp (Exp.Tjoin (c, unparse_rigid_var r))) ty rigvars
 
 let rec unparse_gen_typ :
-  'neg 'pos . flexvar:_ -> neg:('neg -> Exp.tyexp) -> pos:('pos -> Exp.tyexp) ->
+  'neg 'pos . flexvar:_ -> ext:_ -> neg:('neg -> Exp.tyexp) -> pos:('pos -> Exp.tyexp) ->
              ('neg,'pos) typ -> Exp.tyexp =
-  fun ~flexvar ~neg ~pos ty -> match ty with
+  fun ~flexvar ~ext ~neg ~pos ty -> match ty with
   | Tsimple t -> pos t
-  | Tcons c -> unparse_cons ~neg:(unparse_gen_typ ~flexvar ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~flexvar ~neg ~pos) c
+  | Tcons c -> unparse_cons ~neg:(unparse_gen_typ ~flexvar ~ext ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~flexvar ~ext ~neg ~pos) c
   | Tvar var
   | Tvjoin (Tcons Bot, var) ->
-     unparse_var ~flexvar var
+     unparse_var ~flexvar ~ext var
   | Tvjoin (rest, var) ->
-     mktyexp (Exp.Tjoin (unparse_gen_typ ~flexvar ~neg ~pos rest, unparse_var ~flexvar var))
-  | Tpoly { vars=_; body=_ } ->
-     unimp "unparse Tpoly"
+     mktyexp (Exp.Tjoin (unparse_gen_typ ~flexvar ~ext ~neg ~pos rest, unparse_var ~flexvar ~ext var))
+  | Tpoly { vars; body } ->
+     (* FIXME name the variables! *)
+     let ext, bounds = unparse_bounds ~flexvar ~ext ~neg ~pos vars in
+     mktyexp (Exp.Tforall(bounds, unparse_gen_typ ~flexvar ~ext ~neg ~pos body))
+
+(* FIXME this should freshen names, or use shifts, or something. *)
+and unparse_bounds :
+  'neg 'pos . flexvar:_ -> ext:_ -> neg:('neg -> Exp.tyexp) -> pos:('pos -> Exp.tyexp) ->
+             (string * ('pos,'neg) typ) iarray -> _ * Exp.typolybounds =
+  fun ~flexvar ~ext ~neg ~pos vars ->
+  let ext = IArray.map fst vars :: ext in
+  ext, IArray.map (fun (s, bound) ->
+       let s = (s, loc) in
+       match bound with
+       | Tcons Top ->
+          s, None
+       | t ->
+          s, Some (unparse_gen_typ ~flexvar ~ext ~pos:neg ~neg:pos t)) vars |> IArray.to_list
 
 let rec unparse_flex_lower_bound ~flexvar { ctor; flexvars } =
   let t =
@@ -1008,7 +1044,7 @@ let rec unparse_flex_lower_bound ~flexvar { ctor; flexvars } =
   | None -> unparse_cons ~neg:never ~pos:never Bot
 
 
-let unparse_ptyp ~flexvar (t : ptyp) =
-  unparse_gen_typ ~flexvar ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) t
-let unparse_ntyp ~flexvar (t : ntyp) =
-  unparse_gen_typ ~flexvar ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) t
+let unparse_ptyp ~flexvar ?(ext=[]) (t : ptyp) =
+  unparse_gen_typ ~flexvar ~ext ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) t
+let unparse_ntyp ~flexvar ?(ext=[]) (t : ntyp) =
+  unparse_gen_typ ~flexvar ~ext ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) t

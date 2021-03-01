@@ -67,7 +67,7 @@ let dump env level (t : ptyp) =
   dump (Tsimple fl);
 
   let bvars = Vector.create () in
-  let fl = substn 4 bvars fl in
+  let fl = substn 4 bvars level ~index:0 fl in
   dump fl;
   Vector.iteri bvars (fun ix (_, r) ->
     PPrint.ToChannel.pretty 1. 120 stdout PPrint.(utf8string (Printf.sprintf "  $%d ≤ " ix) ^^ group (Print.tyexp (unparse_ntyp ~flexvar:nope !r)) ^^ hardline));
@@ -194,7 +194,7 @@ let poly () =
     Tpoly {vars = IArray.of_array [| "P", Tcons Top |];
            body = Tcons (func [bvar 0] (
              Tpoly {vars=IArray.of_array [| "Q", Tcons Top |];
-                    body = Tcons (func [bvar 0] (bvar ~index:1 ~rest:(bvar 0) 0))}))} in
+                    body = Tcons (func [bvar 0] (bvar ~rest:(bvar ~index:1 0) 0))}))} in
   print_endline "t1 = t2";
   subtype ~error env (t1 ()) (t2 ());
   subtype ~error env (t2 ()) (t1 ());
@@ -207,7 +207,6 @@ let poly () =
             
 (*  subtype ~error env (t2 ()) (t3 ());*)
   ()
-  
 
 let () = choosy ()
 let () = lbs ()

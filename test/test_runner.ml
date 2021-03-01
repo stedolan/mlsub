@@ -71,7 +71,7 @@ let run_cmd s =
         with e ->
             println "RECHECK: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
         end
-     | exception ((Assert_failure _ | Typedefs.Internal _) as e) ->
+     | exception ((Assert_failure _ | Typedefs.Internal _ | Out_of_memory | Invalid_argument _) as e) ->
         println "%s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
      | exception e ->
         println "typechecking error: %s" (Printexc.to_string e)

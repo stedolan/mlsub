@@ -123,9 +123,31 @@ let elab_gen (env:env) (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds optio
   let env' = Env_types { level; rig_names = SymMap.empty; rig_defns = IArray.empty; rest = env } in
   let ty, Elab (erq, ek) = fn env' in
   wf_ptyp env' ty;
-  (* FIXME *)
-  let ty = ty in
-  ty, Elab (erq, fun e -> None, ek e)
+
+  let rec fixpoint visit erq ty =
+    if visit > 10 then intfail "looping?";
+    let changed = ref false in
+    let ty = expand_ptyp visit ~changed env' level ty in
+    let erq = elabreq_map_typs erq ~index:0
+                ~neg:(fun ~index:_ -> expand_ntyp visit ~changed env' level)
+                ~pos:(fun ~index:_ -> expand_ptyp visit ~changed env' level) in
+    if !changed then
+      fixpoint (visit+2) erq ty
+    else
+      (visit, erq, ty) in
+  let visit, erq, ty = fixpoint 2 erq ty in
+
+  let bvars = Vector.create () in
+  let ty = substn_ptyp visit bvars level ~index:0 ty in
+  let erq = elabreq_map_typs erq ~index:0
+              ~neg:(substn_ntyp visit bvars level)
+              ~pos:(substn_ptyp visit bvars level) in
+  if Vector.length bvars = 0 then
+    ty, Elab (erq, fun e -> None, ek e)
+  else
+    let bounds = bvars |> Vector.to_array |> Array.mapi (fun i (_,r) -> Printf.sprintf "A_%d" i, !r) |> IArray.of_array in
+    let ty = Tpoly { vars = bounds; body = ty } in
+    ty, Elab (Gen{bounds; body=erq}, fun (poly, e) -> Some poly, ek e)
   
 (*
   let level' = env_next_level env Esort_flexible in

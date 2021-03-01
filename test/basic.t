@@ -199,7 +199,7 @@ if true { (@bot : (~foo:(int,int), ~bar:any) -> string) } else { (@bot : (~foo:(
 if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot : ((any,string), ~bar:string, ~foo:(string,any)) -> nothing)}
 > if true{(@bot : ((int, any), ~foo: (int, int), ~bar: any) -> string)} else
 > {(@bot : ((any, string), ~bar: string, ~foo: (string, any)) -> nothing)}
-> * ⊢ ((int, string), foo: (nothing, int), bar: string) -> string
+> * ⊢ ((int, string), ~foo: (nothing, int), ~bar: string) -> string
 >   if true{(@bot : ((int, any), ~foo: (int, int), ~bar: any) -> string)} else
 >   {(@bot : ((any, string), ~bar: string, ~foo: (string, any)) -> nothing)}
 > ((int, string), ~foo: (nothing, int), ~bar: string) -> string
@@ -499,7 +499,7 @@ fn (f) { (f({x:1,y:2}), f({x:1,z:2})) }
 
 fn (x) { if x.cond { {p:1} } else { {p:2,q:1} } }
 > fn (x) { if x.cond{{p: 1}} else {{p: 2, q: 1}} }
-> * ⊢ ((cond: bool, ...)) -> (p: int, ...)
+> * ⊢ ({cond: bool, ...}) -> {p: int, ...}
 >   fn (x: {cond: bool, ...}) : {p: int, ...} {
 >   if x.cond{{p: 1}} else
 >   {{p: 2, q: 1}}
@@ -508,7 +508,7 @@ fn (x) { if x.cond { {p:1} } else { {p:2,q:1} } }
 
 fn (x) { if x.cond { {q:2,p:1} } else { {p:2,q:1} } }
 > fn (x) { if x.cond{{q: 2, p: 1}} else {{p: 2, q: 1}} }
-> * ⊢ ((cond: bool, ...)) -> (q: int, p: int)
+> * ⊢ ({cond: bool, ...}) -> {q: int, p: int}
 >   fn (x: {cond: bool, ...}) : {q: int, p: int} {
 >   if x.cond{{q: 2, p: 1}} else
 >   {{p: 2, q: 1}}

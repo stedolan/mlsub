@@ -9,8 +9,7 @@ type _ elab_req =
   | Ptyp : ptyp -> tyexp elab_req
   | Ntyp : ntyp -> tyexp elab_req
   | Gen :
-      { bounds : (string option * ntyp) array;
-        flow : Flow_graph.t;
+      { bounds : (string * ntyp) IArray.t;
         body : 'a elab_req } ->
       (typolybounds * 'a) elab_req
 type +'a elab =
@@ -35,22 +34,38 @@ let elab_fields (f : 'a elab tuple_fields) : 'a tuple_fields elab =
   { f with fields }
 
 
-let rec elaborate : type a . env -> a elab_req -> a =
-  fun env rq -> match rq with
+(* FIXME is env needed? *)
+let rec elaborate : type a . env -> ext:_ -> a elab_req -> a =
+  fun env ~ext rq -> match rq with
   | Unit -> ()
-  | Pair (s, t) -> (elaborate env s, elaborate env t)
-  | Ptyp t -> unparse_ptyp ~flexvar:ignore t
-  | Ntyp t -> unparse_ntyp ~flexvar:ignore t
-  | Gen { bounds; flow; body } ->
-     assert false
-     (* FIXME *)
+  | Pair (s, t) -> (elaborate env ~ext s, elaborate env ~ext t)
+  | Ptyp t -> unparse_ptyp ~flexvar:ignore ~ext t
+  | Ntyp t -> unparse_ntyp ~flexvar:ignore ~ext t
+  | Gen { bounds; body } ->
+     (* FIXME bound var names in env *)
+     let ext, bounds = unparse_bounds ~flexvar:ignore ~ext ~pos:(unparse_flex_lower_bound ~flexvar:ignore) ~neg:(unparse_flexvar ~flexvar:ignore) bounds in
+     bounds, elaborate env ~ext body
             (*
      let env, constraints, inst = Type_print.enter_poly_for_convert env pol bounds flow in
      let body = map_bound_elab_req (binder_sort pol) 0 inst body in
      constraints, elaborate env body*)
 
+let rec elabreq_map_typs :
+  type a . neg:_ -> pos:_ -> index:int -> a elab_req -> a elab_req =
+  fun ~neg ~pos ~index rq -> match rq with
+  | Unit -> Unit
+  | Pair (s, t) -> Pair (elabreq_map_typs ~neg ~pos ~index s,
+                         elabreq_map_typs ~neg ~pos ~index t)
+  | Ptyp p -> Ptyp (pos ~index p)
+  | Ntyp n -> Ntyp (neg ~index n)
+  | Gen {bounds; body} ->
+     let index = index + 1 in
+     let bounds = IArray.map (fun (n,b) -> n, neg ~index b) bounds in
+     let body = elabreq_map_typs ~neg ~pos ~index body in
+     Gen{bounds;body}
 
-let elaborate env (Elab (rq, k)) = k (elaborate env rq)
+
+let elaborate env (Elab (rq, k)) = k (elaborate env ~ext:[] rq)
 
 
 (*
