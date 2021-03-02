@@ -4,7 +4,9 @@ open Typedefs
 open Types
 
 let report = function
-  | Incompatible -> failwith "incompat"
+(* FIXME enable & promote tests
+  | Incompatible (s,t) -> failwith (Printf.sprintf "incompat %s <: %s" s t)*)
+  | Incompatible _ -> failwith "incompat"
   | Missing k -> failwith ("missing " ^ string_of_field_name k)
   | Extra _ -> failwith ("extra")
 

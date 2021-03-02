@@ -2,36 +2,3 @@
  (name test_runner)
  (modules test_runner)
  (libraries lang))
-
-(rule
- (target basic.t.out)
- (deps (:run test_runner.exe) (:in basic.t))
- (action (with-stdout-to %{target} (with-stdin-from %{in} (run %{run})))))
-(rule
- (alias runtest)
- (action (diff basic.t basic.t.out)))
-
-(rule
- (target subtyping.t.out)
- (deps (:run test_runner.exe) (:in subtyping.t))
- (action (with-stdout-to %{target} (with-stdin-from %{in} (run %{run})))))
-(rule
- (alias runtest)
- (action (diff subtyping.t subtyping.t.out)))
-
-(rule
- (target syntax.t.out)
- (deps (:run test_runner.exe) (:in syntax.t))
- (action (with-stdout-to %{target} (with-stdin-from %{in} (run %{run})))))
-(rule
- (alias runtest)
- (action (diff syntax.t syntax.t.out)))
-
-(rule
- (target subexp.t.out)
- (deps (:run test_runner.exe) (:in subexp.t))
- (action (with-stdout-to %{target} (with-stdin-from %{in} (run %{run})))))
-(rule
- (alias runtest)
- (action (diff subexp.t subexp.t.out)))
-

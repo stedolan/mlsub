@@ -92,3 +92,11 @@
 # scope escape check
 : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
 > typechecking error: Failure("incompat")
+
+
+# FIXME bug due to spec sub
+: [A <: {cond: bool, ...}] (A) -> {foo: int, cond: int} | A <: [A <: {cond: bool, ...}] (A) -> {foo: int, cond: int} | A
+> 
+
+: [A <: {cond: bool}] A <: [A <: {cond: string}] ({cond: int} | A)
+> 

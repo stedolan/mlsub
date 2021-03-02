@@ -5,7 +5,7 @@ open Typedefs
 (* let (=) (x : int) (y : int) = x = y *)
 
 type conflict_reason =
-  | Incompatible
+  | Incompatible of string * string
   | Missing of field_name
   | Extra of [`Fields|`Named of field_name]
 
@@ -37,7 +37,16 @@ let subtype_cons ~error ~pos ~neg a b =
      subtype_cons_fields ~error neg args' args; pos res res'
   | Record fs, Record fs' ->
      subtype_cons_fields ~error pos fs fs'
-  | _,_ -> error Incompatible
+  | a,b ->
+     let msg = function
+       | Bot -> "bot"
+       | Bool -> "bool"
+       | Int -> "int"
+       | String -> "string"
+       | Func _ -> "func"
+       | Record _ -> "record"
+       | Top -> "top" in
+     error (Incompatible (msg a, msg b))
 
 (* NB: nleft/nright/nboth = contravariant
    Since meet is used on negative types, these will be *positive* *)
@@ -189,7 +198,8 @@ and subtype_ctor_rig ~error ~changed env cp cn =
     else subtype_ctor_rig ~error ~changed env (env_rigid_bound env pv) cn);
   subtype_cons ~error
     ~neg:(subtype_t_var ~error ~changed env)
-    ~pos:(subtype_t_var ~error ~changed env) cp.cons cn.cons
+    ~pos:(subtype_t_var ~error ~changed env) cp.cons cn.cons;
+  ()
 
 and subtype_flex_flex ~error ~changed env (pv : flexvar) (nv : flexvar) =
   match pv.upper with
