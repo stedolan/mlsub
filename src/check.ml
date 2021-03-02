@@ -145,7 +145,17 @@ let elab_gen (env:env) (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds optio
   if Vector.length bvars = 0 then
     ty, Elab (erq, fun e -> None, ek e)
   else
-    let bounds = bvars |> Vector.to_array |> Array.mapi (fun i (_,r) -> Printf.sprintf "A_%d" i, !r) |> IArray.of_array in
+    let next_name = ref 0 in
+    let rec mkname () =
+      let n = !next_name in
+      incr next_name;
+      let name = match n with
+        | n when n < 26 -> Printf.sprintf "%c" (Char.chr (Char.code 'A' + n))
+        | n -> Printf.sprintf "T_%d" (n-26) in
+      match env_lookup_type_var env name with
+      | None -> name
+      | Some _ -> mkname () in
+    let bounds = bvars |> Vector.to_array |> Array.map (fun (_,r) -> mkname (), !r) |> IArray.of_array in
     let ty = Tpoly { vars = bounds; body = ty } in
     ty, Elab (Gen{bounds; body=erq}, fun (poly, e) -> Some poly, ek e)
   
@@ -331,6 +341,7 @@ ignore poly;((*FIXME       elab_poly env poly (fun env ->*)
            | _, p -> check_pat env acc t p) SymMap.empty params in
          let env' = Env_vals { vals = vs; rest = env } in
          let res, body = check_or_infer env' ret body in
+         let _ = map_fields (fun _fn (t,_) -> wf_ntyp env t) params in
          Tcons (Func (map_fields (fun _fn (t,_) -> t) params, res)),
          let* params =
            elab_fields (map_fields (fun _fn (t, pat) ->
@@ -357,7 +368,9 @@ ignore poly;((*FIXME       elab_poly env poly (fun env ->*)
      let args = map_fields (fun _fn e -> e, Ivar.make ()) args in
      let resp, res = Ivar.make () in
      let argtmpl = map_fields (fun _fn (_e, (r, _)) -> r) args in
+     wf_ptyp env fty;
      match_typ ~error:report env (env_level env) fty (Func (argtmpl, resp));
+     wf_ptyp env fty;
      let args = map_fields (fun _fn (e, (_,r)) -> check env e (Ivar.get r)) args in
      Ivar.get res,
      let* f = f and* args = elab_fields args in

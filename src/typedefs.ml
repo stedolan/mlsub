@@ -53,6 +53,7 @@ module IArray : sig
   val map : ('a -> 'b) -> 'a t -> 'b t
   val iter : ('a -> unit) -> 'a t -> unit
   val iter2 : ('a -> 'b -> unit) -> 'a t -> 'b t -> unit
+  val exists : ('a -> bool) -> 'a t -> bool
 end = struct
   type +'a t = Mk : 'b array * ('b -> 'a) -> 'a t
   let acopy a = Array.map id a
@@ -69,6 +70,7 @@ end = struct
   let iter2 f (Mk (a, ra)) (Mk (b, rb)) =
     Array.iter2 (fun a b -> f (ra a) (rb b)) a b
   let iter f (Mk (a, r)) = Array.iter (fun x -> f (r x)) a
+  let exists f (Mk (a, r)) = Array.exists (fun x -> f (r x)) a
 end
 type 'a iarray = 'a IArray.t
 
@@ -617,6 +619,9 @@ let enter_poly' pol env names vars flow =
 let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   if Hashtbl.mem seen fv.id then () else begin
   Hashtbl.add seen fv.id ();
+  if not (Env_level.extends fv.level (env_level env)) then
+    intfail "wf_flexvar: fv %d not inside env %d" (Env_level.to_int fv.level) (Env_level.to_int (env_level env));
+  assert (Env_level.extends fv.level (env_level env));
   assert (Env_level.extends fv.level lvl);
   if not (Env_level.equal fv.level Env_level.initial) then
     ignore (env_rigid_vars env fv.level);
@@ -1012,11 +1017,20 @@ let rec unparse_gen_typ :
      let ext, bounds = unparse_bounds ~flexvar ~ext ~neg ~pos vars in
      mktyexp (Exp.Tforall(bounds, unparse_gen_typ ~flexvar ~ext ~neg ~pos body))
 
-(* FIXME this should freshen names, or use shifts, or something. *)
 and unparse_bounds :
   'neg 'pos . flexvar:_ -> ext:_ -> neg:('neg -> Exp.tyexp) -> pos:('pos -> Exp.tyexp) ->
              (string * ('pos,'neg) typ) iarray -> _ * Exp.typolybounds =
   fun ~flexvar ~ext ~neg ~pos vars ->
+  (* FIXME: this sort of freshening or shifts? *)
+  (* FIXME: if freshening, use levels somehow to determine when not needed *)
+  let taken name =
+    lookup_named_type name <> None || List.exists (fun names -> IArray.exists (String.equal name) names) ext in
+  let rec freshen name i =
+    let p = Printf.sprintf "%s_%d" name i in
+    if not (taken p) then p else freshen name (i + 1) in
+  let freshen name =
+    if not (taken name) then name else freshen name 1 in
+  let vars = IArray.map (fun (s, b) -> freshen s, b) vars in
   let ext = IArray.map fst vars :: ext in
   ext, IArray.map (fun (s, bound) ->
        let s = (s, loc) in
