@@ -128,12 +128,12 @@ let elab_gen (env:env) (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds optio
 
   let rec fixpoint visit erq ty =
     if visit > 10 then intfail "looping?";
-    let changed = ref false in
-    let ty = expand_ptyp visit ~changed env' level ty in
+    let changes = ref [] in
+    let ty = expand_ptyp visit ~changes env' level ty in
     let erq = elabreq_map_typs erq ~index:0
-                ~neg:(fun ~index:_ -> expand_ntyp visit ~changed env' level)
-                ~pos:(fun ~index:_ -> expand_ptyp visit ~changed env' level) in
-    if !changed then
+                ~neg:(fun ~index:_ -> expand_ntyp visit ~changes env' level)
+                ~pos:(fun ~index:_ -> expand_ptyp visit ~changes env' level) in
+    if !changes <> [] then
       fixpoint (visit+2) erq ty
     else
       (visit, erq, ty) in

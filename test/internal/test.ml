@@ -56,14 +56,14 @@ let nope _ = assert false
 let dump env level (t : ptyp) =
   dump t;
   let fl = approx_ptyp env t in
-  let changed = ref false in
-  let fl = expand 2 ~changed env level fl in
-  Printf.printf "changed: %b\n" !changed;
+  let changes = ref [] in
+  let fl = expand 2 ~changes env level fl in
+  Printf.printf "changed: %b\n" (!changes <> []);
   dump (Tsimple fl);
-  if !changed then begin
-  let changed = ref false in
-  let fl = expand 4 ~changed env level fl in
-  Printf.printf "changed: %b\n" !changed;
+  if !changes <> [] then begin
+  let changes = ref [] in
+  let fl = expand 4 ~changes env level fl in
+  Printf.printf "changed: %b\n" (!changes <> []);
   dump (Tsimple fl);
 
   let bvars = Vector.create () in

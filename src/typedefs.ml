@@ -215,6 +215,40 @@ and rigvar_defn = {
   upper : (flexvar, flex_lower_bound) ctor_ty;
 }
 
+(*
+ * Flexvar mutations and backtracking log
+ *)
+
+type flexvar_change =
+  | Change_level of flexvar * env_level
+  | Change_upper of flexvar * styp_neg
+  | Change_lower of flexvar * flex_lower_bound
+
+let fv_set_level ~changes fv level =
+  changes := Change_level (fv, level) :: !changes;
+  fv.level <- level
+
+let fv_set_upper ~changes fv upper =
+  changes := Change_upper (fv, upper) :: !changes;
+  fv.upper <- upper
+
+let fv_set_lower ~changes fv lower =
+  changes := Change_lower (fv, lower) :: !changes;
+  fv.lower <- lower
+
+let fv_maybe_set_lower ~changes fv lower =
+  (* FIXME poly eq *)
+  if lower <> fv.lower then
+    (fv_set_lower ~changes fv lower; true)
+  else false
+
+let fv_maybe_set_upper ~changes (fv : flexvar) upper =
+  (* FIXME poly eq *)
+  if upper <> fv.upper then
+    (fv_set_upper ~changes fv upper; true)
+  else false
+
+
 
 (*
  * Environment ordering
