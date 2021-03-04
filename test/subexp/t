@@ -202,35 +202,35 @@ let ch = fn[A,B,R, A<:R, B<:R](x : A, y : B) : R { if true { x } else { y } }; f
 
 let id = fn(x) { x }; fn () { (id (id), id) }
 > let id = fn (x) { x }; fn () { (id(id), id) }
-> * ⊢ ∀⁺ 0:[⊥,⊤]. () → ((.0.0) → .0.0, ∀⁺ 0:[⊥,⊤]. (.0.0) → .0.0)
+> * ⊢ [A] () -> ((A) -> A, [A_1] (A_1) -> A_1)
 >   let id : [A] (A) -> A = fn [A](x: A) : A { x };
->   fn [A]() : ((A) -> A, [B] (B) -> B) { (id(id), id) }
-> [A] () -> ((A) -> A, [B] (B) -> B)
+>   fn [A]() : ((A) -> A, [A_1] (A_1) -> A_1) { (id(id), id) }
+> [A] () -> ((A) -> A, [A_1] (A_1) -> A_1)
 
 
 fn(f) { fn(id: [A] (A) -> A) { let x = f(id); id(1) } }
 > fn (f) { fn (id: [A] (A) -> A) { let x = f(id); id(1) } }
-> * ⊢ ∀⁺ 0:[⊥,⊤], 1:[⊥,⊤]. (((.0.1) → .0.1) → .0.0) → (∀⁻ 0:[⊥,⊤]. (.0.0) → .0.0) → int
->   fn [A, B](f: ((B) -> B) -> A) : ([A_2] (A_2) -> A_2) ->
->   int { fn (id: [A_2] (A_2) -> A_2) : int { let x : A = f(id); id(1) } }
-> [A, B] (((B) -> B) -> A) -> ([A_2] (A_2) -> A_2) -> int
+> * ⊢ [A, B] (((B) -> B) -> A) -> ([A_1] (A_1) -> A_1) -> int
+>   fn [A, B](f: ((B) -> B) -> A) : ([A_1] (A_1) -> A_1) ->
+>   int { fn (id: [A_1] (A_1) -> A_1) : int { let x : A = f(id); id(1) } }
+> [A, B] (((B) -> B) -> A) -> ([A_1] (A_1) -> A_1) -> int
 
 fn(f) { fn(id: [A] (A) -> A) { id(fn(y) { let x = f(y); y }) } }
 > fn (f) { fn (id: [A] (A) -> A) { id(fn (y) { let x = f(y); y }) } }
-> * ⊢ ∀⁺ 0:[⊥,⊤], 1:[⊥,⊤]. ((.0.1) → .0.0) → ∀⁺ 0:[⊥,.1.1]. (∀⁻ 0:[⊥,⊤]. (.0.0) → .0.0) → (.0.0) → .0.0
->   fn [A, B](f: (B) -> A) : [C <: B] ([A_2] (A_2) -> A_2) ->
->   (C) ->
->   C {
->   fn [C <: B](id: [A_2] (A_2) -> A_2) : (C) ->
->   C { id(fn [D <: B](y: D) : D { let x : A = f(y); y }) }
+> * ⊢ [A, B] ((A) -> B) -> ([A_1] (A_1) -> A_1) -> (A) -> A
+>   fn [A, B](f: (A) -> B) : ([A_1] (A_1) -> A_1) ->
+>   (A) ->
+>   A {
+>   fn (id: [A_1] (A_1) -> A_1) : (A) ->
+>   A { id(fn (y: A) : A { let x : B = f(y); y }) }
 >   }
-> [A, B] ((B) -> A) -> [C <: B] ([A_2] (A_2) -> A_2) -> (C) -> C
+> [A, B] ((A) -> B) -> ([A_1] (A_1) -> A_1) -> (A) -> A
 
 
 (fn(x) {(fn(y){y})(x)} : [A] (A) -> A)
 > (fn (x) { (fn (y) { y })(x) } : [A] (A) -> A)
-> * ⊢ ∀⁺ 0:[⊥,⊤]. (.0.0) → .0.0
->   (fn [A](x: A) : A { (fn [B](y: B) : B { y })(x) } : [A] (A) -> A)
+> * ⊢ [A] (A) -> A
+>   (fn [A](x: A) : A { (fn [A_1](y: A_1) : A_1 { y })(x) } : [A] (A) -> A)
 > [A] (A) -> A
 
 let id = fn(y) { y }; (fn[A](x : A) {id(x)})
@@ -241,7 +241,7 @@ let id = fn(y) { y }; (fn[A](x : A) {id(x)})
 
 let id = fn(y) { y }; (fn(x) {id(x)} : [A] (A) -> A)
 > let id = fn (y) { y }; (fn (x) { id(x) } : [A] (A) -> A)
-> * ⊢ ∀⁺ 0:[⊥,⊤]. (.0.0) → .0.0
+> * ⊢ [A] (A) -> A
 >   let id : [A] (A) -> A = fn [A](y: A) : A { y };
 >   (fn [A](x: A) : A { id(x) } : [A] (A) -> A)
 > [A] (A) -> A

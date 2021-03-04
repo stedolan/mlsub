@@ -581,12 +581,10 @@ fn(b) { if (b.cond) { b } else { {foo: 1, cond: false} } }
 
 fn(b) { if (b.cond) { b } else { {foo: 1, cond: 4} } }
 > fn (b) { if (b.cond){b} else {{foo: 1, cond: 4}} }
-> * ⊢ ∀⁺ 0:[nothing,(cond: bool, ...)], 1:[(foo: int, cond: int),any], 0 ≤ 1. (.0.0) -> .0.1
->   fn [A <: {cond: bool, ...}, B :> {foo: int, cond: int}, A <: B](b: A) : B {
->   if (b.cond){b} else
->   {{foo: 1, cond: 4}}
->   }
-> [A <: {cond: bool, ...}, B :> {foo: int, cond: int}, A <: B] (A) -> B
+> * ⊢ [A <: {cond: bool, ...}] (A) -> {foo: int, cond: int} | A
+>   fn [A <: {cond: bool, ...}](b: A) : {foo: int, cond: int} |
+>   A { if (b.cond){b} else {{foo: 1, cond: 4}} }
+> [A <: {cond: bool, ...}] (A) -> {foo: int, cond: int} | A
 
 fn (x) { (x.foo, x.bar, x.foo) }
 > fn (x) { (x.foo, x.bar, x.foo) }

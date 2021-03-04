@@ -219,7 +219,8 @@ and subtype_flex_flex ~error ~changes env (pv : flexvar) (nv : flexvar) =
        (* FIXME: ordering of side-effects here *)
        hoist_flex ~changes env nv.level pv;
        assert (Env_level.extends pv.level nv.level);
-       subtype_flex_cons ~error ~changes env pv upper
+       subtype_flex_cons ~error ~changes env pv upper;
+       ()
      end
 
 and subtype_flex_cons ~error ~changes env pv cn =
@@ -227,7 +228,8 @@ and subtype_flex_cons ~error ~changes env pv cn =
   subtype_cons ~error
     ~neg:(fun _ () -> () (* already done in ensure_upper_matches *))
     ~pos:(subtype_flex_flex ~error ~changes env)
-    cp cn.cons
+    cp cn.cons;                 (* FIXME does this ignore cn.rigvars? *)
+  ()
 
 (* Ensure pv has a UBcons upper bound whose head is below a given ctor.
    Returns the constructed upper bound.
@@ -255,56 +257,68 @@ and ensure_upper_matches ~error ~changes env (pv : flexvar) (cn : (flex_lower_bo
       ~pright:(fun _ -> assert false)
       ~pboth:(fun () v -> v)
       cn.cons cons in
-(*
-  if (map_head ignore ignore cn.cons <> map_head ignore ignore cn') then begin
-    let prcons c =
-      unparse_cons ~neg:(fun _ -> mktyexp (named_type "_")) ~pos:(fun _ -> mktyexp (named_type "_")) c 
-      |> Print.tyexp
-      |> (fun x -> PPrint.(ToChannel.pretty 1. 120 stderr (x ^^ hardline))) in
-    prcons cb.cons; 
-    prcons cn.cons;
-    prcons cons;
-    prcons cn';
-    Printf.fprintf stderr "bang\n%!";
-  end;
-*)
+
   (* should be true by absorption law *)
   assert (map_head ignore ignore cn.cons = map_head ignore ignore cn');
 
-  let rigvars =
-    (* Dragons. *)
-    (* FIUATT: should this call spec_sub unconditionally? Probably not. *)
-    let spec_sub rv c =
-      (* FIXME can speculative subtyping screw things up? Probably...
-         The speculation seems unreliable, as whether it gets done must surely
-         depend on constraint resolution order (due to width subtyping).
-         So any changes we make during (failed?) speculation are suspect.
-         Should they be backed out if they don't work? *)
-      (* FIXME: Write some tests that actually observe weirdness here (tricky...) *)
-      (* FIXME: I think this interacts especially badly with the hack
-         that expands rigid variable upper bounds to flexvars. Or maybe it's fine? *)
-      let error _ = raise Exit in
-      match subtype_ctor_rig ~error ~changes env (env_rigid_bound env rv) c with
-      | () -> true
-      | exception Exit -> false in
-    let cbrig =
-      cb.rigvars |> List.filter (fun vb ->
-        if contains_rigvar vb cn.rigvars then true
-        else spec_sub vb {cn with cons = cn'}) in
-    let cnrig =
-      cn.rigvars |> List.filter (fun vn ->
-        if contains_rigvar vn cb.rigvars then false (* already included *)
-        else if not (Env_level.extends vn.level pv.level) then false (* scope escape *)
-        else spec_sub vn cb) in
-    cbrig @ cnrig in
+  (* Dragons. *)
+  (* FIUATT: should this call spec_sub unconditionally? Probably not. *)
+  let spec_sub rv c =
+    (* FIXME can speculative subtyping screw things up? Probably...
+       The speculation seems unreliable, as whether it gets done must surely
+       depend on constraint resolution order (due to width subtyping).
+       So any changes we make during speculation are suspect. *)
+    (* FIXME: Write more tests that actually observe weirdness here (tricky...) *)
+    (* FIXME: I think this interacts especially badly with the hack
+       that expands rigid variable upper bounds to flexvars. Or maybe it's fine? *)
+    let error _ = raise Exit in
+    let temp_changes = ref [] in
+    let rb = env_rigid_bound env rv in
+    match subtype_ctor_rig ~error ~changes:temp_changes env rb c with
+    (* FIXME: Is this even order-independent? *)
+    (* FIXME: this needs to be able to handle rigid bounds properly *)
+    | () -> commit ~changes !temp_changes; true
+    (*| () -> revert !temp_changes; !temp_changes = [] FIXME: is this worse? *)
+    | exception Exit -> revert !temp_changes; false in
+  let cbrig =
+    cb.rigvars |> List.filter (fun vb ->
+      if contains_rigvar vb cn.rigvars then true
+      else spec_sub vb {cn with cons = cn'}) in
+  let cnrig =
+    cn.rigvars |> List.filter (fun vn ->
+      if contains_rigvar vn cb.rigvars then false (* already included *)
+      else if not (Env_level.extends vn.level pv.level) then false (* scope escape *)
+      else spec_sub vn cb) in
 
-  let bound = {cons; rigvars} in
-  if fv_maybe_set_upper ~changes pv (UBcons bound) then begin
-    (* FIXME is this all still wf, despite hoisting? *)
+  if cnrig = [] then begin
+    let bound = { cons ; rigvars = cbrig } in
+    if fv_maybe_set_upper ~changes pv (UBcons bound) then begin
+      (* FIXME is this all still wf, despite hoisting? *)
+      subtype_t_cons ~error ~changes env pv.lower bound;
+      wf_ptyp env (Tsimple (flexlb_fv pv));
+    end;
+    map_head ignore id bound.cons
+  end else begin
+    (* Extremely tricky case.
+       We had LB <= pv <= UB, but we've just decided to add rigvar(s) a to UB,
+       on the basis that a <= UB already, so UB = UB | a and so adding a to the
+       upper bound doesn't actually change anything.
+       However, some variables in UB might be constrained from below (by LB),
+       and some of these constraint might arise from approximations of rigvars in LB.
+       These might no longer be necessary: if a is in LB, then a <= UB|a can be
+       discharged directly without needing to constrain UB from below.
+       So, if UB is growing rigvars, we freshen its matchable variables and compare
+       again with LB. This may cause some variables in UB to be less constrained. *)
+    (* FIXME: do I also need to freshen the contravariant parts? Something's weird here.
+       Probably observable with a fiddly reflexivity example, fuzz it. *)
+    let cons = map_head id (fresh_below_var pv.level) cons in
+    let bound = { cons; rigvars = cbrig @ cnrig } in
+    fv_set_upper ~changes pv (UBcons bound);
     subtype_t_cons ~error ~changes env pv.lower bound;
     wf_ptyp env (Tsimple (flexlb_fv pv));
-  end;
-  map_head ignore id cons
+    map_head ignore id bound.cons
+  end
+
 
 and subtype_cons_flex ~error ~changes env (cp : (flexvar, flex_lower_bound) ctor_ty) (nv : flexvar) =
   match cp with
@@ -315,6 +329,7 @@ and subtype_cons_flex ~error ~changes env (cp : (flexvar, flex_lower_bound) ctor
      let bound = flex_cons_upper ~changes env nv in
      let lower = join_ctor ~changes env nv.level nv.lower cp in
      (* FIXME: should it be enough to compare cp instead of nv.lower? *)
+     (* Printf.printf "lower bound of %a: %a --> %a\n" pp_flexvar nv pp_flexlb nv.lower pp_flexlb lower; *)
      if fv_maybe_set_lower ~changes nv lower then
        subtype_t_cons ~error ~changes env lower bound
 
@@ -497,7 +512,7 @@ let rec subtype ~error env (p : ptyp) (n : ntyp) =
   | p, Tcons cn ->
      (* FIXME duplicate subtype_t_cons and subtype_flex_cons for better matching behaviour here *)
      subtype_t_var ~error ~changes:(ref []) env (approx_ptyp env p) (approx_ntyp env (Tcons cn))
-  | p, n -> subtype_t_var ~error ~changes:(ref []) env (approx_ptyp env p) (approx_ntyp env n)
+  | p, n -> subtype_t_var ~error ~changes:(ref []) env (approx_ptyp env p) (approx_ntyp env n); ()
 
 
 let rec match_typ ~error env lvl (p : ptyp) (orig_head : (ntyp Ivar.put, ptyp Ivar.put) cons_head) =

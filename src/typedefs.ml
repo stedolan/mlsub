@@ -211,7 +211,8 @@ and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string;
-  (* FIXME: ctor_ty? Are rigid vars allowed in upper bound heads? *)
+  (* FIXME: ctor_ty? Are rigid vars allowed in upper bound heads?
+     FIXME: this seems very dubious *)
   upper : (flexvar, flex_lower_bound) ctor_ty;
 }
 
@@ -225,15 +226,15 @@ type flexvar_change =
   | Change_lower of flexvar * flex_lower_bound
 
 let fv_set_level ~changes fv level =
-  changes := Change_level (fv, level) :: !changes;
+  changes := Change_level (fv, fv.level) :: !changes;
   fv.level <- level
 
 let fv_set_upper ~changes fv upper =
-  changes := Change_upper (fv, upper) :: !changes;
+  changes := Change_upper (fv, fv.upper) :: !changes;
   fv.upper <- upper
 
 let fv_set_lower ~changes fv lower =
-  changes := Change_lower (fv, lower) :: !changes;
+  changes := Change_lower (fv, fv.lower) :: !changes;
   fv.lower <- lower
 
 let fv_maybe_set_lower ~changes fv lower =
@@ -248,7 +249,14 @@ let fv_maybe_set_upper ~changes (fv : flexvar) upper =
     (fv_set_upper ~changes fv upper; true)
   else false
 
+let revert changes =
+  changes |> List.iter (function
+  | Change_level (fv, level) -> fv.level <- level
+  | Change_upper (fv, upper) -> fv.upper <- upper
+  | Change_lower (fv, lower) -> fv.lower <- lower)
 
+let commit ~changes rest =
+  changes := rest @ !changes
 
 (*
  * Environment ordering
@@ -1091,8 +1099,32 @@ let rec unparse_flex_lower_bound ~flexvar { ctor; flexvars } =
   | Some t -> t
   | None -> unparse_cons ~neg:never ~pos:never Bot
 
-
 let unparse_ptyp ~flexvar ?(ext=[]) (t : ptyp) =
   unparse_gen_typ ~flexvar ~ext ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) t
 let unparse_ntyp ~flexvar ?(ext=[]) (t : ntyp) =
   unparse_gen_typ ~flexvar ~ext ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) t
+
+
+
+(* For debugging *)
+let pp_tyexp ppf ty =
+  let buf = Buffer.create 100 in
+  PPrint.ToBuffer.pretty 1. 10000 buf (PPrint.group (Print.tyexp ty));
+  Printf.fprintf ppf "%s" (Buffer.to_bytes buf |> Bytes.to_string)
+
+let pp_cons_pos ppf t =
+  let cons = unparse_cons ~neg:(unparse_flexvar ~flexvar:ignore) ~pos:(unparse_flex_lower_bound ~flexvar:ignore) t.cons in
+  let doc = unparse_join cons t.rigvars in
+  pp_tyexp ppf doc
+
+let pp_cons_neg ppf t =
+  let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar:ignore) ~pos:(unparse_flexvar ~flexvar:ignore)  t.cons in
+  let doc = unparse_join cons t.rigvars in
+  pp_tyexp ppf doc
+
+let pp_flexlb ppf t =
+  let doc = unparse_flex_lower_bound ~flexvar:ignore t in
+  pp_tyexp ppf doc
+
+let pp_flexvar ppf v =
+  pp_tyexp ppf (unparse_flexvar ~flexvar:ignore v)

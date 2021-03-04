@@ -94,9 +94,15 @@
 > typechecking error: Failure("incompat")
 
 
-# FIXME bug due to spec sub
+# tricky case of spec sub & rigvars (see cnrig <> [] case in ensure_upper_matches)
 : [A <: {cond: bool, ...}] (A) -> {foo: int, cond: int} | A <: [A <: {cond: bool, ...}] (A) -> {foo: int, cond: int} | A
-> 
+> ok
 
 : [A <: {cond: bool}] A <: [A <: {cond: string}] ({cond: int} | A)
-> 
+> ok
+
+: [B <: {cond: any}] B <: [A <: {cond: bool}] ({cond: int} | A)
+> ok
+
+: [A <: {cond: bool}] ((A) -> ({cond: int} | A)) <: [A <: {cond: bool}] ((A) -> ({cond: int} | A))
+> ok
