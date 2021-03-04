@@ -719,21 +719,33 @@ fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 >   }
 > [A :> any] ((A) -> any, ([A_2] (A_2) -> A_2) -> int) -> int
 
-fn (x, wid : (([A <: {foo:int}, A :> {foo:int,bar:string}] (A) -> A) -> int)) { wid(fn(a){x(a)}) }
-> fn (x, wid: (([A <: {foo: int}, A :> {foo: int, bar: string}] (A) -> A) -> int)) { wid(fn (a) { x(a) }) }
+# FIXME: not convinced by this type: why (a : B) : A? Will this recheck after elab?
+fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(fn(a){x(a)}) }
+> fn (x, wid: (([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int)) { wid(fn (a) { x(a) }) }
 > * ⊢
-> ∀⁺ 0:[nothing,(foo: int, bar: string)], 1:[(foo: int),any]. (
->   (.0.1) -> .0.0,
->   (∀⁺ 0:[(foo: int, bar: string),(foo: int)]. (.0.0) -> .0.0) -> int) -> int
->   fn [A <: {foo: int, bar: string}, B :> {foo: int}](x: (B) ->
->   A,
->   wid: ([A_2 <: {foo: int}, A_2 :> {foo: int, bar: string}] (A_2) -> A_2) ->
->   int) : int { wid(fn (a: B) : A { x(a) }) }
-> [A <: {foo: int, bar: string}, B :> {foo: int}] ((B) ->
+> [A <: {foo: int, bar: string}, B] (({foo: int} | B) ->
 > A,
-> ([A_2 <: {foo: int}, A_2 :> {foo: int, bar: string}] (A_2) -> A_2) ->
+> ([A_1 <: {foo: int}] (A_1) -> {foo: int, bar: string} | A_1) ->
 > int) ->
 > int
+>   fn [A <: {foo: int, bar: string}, B](x: ({foo: int} | B) ->
+>   A,
+>   wid: ([A_1 <: {foo: int}] (A_1) -> {foo: int, bar: string} | A_1) ->
+>   int) : int { wid(fn (a: B) : A { x(a) }) }
+> [A <: {foo: int, bar: string}, B] (({foo: int} | B) ->
+> A,
+> ([A_1 <: {foo: int}] (A_1) -> {foo: int, bar: string} | A_1) ->
+> int) ->
+> int
+
+fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(x) }
+> fn (x, wid: (([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int)) { wid(x) }
+> * ⊢ (({foo: int}) -> {foo: int, bar: string}, ([A <: {foo: int}] (A) -> {foo: int, bar: string} | A) -> int) -> int
+>   fn (x: ({foo: int}) ->
+>   {foo: int, bar: string},
+>   wid: ([A <: {foo: int}] (A) -> {foo: int, bar: string} | A) ->
+>   int) : int { wid(x) }
+> (({foo: int}) -> {foo: int, bar: string}, ([A <: {foo: int}] (A) -> {foo: int, bar: string} | A) -> int) -> int
 
 fn(f) { (fn(x) { 5 })(f(10)) }
 > fn (f) { (fn (x) { 5 })(f(10)) }
