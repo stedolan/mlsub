@@ -69,7 +69,9 @@ let dump env level (t : ptyp) =
   let bvars = Vector.create () in
   let fl = substn 4 bvars level ~index:0 fl in
   dump fl;
-  Vector.iteri bvars (fun ix (_, r) ->
+  Vector.iteri bvars (fun ix v -> match v with
+  | Gen_rigid _ -> assert false
+  | Gen_flex (_, r) ->
     PPrint.ToChannel.pretty 1. 120 stdout PPrint.(utf8string (Printf.sprintf "  $%d ≤ " ix) ^^ group (Print.tyexp (unparse_ntyp ~flexvar:nope !r)) ^^ hardline));
   end;
   print_endline ""

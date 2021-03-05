@@ -1071,7 +1071,7 @@ and unparse_bounds :
     let p = Printf.sprintf "%s_%d" name i in
     if not (taken p) then p else freshen name (i + 1) in
   let freshen name =
-    if not (taken name) then name else freshen name 1 in
+    if not (taken name) then name else freshen name 2 in
   let vars = IArray.map (fun (s, b) -> freshen s, b) vars in
   let ext = IArray.map fst vars :: ext in
   ext, IArray.map (fun (s, bound) ->

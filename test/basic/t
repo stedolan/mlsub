@@ -174,7 +174,7 @@ if (false) { {foo:1,bar:2} } else { {foo:1,baz:()} }
 ((1,2,3) : (int, int, ...))
 > ((1, 2, 3) : (int, int, ...))
 > * ⊢ (int, int, ...)
->   ((1, 2) : (int, int, ...))
+>   ((1, 2, (3 : int)) : (int, int, ...))
 > (int, int, ...)
 
 
@@ -246,7 +246,7 @@ if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot
 ((1, 2, 3) : (int, int, ...))
 > ((1, 2, 3) : (int, int, ...))
 > * ⊢ (int, int, ...)
->   ((1, 2) : (int, int, ...))
+>   ((1, 2, (3 : int)) : (int, int, ...))
 > (int, int, ...)
 
 
@@ -567,7 +567,7 @@ fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { {foo: 1, 
 > * ⊢ [A <: {cond: bool, ...}] (A) -> {foo: int, cond: bool} | A
 >   fn [A <: {cond: bool, ...}](b: A) : {foo: int, cond: bool} |
 >   A {
->   (fn [A_1 <: {cond: bool, ...}](a: A_1) : A_1 { if (a.cond){a} else {a} })(if true{b} else
+>   (fn [A_2 <: {cond: bool, ...}](a: A_2) : A_2 { if (a.cond){a} else {a} })(if true{b} else
 >   {{foo: 1, cond: false}})
 >   }
 > [A <: {cond: bool, ...}] (A) -> {foo: int, cond: bool} | A
@@ -605,8 +605,8 @@ fn (x) { ((fn(x){x.foo})(x), (fn(x){x.foo})(x))  }
 > fn (x) { ((fn (x) { x.foo })(x), (fn (x) { x.foo })(x)) }
 > * ⊢ [A] ({foo: A, ...}) -> (A, A)
 >   fn [A](x: {foo: A, ...}) : (A, A) {
->   ((fn [A_1](x: {foo: A_1, ...}) : A_1 { x.foo })(x),
->   (fn [A_1](x: {foo: A_1, ...}) : A_1 { x.foo })(x))
+>   ((fn [A_2](x: {foo: A_2, ...}) : A_2 { x.foo })(x),
+>   (fn [A_2](x: {foo: A_2, ...}) : A_2 { x.foo })(x))
 >   }
 > [A] ({foo: A, ...}) -> (A, A)
 
@@ -615,7 +615,7 @@ fn (x) { (fn(y) { y.foo.bar })({foo:{bar:x}}) }
 > fn (x) { (fn (y) { y.foo.bar })({foo: {bar: x}}) }
 > * ⊢ [A] (A) -> A
 >   fn [A](x: A) : A {
->   (fn [A_1](y: {foo: {bar: A_1, ...}, ...}) : A_1 { y.foo.bar })({foo: {bar: x}})
+>   (fn [A_2](y: {foo: {bar: A_2, ...}, ...}) : A_2 { y.foo.bar })({foo: {bar: x}})
 >   }
 > [A] (A) -> A
 
@@ -725,16 +725,16 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(
 > * ⊢
 > [A <: {foo: int, bar: string}, B] (({foo: int} | B) ->
 > A,
-> ([A_1 <: {foo: int}] (A_1) -> {foo: int, bar: string} | A_1) ->
+> ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) ->
 > int) ->
 > int
 >   fn [A <: {foo: int, bar: string}, B](x: ({foo: int} | B) ->
 >   A,
->   wid: ([A_1 <: {foo: int}] (A_1) -> {foo: int, bar: string} | A_1) ->
+>   wid: ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) ->
 >   int) : int { wid(fn (a: B) : A { x(a) }) }
 > [A <: {foo: int, bar: string}, B] (({foo: int} | B) ->
 > A,
-> ([A_1 <: {foo: int}] (A_1) -> {foo: int, bar: string} | A_1) ->
+> ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) ->
 > int) ->
 > int
 

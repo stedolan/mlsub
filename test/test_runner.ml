@@ -51,7 +51,7 @@ let run_cmd s =
       | _ -> println "MISMATCH"
      end;
      let open Typedefs in
-     begin match Check.elab_gen Env_nil (fun env -> Check.infer env e) with
+     begin match Check.elab_gen Env_nil None (fun env -> Check.infer env e) with
      | t, elab ->
         begin
         pprintln PPrint.(utf8string "* ⊢" ^^ break 1 ^^ (Print.tyexp (Typedefs.unparse_ptyp ~flexvar:ignore t)));

@@ -115,11 +115,6 @@ let bottom = {ctor={cons=Bot;rigvars=[]};flexvars=[]}
 let flexlb_fv fv = { ctor = { cons = Bot; rigvars = [] }; flexvars = [fv] }
 
 
-
-(* FIXME: does this need separate ~neg and ~pos? *)
-(* FIXME: Inline into single use site? *)
-
-
 (*
  * Core subtyping functions
  *)
@@ -228,12 +223,11 @@ and subtype_flex_cons ~error ~changes env pv cn =
   subtype_cons ~error
     ~neg:(fun _ () -> () (* already done in ensure_upper_matches *))
     ~pos:(subtype_flex_flex ~error ~changes env)
-    cp cn.cons;                 (* FIXME does this ignore cn.rigvars? *)
+    cp cn.cons;
   ()
 
 (* Ensure pv has a UBcons upper bound whose head is below a given ctor.
-   Returns the constructed upper bound.
-   FIXME: poly rather than unit for cn's type *)
+   Returns the constructed upper bound. *)
 and ensure_upper_matches ~error ~changes env (pv : flexvar) (cn : (flex_lower_bound, unit) ctor_ty) : (unit, flexvar) cons_head =
   let cb = flex_cons_upper ~changes env pv in
   let cons =
@@ -335,7 +329,6 @@ and subtype_cons_flex ~error ~changes env (cp : (flexvar, flex_lower_bound) ctor
 
 and join_ctor ~changes env level lower cp =
   (* lower is already wf at level, cp may not be *)
-  (* FIXME hoisting: hoist cp flexvars if needed *)
   let cons =
     join_cons
        ~nleft:id
@@ -671,17 +664,32 @@ and expand_ntyp visit ~changes env level (n : ntyp) =
 let tcons {cons;rigvars} =
   List.fold_left (fun c r -> Tvjoin (c, Vrigid r)) (Tcons cons) rigvars
 
-let rec substn visit bvars level ~index ({ctor;flexvars} : flex_lower_bound) : ptyp =
-  let cons = map_ctor_rig (substn_fv_neg visit bvars level ~index) (substn visit bvars level ~index) ctor in
-  let flexvars = flexvars |> List.filter_map (fun pv ->
-    assert (Env_level.extends pv.level level);
-    (* FIXME: may want to sort these *)
-    if not (Env_level.equal pv.level level) then
-      Some (Vflex pv)
-    else if is_visited_neg visit pv then
+(* FIXME: bit weird... There must be a better representation for bvars here *)
+type genvar =
+  | Gen_flex of flexvar * ntyp ref
+  | Gen_rigid of rigvar
+
+
+let rec substn visit bvars level ~index ({ctor={cons;rigvars};flexvars} : flex_lower_bound) : ptyp =
+  let cons = map_head (substn_fv_neg visit bvars level ~index) (substn visit bvars level ~index) cons in
+  let rigvars_gen, rigvars_keep = List.partition (fun (rv:rigvar) -> Env_level.equal rv.level level) rigvars in
+  let flexvars_gen, flexvars_keep = List.partition (fun (fv:flexvar) -> Env_level.equal fv.level level) flexvars in
+
+  let rigvars_gen = rigvars_gen |> List.map (fun (rv:rigvar) ->
+    Vbound {index; var = rv.var}) in
+  let rigvars_keep = rigvars_keep |> List.map (fun rv -> Vrigid rv) in
+  let flexvars_gen = flexvars_gen |> List.filter_map (fun pv ->
+    if is_visited_neg visit pv then
       Some (Vbound {index; var = substn_bvar visit bvars level ~index pv})
     else None) in
-  List.fold_left (fun rest var -> Tvjoin (rest, var)) (tcons cons) flexvars
+  let flexvars_keep = flexvars_keep |> List.map (fun fv -> Vflex fv) in
+  
+  (* FIXME: are Tvjoin invariants OK here? Should I sort the _keep vars? *)
+  (* FIXME: if cons = bot, should we avoid the tvjoin? *)
+  List.fold_left
+    (fun rest var -> Tvjoin (rest, var))
+    (Tcons cons)
+    (rigvars_keep @ flexvars_keep @ rigvars_gen @ flexvars_gen)
 
 and substn_fv_neg visit bvars level ~index nv : ntyp =
   assert (Env_level.extends nv.level level);
@@ -698,14 +706,21 @@ and substn_fv_neg visit bvars level ~index nv : ntyp =
 and substn_upper visit bvars level ~index = function
   | UBvar v -> substn_fv_neg visit bvars level ~index v
   | UBnone -> Tcons Top
-  | UBcons c -> tcons (map_ctor_rig (substn visit bvars level ~index) (substn_fv_neg visit bvars level ~index) c)
+  | UBcons {cons;rigvars} ->
+     let cons = map_head (substn visit bvars level ~index) (substn_fv_neg visit bvars level ~index) cons in
+     let rigvars_gen, rigvars_keep = List.partition (fun (rv:rigvar) -> Env_level.equal rv.level level) rigvars in
+     (* Drop rigvars_gen if needed to avoid contravariant joins. *)
+     match cons, rigvars_keep, rigvars_gen with
+     | Bot, [], [v] -> assert (Vector.get bvars v.var = Gen_rigid v); Tvar (Vbound {index; var=v.var})
+     | cons, rigvars, _ -> tcons { cons; rigvars } (* FIXME sorting? tcons? *)
+
 
 (* FIXME!!: gen constraints. What can upper bounds be? *)
 and substn_bvar visit bvars level ~index fv =
   assert (is_visited_neg visit fv && is_visited_pos visit fv);
   if fv.bound_var <> -1 then fv.bound_var else begin
     let r = ref (Tcons Top) in
-    let n = Vector.push bvars (fv, r) in
+    let n = Vector.push bvars (Gen_flex (fv, r)) in
     fv.bound_var <- n;
     r := substn_upper visit bvars level ~index fv.upper;
     n
@@ -731,11 +746,15 @@ and substn_ntyp visit bvars level ~index : ntyp -> ntyp = function
   | Tcons c -> Tcons (map_head (substn_ptyp visit bvars level ~index)
                         (substn_ntyp visit bvars level ~index) c)
   | Tsimple s -> substn_fv_neg visit bvars level ~index s
-  | Tvar (Vflex fv) (*FIXME when Env_level.equal fv.level level*) ->
-     substn_fv_neg visit bvars level ~index fv
   | Tvar (Vbound v) -> Tvar (Vbound v)
-  | Tvar _ -> unimp "substn tvar"
-  | Tvjoin _ -> unimp "substn tvjoin"
+  | Tvjoin (t, Vbound v) ->
+     (intfail "tricky case hit! (delete this)" : unit);
+     Tvjoin (substn_ntyp visit bvars level ~index t, Vbound v)
+
+  | Tvjoin (_, (Vflex _ | Vrigid _)) | Tvar (Vflex _ | Vrigid _) as n ->
+     (* must be locally closed since inside tvjoin flex/rigid *)
+     substn_upper visit bvars level ~index (simple_ntyp level n)
+
   | Tpoly {vars;body} ->
      let index = index + 1 in
      let vars = IArray.map (fun (s,t) -> s, substn_ptyp visit bvars level ~index t) vars in

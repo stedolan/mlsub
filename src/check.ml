@@ -10,7 +10,6 @@ let report = function
   | Missing k -> failwith ("missing " ^ string_of_field_name k)
   | Extra _ -> failwith ("extra")
 
-
 let rec env_lookup_var env v =
   match env with
   | Env_nil -> failwith (v.label ^ " not in scope")
@@ -120,9 +119,17 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
 
 open Elab
 
-let elab_gen (env:env) (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds option * 'a) elab =
+let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds option * 'a) elab =
   let level = Env_level.extend (env_level env) in
-  let env' = Env_types { level; rig_names = SymMap.empty; rig_defns = IArray.empty; rest = env } in
+  let rigvars', rig_names =
+    match poly with
+    | None -> IArray.empty, SymMap.empty
+    | Some poly -> enter_polybounds env poly in
+  let rigvars = IArray.mapi (fun var _ -> {level;var}) rigvars' in
+  let rig_defns = rigvars' |> IArray.map (fun (name, bound) ->
+    { name; upper = simple_ptyp_bound level (open_typ_rigid rigvars bound) }) in
+
+  let env' = Env_types { level; rig_names; rig_defns; rest = env } in
   let ty, Elab (erq, ek) = fn env' in
   wf_ptyp env' ty;
 
@@ -140,6 +147,8 @@ let elab_gen (env:env) (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds optio
   let visit, erq, ty = fixpoint 2 erq ty in
 
   let bvars = Vector.create () in
+  rigvars |> IArray.iter (fun rv -> ignore (Vector.push bvars (Gen_rigid rv)));
+
   let ty = substn_ptyp visit bvars level ~index:0 ty in
   let erq = elabreq_map_typs erq ~index:0
               ~neg:(substn_ntyp visit bvars level)
@@ -154,69 +163,17 @@ let elab_gen (env:env) (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds optio
       let name = match n with
         | n when n < 26 -> Printf.sprintf "%c" (Char.chr (Char.code 'A' + n))
         | n -> Printf.sprintf "T_%d" (n-26) in
-      match env_lookup_type_var env name with
+      (* NB: look up env', to ensure no collisions with rigvars *)
+      match env_lookup_type_var env' name with
       | None -> name
       | Some _ -> mkname () in
-    let bounds = bvars |> Vector.to_array |> Array.map (fun (_,r) -> mkname (), !r) |> IArray.of_array in
+    let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex (_,r) -> mkname (), !r) |> IArray.of_array in
     let ty = Tpoly { vars = bounds; body = ty } in
     ty, Elab (Gen{bounds; body=erq}, fun (poly, e) -> Some poly, ek e)
   
-(*
-  let level' = env_next_level env Esort_flexible in
-  let env' = env_cons env level' (Eflexible {vars=Vector.create(); names=SymMap.empty}) in
-  let ty, (Elab (erq, ek)) = fn env' in
-  wf_ptyp env' ty;
-  (* FIXME hack *)
-  let rq = Pair(erq, Ptyp ty) in
-  let rq = try Type_simplification.remove_joins env' level' rq 
-           with e ->  (*PPrint.ToChannel.pretty 1. 80 stderr PPrint.(pr_env env' ^^ hardline ^^ Elab.pr_elab_req rq); *)raise e in
-
-  let envgc, envgc_level, rq = Type_simplification.garbage_collect env' level' rq in
-  wf_elab_req envgc rq;
-  match generalise envgc envgc_level with
-  | None ->
-     (* nothing to generalise *)
-     wf_elab_req env rq;
-     let erq, ty = match rq with Pair(erq, Typ (Pos, ty)) -> erq, ty | _ -> assert false in
-     ty, Elab (erq, fun e -> None, ek e)
-  | Some (bounds, flow, gen) ->
-     let rq = map_free_elab_req envgc_level 0 gen rq in
-     let erq, ty = match rq with Pair(erq, Typ (Pos, ty)) -> erq, ty | _ -> assert false in
-     let ty = Tpoly { names = SymMap.empty; bounds; flow; body = ty } in
-     let erq = Gen { pol = Pos; bounds; flow; body = erq } in
-     wf_typ Pos env ty;
-     wf_elab_req env erq;
-     ty, Elab (erq, fun (poly, e) -> Some poly, ek e)
-*)
-
 let fresh_flow env =
   let fv = fresh_flexvar (env_level env) in
   Tvar (Vflex fv)
-
-
-(*
-let elab_poly env poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds option * 'a) elab =
-  match poly with
-  | None ->
-     let ty, elab = fn env in
-     ty, let* elab = elab in None, elab
-  | Some poly ->
-     let names, nbounds, pbounds, flow = poly_of_typolybounds env poly in
-     let env', level', _inst = enter_poly_neg' env names nbounds flow in
-     let ty, (Elab (erq, ek)) = fn env' in
-
-     (* hack *)
-     let rq = Pair (erq, Ptyp ty) in
-     let rq = map_free_elab_req level' 0 (env_gen_var Esort_flexible) rq in
-     let erq, ty = match rq with Pair(erq, Ptyp ty) -> erq, ty | _ -> assert false in
-
-     let ty = Tpoly { names; bounds = pbounds; flow; body = ty } in
-     (* FIXME: what's the right pol here? *)
-     let erq = Gen { pol = Pos; bounds = pbounds; flow; body = erq } in
-     wf_ptyp env ty;
-     wf_elab_req env erq;
-     ty, Elab (erq, fun (poly, e) -> Some poly, ek e)
-*)
 
 let rec check env e (ty : ntyp) : exp elab =
   wf_ntyp env ty;
@@ -236,10 +193,14 @@ and check' env e ty =
      let* e = check env e ty in
      Parens e
   | Tuple ef, Tcons (Record tf) ->
+     let infer_typed env ((_,loc) as e) =
+       let ty, e = infer env e in
+       let* e = e and* ty = elab_ptyp ty in
+       Some (Typed (e, ty)), loc in
      let merged =
        merge_fields ef tf
          ~both:(fun _fn e ty -> Some (check env e ty))
-         ~left:(fun _fn e -> ignore (infer env e); None (* FIXME: not a great elab, this! *))
+         ~left:(fun _fn e -> Some (infer_typed env e))
          ~right:(fun fn _ty -> failwith ("missing " ^ string_of_field_name fn) )
          ~extra:(function
            | _, (`Closed, `Extra) -> failwith "extra"
@@ -278,7 +239,6 @@ and check' env e ty =
 *)
   | Pragma "true", Tcons Bool -> elab_pure e
   | Pragma "false", Tcons Bool -> elab_pure e
-  (* FIXME: in the Tsimple case, maybe keep an existing flex level? *)
   | e, _ ->
      (* Default case: infer and subtype. *)
      let ty', e = infer' env e in
@@ -333,7 +293,7 @@ and infer' env : exp' -> ptyp * exp' elab = function
   | Fn (poly, params, ret, body) ->
      let ty, elab =
 ignore poly;((*FIXME       elab_poly env poly (fun env ->*)
-         elab_gen env (fun env ->
+         elab_gen env poly (fun env ->
          let params = map_fields (fun _fn (p, ty) ->
            match ty with
            | Some ty -> typ_of_tyexp env ty, p
