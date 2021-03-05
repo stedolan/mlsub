@@ -19,7 +19,7 @@ fn(id : [A](A) -> A, (x,y)) { (id(y),id(x)) }
 
 fn[A](x : A) { if x.cond {x} else {x} }
 > fn [A](x: A) { if x.cond{x} else {x} }
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: record")
 
 fn[A <: {cond:bool}](x : A) { if x.cond {x} else {x} }
 > fn [A <: {cond: bool}](x: A) { if x.cond{x} else {x} }
@@ -59,11 +59,11 @@ fn (a) { (fn(x) { (x, fn(x) { x }) })(a) }
 
 (fn (x: bool) { x } : [A] (A) -> A)
 > (fn (x: bool) { x } : [A] (A) -> A)
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: bool")
 
 (fn (x: any) { x } : [A] (A) -> A)
 > (fn (x: any) { x } : [A] (A) -> A)
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: bot")
 
 (fn[B] (x: B) { x } : [A] (A) -> A)
 > (fn [B](x: B) { x } : [A] (A) -> A)
@@ -163,7 +163,7 @@ let ch = fn[A,B](x : A, y : B) : A|B { if true { x } else { y } }; fn (a,b) { ch
 
 (fn[A,B,R](x : A, y : B) : R|A { if true { x } else { y } } : [A] (A, A) -> A)
 > (fn [A, B, R](x: A, y: B) : R | A { if true{x} else {y} } : [A] (A, A) -> A)
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: bot")
 
 (fn[A,B,R](x : A, y : B) : R|A { x } : [A] (A, A) -> A)
 > (fn [A, B, R](x: A, y: B) : R | A { x } : [A] (A, A) -> A)
@@ -187,7 +187,7 @@ let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let () =
 # (by design, but a bit weird)
 let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let () = f(x); x.foo}); wid(g) }
 > let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) }; fn (f) { let g = (fn (x) { let () = f(x); x.foo }); wid(g) }
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: bot")
 
 # works in checking mode (bidir)
 # FIXME: [A <: ()] is correct, but not great
@@ -215,7 +215,7 @@ let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f : (any) -> ()) { wid(
 let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
 > let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) };
 > fn (f) { let g = (fn (x) { let z = f({bar: x}); x.foo }); wid(g) }
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: bot")
 
 let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let z = f({bar:x}); x.foo}) }
 > let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) }; fn (f) { wid(fn (x) { let z = f({bar: x}); x.foo }) }

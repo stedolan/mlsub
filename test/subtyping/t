@@ -2,13 +2,13 @@
 > ok
 
 : int <: bool
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat int <: bool")
 
 : [A] (A) -> A <: (int) -> int
 > ok
 
 : (int) -> int <: [A] (A) -> A
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: int")
 
 : [A, B] (A, B) -> (A|B) <: [X] (X, X) -> X
 > ok
@@ -23,10 +23,10 @@
 > ok
 
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: string")
 
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: bot")
 
 : [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y} <: [X] () -> {foo: (X) -> X, bar: (X) -> X}
 > ok
@@ -41,22 +41,22 @@
 : [X <: int] (X) -> X <: (int) -> int
 > ok
 : (int) -> int <: [X <: int] (X) -> X
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat int <: bot")
 
 : [X] (X) -> (X|int) <: (int) -> int
 > ok
 : (int) -> int <: [X] (X) -> (X|int)
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: int")
 
 : [X] (X) -> (X) <: (int) -> int
 > ok
 : (int) -> int <: [X] (X) -> (X)
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: int")
 
 
 
 : [X <: int] (X) -> (X|bool) <: (int) -> bool
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat int <: bot")
 : (int) -> bool <: [X <: int] (X) -> (X|bool)
 > ok
 
@@ -73,7 +73,7 @@
 > ok
 
 : [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat int <: bot")
 
 : (int) -> (int, [A <: int] (A) -> A) <: [A <: int] (A) -> (int, ([B] (A) -> A))
 > ok
@@ -91,7 +91,7 @@
 
 # scope escape check
 : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: bot")
 
 
 # tricky case of spec sub & rigvars (see cnrig <> [] case in ensure_upper_matches)

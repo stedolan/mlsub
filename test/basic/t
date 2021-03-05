@@ -45,7 +45,7 @@ false
 
 (42 : string)
 > (42 : string)
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat int <: string")
 
 #
 # If
@@ -122,7 +122,7 @@ if (false) { 1 } else { false }
 
 ((1,) : (int))
 > ((1,) : (int))
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat record <: int")
 
 # and patterns
 let (x,) = (1,); {x}
@@ -178,7 +178,7 @@ if (false) { {foo:1,bar:2} } else { {foo:1,baz:()} }
 
 true.foo
 > true.foo
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat bool <: record")
 
 @bot
 > @bot
@@ -296,7 +296,7 @@ let x = (1, 2); x
 
 let x : int = (1, 2); x
 > let x : int = (1, 2); x
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat record <: int")
 
 let x : bool = true; x
 > let x : bool = true; x
@@ -306,7 +306,7 @@ let x : bool = true; x
 
 let x : bool = 5; x
 > let x : bool = 5; x
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat int <: bool")
 
 let {x: foo, y: bar} = {x: 10, y: true}; (foo, bar)
 > let {x: foo, y: bar} = {x: 10, y: true}; (foo, bar)
@@ -352,7 +352,7 @@ let {x: foo, y: bar} : {x:int} = {x:1, y:true}; foo
 > typechecking error: Failure("extra")
 let {x: foo, y: bar} : {x:int,y:int} = {x:1, y:true}; foo
 > let {x: foo, y: bar} : {x: int, y: int} = {x: 1, y: true}; foo
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat bool <: int")
 let {x: foo, y: bar} : {x:int,y:bool,z:bool} = {x:1, y:true}; foo
 > let {x: foo, y: bar} : {x: int, y: bool, z: bool} = {x: 1, y: true}; foo
 > typechecking error: Failure("missing z")
@@ -408,7 +408,7 @@ let a = {foo: 1, bar: 2}; let b : {bar: any, ...} = a; b
 
 let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
 > let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat int <: bot")
 
 # function types
 fn (f: (int,int) -> int) { f(1,2) }
@@ -495,7 +495,7 @@ fn (a) { if (a.foo) { {bar: a.bar} } else { a } }
 
 (fn (a,b) { a })(5,if 5 { 5 } else { 5 })
 > (fn (a, b) { a })(5, if 5{5} else {5})
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat int <: bool")
 
 # more tuple cases
 fn (f) { (f({x:1,y:2}), f({x:1,z:2})) }
@@ -721,7 +721,7 @@ fn (f : [A] (A) -> A) { (f(1), f(true)) }
 # now requires an annotation on x or f (due to hoisting & escape)
 fn (x, wid : (([A] (A) -> A) -> int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
 > fn (x, wid: (([A] (A) -> A) -> int)) { let f = fn (a) { {x: x(a), y: a}.y }; wid(f) }
-> typechecking error: Failure("incompat")
+> typechecking error: Failure("incompat top <: bot")
 
 # with annotation
 fn (x : (any)->(), wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
