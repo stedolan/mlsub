@@ -1,8 +1,6 @@
-
 open PPrint
 open Tuple_fields
 open Exp
-(*open Typedefs*)
 
 (* FIXME: precedence is fucked here. Need to insert parens *)
 
@@ -32,6 +30,11 @@ let mayloc x f = match x with
 let parens x = parens (group x)
 let braces x = braces (group x)
 let brackets x = brackets (group x)
+
+let sep ?(trail=false) s xs =
+  group (indent (break 0 ^^ separate_map (s ^^ break 1) group xs) ^^
+           (if trail then s else empty) ^^
+           break 0)
 
 let rec exp e = mayloc e @@ function
   | Lit (l, _) -> literal l
@@ -70,10 +73,9 @@ and fields : 'e . ?tcomma:bool -> (pos:bool -> field_name -> 'e -> document) -> 
     | fnames -> List.map (fun fn -> false, fn) fnames in
   let fnames = annot_fnames 0 fnames in
   let tcomma = tcomma && List.length fnames = 1 && fopen = `Closed in
-  separate (comma ^^ break 1)
+  sep comma ~trail:tcomma
     (List.map (fun (pos,f) -> print_elem ~pos f (FieldMap.find f fields)) fnames
     @ (match fopen with `Open -> [string "..."] | `Closed -> []))
-    ^^ (if tcomma then comma else empty)
 
 and record : 'e . pun:(field_name * 'e -> bool) -> ('e -> document) -> 'e tuple_fields -> document =
   fun ~pun print_elem t ->
