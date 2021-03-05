@@ -54,7 +54,6 @@ let run_cmd s =
      begin match Check.elab_gen Env_nil None (fun env -> Check.infer env e) with
      | t, elab ->
         begin
-        pprintln PPrint.(utf8string "* ⊢" ^^ break 1 ^^ (Print.tyexp (Typedefs.unparse_ptyp ~flexvar:ignore t)));
         let poly, elab = Elab.elaborate Env_nil elab in
         poly |> Option.iter (fun poly ->
           pprintln PPrint.(string "WEAKPOLY" ^^ Print.typolybounds poly));
