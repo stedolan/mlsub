@@ -45,7 +45,9 @@ let rec exp e = mayloc e @@ function
         | None -> empty
         | Some poly -> typolybounds poly) ^^
        parens (fields parameter params) ^^
-       opt_type_annotation ty ^^
+       (match ty with
+        | None -> empty
+        | Some ty -> blank 1 ^^ string "->" ^^ blank 1 ^^ tyexp ty) ^^
        space ^^ braces (break 1 ^^ exp body ^^ break 1)
   | Let (p, ty, e, body) ->
      group (string "let" ^^ space ^^

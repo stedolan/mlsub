@@ -58,7 +58,7 @@ exp_:
 | FN;
   poly = ioption(typolybounds);
   LPAR; params = separated_list(COMMA, parameter); RPAR;
-  ty = opt_type_annotation;
+  ty = ioption(ARROW; t = tyexp {t});
   LBRACE; body = exp; RBRACE
   { Fn (poly, parse_fields params, ty, body) }
 | IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; f = exp; RBRACE
