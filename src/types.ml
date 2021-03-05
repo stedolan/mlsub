@@ -493,7 +493,7 @@ let rec subtype ~error env (p : ptyp) (n : ntyp) =
      (* FIXME: which env does simple_ptyp_bound run in? *)
      let rig_defns = IArray.map (fun (name, b) ->
        { name;
-         upper = simple_ptyp_bound (env_level env) (open_typ_rigid rvars b) }) vars in
+         upper = simple_ptyp_bound level (open_typ_rigid rvars b) }) vars in
      let body = open_typ_rigid rvars body in
      let env = Env_types { level; rig_names = SymMap.empty; rig_defns; rest = env} in
      subtype ~error env p body
