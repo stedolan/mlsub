@@ -38,7 +38,7 @@ let rec lex buf =
   | "as" -> AS
 
   | Plus('0'..'9') -> INT (int_of_string (lexeme buf))
-  | ('a'..'z'|'A'..'Z'|'_'), Star('a'..'z'|'A'..'Z'|'0'..'9') ->
+  | ('a'..'z'|'A'..'Z'|'_'), Star('a'..'z'|'_'|'A'..'Z'|'0'..'9') ->
      SYMBOL (lexeme buf)
   | '@', Star('a'..'z') ->
      PRAGMA (sub_lexeme buf 1 (lexeme_length buf - 1))

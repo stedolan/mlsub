@@ -222,21 +222,32 @@ and check' env e ty =
      let env = Env_vals { vals = vs; rest = env } in
      let* e, ety = e and* body = check env body ty in
      Let(p, Some ety, e, body)
-  (* FIXME not good *)
-(*
-  | Fn _, Tpoly { names = _; bounds; flow; body } ->
-     (* The names should not be in scope in the body *)
-     let names = SymMap.empty in
-     let env, ty = enter_poly_neg env names bounds flow body in
-     check' env e ty
+  (* FIXME should I combine Tpoly and Func? *)
+  | Fn (None, params, ret, body), Tpoly { vars; body = Tcons (Func (ptypes, rtype)) } ->
+     (* FIXME share code with elab_gen *)
+     let level = Env_level.extend (env_level env) in
+     let rigvars = IArray.mapi (fun var _ -> {level;var}) vars in
+     let rig_defns = vars |> IArray.map (fun (name, bound) ->
+       { name; upper = simple_ptyp_bound level (open_typ_rigid rigvars bound) }) in
+     (* rigvars not in scope in body, so no rig_names *)
+     let env' = Env_types { level; rig_names = SymMap.empty; rig_defns; rest = env } in
+     (* FIXME share with below *)
+     let ptypes = map_fields (fun _fn t -> open_typ_rigid rigvars t) ptypes in
+     let vals = check_parameters env' SymMap.empty params ptypes in
+     let env'' = Env_vals { vals; rest = env' } in
+     let rtype = open_typ_rigid rigvars rtype in
+     let* body = check env'' body (check_annot env'' ret rtype) in
+     (* No elaboration.
+        FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
+     Fn (None, params, ret, body)
   | Fn (None, params, ret, body), Tcons (Func (ptypes, rtype)) ->
      (* If poly <> None, then we should infer & subtype *)
-     let orig_env = env in
-     let env_gen = env_cons orig_env (Eflexible {vars=Vector.create (); names=SymMap.empty}) in
-     let vs = check_parameters env_gen SymMap.empty params ptypes in
-     let env' = env_cons env_gen (Evals vs) in
-     check env' body (check_annot env' ret rtype)
-*)
+     (* FIXME: do we need another level here? Does hoisting break things? *)
+     let vals = check_parameters env SymMap.empty params ptypes in
+     let env' = Env_vals { vals; rest = env } in
+     let* body = check env' body (check_annot env' ret rtype) in
+     (* No elaboration. Arguably we could *delete* annotations here! *)
+     Fn (None, params, ret, body)
   | Pragma "true", Tcons Bool -> elab_pure e
   | Pragma "false", Tcons Bool -> elab_pure e
   | e, _ ->
@@ -292,8 +303,7 @@ and infer' env : exp' -> ptyp * exp' elab = function
      Let(p, Some ety, e, body)
   | Fn (poly, params, ret, body) ->
      let ty, elab =
-ignore poly;((*FIXME       elab_poly env poly (fun env ->*)
-         elab_gen env poly (fun env ->
+       elab_gen env poly (fun env ->
          let params = map_fields (fun _fn (p, ty) ->
            match ty with
            | Some ty -> typ_of_tyexp env ty, p
@@ -309,18 +319,9 @@ ignore poly;((*FIXME       elab_poly env poly (fun env ->*)
            elab_fields (map_fields (fun _fn (t, pat) ->
              elab_pair (elab_pure pat) (elab_ntyp t)) params)
          and* body = body in
-         params, body)) in
+         params, body) in
      ty,
-     let* (*poly_annot, *) (poly_inf, (params, (body, ret))) = elab in
-     let poly =
-       match (*poly_annot,*) None, poly_inf with
-       | None, None -> None
-       | Some p, None | None, Some p -> Some p
-       | Some p, Some q ->
-          (* Variable names are distinct, see type_print freshening *)
-          (* FIXME: assert this *)
-          Some (p @ q)
-     in
+     let* poly, (params, (body, ret)) = elab in
      Fn (poly,
          map_fields (fun _ (p, ty) -> p, Some ty) params,
          Some ret,

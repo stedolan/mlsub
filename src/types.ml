@@ -508,16 +508,35 @@ let rec subtype ~error env (p : ptyp) (n : ntyp) =
   | p, n -> subtype_t_var ~error ~changes:(ref []) env (approx_ptyp env p) (approx_ntyp env n); ()
 
 
-let rec match_typ ~error env lvl (p : ptyp) (orig_head : (ntyp Ivar.put, ptyp Ivar.put) cons_head) =
-  wf_ptyp env p;
-  match p with
-  | Tcons c ->
-     subtype_cons ~error ~neg:(fun v t -> Ivar.put v t) ~pos:(fun t v -> Ivar.put v t) c orig_head
-(* FIXME unneeded, approx_ptyp works? Nah, predicativity bad.  | Tpoly _ -> unimp "instantiate on poly match" *)
-  | Tpoly {vars; body} ->
-     let body = instantiate_flex env vars body in
-     match_typ ~error env lvl body orig_head
-  | t ->
+(* FIXME: not ideal, probably copies too many vars *)
+let join_simple env lvl p q =
+  let r = bottom in
+  let r = join_lower ~changes:(ref []) env lvl r p in
+  let r = join_lower ~changes:(ref []) env lvl r q in
+  r
+
+(* FIXME: rank1 joins maybe?
+   FIXME: keep types as Tcons if possible? Better inference. Can this matter? *)
+let join_ptyp env (p : ptyp) (q : ptyp) : ptyp =
+  Tsimple (join_simple env (env_level env) (approx_ptyp env p) (approx_ptyp env q))
+
+let rec match_simple_typ ~error ~changes env lvl (p : flex_lower_bound) (head : (flexvar, flex_lower_bound ref) cons_head) =
+  let {ctor = {cons; rigvars}; flexvars} = p in
+  subtype_cons ~error cons head
+    ~neg:(subtype_flex_flex ~error ~changes env) (* FIXME test this *)
+    ~pos:(fun p r -> r := join_lower ~changes env lvl !r p);
+  rigvars |> List.iter (fun rv ->
+    match_simple_typ ~error ~changes env lvl {ctor=env_rigid_bound env rv;flexvars=[]} head);
+  flexvars |> List.iter (fun fv ->
+    let mhead = map_head flexlb_fv ignore head in
+    let m = ensure_upper_matches ~error ~changes:(ref []) env fv {cons=mhead;rigvars=[]} in
+    subtype_cons ~error:noerror m head
+      ~neg:(fun _t () -> () (*already filled*))
+      (* FIXME levels: fine as long as lvl = env_level env? Enforce? *)
+      ~pos:(fun v r -> r := join_flexvars !r [v]));
+  ()
+
+(*
      let {ctor; flexvars} = approx_ptyp env t in
      wf_ptyp env p;
      let head =
@@ -527,29 +546,32 @@ let rec match_typ ~error env lvl (p : ptyp) (orig_head : (ntyp Ivar.put, ptyp Iv
                     flexlb_fv v)
          ignore
          orig_head in
-     let fv = match ctor, flexvars with { cons = Bot; rigvars = []}, [fv] -> fv | _ -> unimp "match" in
+     let changes = ref [] in
+     subtype_cons ~error
+       ~neg:(fun fv v -> subtype_flex_flex ~error ~changes env fv v)
+       ~pos:(fun t () -> match_join env v t) ctor head
+*)
      (* FIXME: unify with subtype_flex_cons? *)
-     let m = ensure_upper_matches ~error ~changes:(ref []) env fv {cons=head;rigvars=[]} in
-     wf_ptyp env (Tsimple {ctor;flexvars});
-     subtype_cons ~error:noerror
-       ~neg:(fun _t () -> () (*already filled*))
-       ~pos:(fun p' t' -> Ivar.put t' (Tsimple (flexlb_fv p')))
-       m orig_head;
+
+
+let rec match_typ ~error env lvl (p : ptyp) (head : (ntyp Ivar.put, ptyp Ivar.put) cons_head) =
+  wf_ptyp env p;
+  match p with
+  | Tcons c ->
+     subtype_cons ~error ~neg:(fun v t -> Ivar.put v t) ~pos:(fun t v -> Ivar.put v t) c head
+(* FIXME unneeded, approx_ptyp works? Nah, predicativity bad.  | Tpoly _ -> unimp "instantiate on poly match" *)
+  | Tpoly {vars; body} ->
+     let body = instantiate_flex env vars body in
+     match_typ ~error env lvl body head
+  | t ->
+     let shead = map_head (fun _ -> fresh_flexvar lvl) (fun _ -> ref bottom) head in
+     let changes = ref [] in
+     match_simple_typ ~error ~changes env lvl (approx_ptyp env t) shead;
+     subtype_cons ~error:noerror shead head
+       ~neg:(fun v fv -> Ivar.put v (Tsimple fv))
+       ~pos:(fun t v -> Ivar.put v (Tsimple !t));
      wf_ptyp env p;
      ()
-
-(* FIXME: rank1 joins maybe?
-   FIXME: keep types as Tcons if possible? Better inference. Can this matter? *)
-let join_ptyp env (p : ptyp) (q : ptyp) : ptyp =
-  let p = approx_ptyp env p and q = approx_ptyp env q in
-  let r = bottom in
-  let r = join_lower ~changes:(ref []) env (env_level env) r p in
-  let r = join_lower ~changes:(ref []) env (env_level env) r q in
-  Tsimple r
-
-
-
-
 
 
 

@@ -262,6 +262,12 @@ if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot
 >   (fn (x: {cond: bool, ...}) : int { if x.cond{1} else {2} })({cond: @true})
 > int
 
+(fn(g) { if g () {1} else {2}})(fn() { @true })
+> (fn (g) { if g(){1} else {2} })(fn () { @true })
+> * ⊢ int
+>   (fn (g: () -> bool) : int { if g(){1} else {2} })(fn () { @true })
+> int
+
 #
 # Let-bindings and patterns
 #
@@ -433,11 +439,11 @@ fn () { (fn (~x, ~y) { {x,y} }) (~y:1, ~x:()) }
 
 (fn (x) { x } : (int,int) -> int)
 > (fn (x) { x } : (int, int) -> int)
-> typechecking error: Failure("extra")
+> typechecking error: Failure("missing param")
 
 (fn (x,y) { x } : (int) -> int)
 > (fn (x, y) { x } : (int) -> int)
-> typechecking error: Failure("missing .1")
+> typechecking error: Failure("extra param")
 
 #
 # Lambda
@@ -463,7 +469,9 @@ fn (a : int, b) : (int, int) { (a, b) }
 
 (fn (a) { (a, @true) } : (int) -> (int, bool))
 > (fn (a) { (a, @true) } : (int) -> (int, bool))
-> typechecking error: Failure("pragma: true")
+> * ⊢ (int) -> (int, bool)
+>   (fn (a) { (a, @true) } : (int) -> (int, bool))
+> (int) -> (int, bool)
 
 fn (a) { if (a.foo) { {bar: a.bar} } else { a } }
 > fn (a) { if (a.foo){{bar: a.bar}} else {a} }
@@ -484,6 +492,7 @@ fn (a) { if (a.foo) { {bar: a.bar} } else { a } }
 > * ⊢ int
 >   (fn [A](a: A, b: any) : A { a })(5, 5)
 > int
+
 (fn (a,b) { a })(5,if 5 { 5 } else { 5 })
 > (fn (a, b) { a })(5, if 5{5} else {5})
 > typechecking error: Failure("incompat")
@@ -521,7 +530,7 @@ fn (x) { let {p,q,...}=x; x }
 
 fn (x) { let {p,q} = x; let {p,q,r} = x; {p,q} }
 > fn (x) { let {p, q} = x; let {p, q, r} = x; {p, q} }
-> * ⊢ ∀⁺ 0:[nothing,nothing]. (.0.0) -> (p: nothing, q: nothing)
+> * ⊢ [A <: nothing] (A) -> {p: nothing, q: nothing}
 >   fn [A <: nothing](x: A) : {p: nothing, q: nothing} {
 >   let {p, q} : A = x;
 >   let {p, q, r} : A = x;
@@ -541,7 +550,7 @@ fn (x) { let {p,q,...} = x; let {p,q,r} = x; {p,q} }
 
 fn (x) { let {p,q} = x; let {p,q,r,...} = x; {p,q} }
 > fn (x) { let {p, q} = x; let {p, q, r, ...} = x; {p, q} }
-> * ⊢ ∀⁺ 0:[nothing,nothing]. (.0.0) -> (p: nothing, q: nothing)
+> * ⊢ [A <: nothing] (A) -> {p: nothing, q: nothing}
 >   fn [A <: nothing](x: A) : {p: nothing, q: nothing} {
 >   let {p, q} : A = x;
 >   let {p, q, r, ...} : A = x;
@@ -709,9 +718,9 @@ fn (f : [A] (A) -> A) { (f(1), f(true)) }
 >   fn (f: [A] (A) -> A) : (int, bool) { (f(1), f(true)) }
 > ([A] (A) -> A) -> (int, bool)
 
-# now requires an annotation on x (due to hoisting & escape)
-fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
-> fn (x, wid: (([A] (A) -> A) -> int)) { wid(fn (a) { {x: x(a), y: a}.y }) }
+# now requires an annotation on x or f (due to hoisting & escape)
+fn (x, wid : (([A] (A) -> A) -> int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
+> fn (x, wid: (([A] (A) -> A) -> int)) { let f = fn (a) { {x: x(a), y: a}.y }; wid(f) }
 > typechecking error: Failure("incompat")
 
 # with annotation
@@ -719,14 +728,24 @@ fn (x : (any)->(), wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 > fn (x: (any) -> (), wid: (([A] (A) -> A) -> int)) { wid(fn (a) { {x: x(a), y: a}.y }) }
 > * ⊢ ((any) -> (), ([A] (A) -> A) -> int) -> int
 >   fn (x: (any) -> (), wid: ([A] (A) -> A) -> int) : int {
->   wid(fn [A](a: A) : A { {x: x(a), y: a}.y })
+>   wid(fn (a) { {x: (x(a) : ()), y: a}.y })
 >   }
 > ((any) -> (), ([A] (A) -> A) -> int) -> int
 
+# bidir version requires no annotation
+fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
+> fn (x, wid: (([A] (A) -> A) -> int)) { wid(fn (a) { {x: x(a), y: a}.y }) }
+> * ⊢ [A] ((any) -> A, ([A_2] (A_2) -> A_2) -> int) -> int
+>   fn [A](x: (any) -> A, wid: ([A_2] (A_2) -> A_2) -> int) : int {
+>   wid(fn (a) { {x: (x(a) : A), y: a}.y })
+>   }
+> [A] ((any) -> A, ([A_2] (A_2) -> A_2) -> int) -> int
+
 
 # FIXME: not convinced by this type: why (a : B) : A? Will this recheck after elab?
-fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(fn(a){x(a)}) }
-> fn (x, wid: (([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int)) { wid(fn (a) { x(a) }) }
+
+fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let f = fn(a){x(a)}; wid(f) }
+> fn (x, wid: (([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int)) { let f = fn (a) { x(a) }; wid(f) }
 > * ⊢
 > [A <: {foo: int, bar: string}, B] (({foo: int} | B) ->
 > A,
@@ -736,12 +755,21 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(
 >   fn [A <: {foo: int, bar: string}, B](x: ({foo: int} | B) ->
 >   A,
 >   wid: ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) ->
->   int) : int { wid(fn (a: B) : A { x(a) }) }
+>   int) : int { let f : (B) -> A = fn (a: B) : A { x(a) }; wid(f) }
 > [A <: {foo: int, bar: string}, B] (({foo: int} | B) ->
 > A,
 > ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) ->
 > int) ->
 > int
+
+fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(fn(a){x(a)}) }
+> fn (x, wid: (([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int)) { wid(fn (a) { x(a) }) }
+> * ⊢ (({foo: int}) -> {foo: int, bar: string}, ([A <: {foo: int}] (A) -> {foo: int, bar: string} | A) -> int) -> int
+>   fn (x: ({foo: int}) ->
+>   {foo: int, bar: string},
+>   wid: ([A <: {foo: int}] (A) -> {foo: int, bar: string} | A) ->
+>   int) : int { wid(fn (a) { x(a) }) }
+> (({foo: int}) -> {foo: int, bar: string}, ([A <: {foo: int}] (A) -> {foo: int, bar: string} | A) -> int) -> int
 
 fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(x) }
 > fn (x, wid: (([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int)) { wid(x) }
@@ -773,8 +801,3 @@ fn() { (fn (x) { x })(fn (x) { x }) }
 >   fn [A]() : (A) ->
 >   A { (fn [A_2](x: A_2) : A_2 { x })(fn [A_2](x: A_2) : A_2 { x }) }
 > [A] () -> (A) -> A
-
-# self-app
-(fn (x) { x(x) }) (fn (x) { x(x) })
-> (fn (x) { x(x) })(fn (x) { x(x) })
-> typechecking error: Stack overflow
