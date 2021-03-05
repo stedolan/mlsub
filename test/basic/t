@@ -742,7 +742,7 @@ fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 > [A] ((any) -> A, ([A_2] (A_2) -> A_2) -> int) -> int
 
 
-# FIXME: not convinced by this type: why (a : B) : A? Will this recheck after elab?
+# FIXME: not convinced by this type: why (a : B) : A? Fails elab.
 
 fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let f = fn(a){x(a)}; wid(f) }
 > fn (x, wid: (([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int)) { let f = fn (a) { x(a) }; wid(f) }
@@ -761,6 +761,30 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let 
 > ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) ->
 > int) ->
 > int
+> ELAB: Failure("incompat record <: bot")
+> Raised at Stdlib.failwith in file "stdlib.ml", line 29, characters 17-33
+> Called from Lang__Types.subtype_ctor_rig in file "src/types.ml", line 193, characters 2-127
+> Called from Stdlib__list.iter in file "list.ml", line 110, characters 12-15
+> Called from Lang__Types.subtype_ctor_rig in file "src/types.ml", line 190, characters 2-156
+> Called from Lang__Types.subtype in file "src/types.ml", line 508, characters 12-94
+> Called from Stdlib__map.Make.iter in file "map.ml", line 296, characters 20-25
+> Called from Lang__Types.subtype_cons in file "src/types.ml", line 37, characters 5-46
+> Called from Lang__Check.check' in file "src/check.ml", line 254, characters 5-37
+> Called from Lang__Check.check in file "src/check.ml", line 181, characters 14-29
+> Called from Stdlib__map.Make.mapi in file "map.ml", line 312, characters 19-24
+> Called from Lang__Tuple_fields.map_fields in file "src/tuple_fields.ml", line 51, characters 21-65
+> Called from Lang__Check.infer' in file "src/check.ml", line 335, characters 16-80
+> Called from Lang__Check.check' in file "src/check.ml", line 253, characters 18-30
+> Called from Lang__Check.check in file "src/check.ml", line 181, characters 14-29
+> Called from Lang__Check.check' in file "src/check.ml", line 221, characters 33-50
+> Called from Lang__Check.check in file "src/check.ml", line 181, characters 14-29
+> Called from Lang__Check.check_or_infer in file "src/check.ml", line 394, characters 14-27
+> Called from Lang__Check.infer'.(fun) in file "src/check.ml", line 313, characters 25-53
+> Called from Lang__Check.elab_gen in file "src/check.ml", line 131, characters 27-34
+> Called from Lang__Check.infer' in file "src/check.ml", line 304, characters 7-806
+> Called from Lang__Check.check' in file "src/check.ml", line 253, characters 18-30
+> Called from Lang__Check.check in file "src/check.ml", line 181, characters 14-29
+> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 78, characters 10-33
 
 fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(fn(a){x(a)}) }
 > fn (x, wid: (([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int)) { wid(fn (a) { x(a) }) }

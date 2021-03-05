@@ -63,13 +63,22 @@ let run_cmd s =
         let env0 = Env_nil in
         let te = Typedefs.unparse_ptyp ~flexvar:ignore (*Env_nil*) t in
         pprintln (Print.tyexp te);
-        try
+        begin try
           wf_ptyp env0 t;
           let t = Check.typ_of_tyexp env0 te in
           let env0 = env0 in
           Check.check env0 e t |> ignore
         with e ->
             println "RECHECK: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
+        end;
+        begin try
+          wf_ptyp env0 t;
+          let t = Check.typ_of_tyexp env0 te in
+          let env0 = env0 in
+          Check.check env0 elab t |> ignore
+        with e ->
+            println "ELAB: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
+        end;
         end
      | exception ((Assert_failure _ | Typedefs.Internal _ | Out_of_memory | Invalid_argument _) as e) ->
         println "%s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
