@@ -1,5 +1,3 @@
-# FIXME: currently using internal syntax (Typedefs.pr_*)
-
 #
 # Literals
 #
@@ -711,13 +709,20 @@ fn (f : [A] (A) -> A) { (f(1), f(true)) }
 >   fn (f: [A] (A) -> A) : (int, bool) { (f(1), f(true)) }
 > ([A] (A) -> A) -> (int, bool)
 
+# now requires an annotation on x (due to hoisting & escape)
 fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 > fn (x, wid: (([A] (A) -> A) -> int)) { wid(fn (a) { {x: x(a), y: a}.y }) }
-> * ⊢ ∀⁺ 0:[any,any]. ((.0.0) -> any, (∀⁺ 0:[nothing,any]. (.0.0) -> .0.0) -> int) -> int
->   fn [A :> any](x: (A) -> any, wid: ([A_2] (A_2) -> A_2) -> int) : int {
->   wid(fn [B <: A](a: B) : B { {x: x(a), y: a}.y })
+> typechecking error: Failure("incompat")
+
+# with annotation
+fn (x : (any)->(), wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
+> fn (x: (any) -> (), wid: (([A] (A) -> A) -> int)) { wid(fn (a) { {x: x(a), y: a}.y }) }
+> * ⊢ ((any) -> (), ([A] (A) -> A) -> int) -> int
+>   fn (x: (any) -> (), wid: ([A] (A) -> A) -> int) : int {
+>   wid(fn [A](a: A) : A { {x: x(a), y: a}.y })
 >   }
-> [A :> any] ((A) -> any, ([A_2] (A_2) -> A_2) -> int) -> int
+> ((any) -> (), ([A] (A) -> A) -> int) -> int
+
 
 # FIXME: not convinced by this type: why (a : B) : A? Will this recheck after elab?
 fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(fn(a){x(a)}) }
@@ -766,7 +771,7 @@ fn() { (fn (x) { x })(fn (x) { x }) }
 > fn () { (fn (x) { x })(fn (x) { x }) }
 > * ⊢ [A] () -> (A) -> A
 >   fn [A]() : (A) ->
->   A { (fn [A_1](x: A_1) : A_1 { x })(fn [A_1](x: A_1) : A_1 { x }) }
+>   A { (fn [A_2](x: A_2) : A_2 { x })(fn [A_2](x: A_2) : A_2 { x }) }
 > [A] () -> (A) -> A
 
 # self-app
