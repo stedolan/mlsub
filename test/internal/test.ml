@@ -68,29 +68,26 @@ let dump env level (t : ptyp) =
   dump t;
   flush stdout;
   let fl = approx_ptyp env t in
-  let changes = ref [] in
-  let fl = expand 2 ~changes env level fl in
-  Printf.printf "changed: %a\n" pp_changes !changes;
-  dump (Tsimple fl);
-  if !changes <> [] then begin
-  let changes = ref [] in
-  let fl = expand 4 ~changes env level fl in
-  Printf.printf "changes: %a\n" pp_changes !changes;
-  dump (Tsimple fl);
+  let rec fixpoint visit fl =
+    let changes = ref [] in
+    let fl = expand visit ~changes env level fl in
+    Printf.printf "changed: %a\n" pp_changes !changes;
+    dump (Tsimple fl);
+    if !changes = [] then visit, fl
+    else fixpoint (visit + 2) fl in
+  let visit, fl = fixpoint 2 fl in
 
   let bvars = Vector.create () in
-  let fl = substn 4 bvars level ~index:0 fl in
+  let fl = substn visit bvars level ~index:0 fl in
   dump fl;
   Vector.iteri bvars (fun ix v -> match v with
   | Gen_rigid _ -> assert false
   | Gen_flex (_, r) ->
     PPrint.ToChannel.pretty 1. 120 stdout PPrint.(utf8string (Printf.sprintf "  $%d ≤ " ix) ^^ group (Print.tyexp (unparse_ntyp ~flexvar:nope !r)) ^^ hardline));
-  end;
   print_endline ""
 
 let fresh_flow lvl =
   let fv = fresh_flexvar lvl in
-(*  Tsimple fv, Tsimple (flexlb_fv fv)*)
   Tvar (Vflex fv), Tvar (Vflex fv)
 
 
@@ -231,7 +228,6 @@ let flexself () =
   let bn, bp = fresh_flow lvl in
   let cn, cp = fresh_flow lvl in
   let error _ = failwith "nope" in
-  subtype ~error env cn (Tcons Top); (* FIXME remove? *)
   subtype ~error env ap bn;
   subtype ~error env bp cn;
   subtype ~error env ap cn;

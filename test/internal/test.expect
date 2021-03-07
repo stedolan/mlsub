@@ -19,7 +19,7 @@ where
   β ≤ (η | γ) -> θ
   θ ≤ δ
   γ ≤ η ≤ any
-changes: []
+changed: []
 (α, β, γ) -> δ
 where
   δ ≤ any
@@ -55,7 +55,7 @@ where
   (η) -> δ | ζ ≤ α ≤ any
   η ≤ β ≤ any
   η ≤ γ ≤ any
-changes: []
+changed: []
 (δ, ζ) -> ((θ) -> δ | ζ | α, β | η, γ | η)
 where
   δ ≤ any
@@ -89,7 +89,7 @@ where
   α ≤ (γ | ε) -> ζ
   γ ≤ any
   ε ≤ any
-changes: []
+changed: []
 (ε, γ, α) -> (ζ, δ | ζ, β | α)
 where
   ζ ≤ nothing
@@ -131,7 +131,7 @@ where
   α ≤ β
   β ≤ γ
   γ ≤ δ
-changes: []
+changed: []
 (α) -> ν | κ | θ | η | ζ | ε | δ
 where
   κ | θ | η | ζ | ε | δ ≤ ν ≤ any
@@ -162,7 +162,7 @@ where
   α ≤ any
   β ≤ δ ≤ any
   γ ≤ α
-changes: []
+changed: []
 ((α) -> β, (γ) -> δ | β)
 where
   β ≤ any
@@ -178,17 +178,16 @@ t3 <= t1, t2
 t1 <= t3: false
 (α) -> γ
 where
-  γ ≤ δ
-  δ ≤ any
+  γ ≤ any
   α ≤ β
   β ≤ γ
-changed: [δ+ γ-]
+changed: [γ-]
 (α) -> γ
 where
   γ ≤ any
   α ≤ β
   β ≤ γ
-changes: []
+changed: []
 (α) -> γ
 where
   γ ≤ any
@@ -210,7 +209,7 @@ where
   γ | β ≤ α ≤ any
   β | α ≤ γ ≤ any
   α | γ ≤ β ≤ any
-changes: []
+changed: []
 α | γ | β
 where
   γ | β ≤ α ≤ any
@@ -231,7 +230,13 @@ where
   int | γ | β ≤ α ≤ any
   int ≤ γ ≤ any
   α | γ ≤ β ≤ any
-changes: [β+]
+changed: [β+]
+int | α | γ | β
+where
+  int | γ | β ≤ α ≤ any
+  int ≤ γ ≤ any
+  int | α | γ ≤ β ≤ any
+changed: []
 int | α | γ | β
 where
   int | γ | β ≤ α ≤ any
