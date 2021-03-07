@@ -684,21 +684,21 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let 
 > Called from Lang__Types.subtype in file "src/types.ml", line 568, characters 5-91
 > Called from Stdlib__map.Make.iter in file "map.ml", line 296, characters 20-25
 > Called from Lang__Types.subtype_cons in file "src/types.ml", line 37, characters 5-46
-> Called from Lang__Check.check' in file "src/check.ml", line 256, characters 5-37
-> Called from Lang__Check.check in file "src/check.ml", line 183, characters 14-29
+> Called from Lang__Check.check' in file "src/check.ml", line 258, characters 5-37
+> Called from Lang__Check.check in file "src/check.ml", line 185, characters 14-29
 > Called from Stdlib__map.Make.mapi in file "map.ml", line 312, characters 19-24
 > Called from Lang__Tuple_fields.map_fields in file "src/tuple_fields.ml", line 56, characters 21-65
-> Called from Lang__Check.infer' in file "src/check.ml", line 337, characters 16-80
-> Called from Lang__Check.check' in file "src/check.ml", line 255, characters 18-30
-> Called from Lang__Check.check in file "src/check.ml", line 183, characters 14-29
-> Called from Lang__Check.check' in file "src/check.ml", line 223, characters 33-50
-> Called from Lang__Check.check in file "src/check.ml", line 183, characters 14-29
-> Called from Lang__Check.check_or_infer in file "src/check.ml", line 396, characters 14-27
-> Called from Lang__Check.infer'.(fun) in file "src/check.ml", line 315, characters 25-53
-> Called from Lang__Check.elab_gen in file "src/check.ml", line 133, characters 27-34
-> Called from Lang__Check.infer' in file "src/check.ml", line 306, characters 7-806
-> Called from Lang__Check.check' in file "src/check.ml", line 255, characters 18-30
-> Called from Lang__Check.check in file "src/check.ml", line 183, characters 14-29
+> Called from Lang__Check.infer' in file "src/check.ml", line 339, characters 16-80
+> Called from Lang__Check.check' in file "src/check.ml", line 257, characters 18-30
+> Called from Lang__Check.check in file "src/check.ml", line 185, characters 14-29
+> Called from Lang__Check.check' in file "src/check.ml", line 225, characters 33-50
+> Called from Lang__Check.check in file "src/check.ml", line 185, characters 14-29
+> Called from Lang__Check.check_or_infer in file "src/check.ml", line 398, characters 14-27
+> Called from Lang__Check.infer'.(fun) in file "src/check.ml", line 317, characters 25-53
+> Called from Lang__Check.elab_gen in file "src/check.ml", line 133, characters 32-39
+> Called from Lang__Check.infer' in file "src/check.ml", line 308, characters 7-806
+> Called from Lang__Check.check' in file "src/check.ml", line 257, characters 18-30
+> Called from Lang__Check.check in file "src/check.ml", line 185, characters 14-29
 > Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 77, characters 10-33
 
 fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(fn(a){x(a)}) }
@@ -815,4 +815,109 @@ fn (a) { fn(b) { if true { a } else { {bar:b} } } }
 >   B { fn (b: A) -> {bar: A} | B { if true{a} else {{bar: b}} } }
 > [A, B] (B) -> (A) -> {bar: A} | B
 
-# FIXME: add negative, CPS versions of above
+# same, but CPS style
+fn (a) { fn(b) { fn (k) { k(if true { a } else { b }) } } }
+> fn (a) { fn (b) { fn (k) { k(if true{a} else {b}) } } }
+>   fn [A](a: A) -> [A_2] (A_2) ->
+>   [A_3] ((A | A_2) -> A_3) ->
+>   A_3 {
+>   fn [A_2](b: A_2) -> [A_3] ((A | A_2) -> A_3) ->
+>   A_3 { fn [A_3](k: (A | A_2) -> A_3) -> A_3 { k(if true{a} else {b}) } }
+>   }
+> [A] (A) -> [A_2] (A_2) -> [A_3] ((A | A_2) -> A_3) -> A_3
+fn (a) { fn(b) { fn (k) { k(if true { {foo:a} } else { b }) } } }
+> fn (a) { fn (b) { fn (k) { k(if true{{foo: a}} else {b}) } } }
+>   fn [A](a: A) -> [A_2] (A_2) ->
+>   [A_3] (({foo: A} | A_2) -> A_3) ->
+>   A_3 {
+>   fn [A_2](b: A_2) -> [A_3] (({foo: A} | A_2) -> A_3) ->
+>   A_3 {
+>   fn [A_3](k: ({foo: A} | A_2) -> A_3) -> A_3 { k(if true{{foo: a}} else {b}) }
+>   }
+>   }
+> [A] (A) -> [A_2] (A_2) -> [A_3] (({foo: A} | A_2) -> A_3) -> A_3
+fn (a) { fn(b) { fn (k) { k(if true { a } else { {foo:b} }) } } }
+> fn (a) { fn (b) { fn (k) { k(if true{a} else {{foo: b}}) } } }
+>   fn [A, B](a: B) -> (A) ->
+>   [A_2] (({foo: A} | B) -> A_2) ->
+>   A_2 {
+>   fn (b: A) -> [A_2] (({foo: A} | B) -> A_2) ->
+>   A_2 {
+>   fn [A_2](k: ({foo: A} | B) -> A_2) -> A_2 { k(if true{a} else {{foo: b}}) }
+>   }
+>   }
+> [A, B] (B) -> (A) -> [A_2] (({foo: A} | B) -> A_2) -> A_2
+
+# CPS again, applications inside if this time
+fn (a) { fn(b) { fn (k) { if true { k(a) } else { k(b) } } } }
+> fn (a) { fn (b) { fn (k) { if true{k(a)} else {k(b)} } } }
+>   fn [A](a: A) -> [A_2] (A_2) ->
+>   [A_3] ((A | A_2) -> A_3) ->
+>   A_3 {
+>   fn [A_2](b: A_2) -> [A_3] ((A | A_2) -> A_3) ->
+>   A_3 { fn [A_3](k: (A | A_2) -> A_3) -> A_3 { if true{k(a)} else {k(b)} } }
+>   }
+> [A] (A) -> [A_2] (A_2) -> [A_3] ((A | A_2) -> A_3) -> A_3
+fn (a) { fn(b) { fn (k) { if true { k({foo:a}) } else { k(b) } } } }
+> fn (a) { fn (b) { fn (k) { if true{k({foo: a})} else {k(b)} } } }
+>   fn [A](a: A) -> [A_2] (A_2) ->
+>   [A_3] (({foo: A} | A_2) -> A_3) ->
+>   A_3 {
+>   fn [A_2](b: A_2) -> [A_3] (({foo: A} | A_2) -> A_3) ->
+>   A_3 {
+>   fn [A_3](k: ({foo: A} | A_2) -> A_3) -> A_3 {
+>   if true{k({foo: a})} else
+>   {k(b)}
+>   }
+>   }
+>   }
+> [A] (A) -> [A_2] (A_2) -> [A_3] (({foo: A} | A_2) -> A_3) -> A_3
+fn (a) { fn(b) { fn (k) { if true { k(a) } else { k({foo:b}) } } } }
+> fn (a) { fn (b) { fn (k) { if true{k(a)} else {k({foo: b})} } } }
+>   fn [A, B](a: B) -> (A) ->
+>   [A_2] (({foo: A} | B) -> A_2) ->
+>   A_2 {
+>   fn (b: A) -> [A_2] (({foo: A} | B) -> A_2) ->
+>   A_2 {
+>   fn [A_2](k: ({foo: A} | B) -> A_2) -> A_2 { if true{k(a)} else {k({foo: b})} }
+>   }
+>   }
+> [A, B] (B) -> (A) -> [A_2] (({foo: A} | B) -> A_2) -> A_2
+
+# sorta dual of curried choose
+fn (f) { fn(g) { fn(x) { (f(x), g(x)) } } }
+> fn (f) { fn (g) { fn (x) { (f(x), g(x)) } } }
+>   fn [A, B](f: (B) -> A) -> [A_2] ((B) -> A_2) ->
+>   (B) ->
+>   (A, A_2) {
+>   fn [A_2](g: (B) -> A_2) -> (B) ->
+>   (A, A_2) { fn (x: B) -> (A, A_2) { (f(x), g(x)) } }
+>   }
+> [A, B] ((B) -> A) -> [A_2] ((B) -> A_2) -> (B) -> (A, A_2)
+fn (f) { fn(g) { fn(x) { (f(x.foo), g(x)) } } }
+> fn (f) { fn (g) { fn (x) { (f(x.foo), g(x)) } } }
+>   fn [A, B](f: (A) -> B) -> [A_2, B_2 <: {foo: A, ...}] ((B_2) -> A_2) ->
+>   (B_2) ->
+>   (B, A_2) {
+>   fn [A_2, B_2 <: {foo: A, ...}](g: (B_2) -> A_2) -> (B_2) ->
+>   (B, A_2) { fn (x: B_2) -> (B, A_2) { (f(x.foo), g(x)) } }
+>   }
+> [A, B] ((A) -> B) -> [A_2, B_2 <: {foo: A, ...}] ((B_2) -> A_2) -> (B_2) -> (B, A_2)
+fn (f) { fn(g) { fn(x) { (f(x), g(x.foo)) } } }
+> fn (f) { fn (g) { fn (x) { (f(x), g(x.foo)) } } }
+>   fn [A, B <: {foo: C, ...}, C](f: (B) -> A) -> [A_2] ((C) -> A_2) ->
+>   (B) ->
+>   (A, A_2) {
+>   fn [A_2](g: (C) -> A_2) -> (B) ->
+>   (A, A_2) { fn (x: B) -> (A, A_2) { (f(x), g(x.foo)) } }
+>   }
+> [A, B <: {foo: C, ...}, C] ((B) -> A) -> [A_2] ((C) -> A_2) -> (B) -> (A, A_2)
+fn (f) { fn(g) { fn(x) { (f(x.foo), g(x.foo)) } } }
+> fn (f) { fn (g) { fn (x) { (f(x.foo), g(x.foo)) } } }
+>   fn [A, B](f: (B) -> A) -> [A_2] ((B) -> A_2) ->
+>   ({foo: B, ...}) ->
+>   (A, A_2) {
+>   fn [A_2](g: (B) -> A_2) -> ({foo: B, ...}) ->
+>   (A, A_2) { fn (x: {foo: B, ...}) -> (A, A_2) { (f(x.foo), g(x.foo)) } }
+>   }
+> [A, B] ((B) -> A) -> [A_2] ((B) -> A_2) -> ({foo: B, ...}) -> (A, A_2)

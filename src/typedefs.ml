@@ -6,12 +6,12 @@ module StrMap = Map.Make (struct type t = string let compare = compare end)
 
 exception Internal of string
 let intfail fmt =
-  Printf.ksprintf (fun s -> raise (Internal s)) fmt
+  Format.kasprintf (fun s -> raise (Internal s)) fmt
 let () = Printexc.register_printer (function Internal s -> Some ("internal error: " ^ s) | _ -> None)
 
 exception Unimplemented of string
 let unimp fmt =
-  Printf.ksprintf (fun s -> raise (Unimplemented s)) fmt
+  Format.kasprintf (fun s -> raise (Unimplemented s)) fmt
 let () = Printexc.register_printer (function Unimplemented s -> Some ("unimplemented: " ^ s) | _ -> None)
 
 let id x = x
@@ -350,7 +350,7 @@ let rec env_at_level env lvl =
      assert (Env_level.extends lvl tys.level); env_at_level tys.rest lvl
   | Env_nil when Env_level.equal Env_level.initial lvl -> Env_nil
   | Env_nil -> intfail "env level not found"
- 
+
 let env_rigid_vars env lvl =
   match env_at_level env lvl with
   | Env_types tys ->
@@ -406,14 +406,14 @@ let close_typ_var lvl f index = function
 
 (* Can only be used on typs without Tsimple nodes.
    (This limits it to use during parsing, which does not generate Tsimple) *)
-let rec close_typ : 
+let rec close_typ :
   'a 'b . env_level -> (typ_var -> int) -> int -> (zero, zero) typ -> ('a, 'b) typ
   = fun lvl var ix ty -> match ty with
   | Tsimple z -> never z
   | Tcons c -> Tcons (map_head (close_typ lvl var ix) (close_typ lvl var ix) c)
   | Tvar v -> Tvar (close_typ_var lvl var ix v)
   | Tvjoin (t, v) -> Tvjoin(close_typ lvl var ix t, close_typ_var lvl var ix v)
-  | Tpoly {vars; body} -> 
+  | Tpoly {vars; body} ->
      let ix = ix + 1 in
      Tpoly {vars = IArray.map (fun (n, b) -> n, close_typ lvl var ix b) vars;
             body = close_typ lvl var ix body}
@@ -761,13 +761,6 @@ let rec wf_typ : 'pos 'neg .
           Not Vflex, at least. Prob not same binder either. *)
        wf_typ ~seen ~neg:pos ~pos:neg ~ispos:(not ispos) env ext c) vars;
      wf_typ ~seen ~neg ~pos ~ispos env ext body
-
-let wf_ptyp env (t : ptyp) =
-  let seen = Hashtbl.create 10 in
-  wf_typ ~seen ~neg:(wf_flexvar ~seen env (env_level env)) ~pos:(wf_flex_lower_bound ~seen env (env_level env)) ~ispos:true env [] t
-let wf_ntyp env (t : ntyp) =
-  let seen = Hashtbl.create 10 in 
-  wf_typ ~seen ~neg:(wf_flex_lower_bound ~seen env (env_level env)) ~pos:(wf_flexvar ~seen env (env_level env)) ~ispos:false env [] t
 
 
 
@@ -1138,7 +1131,7 @@ let unparse_ntyp ~flexvar ?(ext=[]) (t : ntyp) =
 let pp_tyexp ppf ty =
   let buf = Buffer.create 100 in
   PPrint.ToBuffer.pretty 1. 10000 buf (PPrint.group (Print.tyexp ty));
-  Printf.fprintf ppf "%s" (Buffer.to_bytes buf |> Bytes.to_string)
+  Format.fprintf ppf "%s" (Buffer.to_bytes buf |> Bytes.to_string)
 
 let pp_cons_pos ppf t =
   let cons = unparse_cons ~neg:(unparse_flexvar ~flexvar:ignore) ~pos:(unparse_flex_lower_bound ~flexvar:ignore) t.cons in
@@ -1162,3 +1155,20 @@ let pp_ntyp ppf t =
 
 let pp_ptyp ppf t =
   pp_tyexp ppf (unparse_ptyp ~flexvar:ignore t)
+
+
+let wf_ptyp env (t : ptyp) =
+  try
+    let seen = Hashtbl.create 10 in
+    wf_typ ~seen ~neg:(wf_flexvar ~seen env (env_level env)) ~pos:(wf_flex_lower_bound ~seen env (env_level env)) ~ispos:true env [] t
+  with
+  | Assert_failure (file, line, _char) when file = __FILE__ ->
+     intfail "Ill-formed type (%s:%d): %a" file line pp_ptyp t
+
+let wf_ntyp env (t : ntyp) =
+  try
+    let seen = Hashtbl.create 10 in
+    wf_typ ~seen ~neg:(wf_flex_lower_bound ~seen env (env_level env)) ~pos:(wf_flexvar ~seen env (env_level env)) ~ispos:false env [] t
+  with
+  | Assert_failure (file, line, _char) when file = __FILE__ ->
+     intfail "Ill-formed type (%s:%d): %a" file line pp_ntyp t

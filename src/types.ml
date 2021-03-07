@@ -729,7 +729,7 @@ let rec substn visit bvars level ~index ({ctor={cons;rigvars};flexvars} : flex_l
   let rigvars_keep = rigvars_keep |> List.map (fun rv -> Vrigid rv) in
   let flexvars_gen = flexvars_gen |> List.filter_map (fun pv ->
     if is_visited_neg visit pv then
-      Some (Vbound {index; var = substn_bvar visit bvars level ~index pv})
+      Some (Vbound {index; var = substn_bvar visit bvars level pv})
     else None) in
   let flexvars_keep = flexvars_keep |> List.map (fun fv -> Vflex fv) in
 
@@ -746,7 +746,7 @@ and substn_fv_neg visit bvars level ~index nv : ntyp =
     assert (is_visited_neg visit nv);
     if is_visited_pos visit nv then
       Tvar (Vbound { index;
-                     var = substn_bvar visit bvars level ~index nv })
+                     var = substn_bvar visit bvars level nv })
     else substn_upper visit bvars level ~index nv.upper
   end else begin
     Tvar (Vflex nv)
@@ -765,13 +765,14 @@ and substn_upper visit bvars level ~index = function
 
 
 (* FIXME!!: gen constraints. What can upper bounds be? *)
-and substn_bvar visit bvars level ~index fv =
+and substn_bvar visit bvars level fv =
+  assert (Env_level.equal fv.level level);
   assert (is_visited_neg visit fv && is_visited_pos visit fv);
   if fv.bound_var <> -1 then fv.bound_var else begin
     let r = ref (Tcons Top) in
     let n = Vector.push bvars (Gen_flex (fv, r)) in
     fv.bound_var <- n;
-    r := substn_upper visit bvars level ~index fv.upper;
+    r := substn_upper visit bvars level ~index:0 fv.upper;
     n
   end
 

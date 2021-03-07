@@ -130,8 +130,8 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
     { name; upper = simple_ptyp_bound level (open_typ_rigid rigvars bound) }) in
 
   let env' = Env_types { level; rig_names; rig_defns; rest = env } in
-  let ty, Elab (erq, ek) = fn env' in
-  wf_ptyp env' ty;
+  let orig_ty, Elab (erq, ek) = fn env' in
+  wf_ptyp env' orig_ty;
 
   let rec fixpoint visit erq ty =
     if visit > 10 then intfail "looping?";
@@ -144,7 +144,7 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
       fixpoint (visit+2) erq ty
     else
       (visit, erq, ty) in
-  let visit, erq, ty = fixpoint 2 erq ty in
+  let visit, erq, ty = fixpoint 2 erq orig_ty in
 
   let bvars = Vector.create () in
   rigvars |> IArray.iter (fun rv -> ignore (Vector.push bvars (Gen_rigid rv)));
@@ -169,6 +169,7 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
       | Some _ -> mkname () in
     let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex (_,r) -> mkname (), !r) |> IArray.of_array in
     let ty = Tpoly { vars = bounds; body = ty } in
+    wf_ptyp env ty;
     ty, Elab (Gen{bounds; body=erq}, fun (poly, e) -> Some poly, ek e)
   
 let fresh_flow env =
