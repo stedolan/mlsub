@@ -681,24 +681,24 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let 
 > Called from Lang__Types.subtype_ctor_rig in file "src/types.ml", line 202, characters 2-127
 > Called from Stdlib__list.iter in file "list.ml", line 110, characters 12-15
 > Called from Lang__Types.subtype_ctor_rig in file "src/types.ml", line 199, characters 2-156
-> Called from Lang__Types.subtype in file "src/types.ml", line 567, characters 5-91
+> Called from Lang__Types.subtype in file "src/types.ml", line 568, characters 5-91
 > Called from Stdlib__map.Make.iter in file "map.ml", line 296, characters 20-25
 > Called from Lang__Types.subtype_cons in file "src/types.ml", line 37, characters 5-46
-> Called from Lang__Check.check' in file "src/check.ml", line 254, characters 5-37
-> Called from Lang__Check.check in file "src/check.ml", line 181, characters 14-29
+> Called from Lang__Check.check' in file "src/check.ml", line 256, characters 5-37
+> Called from Lang__Check.check in file "src/check.ml", line 183, characters 14-29
 > Called from Stdlib__map.Make.mapi in file "map.ml", line 312, characters 19-24
 > Called from Lang__Tuple_fields.map_fields in file "src/tuple_fields.ml", line 56, characters 21-65
-> Called from Lang__Check.infer' in file "src/check.ml", line 335, characters 16-80
-> Called from Lang__Check.check' in file "src/check.ml", line 253, characters 18-30
-> Called from Lang__Check.check in file "src/check.ml", line 181, characters 14-29
-> Called from Lang__Check.check' in file "src/check.ml", line 221, characters 33-50
-> Called from Lang__Check.check in file "src/check.ml", line 181, characters 14-29
-> Called from Lang__Check.check_or_infer in file "src/check.ml", line 394, characters 14-27
-> Called from Lang__Check.infer'.(fun) in file "src/check.ml", line 313, characters 25-53
-> Called from Lang__Check.elab_gen in file "src/check.ml", line 131, characters 27-34
-> Called from Lang__Check.infer' in file "src/check.ml", line 304, characters 7-806
-> Called from Lang__Check.check' in file "src/check.ml", line 253, characters 18-30
-> Called from Lang__Check.check in file "src/check.ml", line 181, characters 14-29
+> Called from Lang__Check.infer' in file "src/check.ml", line 337, characters 16-80
+> Called from Lang__Check.check' in file "src/check.ml", line 255, characters 18-30
+> Called from Lang__Check.check in file "src/check.ml", line 183, characters 14-29
+> Called from Lang__Check.check' in file "src/check.ml", line 223, characters 33-50
+> Called from Lang__Check.check in file "src/check.ml", line 183, characters 14-29
+> Called from Lang__Check.check_or_infer in file "src/check.ml", line 396, characters 14-27
+> Called from Lang__Check.infer'.(fun) in file "src/check.ml", line 315, characters 25-53
+> Called from Lang__Check.elab_gen in file "src/check.ml", line 133, characters 27-34
+> Called from Lang__Check.infer' in file "src/check.ml", line 306, characters 7-806
+> Called from Lang__Check.check' in file "src/check.ml", line 255, characters 18-30
+> Called from Lang__Check.check in file "src/check.ml", line 183, characters 14-29
 > Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 77, characters 10-33
 
 fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(fn(a){x(a)}) }
@@ -736,3 +736,83 @@ fn() { (fn (x) { x })(fn (x) { x }) }
 >   fn [A]() -> (A) ->
 >   A { (fn [A_2](x: A_2) -> A_2 { x })(fn [A_2](x: A_2) -> A_2 { x }) }
 > [A] () -> (A) -> A
+
+
+
+# tricky hoisting+cons examples
+# this way around is fine: {foo:b}|a, when a is bound more deeply
+fn(f) { fn(a,b) { let z = f(b); if true { {foo:b} } else { a } } }
+> fn (f) { fn (a, b) { let z = f(b); if true{{foo: b}} else {a} } }
+>   fn [A, B](f: (A) -> B) -> [A_2] (A_2, A) ->
+>   {foo: A} |
+>   A_2 {
+>   fn [A_2](a: A_2, b: A) -> {foo: A} |
+>   A_2 { let z : B = f(b); if true{{foo: b}} else {a} }
+>   }
+> [A, B] ((A) -> B) -> [A_2] (A_2, A) -> {foo: A} | A_2
+
+# this way around is harder: {foo:a}|b, when a is bound more deeply
+# hoists a to avoid an invalid Tvjoin
+fn(f) { fn(a,b) { let z = f(b); if true { {foo:a} } else { b } } }
+> fn (f) { fn (a, b) { let z = f(b); if true{{foo: a}} else {b} } }
+>   fn [A, B, C](f: (B) -> C) -> (A, B) ->
+>   {foo: A} |
+>   B {
+>   fn (a: A, b: B) -> {foo: A} |
+>   B { let z : C = f(b); if true{{foo: a}} else {b} }
+>   }
+> [A, B, C] ((B) -> C) -> (A, B) -> {foo: A} | B
+
+# no need to hoist in these cases, with no cons (because join commutes)
+fn(f) { fn(a,b) { let z = f(b); if true { b } else { a } } }
+> fn (f) { fn (a, b) { let z = f(b); if true{b} else {a} } }
+>   fn [A, B](f: (A) -> B) -> [A_2] (A_2, A) ->
+>   A |
+>   A_2 {
+>   fn [A_2](a: A_2, b: A) -> A |
+>   A_2 { let z : B = f(b); if true{b} else {a} }
+>   }
+> [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A | A_2
+
+fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
+> fn (f) { fn (a, b) { let z = f(b); if true{a} else {b} } }
+>   fn [A, B](f: (A) -> B) -> [A_2] (A_2, A) ->
+>   A |
+>   A_2 {
+>   fn [A_2](a: A_2, b: A) -> A |
+>   A_2 { let z : B = f(b); if true{a} else {b} }
+>   }
+> [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A | A_2
+
+# type validity may require sorting rigvars
+(@bot : [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A | A_2)
+> (@bot : [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A | A_2)
+>   (@bot : [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A | A_2)
+> [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A | A_2
+
+(@bot : [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A_2 | A)
+> (@bot : [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A_2 | A)
+>   (@bot : [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A_2 | A)
+> [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A | A_2
+
+# curried choose variants. Note hoisting in last case.
+fn (a) { fn(b) { if true { a } else { b } } }
+> fn (a) { fn (b) { if true{a} else {b} } }
+>   fn [A](a: A) -> [A_2] (A_2) ->
+>   A |
+>   A_2 { fn [A_2](b: A_2) -> A | A_2 { if true{a} else {b} } }
+> [A] (A) -> [A_2] (A_2) -> A | A_2
+fn (a) { fn(b) { if true { {foo:a} } else { b } } }
+> fn (a) { fn (b) { if true{{foo: a}} else {b} } }
+>   fn [A](a: A) -> [A_2] (A_2) ->
+>   {foo: A} |
+>   A_2 { fn [A_2](b: A_2) -> {foo: A} | A_2 { if true{{foo: a}} else {b} } }
+> [A] (A) -> [A_2] (A_2) -> {foo: A} | A_2
+fn (a) { fn(b) { if true { a } else { {bar:b} } } }
+> fn (a) { fn (b) { if true{a} else {{bar: b}} } }
+>   fn [A, B](a: B) -> (A) ->
+>   {bar: A} |
+>   B { fn (b: A) -> {bar: A} | B { if true{a} else {{bar: b}} } }
+> [A, B] (B) -> (A) -> {bar: A} | B
+
+# FIXME: add negative, CPS versions of above

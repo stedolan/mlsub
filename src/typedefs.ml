@@ -119,6 +119,7 @@ module Env_level : sig
   val replace : t -> t
 
   val equal : t -> t -> bool
+  val compare : t -> t -> int
   val extends : t -> t -> bool
 
   val to_int : t -> int
@@ -131,6 +132,8 @@ end = struct
   let initial = { level = 0 }
   let extend { level } = { level = level + 1 }
   let replace { level } = { level }
+
+  let compare { level=l1} {level=l2} = compare l1 l2
 
   let extends {level=l1} {level=l2} = l1 <= l2
 
@@ -1153,3 +1156,9 @@ let pp_flexlb ppf t =
 
 let pp_flexvar ppf v =
   pp_tyexp ppf (unparse_flexvar ~flexvar:ignore v)
+
+let pp_ntyp ppf t =
+  pp_tyexp ppf (unparse_ntyp ~flexvar:ignore t)
+
+let pp_ptyp ppf t =
+  pp_tyexp ppf (unparse_ptyp ~flexvar:ignore t)

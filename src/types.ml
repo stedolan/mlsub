@@ -393,6 +393,7 @@ and hoist_flex ~changes env level v =
        end
 
 and hoist_lower ~changes env level {ctor;flexvars} =
+  (* FIXME hoisting: this looks wrong: what about the levels of ctor.rigvars?  *)
   map_ctor_rig (hoist_flex ~changes env level) (hoist_lower ~changes env level) ctor |> ignore;
   List.iter (hoist_flex ~changes env level) flexvars;
   ()
@@ -421,7 +422,7 @@ let rec simple_ptyp lvl : ptyp -> flex_lower_bound = function
   | Tvjoin (t, Vrigid rv) ->
      assert (Env_level.extends rv.level lvl);
      let {ctor={cons;rigvars};flexvars} = simple_ptyp rv.level t in
-     {ctor={cons;rigvars=if contains_rigvar rv rigvars then rigvars else rv::rigvars};flexvars}
+     {ctor={cons;rigvars=if contains_rigvar rv rigvars then rigvars else rigvars@[rv]};flexvars}
 
 and simple_ntyp lvl : ntyp -> styp_neg = function
   | Tsimple t -> UBvar t
@@ -630,33 +631,34 @@ let is_visited_neg visit fv =
 
 (* FIXME: I think this is all dodgy re flexvars at upper levels
    Are there enough level checks in expand / substn? *)
+(* FIXME: how does this work with rigvars & flexvars at the same level? (i.e. poly fns) *)
 
 let rec expand visit ~changes ?(vexpand=[]) env level (p : flex_lower_bound) =
   let ctor = map_ctor_rig (expand_fv_neg visit ~changes env level) (expand visit ~changes env level) p.ctor in
-  let flexvars = p.flexvars in
-  flexvars |> List.iter (fun pv ->
-    (* FIXME kinda quadratic *)
-    (* FIXME: contravariant hoisting? Curried choose type? *)
-    hoist_lower ~changes env pv.level p;
-    if Env_level.equal pv.level level then begin
-      match begin_visit_pos visit pv with
-      | Visited -> ()
-      | Unvisited ->
-         ignore (flex_cons_upper ~changes env pv); (* ensure upper not UBvar *)
-         (* Add pv to vexpand so we know to ignore it if we see it again before going
-            under a constructor. (This is basically a bad quadratic SCC algorithm) *)
-         let lower = expand visit ~changes ~vexpand:(pv :: vexpand) env level pv.lower in
-         (* Remove useless reflexive constraints, if they appeared by expanding a cycle *)
-         let lower = { lower with flexvars = List.filter (fun v -> not (equal_flexvar v pv)) lower.flexvars } in
-         let _:bool = fv_maybe_set_lower ~changes pv lower in
-         end_visit_pos visit pv
-      | Visiting ->
-         (* recursive occurrences are fine if not under a constructor *)
-         if List.memq pv vexpand then ()
-         else unimp "positive recursion on flexvars"
-    end);
-  (* NB: flexvars occurs twice below, re-adding the reflexive constraints: α expands to (α|α.lower) *)
-  List.fold_left (fun p v -> join_lower ~changes env level p v.lower) { ctor; flexvars } flexvars
+  let flexvars_gen, flexvars_keep = List.partition (fun fv -> Env_level.equal fv.level level) p.flexvars in
+  flexvars_keep |> List.iter (fun fv ->
+    (* Hoist to avoid making invalid Tvjoins later *)
+    hoist_lower ~changes env fv.level {p with flexvars=[]});
+  flexvars_gen |> List.iter (fun pv ->
+    match begin_visit_pos visit pv with
+    | Visited -> ()
+    | Unvisited ->
+       ignore (flex_cons_upper ~changes env pv); (* ensure upper not UBvar *)
+       (* Add pv to vexpand so we know to ignore it if we see it again before going
+          under a constructor. (This is basically a bad quadratic SCC algorithm) *)
+       let lower = expand visit ~changes ~vexpand:(pv :: vexpand) env level pv.lower in
+       (* Remove useless reflexive constraints, if they appeared by expanding a cycle *)
+       let lower = { lower with flexvars = List.filter (fun v -> not (equal_flexvar v pv)) lower.flexvars } in
+       let _:bool = fv_maybe_set_lower ~changes pv lower in
+       end_visit_pos visit pv
+    | Visiting ->
+       (* recursive occurrences are fine if not under a constructor *)
+       if List.memq pv vexpand then ()
+       else unimp "positive recursion on flexvars");
+  (* NB: flexvars_gen occurs twice below, re-adding the reflexive constraints: α expands to (α|α.lower) *)
+  List.fold_left (fun p v -> join_lower ~changes env level p v.lower)
+    { ctor; flexvars = flexvars_keep @ flexvars_gen }
+    flexvars_gen
 
 and expand_fv_neg visit ~changes env level nv =
   if Env_level.equal nv.level level && begin_visit_neg visit nv then begin

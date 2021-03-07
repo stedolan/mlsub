@@ -20,7 +20,7 @@ let rec env_lookup_var env v =
 
 let rec split_tjoin env cons vars rest =
   match rest with
-  | [] -> cons, vars
+  | [] -> cons, List.rev vars
   | (None, _) :: _ -> failwith "type syntax error"
   | (Some ty, _) as ty' :: rest ->
      match ty with
@@ -75,7 +75,9 @@ and typ_of_tyexp' : 'a 'b . env -> tyexp' -> ('a, 'b) typ =
           match typ_of_tyexp env c with
           | Tcons c -> c
           | _ -> failwith "Expected a constructed type" in
-     tcons {cons; rigvars}
+     (* FIXME: check for well-formedness of cons under these rigvars, to avoid bad Tvjoins *)
+     let rigvars = List.stable_sort (fun (v : rigvar) (v' : rigvar) -> Env_level.compare v.level v'.level) rigvars in
+     List.fold_left (fun c r -> Tvjoin (c, Vrigid r)) (Tcons cons) rigvars
   | Tforall (vars, body) ->
      let vars, name_ix = enter_polybounds env vars in
      let level = Env_level.extend (env_level env) in
