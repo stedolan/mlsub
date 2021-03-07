@@ -47,6 +47,11 @@ let rec collect_fields npos fields fnames_rev = function
 
 let collect_fields fs = collect_fields 0 FieldMap.empty [] fs
 
+let equal_fields f ps qs =
+  FieldMap.equal f ps.fields qs.fields &&
+  ps.fnames = qs.fnames &&
+  ps.fopen = qs.fopen
+
 let map_fields f fs =
   { fs with fields = FieldMap.mapi (fun fn x -> f fn x) fs.fields }
 

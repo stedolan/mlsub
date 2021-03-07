@@ -53,17 +53,29 @@ let tuple xs = Record (Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) 
 
 let nope _ = assert false
 
+let pp_changes ppf changes =
+  Printf.fprintf ppf "[";
+  List.rev changes |> List.iteri (fun i ch ->
+    let fv,ty =
+      match ch with
+      | Change_upper(v,_) -> v, "-"
+      | Change_lower(v,_) -> v, "+"
+      | Change_level(v,_) -> v, "@" in
+    Printf.fprintf ppf "%s%s%s" (if i = 0 then "" else " ") (flexvar_name fv) ty);
+  Printf.fprintf ppf "]"
+
 let dump env level (t : ptyp) =
   dump t;
+  flush stdout;
   let fl = approx_ptyp env t in
   let changes = ref [] in
   let fl = expand 2 ~changes env level fl in
-  Printf.printf "changed: %b\n" (!changes <> []);
+  Printf.printf "changed: %a\n" pp_changes !changes;
   dump (Tsimple fl);
   if !changes <> [] then begin
   let changes = ref [] in
   let fl = expand 4 ~changes env level fl in
-  Printf.printf "changed: %b\n" (!changes <> []);
+  Printf.printf "changes: %a\n" pp_changes !changes;
   dump (Tsimple fl);
 
   let bvars = Vector.create () in
@@ -210,9 +222,47 @@ let poly () =
 (*  subtype ~error env (t2 ()) (t3 ());*)
   ()
 
+let flexself () =
+  let env = Env_nil and lvl = Env_level.initial in
+
+  (* UBvar optimisation *)
+  next_flexvar_id := 0;
+  let an, ap = fresh_flow lvl in
+  let bn, bp = fresh_flow lvl in
+  let cn, cp = fresh_flow lvl in
+  let error _ = failwith "nope" in
+  subtype ~error env cn (Tcons Top); (* FIXME remove? *)
+  subtype ~error env ap bn;
+  subtype ~error env bp cn;
+  subtype ~error env ap cn;
+  dump env lvl (Tcons (func [an] cp));
+
+  (* Attempted UBvar recursion (should become UBcons) *)
+  next_flexvar_id := 0;
+  let an, ap = fresh_flow lvl in
+  let bn, bp = fresh_flow lvl in
+  let cn, cp = fresh_flow lvl in
+  let error _ = failwith "nope" in
+  subtype ~error env ap bn;
+  subtype ~error env bp cn;
+  subtype ~error env cp an;
+  dump env lvl ap;
+
+  (* UBcons recursion, multiple steps to fixed point *)
+  next_flexvar_id := 0;
+  let an, ap = fresh_flow lvl in
+  let bn, bp = fresh_flow lvl in
+  let cn, cp = fresh_flow lvl in
+  subtype ~error env (Tcons Int) cn;
+  subtype ~error env bp an;
+  subtype ~error env cp an;
+  subtype ~error env ap bn;
+  dump env lvl ap
+
 let () = choosy ()
 let () = lbs ()
 let () = match_bug ()
 let () = chain ()
 let () = dirbug ()
 let () = poly ()
+let () = flexself ()

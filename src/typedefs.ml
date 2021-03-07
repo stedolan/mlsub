@@ -97,6 +97,18 @@ let map_head neg pos = function
   | Func (args, res) ->
      Func (map_fields (fun _fn x -> neg x) args, pos res)
 
+let equal_cons neg pos p q =
+  match p, q with
+  | Top, Top -> true
+  | Bot, Bot -> true
+  | Bool, Bool -> true
+  | Int, Int -> true
+  | String, String -> true
+  | Record p, Record q ->
+     equal_fields pos p q
+  | Func (pa, pr), Func (qa, qr) ->
+     equal_fields neg pa qa && pos pr qr
+  | (Top|Bot|Bool|Int|String|Record _|Func _), _ -> false
 
 module Env_level : sig
   type t
@@ -217,6 +229,30 @@ and rigvar_defn = {
 }
 
 (*
+ * Equality checks (Syntactic, not subtyping-aware)
+ *)
+
+let equal_flexvar (p : flexvar) (q : flexvar) =
+  p == q
+let equal_rigvar (p : rigvar) (q : rigvar) =
+  Env_level.equal p.level q.level && p.var = q.var
+let equal_lists f p q =
+  try List.for_all2 f p q
+  with Invalid_argument _ -> false
+let rec equal_flex_lower_bound (p : flex_lower_bound) (q : flex_lower_bound) =
+  equal_lists equal_flexvar p.flexvars q.flexvars &&
+  equal_lists equal_rigvar p.ctor.rigvars q.ctor.rigvars &&
+  equal_cons equal_flexvar equal_flex_lower_bound p.ctor.cons q.ctor.cons
+let equal_styp_neg (p : styp_neg) (q : styp_neg) =
+  match p, q with
+  | UBnone, UBnone -> true
+  | UBvar pv, UBvar qv -> equal_flexvar pv qv
+  | UBcons cp, UBcons cq ->
+     equal_lists equal_rigvar cp.rigvars cq.rigvars &&
+     equal_cons equal_flex_lower_bound equal_flexvar cp.cons cq.cons
+  | (UBnone|UBvar _|UBcons _), _ -> false
+
+(*
  * Flexvar mutations and backtracking log
  *)
 
@@ -234,18 +270,17 @@ let fv_set_upper ~changes fv upper =
   fv.upper <- upper
 
 let fv_set_lower ~changes fv lower =
+  List.iter (fun fv' -> assert (fv != fv')) lower.flexvars;
   changes := Change_lower (fv, fv.lower) :: !changes;
   fv.lower <- lower
 
 let fv_maybe_set_lower ~changes fv lower =
-  (* FIXME poly eq *)
-  if lower <> fv.lower then
+  if not (equal_flex_lower_bound fv.lower lower) then
     (fv_set_lower ~changes fv lower; true)
   else false
 
 let fv_maybe_set_upper ~changes (fv : flexvar) upper =
-  (* FIXME poly eq *)
-  if upper <> fv.upper then
+  if not (equal_styp_neg fv.upper upper) then
     (fv_set_upper ~changes fv upper; true)
   else false
 
@@ -385,17 +420,6 @@ let close_typ_rigid level ty =
     | Vrigid v when Env_level.equal v.level level -> v.var
     | _ -> intfail "close_typ_rigid: not a rigid variable" in
   close_typ level close_var 0 ty
-
-(*
-let styp_bot = Scons Bot
-let styp_top = Scons Top
-
-(* FIXME: not ident if vars are ⊓ *)
-let styp_flexvar fv = Svar (Vflex fv)
-let styp_rigvar level var = Svar (Vrigid {level; var})
-let styp_boundvar index var = Svar (Vbound {index; var})
-let styp_cons cons = Scons cons
-*)
 
 
 let next_flexvar_id = ref 0
@@ -716,7 +740,8 @@ let rec wf_typ : 'pos 'neg .
      begin match v with
      | Vbound v ->
         assert (fst (List.nth ext v.index) = ispos); (* covariant *)
-        (* FIXME: should trim ext somehow, smaller indexes of ext are not valid in t *)
+        (* Tvjoin restriction: in T | b, where b is a bound var, T must not mention deeper bindings *)
+        let ext = List.mapi (fun ix (pol, len) -> if ix < v.index then (pol, 0) else (pol, len)) ext in
         wf_typ ~seen ~neg ~pos ~ispos env ext t
      | Vflex fv ->
         assert ispos; (* positive *)

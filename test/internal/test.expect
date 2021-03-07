@@ -8,7 +8,7 @@ where
   β ≤ (η) -> θ
   θ ≤ δ
   γ ≤ η ≤ any
-changed: true
+changed: [δ- α- β-]
 (α, β, γ) -> δ
 where
   δ ≤ any
@@ -19,7 +19,7 @@ where
   β ≤ (η | γ) -> θ
   θ ≤ δ
   γ ≤ η ≤ any
-changed: false
+changes: []
 (α, β, γ) -> δ
 where
   δ ≤ any
@@ -45,7 +45,7 @@ where
   η ≤ any
   η ≤ β ≤ any
   η ≤ γ ≤ any
-changed: true
+changed: [ε- ε+ δ- ζ- θ-]
 (δ, ζ) -> ((θ) -> δ | ζ | α, β | η, γ | η)
 where
   δ ≤ any
@@ -55,7 +55,7 @@ where
   (η) -> δ | ζ ≤ α ≤ any
   η ≤ β ≤ any
   η ≤ γ ≤ any
-changed: false
+changes: []
 (δ, ζ) -> ((θ) -> δ | ζ | α, β | η, γ | η)
 where
   δ ≤ any
@@ -80,7 +80,7 @@ where
   α ≤ (γ | ε) -> ζ
   γ ≤ any
   ε ≤ any
-changed: true
+changed: [γ- ε-]
 (ε, γ, α) -> (ζ, δ | ζ, β | α)
 where
   ζ ≤ nothing
@@ -89,7 +89,7 @@ where
   α ≤ (γ | ε) -> ζ
   γ ≤ any
   ε ≤ any
-changed: false
+changes: []
 (ε, γ, α) -> (ζ, δ | ζ, β | α)
 where
   ζ ≤ nothing
@@ -118,7 +118,7 @@ where
   α ≤ β
   β ≤ γ
   γ ≤ δ
-changed: true
+changed: [ζ+ η+ θ+ κ+ ν+]
 (α) -> ν | κ | θ | η | ζ | ε | δ
 where
   κ | θ | η | ζ | ε | δ ≤ ν ≤ any
@@ -131,7 +131,7 @@ where
   α ≤ β
   β ≤ γ
   γ ≤ δ
-changed: false
+changes: []
 (α) -> ν | κ | θ | η | ζ | ε | δ
 where
   κ | θ | η | ζ | ε | δ ≤ ν ≤ any
@@ -155,14 +155,14 @@ where
   δ ≤ any
   α ≤ any
   γ ≤ α
-changed: true
+changed: [δ- δ+ β-]
 ((α) -> β, (γ) -> δ | β)
 where
   β ≤ any
   α ≤ any
   β ≤ δ ≤ any
   γ ≤ α
-changed: false
+changes: []
 ((α) -> β, (γ) -> δ | β)
 where
   β ≤ any
@@ -176,3 +176,68 @@ where
 t1 = t2
 t3 <= t1, t2
 t1 <= t3: false
+(α) -> γ
+where
+  γ ≤ δ
+  δ ≤ any
+  α ≤ β
+  β ≤ γ
+changed: [δ+ γ-]
+(α) -> γ
+where
+  γ ≤ any
+  α ≤ β
+  β ≤ γ
+changes: []
+(α) -> γ
+where
+  γ ≤ any
+  α ≤ β
+  β ≤ γ
+($0) -> $0
+where
+  
+  $0 ≤ any
+
+α
+where
+  γ ≤ α ≤ any
+  β ≤ γ ≤ any
+  α ≤ β ≤ any
+changed: [β+ γ+ α+]
+α | γ | β
+where
+  γ | β ≤ α ≤ any
+  β | α ≤ γ ≤ any
+  α | γ ≤ β ≤ any
+changes: []
+α | γ | β
+where
+  γ | β ≤ α ≤ any
+  β | α ≤ γ ≤ any
+  α | γ ≤ β ≤ any
+nothing
+where
+  
+
+α
+where
+  γ | β ≤ α ≤ any
+  int ≤ γ ≤ any
+  α ≤ β ≤ any
+changed: [β+ α+]
+int | α | γ | β
+where
+  int | γ | β ≤ α ≤ any
+  int ≤ γ ≤ any
+  α | γ ≤ β ≤ any
+changes: [β+]
+int | α | γ | β
+where
+  int | γ | β ≤ α ≤ any
+  int ≤ γ ≤ any
+  int | α | γ ≤ β ≤ any
+int
+where
+  
+

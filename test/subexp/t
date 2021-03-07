@@ -265,3 +265,86 @@ fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
 # wtf:
 # fn[A,B,A <: B](x : [X, X <: A, X :> B](X) -> X) -> [X <: A, Y :> B, X <: Y](X) -> Y { x }
 # > parser failure: bad parse
+
+
+# some invalid types that should be rejected because of bad joins
+# FIXME: reject these at an appropriate position
+
+(@bot : [A] [B] ({foo: B} | A))
+> (@bot : [A] [B] ({foo: B} | A))
+> File "src/typedefs.ml", line 725, characters 5-11: Assertion failed
+> Raised at Lang__Typedefs.wf_var in file "src/typedefs.ml", line 725, characters 5-56
+> Called from Stdlib__map.Make.mapi in file "map.ml", line 312, characters 19-24
+> Called from Lang__Tuple_fields.map_fields in file "src/tuple_fields.ml", line 56, characters 21-65
+> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 96, characters 28-68
+> Called from Lang__Typedefs.wf_typ in file "src/typedefs.ml", line 736, characters 5-115
+> Called from Lang__Check.check in file "src/check.ml", line 177, characters 2-16
+> Called from Lang__Check.infer' in file "src/check.ml", line 269, characters 17-30
+> Called from Lang__Check.infer in file "src/check.ml", line 261, characters 17-29
+> Called from Lang__Check.elab_gen in file "src/check.ml", line 131, characters 27-34
+> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 54, characters 17-75
+
+(@bot : [A <: [B]int]int)
+> (@bot : [A <: [B] int] int)
+> typechecking error: Failure("rig var bounds must be Tcons")
+
+# bug in substn_ntyp
+fn[A](id: [B](A) -> int) { id }
+> fn [A](id: [B] (A) -> int) { id }
+>   fn [A](id: [B] (A) -> int) -> [B] (A) -> int { id }
+> [A] ([B] (A) -> int) -> [B] (A) -> int
+
+fn[A](id: [B](A, B) -> int, x:A) -> int {id(x,1)}
+> fn [A](id: [B] (A, B) -> int, x: A) -> int { id(x, 1) }
+>   fn [A](id: [B] (A, B) -> int, x: A) -> int { id(x, 1) }
+> [A] ([B] (A, B) -> int, A) -> int
+
+# If this fails someday due to unannoted x/ret, that's fine
+fn[A](id: [B](A, B) -> (A, B), x){id(x,1)}
+> fn [A](id: [B] (A, B) -> (A, B), x) { id(x, 1) }
+>   fn [A](id: [B] (A, B) -> (A, B), x: A) -> (A, int) { id(x, 1) }
+> [A] ([B] (A, B) -> (A, B), A) -> (A, int)
+
+(fn[A](id: (A) -> (nothing)){id})(fn(a){a})
+> (fn [A](id: (A) -> (nothing)) { id })(fn (a) { a })
+>   (fn [A](id: (A) -> nothing) -> (A) -> nothing { id })(fn (a) { a })
+> (nothing) -> nothing
+
+# another bug
+let f = fn[A](id: (A) -> A){1}; f(fn(a){a})
+> let f = fn [A](id: (A) -> A) { 1 }; f(fn (a) { a })
+>   let f : [A] ((A) -> A) -> int = fn [A](id: (A) -> A) -> int { 1 };
+>   f(fn (a) { a })
+> int
+
+let f = fn[A](id: [B](A, B) -> (A, B), x:A){id(x,1)}; fn(z){ f(fn(a,b){(a,b)}, if z.cond {z.a}else{z.b}) }
+> let f = fn [A](id: [B] (A, B) -> (A, B), x: A) { id(x, 1) };
+> fn (z) { f(fn (a, b) { (a, b) }, if z.cond{z.a} else {z.b}) }
+>   let f : [A] ([B] (A, B) -> (A, B), A) ->
+>   (A, int) =
+>   fn [A](id: [B] (A, B) -> (A, B), x: A) -> (A, int) { id(x, 1) };
+>   fn [A](z: {cond: bool, a: A, b: A, ...}) -> (A, int) {
+>   f(fn (a, b) { (a, b) }, if z.cond{z.a} else {z.b})
+>   }
+> [A] ({cond: bool, a: A, b: A, ...}) -> (A, int)
+
+# test match_simple_typ with complex upper bound
+let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(fn(x) { x }, 1) }
+> let appf = fn [B, C, A <: (B) -> C](f: A, x: B) { f(x) }; fn () { appf(fn (x) { x }, 1) }
+>   let appf : [B, C, A <: (B) -> C] (A, B) ->
+>   C =
+>   fn [B, C, A <: (B) -> C](f: A, x: B) -> C { f(x) };
+>   fn () -> int { appf(fn [A](x: A) -> A { x }, 1) }
+> () -> int
+
+let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(fn(x) { 1 }, 1) }
+> let appf = fn [B, C, A <: (B) -> C](f: A, x: B) { f(x) }; fn () { appf(fn (x) { 1 }, 1) }
+>   let appf : [B, C, A <: (B) -> C] (A, B) ->
+>   C =
+>   fn [B, C, A <: (B) -> C](f: A, x: B) -> C { f(x) };
+>   fn () -> int { appf(fn (x: any) -> int { 1 }, 1) }
+> () -> int
+
+let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(3, 1) }
+> let appf = fn [B, C, A <: (B) -> C](f: A, x: B) { f(x) }; fn () { appf(3, 1) }
+> typechecking error: Failure("incompat int <: func")
