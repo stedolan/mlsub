@@ -216,16 +216,13 @@ and subtype_flex_flex ~error ~changes env (pv : flexvar) (nv : flexvar) =
   | _ ->
      (* FIXME rectypes support affected by ordering here *)
      let upper = flex_cons_upper ~changes env nv in
-     (* FIXME: what if pv <= UBvar a, a in LB(nv) ? Is this optimal?  *)
-     if not (List.memq pv nv.lower.flexvars) then begin
-       fv_set_lower ~changes nv (join_flexvars nv.lower [pv]);
-       (* FIXME: maybe flex_cons_upper should return level? TOCTOU otherwise *)
-       (* FIXME: ordering of side-effects here *)
-       hoist_flex ~changes env nv.level pv;
-       assert (Env_level.extends pv.level nv.level);
-       subtype_flex_cons ~error ~changes env pv upper;
-       ()
-     end
+     fv_set_lower ~changes nv (join_flexvars nv.lower [pv]);
+     (* FIXME: maybe flex_cons_upper should return level? TOCTOU otherwise *)
+     (* FIXME: ordering of side-effects here *)
+     hoist_flex ~changes env nv.level pv;
+     assert (Env_level.extends pv.level nv.level);
+     subtype_flex_cons ~error ~changes env pv upper;
+     ()
 
 and subtype_flex_cons ~error ~changes env pv cn =
   let cp = ensure_upper_matches ~error ~changes env pv (map_ctor_rig id ignore cn) in
