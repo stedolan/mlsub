@@ -467,8 +467,6 @@ let instantiate_flex env vars body =
   ) fvars vars;
   open_typ_flex fvars body
 
-(* FIXME hoisting below here *)
-
 (* arg must be locally closed, not necessarily simple *)
 let rec approx_ptyp env : ptyp -> flex_lower_bound = function
   | Tcons cp ->
@@ -479,6 +477,8 @@ let rec approx_ptyp env : ptyp -> flex_lower_bound = function
      let body = instantiate_flex env vars body in
      approx_ptyp env body
 
+
+(* FIXME hoisting below here *)
 and approx_ntyp env : ntyp -> styp_neg = function
   | Tcons cn ->
      let cons = map_head (approx_ptyp env) (approx_ntyp_var env) cn in
@@ -705,11 +705,6 @@ and expand_ntyp visit ~changes env level (n : ntyp) =
      let body = expand_ntyp visit ~changes env level body in
      Tpoly {vars; body}
 
-
-(* FIXME dodgy as fuck tvjoin *)
-let tcons {cons;rigvars} =
-  List.fold_left (fun c r -> Tvjoin (c, Vrigid r)) (Tcons cons) rigvars
-
 (* FIXME: bit weird... There must be a better representation for bvars here *)
 type genvar =
   | Gen_flex of flexvar * ntyp ref
@@ -757,8 +752,12 @@ and substn_upper visit bvars level ~index = function
      let rigvars_gen, rigvars_keep = List.partition (fun (rv:rigvar) -> Env_level.equal rv.level level) rigvars in
      (* Drop rigvars_gen if needed to avoid contravariant joins. *)
      match cons, rigvars_keep, rigvars_gen with
-     | Bot, [], [v] -> assert (Vector.get bvars v.var = Gen_rigid v); Tvar (Vbound {index; var=v.var})
-     | cons, rigvars, _ -> tcons { cons; rigvars } (* FIXME sorting? tcons? *)
+     | Bot, [], [v] ->
+        assert (Vector.get bvars v.var = Gen_rigid v);
+        Tvar (Vbound {index; var=v.var})
+     | cons, rigvars, _ ->
+        (* FIXME: should the rigvars be sorted? Should this be kept as Tsimple somehow? *)
+        List.fold_left (fun c r -> Tvjoin (c, Vrigid r)) (Tcons cons) rigvars
 
 
 (* FIXME!!: gen constraints. What can upper bounds be? *)
