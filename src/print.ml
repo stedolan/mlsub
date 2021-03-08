@@ -81,7 +81,6 @@ and fields : 'e . ?tcomma:bool -> (pos:bool -> field_name -> 'e -> document) -> 
 
 and record : 'e . pun:(field_name * 'e -> bool) -> ('e -> document) -> 'e tuple_fields -> document =
   fun ~pun print_elem t ->
-  (* FIXME: misprints mono-tuple. Check that tests catch this! *)
   if t.fnames = List.init (List.length t.fnames) (fun i -> Field_positional i) then
     parens (fields ~tcomma:true (fun ~pos:_ _ e -> print_elem e) t)
   else

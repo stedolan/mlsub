@@ -84,8 +84,12 @@
 : [B <: int] (B) -> B <: [A <: int, C] (A) -> A
 > ok
 
-# FIXME: check Mitchell's distrib & other quantifier-pushing relations
-
+# Mitchell's distributivity rule, hoisted version
+# (Original is not true here, because we don't hoist foralls out of function results)
+: [A] ((A) -> A) -> ((A) -> A) <: [C] ([B] (B) -> B) -> ((C) -> C)
+> ok
+: [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
+> typechecking error: Failure("incompat top <: bot")
 
 
 

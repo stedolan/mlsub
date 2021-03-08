@@ -485,7 +485,10 @@ and approx_ntyp env : ntyp -> styp_neg = function
      UBcons {cons;rigvars=[]}
   | (Tvar _ | Tvjoin _ | Tsimple _) as t ->
      simple_ntyp (env_level env) t
-  | Tpoly _ -> unimp "approx_ntyp: Tpoly"
+  | Tpoly _ ->
+     (* Negative var occurrences should be replaced with their upper
+        bounds, positive ones should be deleted. *)
+     unimp "approx_ntyp: Tpoly"
 
 and approx_ntyp_var env (n : ntyp) : flexvar =
   match approx_ntyp env n with
@@ -795,7 +798,6 @@ and substn_ntyp visit bvars level ~index : ntyp -> ntyp = function
   | Tsimple s -> substn_fv_neg visit bvars level ~index s
   | Tvar (Vbound v) -> Tvar (Vbound v)
   | Tvjoin (t, Vbound v) ->
-     (intfail "tricky case hit! (delete this)" : unit);
      Tvjoin (substn_ntyp visit bvars level ~index t, Vbound v)
 
   | Tvjoin (_, (Vflex _ | Vrigid _)) | Tvar (Vflex _ | Vrigid _) as n ->

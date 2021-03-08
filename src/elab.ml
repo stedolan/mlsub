@@ -45,10 +45,6 @@ let rec elaborate : type a . env -> ext:_ -> a elab_req -> a =
      (* FIXME bound var names in env *)
      let ext, bounds = unparse_bounds ~flexvar:ignore ~ext ~pos:(unparse_flex_lower_bound ~flexvar:ignore) ~neg:(unparse_flexvar ~flexvar:ignore) bounds in
      bounds, elaborate env ~ext body
-            (*
-     let env, constraints, inst = Type_print.enter_poly_for_convert env pol bounds flow in
-     let body = map_bound_elab_req (binder_sort pol) 0 inst body in
-     constraints, elaborate env body*)
 
 let rec elabreq_map_typs :
   type a . neg:_ -> pos:_ -> index:int -> a elab_req -> a elab_req =

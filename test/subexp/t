@@ -338,3 +338,20 @@ let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(fn(x) { 1
 let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(3, 1) }
 > let appf = fn [B, C, A <: (B) -> C](f: A, x: B) { f(x) }; fn () { appf(3, 1) }
 > typechecking error: Failure("incompat int <: func")
+
+# requires a working approx_ntyp
+let f = fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }; (fn(x){x})(f)
+> let f = fn (f: [B <: {foo: int, ...}, A <: {bar: B}] (A) -> A | B, g) { g(f) }; (fn (x) { x })(f)
+> typechecking error: unimplemented: approx_ntyp: Tpoly
+
+fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }
+> fn (f: [B <: {foo: int, ...}, A <: {bar: B}] (A) -> A | B, g) { g(f) }
+>   fn [A, B <: {bar: C}, C <: {foo: int, ...}](
+>     f: [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
+>     g: ((B) -> B | C) -> A
+>   ) -> A { g(f) }
+> [A, B <: {bar: C}, C <: {foo: int, ...}] (
+>   [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
+>   ((B) -> B | C) -> A
+> ) ->
+> A
