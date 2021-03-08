@@ -44,12 +44,12 @@ let rec split_tjoin env cons vars rest =
            | Some _ -> failwith "multiple cons in join"
      
 
-let rec typ_of_tyexp : 'a 'b . env -> tyexp -> ('a, 'b) typ =
-  fun env ty -> match ty with
+let rec typ_of_tyexp : 'a 'b . env -> Env_level.t -> tyexp -> ('a, 'b) typ =
+  fun env lvl ty -> match ty with
   | None, _ -> failwith "type syntax error"
-  | Some t, _ -> typ_of_tyexp' env t
-and typ_of_tyexp' : 'a 'b . env -> tyexp' -> ('a, 'b) typ =
-  fun env ty -> match ty with
+  | Some t, _ -> typ_of_tyexp' env lvl t
+and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> tyexp' -> ('a, 'b) typ =
+  fun env lvl ty -> match ty with
   | Tnamed (name, _) ->
      (* FIXME shifting? *)
      let name = name.label in
@@ -57,26 +57,32 @@ and typ_of_tyexp' : 'a 'b . env -> tyexp' -> ('a, 'b) typ =
      | Some cons -> Tcons cons
      | None ->
         match env_lookup_type_var env name with
-        | Some v -> Tvar (Vrigid v)
+        | Some v ->
+           if not (Env_level.extends v.level lvl) then
+             failwith ("rigvar " ^ name ^ " not allowed inside join with rigvar bound earlier");
+           Tvar (Vrigid v)
         | None -> failwith ("unknown type " ^ name)
      end
   | Trecord fields ->
-     Tcons (Record (typs_of_tuple_tyexp env fields))
+     Tcons (Record (typs_of_tuple_tyexp env lvl fields))
   | Tfunc (args, res) ->
-     Tcons (Func (typs_of_tuple_tyexp env args, typ_of_tyexp env res))
+     Tcons (Func (typs_of_tuple_tyexp env lvl args, typ_of_tyexp env lvl res))
   | Tparen t ->
-     typ_of_tyexp env t
+     typ_of_tyexp env lvl t
   | Tjoin (a, b) ->
      let cons, rigvars = split_tjoin env None [] [a;b] in
+     let rigvars = List.stable_sort (fun (v : rigvar) (v' : rigvar) -> Env_level.compare v.level v'.level) rigvars in
+     let join_lvl =
+       match rigvars with
+       | [] -> lvl
+       | rv :: _ -> rv.level in
      let cons =
        match cons with
        | None -> Bot
        | Some c ->
-          match typ_of_tyexp env c with
+          match typ_of_tyexp env join_lvl c with
           | Tcons c -> c
           | _ -> failwith "Expected a constructed type" in
-     (* FIXME: check for well-formedness of cons under these rigvars, to avoid bad Tvjoins *)
-     let rigvars = List.stable_sort (fun (v : rigvar) (v' : rigvar) -> Env_level.compare v.level v'.level) rigvars in
      List.fold_left (fun c r -> Tvjoin (c, Vrigid r)) (Tcons cons) rigvars
   | Tforall (vars, body) ->
      let vars, name_ix = enter_polybounds env vars in
@@ -85,11 +91,11 @@ and typ_of_tyexp' : 'a 'b . env -> tyexp' -> ('a, 'b) typ =
      let rig_defns = vars |> IArray.map (fun (name, bound) ->
        { name; upper = simple_ptyp_bound level (open_typ_rigid rigvars bound) }) in
      let env = Env_types { level; rig_names = name_ix; rig_defns; rest = env } in
-     let body = close_typ_rigid level (typ_of_tyexp env body) in
+     let body = close_typ_rigid level (typ_of_tyexp env (env_level env) body) in
      Tpoly { vars; body }
 
-and typs_of_tuple_tyexp : 'a 'b . env -> tyexp tuple_fields -> ('a, 'b) typ tuple_fields =
-  fun env ts -> map_fields (fun _fn t -> typ_of_tyexp env t) ts
+and typs_of_tuple_tyexp : 'a 'b . env -> Env_level.t -> tyexp tuple_fields -> ('a, 'b) typ tuple_fields =
+  fun env lvl ts -> map_fields (fun _fn t -> typ_of_tyexp env lvl t) ts
 
 and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iarray * int SymMap.t =
   fun env vars ->
@@ -109,12 +115,14 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
     match bound with
     | None -> Tcons Top
     | Some b ->
-       match close_typ_rigid level (typ_of_tyexp temp_env b) with
+       match close_typ_rigid level (typ_of_tyexp temp_env (env_level temp_env) b) with
        | Tcons c -> Tcons c
        (* FIXME: some vjoin cases are also fine. Var even? *)
        | _ -> failwith "rig var bounds must be Tcons" in
   let vars = IArray.map (fun ((name,_), bound) -> name, mkbound bound) (IArray.of_list vars) in
   vars, name_ix
+
+let typ_of_tyexp env t = typ_of_tyexp env (env_level env) t
 
 
 open Elab
