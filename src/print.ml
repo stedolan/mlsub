@@ -27,6 +27,7 @@ let mayloc x f = match x with
   | (None, _) -> string "<err>"
   | (Some s, _) -> f s
 
+let braces' = braces
 let parens x = parens (group x)
 let braces x = braces (group x)
 let brackets x = brackets (group x)
@@ -40,15 +41,17 @@ let rec exp e = mayloc e @@ function
   | Lit (l, _) -> literal l
   | Var s -> ident s
   | Fn (poly, params, ty, body) ->
-     string "fn" ^^ space ^^
+     group (
+       string "fn" ^^ space ^^
        (match poly with
         | None -> empty
         | Some poly -> typolybounds poly) ^^
        parens (fields parameter params) ^^
        (match ty with
         | None -> empty
-        | Some ty -> blank 1 ^^ string "->" ^^ blank 1 ^^ tyexp ty) ^^
-       space ^^ braces (break 1 ^^ exp body ^^ break 1)
+        | Some ty ->
+           indent (blank 1 ^^ group (string "->" ^^ break 1 ^^ group (tyexp ty))))) ^^
+     block body
   | Let (p, ty, e, body) ->
      group (string "let" ^^ space ^^
        pat p ^^ opt_type_annotation ty ^^
@@ -60,12 +63,13 @@ let rec exp e = mayloc e @@ function
      parens (fields argument args)
   | Proj (e, f) -> exp e ^^ char '.' ^^ field_name (Field_named (fst f))
   | If (e, t, f) ->
-     string "if" ^^ blank 1 ^^ exp e ^^
-       braces (exp t) ^^ op "else" ^^
-         braces (exp f)
+     string "if" ^^ blank 1 ^^ exp e ^^ block t ^^ blank 1 ^^ string "else" ^^ block f
   | Typed (e, t) -> parens (exp e ^^ opt_type_annotation (Some t))
   | Parens e -> parens (exp e)
   | Pragma s -> char '@' ^^ string s
+
+and block e =
+  space ^^ braces' (indent (break 1 ^^ exp e) ^^ break 1)
 
 and fields : 'e . ?tcomma:bool -> (pos:bool -> field_name -> 'e -> document) -> 'e tuple_fields -> document =
   fun ?(tcomma=false) print_elem {fnames; fields; fopen} ->
@@ -119,7 +123,7 @@ and parameter ~pos fn (p,ty) =
        opt_type_annotation ty
 
 and opt_type_annotation ?(prespace=true) = function
-  | Some ty -> (if prespace then blank 1 else empty) ^^ string ":" ^^ blank 1 ^^ tyexp ty
+  | Some ty -> (if prespace then blank 1 else empty) ^^ string ":" ^^ blank 1 ^^ group (tyexp ty)
   | None -> empty
 
 and pat p = mayloc p @@ function
@@ -132,8 +136,8 @@ and tyexp t = mayloc t @@ function
   | Trecord fields ->
      record ~pun:(fun _ -> false) tyexp fields
   | Tfunc (args, ret) ->
-     parens (fields argtype args) ^^ op "->" ^^
-       tyexp ret
+     parens (fields argtype args) ^^
+       space ^^ group (string "->" ^^ break 1 ^^ group (tyexp ret))
   | Tforall (bounds, body) ->
       typolybounds bounds ^^ space ^^ tyexp body
   | Tparen t -> parens (tyexp t)

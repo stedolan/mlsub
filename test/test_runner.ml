@@ -10,7 +10,7 @@ let rec rawlines acc =
 
 type cmd = Comment of string | Input of string list
 
-let to_string ?(width=120) doc =
+let to_string ?(width=80) doc =
   let b = Buffer.create 100 in
   PPrint.ToBuffer.pretty 1. width b (PPrint.group doc);
   b |> Buffer.to_bytes |> Bytes.to_string

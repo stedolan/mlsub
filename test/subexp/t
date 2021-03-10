@@ -15,12 +15,12 @@ fn(id : [A](A) -> A, (x,y)) { (id(y),id(x)) }
 > [A, B] ([A_2] (A_2) -> A_2, (B, A)) -> (A, B)
 
 fn[A](x : A) { if x.cond {x} else {x} }
-> fn [A](x: A) { if x.cond{x} else {x} }
+> fn [A](x: A) { if x.cond { x } else { x } }
 > typechecking error: Failure("incompat top <: record")
 
 fn[A <: {cond:bool}](x : A) { if x.cond {x} else {x} }
-> fn [A <: {cond: bool}](x: A) { if x.cond{x} else {x} }
->   fn [A <: {cond: bool}](x: A) -> A { if x.cond{x} else {x} }
+> fn [A <: {cond: bool}](x: A) { if x.cond { x } else { x } }
+>   fn [A <: {cond: bool}](x: A) -> A { if x.cond { x } else { x } }
 > [A <: {cond: bool}] (A) -> A
 
 fn(f) { fn[A](x : A) { f(x) } }
@@ -38,9 +38,9 @@ fn[A,C](a : A, b, c : C, d) { (a, b, c, d) }
 fn (a) { (fn(x) { (x, fn(x) { x }) })(a) }
 > fn (a) { (fn (x) { (x, fn (x) { x }) })(a) }
 >   fn [A](a: A) -> (A, [A_2] (A_2) -> A_2) {
->   (fn [A_2](x: A_2) -> (A_2, [A_3] (A_3) -> A_3) {
->   (x, fn [A_3](x: A_3) -> A_3 { x })
->   })(a)
+>     (fn [A_2](x: A_2) -> (A_2, [A_3] (A_3) -> A_3) {
+>       (x, fn [A_3](x: A_3) -> A_3 { x })
+>     })(a)
 >   }
 > [A] (A) -> (A, [A_2] (A_2) -> A_2)
 
@@ -99,49 +99,64 @@ fn(id, x) { (id(x), id(5)) }
 > [A] ([B] (B) -> B, A) -> (A, int)
 
 fn[A,B](x:A, y:B) { if true { x } else { y } }
-> fn [A, B](x: A, y: B) { if true{x} else {y} }
->   fn [A, B](x: A, y: B) -> A | B { if true{x} else {y} }
+> fn [A, B](x: A, y: B) { if true { x } else { y } }
+>   fn [A, B](x: A, y: B) -> A | B { if true { x } else { y } }
 > [A, B] (A, B) -> A | B
 
 fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }
-> fn [A, B](x: A, y: B) -> A | B { if true{x} else {y} }
->   fn [A, B](x: A, y: B) -> A | B { if true{x} else {y} }
+> fn [A, B](x: A, y: B) -> A | B { if true { x } else { y } }
+>   fn [A, B](x: A, y: B) -> A | B { if true { x } else { y } }
 > [A, B] (A, B) -> A | B
 
 let ch = fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }; ch
-> let ch = fn [A, B](x: A, y: B) -> A | B { if true{x} else {y} }; ch
->   let ch : [A, B] (A, B) ->
->   A |
->   B =
->   fn [A, B](x: A, y: B) -> A | B { if true{x} else {y} };
+> let ch = fn [A, B](x: A, y: B) -> A | B { if true { x } else { y } }; ch
+>   let ch : [A, B] (A, B) -> A | B =
+>   fn [A, B](x: A, y: B) -> A | B { if true { x } else { y } };
 >   ch
 > [A, B] (A, B) -> A | B
 
 let ch = fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }; fn (a,b) { ch(a, b) }
-> let ch = fn [A, B](x: A, y: B) -> A | B { if true{x} else {y} }; fn (a, b) { ch(a, b) }
->   let ch : [A, B] (A, B) ->
->   A |
->   B =
->   fn [A, B](x: A, y: B) -> A | B { if true{x} else {y} };
->   fn [A, B](a: A, b: B) -> A |
->   B { ch(a, b) }
+> let ch = fn [A, B](x: A, y: B) -> A | B { if true { x } else { y } };
+> fn (a, b) {
+>   ch(a, b)
+> }
+>   let ch : [A, B] (A, B) -> A | B =
+>   fn [A, B](x: A, y: B) -> A | B { if true { x } else { y } };
+>   fn [A, B](a: A, b: B) -> A | B {
+>     ch(a, b)
+>   }
 > [A, B] (A, B) -> A | B
 
 (fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } } : [A] (A, A) -> A)
-> (fn [A, B](x: A, y: B) -> A | B { if true{x} else {y} } : [A] (A, A) -> A)
->   (fn [A, B](x: A, y: B) -> A | B { if true{x} else {y} } : [A] (A, A) -> A)
+> (fn [A, B](x: A, y: B) -> A | B { if true { x } else { y } } : [A] (A, A) -> A)
+>   (fn [A, B](x: A, y: B) -> A | B { if true { x } else { y } } : [A] (A, A) -> A)
 > [A] (A, A) -> A
 
 (fn[A,B,R](x : A, y : B) -> A|B|R { if true { x } else { y } } : [A] (A, A) -> A)
-> (fn [A, B, R](x: A, y: B) -> A | B | R { if true{x} else {y} } : [A] (A, A) -> A)
->   (fn [A, B, R](x: A, y: B) -> A |
->   B |
->   R { if true{x} else {y} } : [A] (A, A) ->
->   A)
+> (fn [A, B, R](x: A, y: B) -> A | B | R {
+>   if true {
+>     x
+>   } else {
+>     y
+>   }
+> } : [A] (A, A) -> A)
+>   (fn [A, B, R](x: A, y: B) -> A | B | R {
+>     if true {
+>       x
+>     } else {
+>       y
+>     }
+>   } : [A] (A, A) -> A)
 > [A] (A, A) -> A
 
 (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
-> (fn [A, B, R](x: A, y: B) -> R | A { if true{x} else {y} } : [A] (A, A) -> A)
+> (fn [A, B, R](x: A, y: B) -> R | A {
+>   if true {
+>     x
+>   } else {
+>     y
+>   }
+> } : [A] (A, A) -> A)
 > typechecking error: Failure("incompat top <: bot")
 
 (fn[A,B,R](x : A, y : B) -> R|A { x } : [A] (A, A) -> A)
@@ -152,87 +167,112 @@ let ch = fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }; fn (a,b) { c
 # debugging
 
 let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let () = f(5); x.foo}) }
-> let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) }; fn (f) { wid(fn (x) { let () = f(5); x.foo }) }
->   let wid : ([B] ({foo: B}) -> B) ->
->   int =
+> let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) };
+> fn (f) {
+>   wid(fn (x) { let () = f(5); x.foo })
+> }
+>   let wid : ([B] ({foo: B}) -> B) -> int =
 >   fn (id: [B] ({foo: B}) -> B) -> int { id({foo: 5}) };
->   fn [A <: ()](f: (int) -> A) -> int { wid(fn (x) { let () : A = f(5); x.foo }) }
+>   fn [A <: ()](f: (int) -> A) -> int {
+>     wid(fn (x) { let () : A = f(5); x.foo })
+>   }
 > [A <: ()] ((int) -> A) -> int
 
 
 # making this work requires an annotation on f, due to hoisting
 # (by design, but a bit weird)
 let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let () = f(x); x.foo}); wid(g) }
-> let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) }; fn (f) { let g = (fn (x) { let () = f(x); x.foo }); wid(g) }
+> let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) };
+> fn (f) {
+>   let g = (fn (x) { let () = f(x); x.foo });
+>   wid(g)
+> }
 > typechecking error: Failure("incompat top <: bot")
 
 # works in checking mode (bidir)
 # FIXME: [A <: ()] is correct, but not great
 let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let () = f(x); x.foo}) }
-> let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) }; fn (f) { wid(fn (x) { let () = f(x); x.foo }) }
->   let wid : ([B] ({foo: B}) -> B) ->
->   int =
+> let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) };
+> fn (f) {
+>   wid(fn (x) { let () = f(x); x.foo })
+> }
+>   let wid : ([B] ({foo: B}) -> B) -> int =
 >   fn (id: [B] ({foo: B}) -> B) -> int { id({foo: 5}) };
 >   fn [A <: ()](f: ({foo: any}) -> A) -> int {
->   wid(fn (x) { let () : A = f(x); x.foo })
+>     wid(fn (x) { let () : A = f(x); x.foo })
 >   }
 > [A <: ()] (({foo: any}) -> A) -> int
 
 let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f : (any) -> ()) { wid(fn(x){let () = f(x); x.foo}) }
-> let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) }; fn (f: (any) -> ()) { wid(fn (x) { let () = f(x); x.foo }) }
->   let wid : ([B] ({foo: B}) -> B) ->
->   int =
+> let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) };
+> fn (f: (any) -> ()) {
+>   wid(fn (x) { let () = f(x); x.foo })
+> }
+>   let wid : ([B] ({foo: B}) -> B) -> int =
 >   fn (id: [B] ({foo: B}) -> B) -> int { id({foo: 5}) };
->   fn (f: (any) -> ()) -> int { wid(fn (x) { let () : () = f(x); x.foo }) }
+>   fn (f: (any) -> ()) -> int {
+>     wid(fn (x) { let () : () = f(x); x.foo })
+>   }
 > ((any) -> ()) -> int
 
 
 let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
 > let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) };
-> fn (f) { let g = (fn (x) { let z = f({bar: x}); x.foo }); wid(g) }
+> fn (f) {
+>   let g = (fn (x) { let z = f({bar: x}); x.foo });
+>   wid(g)
+> }
 > typechecking error: Failure("incompat top <: bot")
 
 let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let z = f({bar:x}); x.foo}) }
-> let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) }; fn (f) { wid(fn (x) { let z = f({bar: x}); x.foo }) }
->   let wid : ([B, A <: {foo: B}] (A) -> B) ->
->   int =
+> let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) };
+> fn (f) {
+>   wid(fn (x) { let z = f({bar: x}); x.foo })
+> }
+>   let wid : ([B, A <: {foo: B}] (A) -> B) -> int =
 >   fn (id: [B, A <: {foo: B}] (A) -> B) -> int { id({foo: 5}) };
 >   fn [A](f: ({bar: {foo: any}}) -> A) -> int {
->   wid(fn (x) { let z : A = f({bar: x}); x.foo })
+>     wid(fn (x) { let z : A = f({bar: x}); x.foo })
 >   }
 > [A] (({bar: {foo: any}}) -> A) -> int
 
 let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f : (any) -> string) { wid(fn(x){let z = f({bar:x}); x.foo}) }
 > let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) };
-> fn (f: (any) -> string) { wid(fn (x) { let z = f({bar: x}); x.foo }) }
->   let wid : ([B, A <: {foo: B}] (A) -> B) ->
->   int =
+> fn (f: (any) -> string) {
+>   wid(fn (x) { let z = f({bar: x}); x.foo })
+> }
+>   let wid : ([B, A <: {foo: B}] (A) -> B) -> int =
 >   fn (id: [B, A <: {foo: B}] (A) -> B) -> int { id({foo: 5}) };
 >   fn (f: (any) -> string) -> int {
->   wid(fn (x) { let z : string = f({bar: x}); x.foo })
+>     wid(fn (x) { let z : string = f({bar: x}); x.foo })
 >   }
 > ((any) -> string) -> int
 
 let id = fn(x) { x }; fn () { (id (id), id) }
 > let id = fn (x) { x }; fn () { (id(id), id) }
 >   let id : [A] (A) -> A = fn [A](x: A) -> A { x };
->   fn [A]() -> ((A) -> A, [A_2] (A_2) -> A_2) { (id(id), id) }
+>   fn [A]() -> ((A) -> A, [A_2] (A_2) -> A_2) {
+>     (id(id), id)
+>   }
 > [A] () -> ((A) -> A, [A_2] (A_2) -> A_2)
 
 
 fn(f) { fn(id: [A] (A) -> A) { let x = f(id); id(1) } }
 > fn (f) { fn (id: [A] (A) -> A) { let x = f(id); id(1) } }
->   fn [A, B](f: ((B) -> B) -> A) -> ([A_2] (A_2) -> A_2) ->
->   int { fn (id: [A_2] (A_2) -> A_2) -> int { let x : A = f(id); id(1) } }
+>   fn [A, B](f: ((B) -> B) -> A) -> ([A_2] (A_2) -> A_2) -> int {
+>     fn (id: [A_2] (A_2) -> A_2) -> int {
+>       let x : A = f(id);
+>       id(1)
+>     }
+>   }
 > [A, B] (((B) -> B) -> A) -> ([A_2] (A_2) -> A_2) -> int
 
 fn(f) { fn(id: [A] (A) -> A) { id(fn(y) { let x = f(y); y }) } }
 > fn (f) { fn (id: [A] (A) -> A) { id(fn (y) { let x = f(y); y }) } }
->   fn [A, B](f: (A) -> B) -> ([A_2] (A_2) -> A_2) ->
->   (A) ->
->   A {
->   fn (id: [A_2] (A_2) -> A_2) -> (A) ->
->   A { id(fn (y: A) -> A { let x : B = f(y); y }) }
+>   fn [A, B](f: (A) -> B) -> ([A_2] (A_2) -> A_2) -> (A) -> A {
+>     fn (id: [A_2] (A_2) -> A_2) -> (A) -> A {
+>       id(fn (y: A) -> A { let x : B = f(y); y })
+>     }
 >   }
 > [A, B] ((A) -> B) -> ([A_2] (A_2) -> A_2) -> (A) -> A
 
@@ -309,30 +349,39 @@ let f = fn[A](id: (A) -> A){1}; f(fn(a){a})
 
 let f = fn[A](id: [B](A, B) -> (A, B), x:A){id(x,1)}; fn(z){ f(fn(a,b){(a,b)}, if z.cond {z.a}else{z.b}) }
 > let f = fn [A](id: [B] (A, B) -> (A, B), x: A) { id(x, 1) };
-> fn (z) { f(fn (a, b) { (a, b) }, if z.cond{z.a} else {z.b}) }
->   let f : [A] ([B] (A, B) -> (A, B), A) ->
->   (A, int) =
+> fn (z) {
+>   f(fn (a, b) { (a, b) }, if z.cond { z.a } else { z.b })
+> }
+>   let f : [A] ([B] (A, B) -> (A, B), A) -> (A, int) =
 >   fn [A](id: [B] (A, B) -> (A, B), x: A) -> (A, int) { id(x, 1) };
 >   fn [A](z: {cond: bool, a: A, b: A, ...}) -> (A, int) {
->   f(fn (a, b) { (a, b) }, if z.cond{z.a} else {z.b})
+>     f(fn (a, b) { (a, b) }, if z.cond { z.a } else { z.b })
 >   }
 > [A] ({cond: bool, a: A, b: A, ...}) -> (A, int)
 
 # test match_simple_typ with complex upper bound
 let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(fn(x) { x }, 1) }
-> let appf = fn [B, C, A <: (B) -> C](f: A, x: B) { f(x) }; fn () { appf(fn (x) { x }, 1) }
->   let appf : [B, C, A <: (B) -> C] (A, B) ->
->   C =
+> let appf = fn [B, C, A <: (B) -> C](f: A, x: B) { f(x) };
+> fn () {
+>   appf(fn (x) { x }, 1)
+> }
+>   let appf : [B, C, A <: (B) -> C] (A, B) -> C =
 >   fn [B, C, A <: (B) -> C](f: A, x: B) -> C { f(x) };
->   fn () -> int { appf(fn [A](x: A) -> A { x }, 1) }
+>   fn () -> int {
+>     appf(fn [A](x: A) -> A { x }, 1)
+>   }
 > () -> int
 
 let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(fn(x) { 1 }, 1) }
-> let appf = fn [B, C, A <: (B) -> C](f: A, x: B) { f(x) }; fn () { appf(fn (x) { 1 }, 1) }
->   let appf : [B, C, A <: (B) -> C] (A, B) ->
->   C =
+> let appf = fn [B, C, A <: (B) -> C](f: A, x: B) { f(x) };
+> fn () {
+>   appf(fn (x) { 1 }, 1)
+> }
+>   let appf : [B, C, A <: (B) -> C] (A, B) -> C =
 >   fn [B, C, A <: (B) -> C](f: A, x: B) -> C { f(x) };
->   fn () -> int { appf(fn (x: any) -> int { 1 }, 1) }
+>   fn () -> int {
+>     appf(fn (x: any) -> int { 1 }, 1)
+>   }
 > () -> int
 
 let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(3, 1) }
@@ -341,7 +390,8 @@ let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(3, 1) }
 
 # requires a working approx_ntyp
 let f = fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }; (fn(x){x})(f)
-> let f = fn (f: [B <: {foo: int, ...}, A <: {bar: B}] (A) -> A | B, g) { g(f) }; (fn (x) { x })(f)
+> let f = fn (f: [B <: {foo: int, ...}, A <: {bar: B}] (A) -> A | B, g) { g(f) };
+> (fn (x) { x })(f)
 > typechecking error: unimplemented: approx_ntyp: Tpoly
 
 fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }
@@ -349,9 +399,10 @@ fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }
 >   fn [A, B <: {bar: C}, C <: {foo: int, ...}](
 >     f: [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
 >     g: ((B) -> B | C) -> A
->   ) -> A { g(f) }
+>   ) -> A {
+>     g(f)
+>   }
 > [A, B <: {bar: C}, C <: {foo: int, ...}] (
 >   [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
 >   ((B) -> B | C) -> A
-> ) ->
-> A
+> ) -> A

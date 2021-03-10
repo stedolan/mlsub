@@ -21,9 +21,9 @@ fn (x)
 
 # paren insertion
 fn(a) { { foo: if true { fn(x) { x } } else { a } } }
-> fn (a) { {foo: if true{fn (x) { x }} else {a}} }
+> fn (a) { {foo: if true { fn (x) { x } } else { a }} }
 >   fn [A, B](a: B) -> {foo: ((A) -> A) | B} {
->   {foo: if true{fn [A_2](x: A_2) -> A_2 { x }} else {a}}
+>     {foo: if true { fn [A_2](x: A_2) -> A_2 { x } } else { a }}
 >   }
 > [A, B] (B) -> {foo: (A) -> A | B}
 
