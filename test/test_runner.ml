@@ -55,9 +55,18 @@ let run_cmd s =
      | t, elab ->
         begin
         let poly, elab = Elab.elaborate Env_nil elab in
+        let elab = Exp.(map_exp normalise elab) in
         poly |> Option.iter (fun poly ->
           pprintln PPrint.(string "WEAKPOLY" ^^ Print.typolybounds poly));
         pprintln ~width:80 (PPrint.(nest 2 (blank 2 ^^ Print.exp elab)));
+
+        let elab_rendered = to_string (Print.exp elab) in
+        begin match Parse.parse_string elab_rendered with
+        | exception e -> println "MISMATCH_ELAB: %s" (Printexc.to_string e)
+        | Ok (`Exp elab') when Exp.equal elab elab' -> ()
+        | Ok (`Exp elab') -> println "MISMATCH_ELAB: %s" (to_string ~width:100 (Print.exp elab'))
+        | _ -> println "MISMATCH_ELAB"
+        end;
 
         let env0 = Env_nil in
         let te = Typedefs.unparse_ptyp ~flexvar:ignore (*Env_nil*) t in

@@ -69,47 +69,98 @@ and typolybounds =
   (symbol * tyexp option) list
 
 
-module Strip_locations = struct
-  let rec exp (e, _) = Option.map exp' e, noloc
-  and exp' = function
-    | Lit (l, _) -> Lit (l, noloc)
-    | Var (id, _) -> Var (id, noloc)
-    | Fn (poly, args, ret, body) ->
-       Fn(Option.map typolybounds poly,
-          map_fields (fun _ (p, ty) -> (pat p, Option.map tyexp ty)) args,
-          Option.map tyexp ret,
-          exp body)
-    | App (e, args) ->
-       App (exp e, map_fields (fun _ e -> exp e) args)
-    | Tuple es ->
-       Tuple (map_fields (fun _ e -> exp e) es)
-    | Let (p, ty, e, body) ->
-       Let (pat p, Option.map tyexp ty, exp e, exp body)
-    | Proj (e, (s,_)) ->
-       Proj (exp e, (s,noloc))
-    | If (e, t, f) ->
-       If (exp e, exp t, exp f)
-    | Typed (e, ty) ->
-       Typed (exp e, tyexp ty)
-    | Parens e ->
-       Parens (exp e)
-    | Pragma s -> Pragma s
-  and pat (p, _) = Option.map pat' p, noloc
-  and pat' = function
-    | Ptuple ps -> Ptuple (map_fields (fun _ p -> pat p) ps)
-    | Pvar (s, _) -> Pvar (s, noloc)
-    | Pparens p -> Pparens (pat p)
-  and tyexp (t, _) = Option.map tyexp' t, noloc
-  and tyexp' = function
-    | Tnamed (s, _) -> Tnamed (s, noloc)
-    | Tforall (poly, t) -> Tforall (typolybounds poly, tyexp t)
-    | Trecord ts -> Trecord (map_fields (fun _ ty -> tyexp ty) ts)
-    | Tfunc (args, ret) -> Tfunc (map_fields (fun _ ty -> tyexp ty) args, tyexp ret)
-    | Tparen t -> Tparen (tyexp t)
-    | Tjoin (a, b) -> Tjoin (tyexp a, tyexp b)
-  and typolybounds (bounds : typolybounds) =
-    bounds |> List.map (fun ((s,_), b) ->
-      ((s,noloc), Option.map tyexp b))
-end
+type mapper = {
+  loc : mapper -> location -> location;
+  exp : mapper -> exp -> exp;
+  pat : mapper -> pat -> pat;
+  tyexp : mapper -> tyexp -> tyexp
+}
+let map_exp m e = m.exp m e
 
-let equal e1 e2 = Strip_locations.(exp e1 = exp e2)
+
+let mapper =
+  let loc _ l = l in
+
+  let sym r (s, sloc) = s, r.loc r sloc in
+
+  let mayloc f recr = function
+    | (None, l) -> (None, recr.loc recr l)
+    | (Some x, l) -> (Some (f recr x), recr.loc recr l) in
+
+  let exp = mayloc @@ fun r e -> match e with
+    | Lit (l, loc) ->
+       Lit (l, r.loc r loc)
+    | Var (n, loc) ->
+       Var (n, r.loc r loc)
+    | Fn (poly, args, ret, body) ->
+       let poly = Option.map (List.map (fun (s, t) -> (sym r s, Option.map (r.tyexp r) t))) poly in
+       let args = map_fields (fun _fn (p, t) -> (r.pat r p, Option.map (r.tyexp r) t)) args in
+       let ret = Option.map (r.tyexp r) ret in
+       let body = r.exp r body in
+       Fn (poly, args, ret, body)
+    | App (f, args) ->
+       App (r.exp r f, map_fields (fun _fn e -> r.exp r e) args)
+    | Tuple es ->
+       Tuple (map_fields (fun _fn e -> r.exp r e) es)
+    | Let (p, ty, e, body) ->
+       Let (r.pat r p, Option.map (r.tyexp r) ty, r.exp r e, r.exp r body)
+    | Proj (e, s) ->
+       Proj (r.exp r e, sym r s)
+    | If (e, et, ef) ->
+       If (r.exp r e, r.exp r et, r.exp r ef)
+    | Typed (e, t) ->
+       Typed (r.exp r e, r.tyexp r t)
+    | Parens e ->
+       Parens (r.exp r e)
+    | Pragma s ->
+       Pragma s
+  in
+
+  let pat = mayloc @@ fun r p -> match p with
+    | Ptuple ps -> Ptuple (map_fields (fun _fn x -> r.pat r x) ps)
+    | Pvar s -> Pvar (sym r s)
+    | Pparens p -> Pparens (r.pat r p)
+  in
+
+  let tyexp = mayloc @@ fun r t -> match t with
+    | Tnamed (n,l) ->
+       Tnamed (n, r.loc r l)
+    | Tforall (bounds, body) ->
+       let bounds = List.map (fun (s, t) -> (sym r s, Option.map (r.tyexp r) t)) bounds in
+       let body = r.tyexp r body in
+       Tforall (bounds, body)
+    | Trecord ts ->
+       Trecord (map_fields (fun _fn t -> r.tyexp r t) ts)
+    | Tfunc (args, ret) ->
+       Tfunc (map_fields  (fun _fn t -> r.tyexp r t) args, r.tyexp r ret)
+    | Tparen t ->
+       Tparen (r.tyexp r t)
+    | Tjoin (s, t) ->
+       Tjoin (r.tyexp r s, r.tyexp r t)
+  in
+  { loc; exp; pat; tyexp }
+
+let strip_locations =
+  { mapper with loc = fun _ _ -> noloc }
+
+let equal e1 e2 = map_exp strip_locations e1 = map_exp strip_locations e2
+
+let self_delimiting_tyexp = function
+  | Tparen _ | Tnamed _ | Trecord _ -> true
+  | _ -> false
+
+let normalise =
+  let tyexp r = function
+    | Some (Tjoin (s, t)), loc ->
+       let s =
+         match r.tyexp r s with
+         | Some (Tparen _ | Tnamed _ | Trecord _ | Tjoin _), _ -> s
+         | _, loc -> Some (Tparen s), loc in
+       let t =
+         match r.tyexp r t with
+         | Some (Tnamed _ | Trecord _ | Tjoin _), _ -> t
+         | _, loc -> Some (Tparen t), loc in
+       Some (Tjoin (s, t)), loc
+    | t -> mapper.tyexp r t in
+  { mapper with tyexp }
+  

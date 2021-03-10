@@ -17,3 +17,17 @@ fn(x, y, ~k: int) { (x:int,k,y) }
 
 fn (x)
 > parser failure: bad parse
+
+
+# paren insertion
+fn(a) { { foo: if true { fn(x) { x } } else { a } } }
+> fn (a) { {foo: if true{fn (x) { x }} else {a}} }
+>   fn [A, B](a: B) -> {foo: ((A) -> A) | B} {
+>   {foo: if true{fn [A_2](x: A_2) -> A_2 { x }} else {a}}
+>   }
+> [A, B] (B) -> {foo: (A) -> A | B}
+
+fn[A,B](x:A) -> A | (A) -> B { x }
+> fn [A, B](x: A) -> A | (A) -> B { x }
+>   fn [A, B](x: A) -> A | ((A) -> B) { x }
+> [A, B] (A) -> (A) -> B | A
