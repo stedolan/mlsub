@@ -551,13 +551,20 @@ let flexvar_name fv =
   let names = [| "α"; "β"; "γ"; "δ"; "ε"; "ζ"; "η"; "θ"; "κ"; "ν"; "ξ"; "π"; "ρ" |] in
   let id = fv.id in
   if id < Array.length names then names.(id)
-  else Printf.sprintf "_%d" (id - Array.length names)
+  else Printf.sprintf "_%d" id
 
 let unparse_rigid_var {level;var} =
   mktyexp (named_type (Printf.sprintf "%d.%d" (Env_level.to_int level) var))
 
 let unparse_flexvar ~flexvar fv =
-  flexvar fv; mktyexp (named_type (flexvar_name fv))
+  flexvar fv;
+  let name = flexvar_name fv in
+  let name = 
+    if fv.pos_visit_count <> 0 || fv.neg_visit_count <> 0 then
+      (*Format.sprintf "%s[-%d+%d]" name fv.neg_visit_count fv.pos_visit_count*)
+      name
+    else name in
+  mktyexp (named_type name)
 
 let unparse_var ~flexvar ~ext = function
   | Vbound {index; var} -> unparse_bound_var ~ext index var
@@ -657,6 +664,41 @@ let pp_ntyp ppf t =
 
 let pp_ptyp ppf t =
   pp_tyexp ppf (unparse_ptyp ~flexvar:ignore t)
+
+let dump_ptyp ppf t =
+  let fvs = Hashtbl.create 20 in
+  let fv_list = ref [] in
+  let _name_ix = ref 0 in
+  let rec flexvar fv =
+    match Hashtbl.find fvs fv.id with
+    | _ -> ()
+    | exception Not_found ->
+       let fv_name = flexvar_name fv in
+       Hashtbl.add fvs fv.id (fv_name, None);
+       fv_list := fv.id :: !fv_list;
+       let l =
+         match fv.lower with
+         | {ctor={cons=Bot; rigvars=[]}; flexvars=[]} -> None
+         | l -> Some (unparse_flex_lower_bound ~flexvar l) in
+       let u =
+         match fv.upper with
+         | UBvar v -> unparse_flexvar ~flexvar v
+         | UBnone -> unparse (Tcons Top)
+         | UBcons {cons;rigvars} ->
+            let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) cons in
+            unparse_join cons rigvars in
+       Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
+       ()
+  and unparse t =
+    unparse_ptyp ~flexvar t
+  in
+  let t = unparse t in
+  let fvs = !fv_list |> List.rev |> List.map (fun i -> let (n, t) = (Hashtbl.find fvs i) in n, Option.get t) in
+  Format.fprintf ppf "%a\n" pp_tyexp t;
+  fvs |> List.iter (function
+    | n, (Some l, u) -> Format.fprintf ppf "    %a <= %s <= %a\n" pp_tyexp l n pp_tyexp u
+    | n, (None, u) -> Format.fprintf ppf "    %s <= %a\n" n pp_tyexp u)
+
 
 
 let wf_ptyp env (t : ptyp) =

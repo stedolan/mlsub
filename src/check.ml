@@ -148,6 +148,7 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
     let erq = elabreq_map_typs erq ~index:0
                 ~neg:(fun ~index:_ -> expand_ntyp visit ~changes env' level)
                 ~pos:(fun ~index:_ -> expand_ptyp visit ~changes env' level) in
+    (* Format.printf "FIX: %a\n" dump_ptyp orig_ty; *)
     if !changes <> [] then
       fixpoint (visit+2) erq ty
     else
@@ -158,6 +159,7 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
   rigvars |> IArray.iter (fun rv -> ignore (Vector.push bvars (Gen_rigid rv)));
 
   let ty = substn_ptyp visit bvars level ~index:0 ty in
+  (* Format.printf "GEN: %a\n --> %a\n%!" dump_ptyp orig_ty pp_ptyp ty; *)
   let erq = elabreq_map_typs erq ~index:0
               ~neg:(substn_ntyp visit bvars level)
               ~pos:(substn_ptyp visit bvars level) in
