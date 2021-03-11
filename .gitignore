@@ -3,3 +3,5 @@ _build
 .merlin
 src/TODO
 notes
+vendor
+_build.fuzz

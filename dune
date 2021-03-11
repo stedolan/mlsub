@@ -1,1 +1,4 @@
-(env (dev (flags (:standard -w -30 -warn-error -A))))
+(env
+ (dev (flags (:standard -w -30 -warn-error -A)))
+ (fuzz (flags (:standard -w -30 -warn-error -A)) (ocamlopt_flags (:standard -afl-instrument))))
+(vendored_dirs vendor)

@@ -1,0 +1,4 @@
+(executable
+ (name fuzz)
+ (libraries lang crowbar)
+ (modules fuzz))
