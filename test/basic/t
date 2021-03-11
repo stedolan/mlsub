@@ -653,14 +653,14 @@ fn (x) { if (x.cond) { (x, 5) } else { (x, x) } }
 
 fn (x) { if (x.cond) { (x, 5) } else { (x, x.n) } }
 > fn (x) { if (x.cond) { (x, 5) } else { (x, x.n) } }
->   fn [A <: {cond: bool, n: B, ...}, B](x: A) -> (A, int | B) {
+>   fn [A, B <: {cond: bool, n: A, ...}](x: B) -> (B, int | A) {
 >     if (x.cond) {
 >       (x, 5)
 >     } else {
 >       (x, x.n)
 >     }
 >   }
-> [A <: {cond: bool, n: B, ...}, B] (A) -> (A, int | B)
+> [A, B <: {cond: bool, n: A, ...}] (B) -> (B, int | A)
 
 # once
 fn (f, x) { f(x) }
@@ -742,24 +742,24 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let 
 > Called from Lang__Types.subtype_ctor_rig in file "src/types.ml", line 202, characters 2-127
 > Called from Stdlib__list.iter in file "list.ml", line 110, characters 12-15
 > Called from Lang__Types.subtype_ctor_rig in file "src/types.ml", line 199, characters 2-156
-> Called from Lang__Types.subtype in file "src/types.ml", line 568, characters 5-91
+> Called from Lang__Types.subtype in file "src/types.ml", line 582, characters 5-91
 > Called from Stdlib__map.Make.iter in file "map.ml", line 296, characters 20-25
 > Called from Lang__Types.subtype_cons in file "src/types.ml", line 37, characters 5-46
-> Called from Lang__Check.check' in file "src/check.ml", line 267, characters 5-37
-> Called from Lang__Check.check in file "src/check.ml", line 194, characters 14-29
+> Called from Lang__Check.check' in file "src/check.ml", line 273, characters 5-37
+> Called from Lang__Check.check in file "src/check.ml", line 200, characters 14-29
 > Called from Stdlib__map.Make.mapi in file "map.ml", line 312, characters 19-24
 > Called from Lang__Tuple_fields.map_fields in file "src/tuple_fields.ml", line 56, characters 21-65
-> Called from Lang__Check.infer' in file "src/check.ml", line 348, characters 16-80
-> Called from Lang__Check.check' in file "src/check.ml", line 266, characters 18-30
-> Called from Lang__Check.check in file "src/check.ml", line 194, characters 14-29
-> Called from Lang__Check.check' in file "src/check.ml", line 234, characters 33-50
-> Called from Lang__Check.check in file "src/check.ml", line 194, characters 14-29
-> Called from Lang__Check.check_or_infer in file "src/check.ml", line 407, characters 14-27
-> Called from Lang__Check.infer'.(fun) in file "src/check.ml", line 326, characters 25-53
-> Called from Lang__Check.elab_gen in file "src/check.ml", line 141, characters 32-39
-> Called from Lang__Check.infer' in file "src/check.ml", line 317, characters 7-806
-> Called from Lang__Check.check' in file "src/check.ml", line 266, characters 18-30
-> Called from Lang__Check.check in file "src/check.ml", line 194, characters 14-29
+> Called from Lang__Check.infer' in file "src/check.ml", line 354, characters 16-80
+> Called from Lang__Check.check' in file "src/check.ml", line 272, characters 18-30
+> Called from Lang__Check.check in file "src/check.ml", line 200, characters 14-29
+> Called from Lang__Check.check' in file "src/check.ml", line 240, characters 33-50
+> Called from Lang__Check.check in file "src/check.ml", line 200, characters 14-29
+> Called from Lang__Check.check_or_infer in file "src/check.ml", line 413, characters 14-27
+> Called from Lang__Check.infer'.(fun) in file "src/check.ml", line 332, characters 25-53
+> Called from Lang__Check.elab_gen in file "src/check.ml", line 146, characters 32-39
+> Called from Lang__Check.infer' in file "src/check.ml", line 323, characters 7-806
+> Called from Lang__Check.check' in file "src/check.ml", line 272, characters 18-30
+> Called from Lang__Check.check in file "src/check.ml", line 200, characters 14-29
 > Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 86, characters 10-33
 
 fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(fn(a){x(a)}) }
@@ -1019,15 +1019,15 @@ fn (f) { fn(g) { fn(x) { (f(x.foo), g(x)) } } }
 > [A, B] ((A) -> B) -> [A_2, B_2 <: {foo: A, ...}] ((B_2) -> A_2) -> (B_2) -> (B, A_2)
 fn (f) { fn(g) { fn(x) { (f(x), g(x.foo)) } } }
 > fn (f) { fn (g) { fn (x) { (f(x), g(x.foo)) } } }
->   fn [A, B <: {foo: C, ...}, C](f: (B) -> A) ->
->     [A_2] ((C) -> A_2) -> (B) -> (A, A_2) {
->     fn [A_2](g: (C) -> A_2) -> (B) -> (A, A_2) {
->       fn (x: B) -> (A, A_2) {
+>   fn [A, B, C <: {foo: B, ...}](f: (C) -> A) ->
+>     [A_2] ((B) -> A_2) -> (C) -> (A, A_2) {
+>     fn [A_2](g: (B) -> A_2) -> (C) -> (A, A_2) {
+>       fn (x: C) -> (A, A_2) {
 >         (f(x), g(x.foo))
 >       }
 >     }
 >   }
-> [A, B <: {foo: C, ...}, C] ((B) -> A) -> [A_2] ((C) -> A_2) -> (B) -> (A, A_2)
+> [A, B, C <: {foo: B, ...}] ((C) -> A) -> [A_2] ((B) -> A_2) -> (C) -> (A, A_2)
 fn (f) { fn(g) { fn(x) { (f(x.foo), g(x.foo)) } } }
 > fn (f) { fn (g) { fn (x) { (f(x.foo), g(x.foo)) } } }
 >   fn [A, B](f: (B) -> A) -> [A_2] ((B) -> A_2) -> ({foo: B, ...}) -> (A, A_2) {

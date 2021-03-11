@@ -31,3 +31,6 @@ fn[A,B](x:A) -> A | (A) -> B { x }
 > fn [A, B](x: A) -> A | (A) -> B { x }
 >   fn [A, B](x: A) -> A | ((A) -> B) { x }
 > [A, B] (A) -> (A) -> B | A
+
+: [A <: ([] int) -> int ] A <: int
+> typechecking error: Failure("bounds must be simple")

@@ -54,6 +54,7 @@ module IArray : sig
   val iter : ('a -> unit) -> 'a t -> unit
   val iter2 : ('a -> 'b -> unit) -> 'a t -> 'b t -> unit
   val exists : ('a -> bool) -> 'a t -> bool
+  val map_fold_left : ('s -> 'a -> 's * 'b) -> 's -> 'a t -> 's * 'b t
 end = struct
   type +'a t = Mk : 'b array * ('b -> 'a) -> 'a t
   let acopy a = Array.map id a
@@ -71,6 +72,20 @@ end = struct
     Array.iter2 (fun a b -> f (ra a) (rb b)) a b
   let iter f (Mk (a, r)) = Array.iter (fun x -> f (r x)) a
   let exists f (Mk (a, r)) = Array.exists (fun x -> f (r x)) a
+  let map_fold_left f s (Mk (a, r)) =
+    let st = ref s in
+    let out = ref [| |] in
+    for i = 0 to Array.length a - 1 do
+      let x = a.(i) in
+      let s, b = f !st (r x) in
+      let out =
+        match !out with
+        | [| |] -> out := Array.make (Array.length a) b; !out
+        | o -> o in
+      out.(i) <- b;
+      st := s
+    done;
+    !st, of_array !out
 end
 type 'a iarray = 'a IArray.t
 
@@ -355,32 +370,37 @@ let open_typ_flex vars t =
   open_typ (fun i -> Vflex (IArray.get vars i)) 0 t
 
 
-let close_typ_var lvl f index = function
+let close_typ_var lvl f ~ispos ~isjoin index = function
   | Vrigid {level; _} as v when Env_level.equal lvl level ->
-     Vbound {index; var = f v}
+     Vbound {index; var = f v ~ispos ~isjoin}
   | Vflex fv as v when Env_level.equal lvl fv.level ->
-     Vbound {index; var = f v}
+     Vbound {index; var = f v ~ispos ~isjoin}
   | v -> v
 
 (* Can only be used on typs without Tsimple nodes.
    (This limits it to use during parsing, which does not generate Tsimple) *)
 let rec close_typ :
-  'a 'b . env_level -> (typ_var -> int) -> int -> (zero, zero) typ -> ('a, 'b) typ
-  = fun lvl var ix ty -> match ty with
+  'a 'b . env_level -> (typ_var -> ispos:bool -> isjoin:bool -> int) -> ispos:bool -> int -> (zero, zero) typ -> ('a, 'b) typ
+  = fun lvl var ~ispos ix ty -> match ty with
   | Tsimple z -> never z
-  | Tcons c -> Tcons (map_head (close_typ lvl var ix) (close_typ lvl var ix) c)
-  | Tvar v -> Tvar (close_typ_var lvl var ix v)
-  | Tvjoin (t, v) -> Tvjoin(close_typ lvl var ix t, close_typ_var lvl var ix v)
+  | Tcons c -> Tcons (map_head (close_typ lvl var ~ispos:(not ispos) ix) (close_typ lvl var ~ispos ix) c)
+  | Tvar v -> Tvar (close_typ_var lvl var ~ispos ~isjoin:false ix v)
+  | Tvjoin (t, v) -> 
+     Tvjoin(close_typ lvl var ~ispos ix t,
+            close_typ_var lvl var ~ispos ~isjoin:true ix v)
   | Tpoly {vars; body} ->
      let ix = ix + 1 in
-     Tpoly {vars = IArray.map (fun (n, b) -> n, close_typ lvl var ix b) vars;
-            body = close_typ lvl var ix body}
+     Tpoly {vars = IArray.map (fun (n, b) -> n, close_typ lvl var ~ispos:(not ispos) ix b) vars;
+            body = close_typ lvl var ~ispos ix body}
 
 let close_typ_rigid level ty =
-  let close_var = function
+  let close_var v ~ispos ~isjoin =
+    (* FIXME report this better *)
+    if isjoin && not ispos then intfail "contravariant join";
+    match v with
     | Vrigid v when Env_level.equal v.level level -> v.var
     | _ -> intfail "close_typ_rigid: not a rigid variable" in
-  close_typ level close_var 0 ty
+  close_typ level close_var ~ispos:true 0 ty
 
 
 let next_flexvar_id = ref 0
@@ -425,6 +445,12 @@ let lookup_named_type = function
   | "string" -> Some String
   | _ -> None
 
+let flexvar_name fv =
+  let names = [| "α"; "β"; "γ"; "δ"; "ε"; "ζ"; "η"; "θ"; "κ"; "ν"; "ξ"; "π"; "ρ" |] in
+  let id = fv.id in
+  if id < Array.length names then names.(id)
+  else Printf.sprintf "_%d" id
+
 
 (*
  * Well-formedness checks.
@@ -434,7 +460,7 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   if Hashtbl.mem seen fv.id then () else begin
   Hashtbl.add seen fv.id ();
   if not (Env_level.extends fv.level (env_level env)) then
-    intfail "wf_flexvar: fv %d not inside env %d" (Env_level.to_int fv.level) (Env_level.to_int (env_level env));
+    intfail "wf_flexvar: %s at %d not inside env %d" (flexvar_name fv) (Env_level.to_int fv.level) (Env_level.to_int (env_level env));
   assert (Env_level.extends fv.level (env_level env));
   assert (Env_level.extends fv.level lvl);
   if not (Env_level.equal fv.level Env_level.initial) then
@@ -491,11 +517,11 @@ let rec wf_typ : 'pos 'neg .
         (* Tvjoin restriction: in T | b, where b is a bound var, T must not mention deeper bindings *)
         let ext = List.mapi (fun ix (pol, len) -> if ix < v.index then (pol, 0) else (pol, len)) ext in
         wf_typ ~seen ~neg ~pos ~ispos env ext t
-     | Vflex fv ->
+     | Vflex _ ->
         assert ispos; (* positive *)
-        wf_typ ~seen ~neg ~pos ~ispos (env_at_level env fv.level) [] t
-     | Vrigid rv ->
-        wf_typ ~seen ~neg ~pos ~ispos (env_at_level env rv.level) [] t
+        wf_typ ~seen ~neg ~pos ~ispos env [] t
+     | Vrigid _ ->
+        wf_typ ~seen ~neg ~pos ~ispos env [] t
      end
   | Tpoly {vars; body} ->
      let n_unique_vars = IArray.to_list vars |> List.map fst |> List.sort_uniq String.compare |> List.length in
@@ -547,11 +573,6 @@ let unparse_bound_var ~ext index var =
       | n -> Printf.sprintf "$%d.%d" n var in
   mktyexp (named_type name)
 
-let flexvar_name fv =
-  let names = [| "α"; "β"; "γ"; "δ"; "ε"; "ζ"; "η"; "θ"; "κ"; "ν"; "ξ"; "π"; "ρ" |] in
-  let id = fv.id in
-  if id < Array.length names then names.(id)
-  else Printf.sprintf "_%d" id
 
 let unparse_rigid_var {level;var} =
   mktyexp (named_type (Printf.sprintf "%d.%d" (Env_level.to_int level) var))
@@ -563,7 +584,9 @@ let unparse_flexvar ~flexvar fv =
     if fv.pos_visit_count <> 0 || fv.neg_visit_count <> 0 then
       (*Format.sprintf "%s[-%d+%d]" name fv.neg_visit_count fv.pos_visit_count*)
       name
-    else name in
+    else
+      name (*Format.sprintf "%s@%d" name (Env_level.to_int fv.level)*)
+ in
   mktyexp (named_type name)
 
 let unparse_var ~flexvar ~ext = function
@@ -639,6 +662,7 @@ let unparse_ntyp ~flexvar ?(ext=[]) (t : ntyp) =
 (* For debugging *)
 let pp_tyexp ppf ty =
   let buf = Buffer.create 100 in
+  let ty = Exp.map_tyexp Exp.normalise ty in
   PPrint.ToBuffer.pretty 1. 10000 buf (PPrint.group (Print.tyexp ty));
   Format.fprintf ppf "%s" (Buffer.to_bytes buf |> Bytes.to_string)
 

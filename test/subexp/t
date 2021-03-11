@@ -396,13 +396,13 @@ let f = fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }; (fn(x)
 
 fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }
 > fn (f: [B <: {foo: int, ...}, A <: {bar: B}] (A) -> A | B, g) { g(f) }
->   fn [A, B <: {bar: C}, C <: {foo: int, ...}](
+>   fn [A, B <: {foo: int, ...}, C <: {bar: B}](
 >     f: [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
->     g: ((B) -> B | C) -> A
+>     g: ((C) -> C | B) -> A
 >   ) -> A {
 >     g(f)
 >   }
-> [A, B <: {bar: C}, C <: {foo: int, ...}] (
+> [A, B <: {foo: int, ...}, C <: {bar: B}] (
 >   [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
->   ((B) -> B | C) -> A
+>   ((C) -> C | B) -> A
 > ) -> A

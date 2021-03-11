@@ -2,7 +2,4 @@
 # self-app
 (fn (x) { x(x) }) (fn (x) { x(x) })
 > (fn (x) { x(x) })(fn (x) { x(x) })
->   (fn [A, B <: (B) -> A](x: B) -> A { x(x) })(
->     fn [A, B <: (B) -> A](x: B) -> A { x(x) }
->   )
-> nothing
+> typechecking error: unimplemented: flexvar recursive in own bound

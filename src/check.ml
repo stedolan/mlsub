@@ -43,7 +43,6 @@ let rec split_tjoin env cons vars rest =
            | None -> split_tjoin env (Some ty') vars rest
            | Some _ -> failwith "multiple cons in join"
      
-
 let rec typ_of_tyexp : 'a 'b . env -> Env_level.t -> tyexp -> ('a, 'b) typ =
   fun env lvl ty -> match ty with
   | None, _ -> failwith "type syntax error"
@@ -83,6 +82,8 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> tyexp' -> ('a, 'b) typ =
           match typ_of_tyexp env join_lvl c with
           | Tcons c -> c
           | _ -> failwith "Expected a constructed type" in
+     if rigvars <> [] && not (check_simple (Tcons cons)) then
+       failwith "Poly type under join";
      List.fold_left (fun c r -> Tvjoin (c, Vrigid r)) (Tcons cons) rigvars
   | Tforall (vars, body) ->
      let vars, name_ix = enter_polybounds env vars in
@@ -110,16 +111,20 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
     vars
     |> List.map (fun ((name,_),_) -> {name; upper={cons=Top;rigvars=[]}})
     |> IArray.of_list in
-  let temp_env = Env_types { level; rig_names = name_ix; rig_defns = stubs; rest = env } in
-  let mkbound bound =
+  let mkbound rig_names bound =
     match bound with
     | None -> Tcons Top
     | Some b ->
+       let temp_env = Env_types { level; rig_names; rig_defns = stubs; rest = env } in
        match close_typ_rigid level (typ_of_tyexp temp_env (env_level temp_env) b) with
-       | Tcons c -> Tcons c
+       | (Tcons c) as t ->
+          if not (check_simple t) then failwith "bounds must be simple";
+          Tcons c
        (* FIXME: some vjoin cases are also fine. Var even? *)
        | _ -> failwith "rig var bounds must be Tcons" in
-  let vars = IArray.map (fun ((name,_), bound) -> name, mkbound bound) (IArray.of_list vars) in
+  let name_ix, vars = IArray.map_fold_left (fun names ((name,_), bound) ->
+    let names' = SymMap.add name (SymMap.find name name_ix) names in
+    names', (name, mkbound names bound)) SymMap.empty (IArray.of_list vars) in
   vars, name_ix
 
 let typ_of_tyexp env t = typ_of_tyexp env (env_level env) t
@@ -145,6 +150,7 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
     if visit > 10 then intfail "looping?";
     let changes = ref [] in
     let ty = expand_ptyp visit ~changes env' level ty in
+    wf_ptyp env' ty;
     let erq = elabreq_map_typs erq ~index:0
                 ~neg:(fun ~index:_ -> expand_ntyp visit ~changes env' level)
                 ~pos:(fun ~index:_ -> expand_ptyp visit ~changes env' level) in

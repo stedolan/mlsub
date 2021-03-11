@@ -76,7 +76,7 @@ type mapper = {
   tyexp : mapper -> tyexp -> tyexp
 }
 let map_exp m e = m.exp m e
-
+let map_tyexp m t = m.tyexp m t
 
 let mapper =
   let loc _ l = l in

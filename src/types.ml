@@ -399,6 +399,19 @@ and hoist_lower ~changes env level {ctor;flexvars} =
  * Subtyping on typs (polymorphism)
  *)
 
+(* check that a well-formed type is simple (i.e does not contain a forall) *)
+let rec check_simple = function
+  | Tsimple _ | Tvar _ -> true
+  | Tvjoin _ ->
+     (* Anything under the join must be simple by wf-ness *)
+     true
+  | Tcons c ->
+     (* FIXME: a fold would be nicer, surely? *)
+     equal_cons (=) (=)
+       (map_head (fun _ -> true) (fun _ -> true) c)
+       (map_head check_simple check_simple c)
+  | Tpoly _ -> false
+
 (* argument must be a simple locally closed type well-formed at lvl *)
 let rec simple_ptyp lvl : ptyp -> flex_lower_bound = function
   | Tsimple t -> t
@@ -415,10 +428,10 @@ let rec simple_ptyp lvl : ptyp -> flex_lower_bound = function
      { ctor = {cons=Bot; rigvars=[rv]}; flexvars = [] }
   | Tvjoin (t, Vflex fv) ->
      assert (Env_level.extends fv.level lvl);
-     join_flexvars (simple_ptyp fv.level t) [fv]
+     join_flexvars (simple_ptyp lvl t) [fv]
   | Tvjoin (t, Vrigid rv) ->
      assert (Env_level.extends rv.level lvl);
-     let {ctor={cons;rigvars};flexvars} = simple_ptyp rv.level t in
+     let {ctor={cons;rigvars};flexvars} = simple_ptyp lvl t in
      {ctor={cons;rigvars=if contains_rigvar rv rigvars then rigvars else rigvars@[rv]};flexvars}
 
 and simple_ntyp lvl : ntyp -> styp_neg = function
@@ -537,6 +550,7 @@ let rec match_simple_typ ~error ~changes env lvl (p : flex_lower_bound) (head : 
 
 
 let rec subtype ~error env (p : ptyp) (n : ntyp) =
+  (* Format.printf "%a <= %a\n" pp_ptyp p pp_ntyp n; *)
   wf_ptyp env p; wf_ntyp env n;
   match p, n with
   | Tcons cp, Tcons cn ->
@@ -634,6 +648,7 @@ let is_visited_neg visit fv =
 (* FIXME: how does this work with rigvars & flexvars at the same level? (i.e. poly fns) *)
 
 let rec expand visit ~changes ?(vexpand=[]) env level (p : flex_lower_bound) =
+  wf_flex_lower_bound ~seen:(Hashtbl.create 10) env level p;
   let ctor = map_ctor_rig (expand_fv_neg visit ~changes env level) (expand visit ~changes env level) p.ctor in
   let flexvars_gen, flexvars_keep = List.partition (fun fv -> Env_level.equal fv.level level) p.flexvars in
   flexvars_keep |> List.iter (fun fv ->
@@ -767,11 +782,13 @@ and substn_upper visit bvars level ~index = function
 and substn_bvar visit bvars level fv =
   assert (Env_level.equal fv.level level);
   assert (is_visited_neg visit fv && is_visited_pos visit fv);
+  if fv.bound_var = -2 then unimp "flexvar recursive in own bound";
   if fv.bound_var <> -1 then fv.bound_var else begin
     let r = ref (Tcons Top) in
+    fv.bound_var <- -2;
+    r := substn_upper visit bvars level ~index:0 fv.upper;
     let n = Vector.push bvars (Gen_flex (fv, r)) in
     fv.bound_var <- n;
-    r := substn_upper visit bvars level ~index:0 fv.upper;
     n
   end
 
