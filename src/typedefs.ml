@@ -393,14 +393,14 @@ let rec close_typ :
      Tpoly {vars = IArray.map (fun (n, b) -> n, close_typ lvl var ~ispos:(not ispos) ix b) vars;
             body = close_typ lvl var ~ispos ix body}
 
-let close_typ_rigid level ty =
+let close_typ_rigid ~ispos level ty =
   let close_var v ~ispos ~isjoin =
     (* FIXME report this better *)
-    if isjoin && not ispos then intfail "contravariant join";
+    if isjoin && not ispos then failwith "contravariant join";
     match v with
     | Vrigid v when Env_level.equal v.level level -> v.var
     | _ -> intfail "close_typ_rigid: not a rigid variable" in
-  close_typ level close_var ~ispos:true 0 ty
+  close_typ level close_var ~ispos 0 ty
 
 
 let next_flexvar_id = ref 0

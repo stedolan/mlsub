@@ -92,7 +92,7 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> tyexp' -> ('a, 'b) typ =
      let rig_defns = vars |> IArray.map (fun (name, bound) ->
        { name; upper = simple_ptyp_bound level (open_typ_rigid rigvars bound) }) in
      let env = Env_types { level; rig_names = name_ix; rig_defns; rest = env } in
-     let body = close_typ_rigid level (typ_of_tyexp env (env_level env) body) in
+     let body = close_typ_rigid ~ispos:true level (typ_of_tyexp env (env_level env) body) in
      Tpoly { vars; body }
 
 and typs_of_tuple_tyexp : 'a 'b . env -> Env_level.t -> tyexp tuple_fields -> ('a, 'b) typ tuple_fields =
@@ -116,7 +116,7 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
     | None -> Tcons Top
     | Some b ->
        let temp_env = Env_types { level; rig_names; rig_defns = stubs; rest = env } in
-       match close_typ_rigid level (typ_of_tyexp temp_env (env_level temp_env) b) with
+       match close_typ_rigid ~ispos:false level (typ_of_tyexp temp_env (env_level temp_env) b) with
        | (Tcons c) as t ->
           if not (check_simple t) then failwith "bounds must be simple";
           Tcons c
