@@ -110,3 +110,19 @@
 
 : [A <: {cond: bool}] ((A) -> ({cond: int} | A)) <: [A <: {cond: bool}] ((A) -> ({cond: int} | A))
 > ok
+
+# found by fuzzing!
+: [D, A] {bar: {p: A} | A, foo: {p: D} | A} <: 
+  [D, A] {bar: {p: A} | A, foo: {p: D} | A}
+> ok
+
+: [D <: {foo: {foo: int}}, A] ({foo: A | {foo: int}} | A | D) <:
+  [D <: {foo: {foo: int}}, A] ({foo: A | {foo: int}} | A | D)
+> ok
+
+: [A] ({foo: A | {foo: int}} | A) <:
+  [D <: {foo: {foo: int}}] ({foo: {foo: int}} | D)
+> ok
+
+: [A] (A | {foo:int, bar:A}) <: [A] (A | {foo:int, bar:int})
+> ok

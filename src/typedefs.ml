@@ -173,6 +173,7 @@ type rigvar =
 type (+'neg,+'pos) ctor_ty =
   { cons: ('neg,'pos) cons_head; rigvars: rigvar list }
 
+(* FIXME: most uses of this function are probably bugs: rigvars need attention *)
 let map_ctor_rig neg pos { cons; rigvars } = { cons = map_head neg pos cons; rigvars }
 
 
@@ -200,8 +201,9 @@ and styp_neg =
   | UBnone
     (* f.upper = UBvar v: *only* upper bound is v. *)
   | UBvar of flexvar
-    (* arbitrary upper bound *)
-  | UBcons of (flex_lower_bound, flexvar) ctor_ty
+    (* arbitrary upper bounds.
+       Only one allowed per set of rigid variables *)
+  | UBcons of (flex_lower_bound, flexvar) ctor_ty list
 
 (* Matchability constraint: the contravariant parts of a flexible variable's lower bound must be flexible variables.
    Flexible variables appearing in vars must not have UBvar upper bounds, as they are also constrained above here.
@@ -254,9 +256,21 @@ let equal_flexvar (p : flexvar) (q : flexvar) =
   p == q
 let equal_rigvar (p : rigvar) (q : rigvar) =
   Env_level.equal p.level q.level && p.var = q.var
+let compare_rigvar (p : rigvar) (q : rigvar) =
+  let cmp = compare (Env_level.to_int p.level) (Env_level.to_int q.level) in
+  if cmp <> 0 then cmp else
+    (assert (Env_level.equal p.level q.level); compare p.var q.var)
 let equal_lists f p q =
   try List.for_all2 f p q
   with Invalid_argument _ -> false
+let rec compare_lists f p q =
+  match p, q with
+  | [], [] -> 0
+  | p::ps, q::qs ->
+     let cmp = f p q in
+     if cmp = 0 then compare_lists f ps qs else cmp
+  | [], _::_ -> -1
+  | _::_, [] -> 1
 let rec equal_flex_lower_bound (p : flex_lower_bound) (q : flex_lower_bound) =
   equal_lists equal_flexvar p.flexvars q.flexvars &&
   equal_lists equal_rigvar p.ctor.rigvars q.ctor.rigvars &&
@@ -265,9 +279,10 @@ let equal_styp_neg (p : styp_neg) (q : styp_neg) =
   match p, q with
   | UBnone, UBnone -> true
   | UBvar pv, UBvar qv -> equal_flexvar pv qv
-  | UBcons cp, UBcons cq ->
-     equal_lists equal_rigvar cp.rigvars cq.rigvars &&
-     equal_cons equal_flex_lower_bound equal_flexvar cp.cons cq.cons
+  | UBcons cps, UBcons cqs ->
+     equal_lists (fun cp cq ->
+       equal_lists equal_rigvar cp.rigvars cq.rigvars &&
+       equal_cons equal_flex_lower_bound equal_flexvar cp.cons cq.cons) cps cqs
   | (UBnone|UBvar _|UBcons _), _ -> false
 
 (*
@@ -474,8 +489,19 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
      assert (fv.lower = {ctor={cons=Bot;rigvars=[]};flexvars=[]});
      (* FIXME: same level? *)
      wf_flexvar ~seen env fv.level v
-  | UBcons cn ->
-     map_ctor_rig (wf_flex_lower_bound ~seen env fv.level) (wf_flexvar ~seen env fv.level) cn |> ignore
+  | UBcons cns ->
+     (* Rigvar sets must be distinct *)
+     let rvsets = List.map (fun rv -> rv.rigvars) cns in
+     let rvsets_uniq = List.sort_uniq (compare_lists compare_rigvar) rvsets in
+     assert (List.length rvsets = List.length rvsets_uniq);
+     (* Each rigvar set must contain all of the rigvars in the lower bound *)
+     let rvlow = fv.lower.ctor.rigvars in
+     cns |> List.iter (fun {cons=_;rigvars} ->
+       rvlow |> List.iter (fun rv -> assert (List.exists (equal_rigvar rv) rigvars)));
+     (* Well-formedness of bounds *)
+     cns |> List.iter (fun {cons;rigvars} ->
+       assert (rigvars = List.sort_uniq compare_rigvar rigvars);
+       map_head (wf_flex_lower_bound ~seen env fv.level) (wf_flexvar ~seen env fv.level) cons |> ignore)
   end
 
 and wf_rigvar env lvl (rv : rigvar) =
@@ -706,11 +732,12 @@ let dump_ptyp ppf t =
          | l -> Some (unparse_flex_lower_bound ~flexvar l) in
        let u =
          match fv.upper with
-         | UBvar v -> unparse_flexvar ~flexvar v
-         | UBnone -> unparse (Tcons Top)
-         | UBcons {cons;rigvars} ->
+         | UBvar v -> [unparse_flexvar ~flexvar v]
+         | UBnone -> []
+         | UBcons cns ->
+            cns |> List.map (fun {cons;rigvars} ->
             let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) cons in
-            unparse_join cons rigvars in
+            unparse_join cons rigvars) in
        Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
        ()
   and unparse t =
@@ -720,9 +747,16 @@ let dump_ptyp ppf t =
   let fvs = !fv_list |> List.rev |> List.map (fun i -> let (n, t) = (Hashtbl.find fvs i) in n, Option.get t) in
   Format.fprintf ppf "%a\n" pp_tyexp t;
   fvs |> List.iter (function
-    | n, (Some l, u) -> Format.fprintf ppf "    %a <= %s <= %a\n" pp_tyexp l n pp_tyexp u
-    | n, (None, u) -> Format.fprintf ppf "    %s <= %a\n" n pp_tyexp u)
-
+    | n, (l, us) ->
+       begin match l with
+       | Some l -> 
+          Format.fprintf ppf " %a <= %s" pp_tyexp l n
+       | None ->
+          Format.fprintf ppf "      %s" n
+       end;
+       us |> List.iteri (fun i u ->
+         Format.fprintf ppf "%s %a" (if i = 0 then " <=" else ";") pp_tyexp u);
+       Format.fprintf ppf "\n")
 
 
 let wf_ptyp env (t : ptyp) =

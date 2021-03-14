@@ -739,12 +739,15 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let 
 > ) -> int
 > ELAB: Failure("incompat record <: bot")
 > Raised at Stdlib.failwith in file "stdlib.ml", line 29, characters 17-33
-> Called from Lang__Types.subtype_ctor_rig in file "src/types.ml", line 202, characters 2-127
+> Called from Lang__Types.subtype_ctor_rig in file "src/types.ml", line 205, characters 2-127
 > Called from Stdlib__list.iter in file "list.ml", line 110, characters 12-15
-> Called from Lang__Types.subtype_ctor_rig in file "src/types.ml", line 199, characters 2-156
-> Called from Lang__Types.subtype in file "src/types.ml", line 582, characters 5-91
+> Called from Lang__Types.subtype_ctor_rig in file "src/types.ml", line 202, characters 2-156
+> Called from Stdlib__list.iter in file "list.ml", line 110, characters 12-15
+> Called from Lang__Types.subtype_cons_flex in file "src/types.ml", line 389, characters 7-96
+> Called from Lang__Types.subtype in file "src/types.ml", line 647, characters 5-91
 > Called from Stdlib__map.Make.iter in file "map.ml", line 296, characters 20-25
 > Called from Lang__Types.subtype_cons in file "src/types.ml", line 37, characters 5-46
+> Called from Lang__Types.subtype in file "src/types.ml", line 634, characters 5-30
 > Called from Lang__Check.check' in file "src/check.ml", line 273, characters 5-37
 > Called from Lang__Check.check in file "src/check.ml", line 200, characters 14-29
 > Called from Stdlib__map.Make.mapi in file "map.ml", line 312, characters 19-24

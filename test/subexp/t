@@ -406,3 +406,27 @@ fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }
 >   [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
 >   ((C) -> C | B) -> A
 > ) -> A
+
+# wfrig check in ensure_upper_matches
+fn[A <: {foo:int}](a: A) { let id = fn(x) { x }; id(a).foo }
+> fn [A <: {foo: int}](a: A) { let id = fn (x) { x }; id(a).foo }
+>   fn [A <: {foo: int}](a: A) -> int {
+>     let id : [B] (B) -> B = fn [B](x: B) -> B { x };
+>     id(a).foo
+>   }
+> [A <: {foo: int}] (A) -> int
+
+# multi upper bounds & specsub (somewhat dodgy)
+fn[A <: {foo:int}, B <: {bar:int}](x) -> {a:A, b:{foo:int}|B} {
+  let splat = fn(x) { {a:x, b:x} }; splat(x)
+}
+> fn [A <: {foo: int}, B <: {bar: int}](x) -> {a: A, b: {foo: int} | B} {
+>   let splat = fn (x) { {a: x, b: x} };
+>   splat(x)
+> }
+>   fn [A <: {foo: int}, B <: {bar: int}](x: A) -> {a: A, b: {foo: int} | B} {
+>     let splat : [C] (C) -> {a: C, b: C} =
+>     fn [C](x: C) -> {a: C, b: C} { {a: x, b: x} };
+>     splat(x)
+>   }
+> [A <: {foo: int}, B <: {bar: int}] (A) -> {a: A, b: {foo: int} | B}

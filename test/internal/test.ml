@@ -4,48 +4,7 @@ open Types
 module SymMap = Tuple_fields.SymMap
 
 let dump (t : ptyp) =
-  let fvs = Hashtbl.create 20 in
-  let fv_list = ref [] in
-  let _name_ix = ref 0 in
-  let rec flexvar fv =
-    match Hashtbl.find fvs fv.id with
-    | _ -> ()
-    | exception Not_found ->
-       let fv_name = flexvar_name fv in
-       Hashtbl.add fvs fv.id (fv_name, None);
-       fv_list := fv.id :: !fv_list;
-       let l =
-         match fv.lower with
-         | {ctor={cons=Bot; rigvars=[]}; flexvars=[]} -> None
-         | l -> Some (unparse_flex_lower_bound ~flexvar l) in
-       let u =
-         match fv.upper with
-         | UBvar v -> unparse_flexvar ~flexvar v
-         | UBnone -> unparse (Tcons Top)
-         | UBcons {cons;rigvars} ->
-            let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) cons in
-            unparse_join cons rigvars in
-       Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
-       ()
-  and unparse t =
-    unparse_ptyp ~flexvar t
-  in
-  let t = unparse t in
-  let fvs = !fv_list |> List.rev |> List.map (fun i -> let (n, t) = (Hashtbl.find fvs i) in n, Option.get t) in
-  let open PPrint in
-  let doc =
-    group (Print.tyexp t) ^^ hardline ^^
-    utf8string "where" ^^ hardline ^^
-    nest 2 (blank 2 ^^ separate_map hardline (fun (n, (l, u)) -> group @@ 
-      (match l with
-       | None -> empty
-       | Some l -> Print.tyexp l ^^ blank 1 ^^ utf8string "≤" ^^ blank 1)
-      ^^
-      utf8string n
-      ^^
-      (blank 1 ^^ utf8string "≤" ^^ blank 1 ^^ Print.tyexp u))
-          fvs) ^^ hardline in
-  PPrint.ToChannel.pretty 1. 120 stdout doc
+  Format.printf "%a%!" dump_ptyp t
 
 let func a b = Func (Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) a)), b)
 
