@@ -767,8 +767,8 @@ and expand_fv_neg visit ~changes env level nv =
 
            | () ->
               (* FIXME: which of these is less bad? *)
-              (* revert !temp_changes; false *)
-              commit ~changes !temp_changes; true
+              revert !temp_changes; false
+              (* commit ~changes !temp_changes; true *)
 
            | exception Exit -> revert !temp_changes; false
          )) in

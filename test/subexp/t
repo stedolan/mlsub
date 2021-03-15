@@ -424,9 +424,53 @@ fn[A <: {foo:int}, B <: {bar:int}](x) -> {a:A, b:{foo:int}|B} {
 >   let splat = fn (x) { {a: x, b: x} };
 >   splat(x)
 > }
->   fn [A <: {foo: int}, B <: {bar: int}](x: A) -> {a: A, b: {foo: int} | B} {
+>   fn [A <: {foo: int}, B <: {bar: int}](x: nothing) -> {a: A, b: {foo: int} | B} {
 >     let splat : [C] (C) -> {a: C, b: C} =
 >     fn [C](x: C) -> {a: C, b: C} { {a: x, b: x} };
 >     splat(x)
 >   }
-> [A <: {foo: int}, B <: {bar: int}] (A) -> {a: A, b: {foo: int} | B}
+> [A <: {foo: int}, B <: {bar: int}] (nothing) -> {a: A, b: {foo: int} | B}
+
+
+# weirdness: non-monotonicity wrt annotations
+
+fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:{foo:int}} {
+  {a:x, b:x, c:x}
+}
+> fn [A <: {foo: int}, B <: {bar: bool}](x) ->
+>   {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}} {
+>   {a: x, b: x, c: x}
+> }
+>   fn [A <: {foo: int}, B <: {bar: bool}](x: nothing) ->
+>     {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}} {
+>     {a: x, b: x, c: x}
+>   }
+> [A <: {foo: int}, B <: {bar: bool}] (nothing) -> {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}}
+
+fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:any} {
+  {a:x, b:x, c:x}
+}
+> fn [A <: {foo: int}, B <: {bar: bool}](x) ->
+>   {a: {bar: bool} | A, b: {foo: int} | B, c: any} {
+>   {a: x, b: x, c: x}
+> }
+>   fn [A <: {foo: int}, B <: {bar: bool}](x: nothing) ->
+>     {a: {bar: bool} | A, b: {foo: int} | B, c: any} {
+>     {a: x, b: x, c: x}
+>   }
+> [A <: {foo: int}, B <: {bar: bool}] (nothing) -> {a: {bar: bool} | A, b: {foo: int} | B, c: any}
+
+
+# why doesn't this work?
+fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|A|B, c:any} {
+  {a:x, b:x, c:x}
+}
+> fn [A <: {foo: int}, B <: {bar: bool}](x) ->
+>   {a: {bar: bool} | A, b: {foo: int} | A | B, c: any} {
+>   {a: x, b: x, c: x}
+> }
+>   fn [A <: {foo: int}, B <: {bar: bool}](x: A) ->
+>     {a: {bar: bool} | A, b: {foo: int} | A | B, c: any} {
+>     {a: x, b: x, c: x}
+>   }
+> [A <: {foo: int}, B <: {bar: bool}] (A) -> {a: {bar: bool} | A, b: {foo: int} | A | B, c: any}
