@@ -59,7 +59,7 @@ let compare a b =
   | exception _ -> bad_test ()
   | a, b ->
      try Types.subtype ~error:(fun _ -> raise Exit) Env_nil a b
-     with Exit | Typedefs.Unimplemented _ -> ()
+     with Exit -> ()
 
 let parse t = Lang.Check.typ_of_tyexp Env_nil t
 
@@ -78,19 +78,15 @@ let commute a b c d p q r s =
   let subt a b =
     match Types.subtype ~error:(fun _ -> raise Exit) Env_nil a b with
     | () -> `Yes
-    | exception Exit -> `No
-    | exception (Typedefs.Unimplemented _) -> `Unimp in
-  match subt tl tr, subt tl' tr' with
-  | `Unimp, _ | _, `Unimp -> ()
-  | s, t -> assert (s = t)
+    | exception Exit -> `No in
+  assert (subt tl tr = subt tl' tr')
 
 let transitive a b c =
   let a, b, c = try parse a, parse b, parse c with _ -> bad_test () in
   let subt a b =
     match Types.subtype ~error:(fun _ -> raise Exit) Env_nil a b with
     | () -> true
-    | exception Exit -> false
-    | exception (Typedefs.Unimplemented _) -> bad_test () in
+    | exception Exit -> false in
   let ab = subt a b and bc = subt b c and ca = subt c a in
   let ba = subt b a and cb = subt c b and ac = subt a c in
   assert ((ab && bc) <= ac);

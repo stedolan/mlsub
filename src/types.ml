@@ -561,10 +561,25 @@ and approx_ntyp env : ntyp -> styp_neg = function
      UBcons [{cons;rigvars=[]}]
   | (Tvar _ | Tvjoin _ | Tsimple _) as t ->
      simple_ntyp (env_level env) t
-  | Tpoly _ ->
+  | Tpoly {vars; body} ->
      (* Negative var occurrences should be replaced with their upper
         bounds, positive ones should be deleted. *)
-     unimp "approx_ntyp: Tpoly"
+     let bounds = Array.make (IArray.length vars) None in
+     let neg rest v =
+       (match rest with Some _ -> intfail "contravariant join" | None -> ());
+       match bounds.(v) with
+       | None -> intfail "recursive rigid bound"
+       | Some t -> Tsimple t in
+     let pos rest _v =
+       match rest with
+       | None -> Tcons Bot
+       | Some t -> t in
+     vars |> IArray.iteri (fun i (_, b) ->
+       let b = open_typ ~neg:pos ~pos:neg 0 b in
+       let b = approx_ptyp env b in
+       bounds.(i) <- Some b);
+     let body = open_typ ~neg ~pos 0 body in
+     approx_ntyp env body
 
 and approx_ntyp_var env (n : ntyp) : flexvar =
   match approx_ntyp env n with

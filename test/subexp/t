@@ -388,11 +388,41 @@ let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(3, 1) }
 > let appf = fn [B, C, A <: (B) -> C](f: A, x: B) { f(x) }; fn () { appf(3, 1) }
 > typechecking error: Failure("incompat int <: func")
 
-# requires a working approx_ntyp
-let f = fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }; (fn(x){x})(f)
+# approx_ntyp
+fn[P, Q <: {foo:P}] (x) -> [A, B <: {bar: Q}, C <: {x:B, y:Q}] (A, B, C) -> (A, B|(P,Q), C) { x }
+> fn [P, Q <: {foo: P}](x) ->
+>   [A, B <: {bar: Q}, C <: {x: B, y: Q}] (A, B, C) -> (A, B | (P, Q), C) {
+>   x
+> }
+>   fn [P, Q <: {foo: P}](
+>     x: (any, {bar: Q}, {x: {bar: Q}, y: Q}) -> (nothing, (P, Q), nothing)
+>   ) -> [A, B <: {bar: Q}, C <: {x: B, y: Q}] (A, B, C) -> (A, B | (P, Q), C) {
+>     x
+>   }
+> [P, Q <: {foo: P}] ((any, {bar: Q}, {x: {bar: Q}, y: Q}) -> (nothing, (P, Q), nothing)) ->
+> [A, B <: {bar: Q}, C <: {x: B, y: Q}] (A, B, C) -> (A, (P, Q) | B, C)
+
+# more approx_ntyp
+let f = fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }; fn() { (fn(x){x})(f) }
 > let f = fn (f: [B <: {foo: int, ...}, A <: {bar: B}] (A) -> A | B, g) { g(f) };
-> (fn (x) { x })(f)
-> typechecking error: unimplemented: approx_ntyp: Tpoly
+> fn () {
+>   (fn (x) { x })(f)
+> }
+>   let f : [A, B <: {foo: int, ...}, C <: {bar: B}] (
+>     [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
+>     ((C) -> C | B) -> A
+>   ) -> A =
+>   fn [A, B <: {foo: int, ...}, C <: {bar: B}](
+>     f: [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
+>     g: ((C) -> C | B) -> A
+>   ) -> A {
+>     g(f)
+>   };
+>   fn [A, B <: {foo: int, ...}, C <: {bar: B}]() ->
+>     (({bar: {foo: int, ...}}) -> nothing, ((C) -> C | B) -> A) -> A {
+>     (fn [A_2](x: A_2) -> A_2 { x })(f)
+>   }
+> [A, B <: {foo: int, ...}, C <: {bar: B}] () -> (({bar: {foo: int, ...}}) -> nothing, ((C) -> C | B) -> A) -> A
 
 fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }
 > fn (f: [B <: {foo: int, ...}, A <: {bar: B}] (A) -> A | B, g) { g(f) }

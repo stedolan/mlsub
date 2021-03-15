@@ -52,6 +52,7 @@ module IArray : sig
   val mapi : (int -> 'a -> 'b) -> 'a t -> 'b t
   val map : ('a -> 'b) -> 'a t -> 'b t
   val iter : ('a -> unit) -> 'a t -> unit
+  val iteri : (int -> 'a -> unit) -> 'a t -> unit
   val iter2 : ('a -> 'b -> unit) -> 'a t -> 'b t -> unit
   val exists : ('a -> bool) -> 'a t -> bool
   val map_fold_left : ('s -> 'a -> 's * 'b) -> 's -> 'a t -> 's * 'b t
@@ -68,6 +69,8 @@ end = struct
   let to_list x = to_array x |> Array.to_list
   let map f (Mk (a, r)) = Mk (Array.init (Array.length a) (fun i -> f (r a.(i))), id)
   let mapi f (Mk (a, r)) = Mk (Array.init (Array.length a) (fun i -> f i (r a.(i))), id)
+  let iteri f (Mk (a, ra)) =
+    Array.iteri (fun i x -> f i (ra x)) a
   let iter2 f (Mk (a, ra)) (Mk (b, rb)) =
     Array.iter2 (fun a b -> f (ra a) (rb b)) a b
   let iter f (Mk (a, r)) = Array.iter (fun x -> f (r x)) a
@@ -358,31 +361,61 @@ let rec env_level env =
  * Opening/closing of binders
  *)
 
+(* Assert that a typ contains no Vbound *)
+let assert_locally_closed_var ix = function
+  | Vrigid _ | Vflex _ -> ()
+  | Vbound {index; _} -> assert (index < ix)
+
+let rec assert_locally_closed :
+  'a 'b . int -> ('a, 'b) typ -> unit =
+  fun ix ty -> match ty with
+  | Tsimple _ -> ()
+  | Tcons c -> ignore (map_head (assert_locally_closed ix) (assert_locally_closed ix) c)
+  | Tvar v -> assert_locally_closed_var ix v
+  | Tvjoin (t, v) -> assert_locally_closed ix t; assert_locally_closed_var ix v
+  | Tpoly {vars; body} ->
+     let ix = ix + 1 in
+     vars |> IArray.iter (fun (_, b) -> assert_locally_closed ix b);
+     assert_locally_closed ix body
 
 let map_head_cons pol f fields =
   map_fields (fun _fn x -> f pol x) fields
 
-let open_typ_var f ix = function
+let tvjoin_opt t v =
+  match t with
+  | None -> Tvar v
+  | Some t -> Tvjoin (t, v)
+
+let open_typ_var f rest ix = function
   | Vbound {index; var} when index >= ix ->
-     assert (index = ix); f var
-  | v -> v
+     assert (index = ix);
+     Option.iter (assert_locally_closed ix) rest;
+     let res = f rest var in
+     assert_locally_closed ix res;
+     res
+  | v -> tvjoin_opt rest v
 
 let rec open_typ :
-  'neg 'pos . (int -> typ_var) -> int -> ('neg, 'pos) typ -> ('neg, 'pos) typ =
-  fun var ix t -> match t with
+  'neg 'pos . 
+    neg:(('pos, 'neg) typ option -> int -> ('pos, 'neg) typ) ->
+    pos:(('neg, 'pos) typ option -> int -> ('neg, 'pos) typ) ->
+    int -> ('neg, 'pos) typ -> ('neg, 'pos) typ =
+  fun ~neg ~pos ix t -> match t with
   | Tsimple _ as s -> s
-  | Tcons c -> Tcons (map_head (open_typ var ix) (open_typ var ix) c)
-  | Tvar v -> Tvar (open_typ_var var ix v)
-  | Tvjoin (t, v) -> Tvjoin(open_typ var ix t, open_typ_var var ix v)
+  | Tcons c -> Tcons (map_head (open_typ ~neg:pos ~pos:neg ix) (open_typ ~neg ~pos ix) c)
+  | Tvar v -> open_typ_var pos None ix v
+  | Tvjoin (t, v) -> open_typ_var pos (Some (open_typ ~neg ~pos ix t)) ix v
   | Tpoly {vars; body} ->
      let ix = ix + 1 in
-     Tpoly {vars = IArray.map (fun (n, b) -> n, open_typ var ix b) vars;
-            body = open_typ var ix body}
+     Tpoly {vars = IArray.map (fun (n, b) -> n, open_typ ~neg:pos ~pos:neg ix b) vars;
+            body = open_typ ~neg ~pos ix body}
 
 let open_typ_rigid vars t =
-  open_typ (fun i -> Vrigid (IArray.get vars i)) 0 t
+  let mkv rest i = tvjoin_opt rest (Vrigid (IArray.get vars i)) in
+  open_typ ~neg:mkv ~pos:mkv 0 t
 let open_typ_flex vars t =
-  open_typ (fun i -> Vflex (IArray.get vars i)) 0 t
+  let mkv rest i = tvjoin_opt rest (Vflex (IArray.get vars i)) in
+  open_typ ~neg:mkv ~pos:mkv 0 t
 
 
 let close_typ_var lvl f ~ispos ~isjoin index = function
