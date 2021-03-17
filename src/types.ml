@@ -133,6 +133,7 @@ let fresh_below_var lvl fv =
    cn must be wf at lvl. FIXME: check this thoroughly *)
 let fresh_below_cons lvl {cons;rigvars} =
   List.iter (fun (rv : rigvar) -> assert (Env_level.extends rv.level lvl)) rigvars;
+  let rigvars = List.sort_uniq compare_rigvar rigvars in (* FIXME: hideous *)
   (* need to freshen covariant parts of cons to preserve matchability.
      FIXME: is that true for double-negative parts as well?
      What's the matchability status of the flexvars embedded in the flex_lower_bound?
