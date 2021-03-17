@@ -18,29 +18,37 @@ let rec env_lookup_var env v =
   | Env_types { rest; _ } | Env_vals {rest; _}->
      env_lookup_var rest v
 
-let rec split_tjoin env cons vars rest =
+let env_lookup_type_var env lvl name =
+  match env_lookup_type_var env name with
+  | Some v ->
+     if not (Env_level.extends v.level lvl) then
+       failwith ("rigvar " ^ name ^ " not allowed inside join with rigvar bound earlier");
+     Some v
+  | None -> None
+
+let rec split_tjoin env lvl cons vars rest =
   match rest with
   | [] -> cons, List.rev vars
   | (None, _) :: _ -> failwith "type syntax error"
   | (Some ty, _) as ty' :: rest ->
      match ty with
      | Tjoin (a, b) ->
-        split_tjoin env cons vars (a :: b :: rest)
+        split_tjoin env lvl cons vars (a :: b :: rest)
      | Tparen a ->
-        split_tjoin env cons vars (a :: rest)
+        split_tjoin env lvl cons vars (a :: rest)
      | Tforall _ -> failwith "Tforall in join"
      | ty ->
         let as_var =
           match ty with
           | Tnamed (name, _) ->
              (* FIXME shifting? *)
-             env_lookup_type_var env name.label
+             env_lookup_type_var env lvl name.label
           | _ -> None in
         match as_var with
-        | Some v -> split_tjoin env cons (v :: vars) rest
+        | Some v -> split_tjoin env lvl cons (v :: vars) rest
         | None ->
            match cons with
-           | None -> split_tjoin env (Some ty') vars rest
+           | None -> split_tjoin env lvl (Some ty') vars rest
            | Some _ -> failwith "multiple cons in join"
      
 let rec typ_of_tyexp : 'a 'b . env -> Env_level.t -> tyexp -> ('a, 'b) typ =
@@ -55,11 +63,8 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> tyexp' -> ('a, 'b) typ =
      begin match lookup_named_type name with
      | Some cons -> Tcons cons
      | None ->
-        match env_lookup_type_var env name with
-        | Some v ->
-           if not (Env_level.extends v.level lvl) then
-             failwith ("rigvar " ^ name ^ " not allowed inside join with rigvar bound earlier");
-           Tvar (Vrigid v)
+        match env_lookup_type_var env lvl name with
+        | Some v -> Tvar (Vrigid v)
         | None -> failwith ("unknown type " ^ name)
      end
   | Trecord fields ->
@@ -69,7 +74,7 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> tyexp' -> ('a, 'b) typ =
   | Tparen t ->
      typ_of_tyexp env lvl t
   | Tjoin (a, b) ->
-     let cons, rigvars = split_tjoin env None [] [a;b] in
+     let cons, rigvars = split_tjoin env lvl None [] [a;b] in
      let rigvars = List.stable_sort (fun (v : rigvar) (v' : rigvar) -> Env_level.compare v.level v'.level) rigvars in
      let join_lvl =
        match rigvars with
@@ -180,7 +185,7 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
         | n when n < 26 -> Printf.sprintf "%c" (Char.chr (Char.code 'A' + n))
         | n -> Printf.sprintf "T_%d" (n-26) in
       (* NB: look up env', to ensure no collisions with rigvars *)
-      match env_lookup_type_var env' name with
+      match env_lookup_type_var env' (env_level env') name with
       | None -> name
       | Some _ -> mkname () in
     let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex (_,r) -> mkname (), !r) |> IArray.of_array in

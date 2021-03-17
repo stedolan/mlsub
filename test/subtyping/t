@@ -126,3 +126,11 @@
 
 : [A] (A | {foo:int, bar:A}) <: [A] (A | {foo:int, bar:int})
 > ok
+
+
+: [C] (C | {bar: C}) <: [C] {bar: C}
+> ok
+: [C] {bar: C} <: [C <: {bar: bool}] {bar: C}
+> ok
+: [C] (C | {bar: C}) <: [C <: {bar: bool}] {bar: C}
+> ok

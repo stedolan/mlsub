@@ -314,6 +314,10 @@ fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
 > (@bot : [A] [B] ({foo: B} | A))
 > typechecking error: Failure("rigvar B not allowed inside join with rigvar bound earlier")
 
+(@bot : [A, B] (int, [C] ({foo: int | C} | B)))
+> (@bot : [A, B] (int, [C] ({foo: int | C} | B)))
+> typechecking error: Failure("rigvar C not allowed inside join with rigvar bound earlier")
+
 (@bot : [A <: [B]int]int)
 > (@bot : [A <: [B] int] int)
 > typechecking error: Failure("rig var bounds must be Tcons")
