@@ -54,7 +54,7 @@ let run_cmd s =
      begin match Check.elab_gen Env_nil None (fun env -> Check.infer env e) with
      | t, elab ->
         begin
-        let poly, elab = Elab.elaborate Env_nil elab in
+        let poly, _ty, elab = Elab.elaborate Env_nil elab in
         let elab = Exp.(map_exp normalise elab) in
         poly |> Option.iter (fun poly ->
           pprintln PPrint.(string "WEAKPOLY" ^^ Print.typolybounds poly));

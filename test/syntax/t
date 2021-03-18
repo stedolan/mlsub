@@ -29,7 +29,7 @@ fn(a) { { foo: if true { fn(x) { x } } else { a } } }
 
 fn[A,B](x:A) -> A | (A) -> B { x }
 > fn [A, B](x: A) -> A | (A) -> B { x }
->   fn [A, B](x: A) -> A | ((A) -> B) { x }
+>   fn [A, B](x: A) -> ((A) -> B) | A { x }
 > [A, B] (A) -> (A) -> B | A
 
 : [A <: ([] int) -> int ] A <: int

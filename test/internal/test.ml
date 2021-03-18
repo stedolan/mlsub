@@ -37,7 +37,7 @@ let dump env level (t : ptyp) =
   let visit, fl = fixpoint 2 fl in
 
   let bvars = Vector.create () in
-  let fl = substn visit bvars level ~index:0 fl in
+  let fl = substn {mode=`Poly;visit; bvars; level; index=0} fl in
   dump fl;
   Vector.iteri bvars (fun ix v -> match v with
   | Gen_rigid _ -> assert false

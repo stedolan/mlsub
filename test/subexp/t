@@ -161,7 +161,7 @@ let ch = fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }; fn (a,b) { c
 
 (fn[A,B,R](x : A, y : B) -> R|A { x } : [A] (A, A) -> A)
 > (fn [A, B, R](x: A, y: B) -> R | A { x } : [A] (A, A) -> A)
->   (fn [A, B, R](x: A, y: B) -> R | A { x } : [A] (A, A) -> A)
+>   (fn [A, B, R](x: A, y: B) -> A | R { x } : [A] (A, A) -> A)
 > [A] (A, A) -> A
 
 # debugging
@@ -398,7 +398,7 @@ fn[P, Q <: {foo:P}] (x) -> [A, B <: {bar: Q}, C <: {x:B, y:Q}] (A, B, C) -> (A, 
 > }
 >   fn [P, Q <: {foo: P}](
 >     x: (any, {bar: Q}, {x: {bar: Q}, y: Q}) -> (nothing, (P, Q), nothing)
->   ) -> [A, B <: {bar: Q}, C <: {x: B, y: Q}] (A, B, C) -> (A, B | (P, Q), C) {
+>   ) -> [A, B <: {bar: Q}, C <: {x: B, y: Q}] (A, B, C) -> (A, (P, Q) | B, C) {
 >     x
 >   }
 > [P, Q <: {foo: P}] ((any, {bar: Q}, {x: {bar: Q}, y: Q}) -> (nothing, (P, Q), nothing)) ->
@@ -502,7 +502,7 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|A|B, c:an
 >   {a: x, b: x, c: x}
 > }
 >   fn [A <: {foo: int}, B <: {bar: bool}](x: A) ->
->     {a: {bar: bool} | A, b: {foo: int} | A | B, c: any} {
+>     {a: {bar: bool} | A, b: {foo: int} | B, c: any} {
 >     {a: x, b: x, c: x}
 >   }
 > [A <: {foo: int}, B <: {bar: bool}] (A) -> {a: {bar: bool} | A, b: {foo: int} | B, c: any}

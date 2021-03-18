@@ -674,6 +674,7 @@ let rec expand visit ~changes ?(vexpand=[]) env level (p : flex_lower_bound) =
        (* Add pv to vexpand so we know to ignore it if we see it again before going
           under a constructor. (This is basically a bad quadratic SCC algorithm) *)
        let lower = expand visit ~changes ~vexpand:(pv :: vexpand) env level pv.lower in
+       (* FIXME! recheck level *)
        (* Remove useless reflexive constraints, if they appeared by expanding a cycle *)
        let lower = { lower with flexvars = List.filter (fun v -> not (equal_flexvar v pv)) lower.flexvars } in
        if fv_maybe_set_lower ~changes pv lower then
@@ -712,6 +713,7 @@ and expand_fv_neg visit ~changes env level nv =
   end;
   nv
 
+
 (* FIXME: could expand and subst be the same function?
    subst by referring to *previous* visit state, keep going until fixpoint.\
    (Assumption: if a variable wasn't reachable with a given polarity on pass 1,
@@ -747,23 +749,47 @@ and expand_ntyp visit ~changes env level (n : ntyp) =
      Tpoly {vars; body}
 
 (* FIXME: bit weird... There must be a better representation for bvars here *)
+
 type genvar =
   | Gen_flex of flexvar * ntyp ref
   | Gen_rigid of rigvar
 
+(* 
 
-let rec substn visit bvars level ~index ({ctor={cons;rigvars};flexvars} : flex_lower_bound) : ptyp =
-  let cons = map_head (substn_fv_neg visit bvars level ~index) (substn visit bvars level ~index) cons in
-  let rigvars_gen, rigvars_keep = Rvset.peel_level level rigvars in
-  let flexvars_gen, flexvars_keep = List.partition (fun (fv:flexvar) -> Env_level.equal fv.level level) flexvars in
+design:
+  switch to a different mode for subst'ing in elaborations
+  in elab mode:
+    1. don't worry about contravariant joins in substn_upper
+    2. if keeping a var that occurs negatively, always expand (even at neg occs)
+    3. if bivariant vars don't have a bound ix by now, don't make one (expand & drop)
+
+  3 amounts to replacing vars with their lower bound if not used in gen type.
+  Two other classes of vars could in theory be dropped:
+    - vars used positively in gen type and negatively only in elab
+    - vars used negatively in gen type and positively only in elab
+
+  FIXME: 1 is not implemented yet (requires testing)
+ *)
+
+type subst_info = {
+  visit: int;
+  bvars: genvar Vector.t;
+  level: Env_level.t;
+  index: int;
+  mode: [`Poly | `Elab]
+}
+
+let rec substn : 'a 'b . subst_info -> flex_lower_bound -> ('a, 'b) typ =
+  fun s {ctor={cons;rigvars};flexvars} ->
+  let cons = map_head (substn_fv_neg s) (substn s) cons in
+  let rigvars_gen, rigvars_keep = Rvset.peel_level s.level rigvars in
+  let flexvars_gen, flexvars_keep = List.partition (fun (fv:flexvar) -> Env_level.equal fv.level s.level) flexvars in
+  flexvars_gen |> List.iter (fun fv -> assert (is_visited_pos s.visit fv));
 
   let rigvars_gen = rigvars_gen |> List.map (fun (rv:rigvar) ->
-    Vbound {index; var = rv.var}) in
+    Vbound {index = s.index; var = rv.var}) in
   let rigvars_keep = (rigvars_keep :> rigvar list) |> List.map (fun rv -> Vrigid rv) in
-  let flexvars_gen = flexvars_gen |> List.filter_map (fun pv ->
-    if is_visited_neg visit pv then
-      Some (Vbound {index; var = substn_bvar visit bvars level pv})
-    else None) in
+  let flexvars_gen = flexvars_gen |> List.filter_map (substn_bvar s) in
   let flexvars_keep = flexvars_keep |> List.map (fun fv -> Vflex fv) in
 
   (* FIXME: are Tvjoin invariants OK here? Should I sort the _keep vars? *)
@@ -773,80 +799,101 @@ let rec substn visit bvars level ~index ({ctor={cons;rigvars};flexvars} : flex_l
     (Tcons cons)
     (rigvars_keep @ flexvars_keep @ rigvars_gen @ flexvars_gen)
 
-and substn_fv_neg visit bvars level ~index nv : ntyp =
-  assert (Env_level.extends nv.level level);
-  if Env_level.equal nv.level level then begin
-    assert (is_visited_neg visit nv);
-    if is_visited_pos visit nv then
-      Tvar (Vbound { index;
-                     var = substn_bvar visit bvars level nv })
-    else substn_upper visit bvars level ~index nv.upper
+and substn_fv_neg : 'a 'b . subst_info -> flexvar -> ('a, 'b) typ =
+  fun s nv ->
+  assert (Env_level.extends nv.level s.level);
+  if Env_level.equal nv.level s.level then begin
+    assert (is_visited_neg s.visit nv);
+    match s.mode, substn_bvar s nv with
+    | `Poly, Some v -> Tvar v
+    | `Poly, None -> substn_upper s nv.upper
+    | `Elab, _ when not (is_visited_pos s.visit nv) ->
+       (* FIXME is this correct? Should Elab- vars be replaced with their *upper* bounds? *)
+       substn_upper s nv.upper
+    | `Elab, v ->
+       assert (is_visited_pos s.visit nv);
+       let expansion = substn s nv.lower in
+       (* Negative joins, but only in Elab positions *)
+       match v with
+       | None -> expansion
+       | Some v -> Tvjoin (expansion, v)
   end else begin
     Tvar (Vflex nv)
   end
 
-and substn_upper visit bvars level ~index = function
-  | UBvar v -> substn_fv_neg visit bvars level ~index v
+and substn_upper : 'a 'b . subst_info -> styp_neg -> ('a, 'b) typ =
+  fun s -> function
+  | UBvar v -> substn_fv_neg s v
   | UBnone | UBcons [] -> Tcons Top
   | UBcons (_ :: _ :: _) -> intfail "multirig gen"
   | UBcons [{cons;rigvars}] ->
-     let cons = map_head (substn visit bvars level ~index) (substn_fv_neg visit bvars level ~index) cons in
-     let rigvars_gen, rigvars_keep = Rvset.peel_level level rigvars in
-     (* Drop rigvars_gen if needed to avoid contravariant joins. *)
-     match cons, (rigvars_keep :> rigvar list), rigvars_gen with
-     | Bot, [], [v] ->
-        assert (Vector.get bvars v.var = Gen_rigid v);
-        Tvar (Vbound {index; var=v.var})
-     | cons, rigvars, _ ->
-        (* FIXME: should the rigvars be sorted? Should this be kept as Tsimple somehow? *)
-        List.fold_left (fun c r -> Tvjoin (c, Vrigid r)) (Tcons cons) rigvars
+     let cons = map_head (substn s) (substn_fv_neg s) cons in
+     let rigvars_gen, rigvars_keep = Rvset.peel_level s.level rigvars in
+     let rigvars_gen = rigvars_gen |> List.map (fun v ->
+       assert (Vector.get s.bvars v.var = Gen_rigid v);
+       Vbound {index=s.index; var=v.var}) in
+     let rigvars_keep =
+       (rigvars_keep :> rigvar list) |> List.map (fun v -> Vrigid v) in
+     match cons, rigvars_keep, rigvars_gen, s.mode with
+     | Bot, [], [v], _ -> Tvar v
+     | cons, rigvars, _, `Poly ->
+        (* Drop rigvars_gen to avoid making contravariant joins *)
+        List.fold_left (fun c r -> Tvjoin (c, r)) (Tcons cons) rigvars
+     | cons, rv_keep, rv_gen, `Elab ->
+        (* FIXME: this is wrong, I think. Be careful about Tvjoin invariants *)
+        List.fold_left (fun c r -> Tvjoin (c, r)) (Tcons cons) (rv_keep @ rv_gen)
 
 
 (* FIXME!!: gen constraints. What can upper bounds be? *)
-and substn_bvar visit bvars level fv =
-  assert (Env_level.equal fv.level level);
-  assert (is_visited_neg visit fv && is_visited_pos visit fv);
-  if fv.bound_var = -2 then unimp "flexvar recursive in own bound";
-  if fv.bound_var <> -1 then fv.bound_var else begin
-    let r = ref (Tcons Top) in
-    fv.bound_var <- -2;
-    r := substn_upper visit bvars level ~index:0 fv.upper;
-    let n = Vector.push bvars (Gen_flex (fv, r)) in
-    fv.bound_var <- n;
-    n
+and substn_bvar s fv =
+  assert (Env_level.equal fv.level s.level);
+  if not (is_visited_neg s.visit fv && is_visited_pos s.visit fv) then
+    None
+  else begin
+    if fv.bound_var = -2 then unimp "flexvar recursive in own bound";
+    if fv.bound_var <> -1 then
+      Some (Vbound {index=s.index; var=fv.bound_var})
+    else if s.mode = `Elab then
+      (* Don't generalise a variable just for the sake of Elab *)
+      None
+    else begin
+      let r = ref (Tcons Top) in
+      fv.bound_var <- -2;
+      r := substn_upper {s with index=0} fv.upper;
+      let n = Vector.push s.bvars (Gen_flex (fv, r)) in
+      fv.bound_var <- n;
+      Some (Vbound {index=s.index; var=n})
+    end
   end
 
 (* FIXME: deja vu? *)
-let rec substn_ptyp visit bvars level ~index : ptyp -> ptyp = function
-  | Tcons c -> Tcons (map_head (substn_ntyp visit bvars level ~index)
-                        (substn_ptyp visit bvars level ~index) c)
-  | Tsimple s -> substn visit bvars level ~index s
+let rec substn_ptyp s : ptyp -> ptyp = function
+  | Tcons c -> Tcons (map_head (substn_ntyp s) (substn_ptyp s) c)
+  | Tsimple t -> substn s t
   | Tvar (Vbound v) -> Tvar (Vbound v)
-  | Tvjoin (t, Vbound v) -> Tvjoin (substn_ptyp visit bvars level ~index t, Vbound v)
+  | Tvjoin (t, Vbound v) -> Tvjoin (substn_ptyp s t, Vbound v)
 
   | Tvjoin (_, (Vflex _ | Vrigid _)) | Tvar (Vflex _ | Vrigid _) as p ->
      (* must be locally closed since inside tvjoin flex/rigid *)
-     (substn visit bvars level ~index (simple_ptyp level p))
+     (substn s (simple_ptyp s.level p))
   | Tpoly {vars;body} ->
-     let index = index + 1 in
-     let vars = IArray.map (fun (s,t) -> s, substn_ntyp visit bvars level ~index t) vars in
-     let body = substn_ptyp visit bvars level ~index body in
+     let ss = {s with index = s.index + 1} in
+     let vars = IArray.map (fun (s,t) -> s, substn_ntyp ss t) vars in
+     let body = substn_ptyp ss body in
      Tpoly {vars; body}
 
-and substn_ntyp visit bvars level ~index : ntyp -> ntyp = function
-  | Tcons c -> Tcons (map_head (substn_ptyp visit bvars level ~index)
-                        (substn_ntyp visit bvars level ~index) c)
-  | Tsimple s -> substn_fv_neg visit bvars level ~index s
+and substn_ntyp s : ntyp -> ntyp = function
+  | Tcons c -> Tcons (map_head (substn_ptyp s) (substn_ntyp s) c)
+  | Tsimple t -> substn_fv_neg s t
   | Tvar (Vbound v) -> Tvar (Vbound v)
-  | Tvjoin (t, Vbound v) ->
-     Tvjoin (substn_ntyp visit bvars level ~index t, Vbound v)
+  | Tvjoin (t, Vbound v) -> Tvjoin (substn_ntyp s t, Vbound v)
 
   | Tvjoin (_, (Vflex _ | Vrigid _)) | Tvar (Vflex _ | Vrigid _) as n ->
      (* must be locally closed since inside tvjoin flex/rigid *)
-     substn_upper visit bvars level ~index (simple_ntyp level n)
+     substn_upper s (simple_ntyp s.level n)
 
   | Tpoly {vars;body} ->
-     let index = index + 1 in
-     let vars = IArray.map (fun (s,t) -> s, substn_ptyp visit bvars level ~index t) vars in
-     let body = substn_ntyp visit bvars level ~index body in
+     let ss = {s with index = s.index + 1} in
+     let vars = IArray.map (fun (s,t) -> s, substn_ptyp ss t) vars in
+     let body = substn_ntyp ss body in
      Tpoly {vars; body}

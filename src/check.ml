@@ -137,7 +137,7 @@ let typ_of_tyexp env t = typ_of_tyexp env (env_level env) t
 
 open Elab
 
-let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds option * 'a) elab =
+let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds option * tyexp * 'a) elab =
   let level = Env_level.extend (env_level env) in
   let rigvars', rig_names =
     match poly with
@@ -169,13 +169,14 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
   let bvars = Vector.create () in
   rigvars |> IArray.iter (fun rv -> ignore (Vector.push bvars (Gen_rigid rv)));
 
-  let ty = substn_ptyp visit bvars level ~index:0 ty in
+  let subst = { mode = `Poly; visit; bvars; level; index = 0 } in
+  let ty = substn_ptyp subst ty in
   (* Format.printf "GEN: %a\n --> %a\n%!" dump_ptyp orig_ty pp_ptyp ty; *)
   let erq = elabreq_map_typs erq ~index:0
-              ~neg:(substn_ntyp visit bvars level)
-              ~pos:(substn_ptyp visit bvars level) in
+              ~neg:(fun ~index t -> substn_ntyp {subst with index; mode=`Elab} t)
+              ~pos:(fun ~index t -> substn_ptyp {subst with index; mode=`Elab} t) in
   if Vector.length bvars = 0 then
-    ty, Elab (erq, fun e -> None, ek e)
+    ty, Elab (Pair(Ptyp ty, erq), fun (t,e) -> None, t, ek e)
   else
     let next_name = ref 0 in
     let rec mkname () =
@@ -189,9 +190,10 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
       | None -> name
       | Some _ -> mkname () in
     let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex (_,r) -> mkname (), !r) |> IArray.of_array in
-    let ty = Tpoly { vars = bounds; body = ty } in
-    wf_ptyp env ty;
-    ty, Elab (Gen{bounds; body=erq}, fun (poly, e) -> Some poly, ek e)
+    let tpoly = Tpoly { vars = bounds; body = ty } in
+    wf_ptyp env tpoly;
+    tpoly,
+    Elab (Gen{bounds; body=Pair(Ptyp ty, erq)}, fun (poly, (t,e)) -> Some poly, t, ek e)
   
 let fresh_flow env =
   let fv = fresh_flexvar (env_level env) in
@@ -243,6 +245,7 @@ and check' env e ty =
      let vs = check_pat env SymMap.empty pty p in
      let env = Env_vals { vals = vs; rest = env } in
      let* e, ety = e and* body = check env body ty in
+     (* FIXME: I think the type should be the type of the pattern, not ety. Maybe check_pat returns this? *)
      Let(p, Some ety, e, body)
   (* FIXME should I combine Tpoly and Func? *)
   | Fn (None, params, ret, body), Tpoly { vars; body = Tcons (Func (ptypes, rtype)) } ->
@@ -334,20 +337,36 @@ and infer' env : exp' -> ptyp * exp' elab = function
            match fn, p with
            | _, p -> check_pat env acc t p) SymMap.empty params in
          let env' = Env_vals { vals = vs; rest = env } in
-         let res, body = check_or_infer env' ret body in
+         let res, body = check_or_infer' env' ret body in
          let _ = map_fields (fun _fn (t,_) -> wf_ntyp env t) params in
+         (* FIXME bug here
+            There are different rules for elaborating types in the function signature and body.
+            (Because the generalised vars are rigid in the body, but may be flex in the signature)
+            We should make sure that the elaborated param / return types are those from the sig, not the body.
+            Here they're getting elaborated separately, which is wrong.
+            FIXME probably the same bug exists in checking
+          *)
          Tcons (Func (map_fields (fun _fn (t,_) -> t) params, res)),
+         body
+         (*
          let* params =
            elab_fields (map_fields (fun _fn (t, pat) ->
              elab_pair (elab_pure pat) (elab_ntyp t)) params)
          and* body = body in
-         params, body) in
+         params, body*) ) in
      ty,
-     let* poly, (params, (body, ret)) = elab in
-     Fn (poly,
-         map_fields (fun _ (p, ty) -> p, Some ty) params,
-         Some ret,
-         body)
+     let* poly, ty, body = elab in
+     let tparams, tret =
+       match ty with
+       | Some (Tfunc (p,r)), _ -> p, r
+       | ty -> intfail "what? %a" pp_tyexp ty in
+     let params =
+       merge_fields params tparams
+         ~left:(fun _ _ -> assert false)
+         ~right:(fun _ _-> assert false)
+         ~both:(fun _fn (p, _) t -> Some (p, Some t))
+         ~extra:(fun ((c, _),_) -> c) in
+     Fn (poly, params, Some tret, body)
   | App (f, args) ->
      let fty, f = infer env f in
      let args = map_fields (fun _fn e -> e, Ivar.make ()) args in
@@ -418,6 +437,15 @@ and check_or_infer env ty e : ptyp * (exp * tyexp) elab =
      let* e = check env e t
      and* ty = elab_pure ty in
      e, ty
+
+(* when rolling your own elab *)
+and check_or_infer' env ty e : ptyp * exp elab =
+  match ty with
+  | None ->
+     infer env e
+  | Some ty ->
+     let t = typ_of_tyexp env ty in
+     t, check env e t
 
 and check_annot env annot ty =
   wf_ntyp env ty;
