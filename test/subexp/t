@@ -508,3 +508,107 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|A|B, c:an
 >     {a: x, b: x, c: x}
 >   }
 > [A <: {foo: int}, B <: {bar: bool}] (A) -> {a: {bar: bool} | A, b: {foo: int} | A | B, c: any}
+
+
+
+fn(x, y, k1, k2, k3) {
+  let ch = fn[X](a:X,b:X){if true {a} else {b}};
+  let z = ch(x, y)(fn(x){k1(x)});
+  (x(k2), y(k3))
+}
+> fn (x, y, k1, k2, k3) {
+>   let ch = fn [X](a: X, b: X) { if true { a } else { b } };
+>   let z = ch(x, y)(fn (x) { k1(x) });
+>   (x(k2), y(k3))
+> }
+>   fn [A, B, C, D, E, F](
+>     x: (((D) -> C) | E) -> A,
+>     y: (((D) -> C) | F) -> B,
+>     k1: (D) -> C,
+>     k2: E,
+>     k3: F
+>   ) -> (A, B) {
+>     let ch : [X] (X, X) -> X =
+>     fn [X](a: X, b: X) -> X { if true { a } else { b } };
+>     let z : A | B = ch(x, y)(fn (x: D) -> C { k1(x) });
+>     (x(k2), y(k3))
+>   }
+> [A, B, C, D, E, F] (((D) -> C | E) -> A, ((D) -> C | F) -> B, (D) -> C, E, F) -> (A, B)
+
+
+# flex_cons_upper freshening matchability bug
+fn(x, y) {
+  let ch = fn[X](a:X,b:X){if true {a} else {b}};
+  let z = ch(x, y).bar;
+  (x.bar, y.bar)
+}
+> fn (x, y) {
+>   let ch = fn [X](a: X, b: X) { if true { a } else { b } };
+>   let z = ch(x, y).bar;
+>   (x.bar, y.bar)
+> }
+>   fn [A, B](x: {bar: A, ...}, y: {bar: B, ...}) -> (A, B) {
+>     let ch : [X] (X, X) -> X =
+>     fn [X](a: X, b: X) -> X { if true { a } else { b } };
+>     let z : A | B = ch(x, y).bar;
+>     (x.bar, y.bar)
+>   }
+> [A, B] ({bar: A, ...}, {bar: B, ...}) -> (A, B)
+
+# version that actually fails if bug present
+fn(y) {
+  let ch = fn[X](a:X,b:X){if true {a} else {b}};
+  let z = ch({bar:true}, y).bar;
+  (y.bar : int)
+}
+> fn (y) {
+>   let ch = fn [X](a: X, b: X) { if true { a } else { b } };
+>   let z = ch({bar: true}, y).bar;
+>   (y.bar : int)
+> }
+>   fn [A <: int](y: {bar: A, ...}) -> int {
+>     let ch : [X] (X, X) -> X =
+>     fn [X](a: X, b: X) -> X { if true { a } else { b } };
+>     let z : bool | A = ch({bar: true}, y).bar;
+>     (y.bar : int)
+>   }
+> [A <: int] ({bar: A, ...}) -> int
+
+# same bug, in CPSish style (for nonstrictly positive vars)
+# tricky case requiring duplication of non-strictly-covariant vars in flex_cons_upper
+fn (x, y, k1, k2, k3) {
+  let use = fn [P](a : ((P) -> int) -> int) { a(k1) };
+  let ch = fn [X](a : X, b : X) { if true { a } else { b } };
+  let z = use(ch(x, y));
+  ((x : ((int) -> int) -> int), y)
+}
+> fn (x, y, k1, k2, k3) {
+>   let use = fn [P](a: ((P) -> int) -> int) { a(k1) };
+>   let ch = fn [X](a: X, b: X) { if true { a } else { b } };
+>   let z = use(ch(x, y));
+>   ((x : ((int) -> int) -> int), y)
+> }
+>   fn [A <: ((any) -> int) -> int](
+>     x: ((int) -> int) -> int,
+>     y: A,
+>     k1: (any) -> int,
+>     k2: any,
+>     k3: any
+>   ) -> (((int) -> int) -> int, A) {
+>     let use : [P] (((P) -> int) -> int) -> int =
+>     fn [P](a: ((P) -> int) -> int) -> int { a(k1) };
+>     let ch : [X] (X, X) -> X =
+>     fn [X](a: X, b: X) -> X { if true { a } else { b } };
+>     let z : int = use(ch(x, y));
+>     ((x : ((int) -> int) -> int), y)
+>   }
+> [A <: ((any) -> int) -> int] (((int) -> int) -> int, A, (any) -> int, any, any) -> (((int) -> int) -> int, A)
+
+
+# FIXME: hits the elab bug
+# fn (x, y, k) {
+#   let ch = fn[X](a:X,b:X){if true {a} else {b}};
+#   let z = ch(x,y)(fn (a) {let z : int = k(a); 1});
+#   (x(fn(x) { x }), y(fn (x) { x}))
+# }
+# > ?

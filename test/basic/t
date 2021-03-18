@@ -744,10 +744,10 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let 
 > Called from Lang__Types.subtype_ctor_rig in file "src/types.ml", line 203, characters 2-156
 > Called from Stdlib__list.iter in file "list.ml", line 110, characters 12-15
 > Called from Lang__Types.subtype_cons_flex in file "src/types.ml", line 390, characters 7-96
-> Called from Lang__Types.subtype in file "src/types.ml", line 663, characters 5-91
+> Called from Lang__Types.subtype in file "src/types.ml", line 664, characters 5-91
 > Called from Stdlib__map.Make.iter in file "map.ml", line 296, characters 20-25
 > Called from Lang__Types.subtype_cons in file "src/types.ml", line 37, characters 5-46
-> Called from Lang__Types.subtype in file "src/types.ml", line 650, characters 5-30
+> Called from Lang__Types.subtype in file "src/types.ml", line 651, characters 5-30
 > Called from Lang__Check.check' in file "src/check.ml", line 278, characters 5-37
 > Called from Lang__Check.check in file "src/check.ml", line 205, characters 14-29
 > Called from Stdlib__map.Make.mapi in file "map.ml", line 312, characters 19-24
@@ -1041,5 +1041,3 @@ fn (f) { fn(g) { fn(x) { (f(x.foo), g(x.foo)) } } }
 >     }
 >   }
 > [A, B] ((B) -> A) -> [A_2] ((B) -> A_2) -> ({foo: B, ...}) -> (A, A_2)
-
-

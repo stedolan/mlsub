@@ -120,7 +120,6 @@ let flexlb_fv fv = { ctor = { cons = Bot; rigvars = [] }; flexvars = [fv] }
  *)
 
 
-
 let fresh_flexvar level = fresh_flexvar_gen level UBnone
 
 (* equivalent to making a fresh var and constraining <= fv
@@ -129,17 +128,20 @@ let fresh_below_var lvl fv =
   assert (Env_level.extends fv.level lvl);
   fresh_flexvar_gen lvl (UBvar fv)
 
+let rec duplicate_contravariant_lower lvl t =
+  { t with ctor = map_ctor_rig (fresh_below_var lvl) (duplicate_contravariant_lower lvl) t.ctor }
+let duplicate_covariant_upper lvl c =
+  map_ctor_rig (duplicate_contravariant_lower lvl) (fresh_below_var lvl) c
+
 (* equivalent to making a fresh var and constraining <= cn
    cn must be wf at lvl. FIXME: check this thoroughly *)
 let fresh_below_cons lvl {cons;rigvars} =
   List.iter (fun (rv : rigvar) -> assert (Env_level.extends rv.level lvl)) rigvars;
   let rigvars = List.sort_uniq compare_rigvar rigvars in (* FIXME: hideous *)
-  (* need to freshen covariant parts of cons to preserve matchability.
-     FIXME: is that true for double-negative parts as well?
-     What's the matchability status of the flexvars embedded in the flex_lower_bound?
-     I don't think we assume it below, we always join there rather than matching. Verify. *)
-  let cons = map_head id (fresh_below_var lvl) cons in
-  fresh_flexvar_gen lvl (UBcons [{cons;rigvars}])
+  (* need to freshen covariant parts of cons to preserve matchability. *)
+  let ctor = duplicate_covariant_upper lvl {cons; rigvars} in
+  fresh_flexvar_gen lvl (UBcons [ctor])
+
 
 (* add some flexvars to a join.
    does not check levels, so level of resulting join may increase *)
@@ -149,6 +151,7 @@ let join_flexvars lower vs =
     match List.filter (fun v -> not (List.memq v lower.flexvars)) vs with
     | [] -> lower
     | vs -> { lower with flexvars = lower.flexvars @ vs }
+
 
 (* Convert a flexvar's upper bound(s) to UBcons form. May decrease levels. *)
 let rec flex_cons_upper ~changes env (fv : flexvar) : (flex_lower_bound, flexvar) ctor_ty list =
@@ -170,12 +173,9 @@ let rec flex_cons_upper ~changes env (fv : flexvar) : (flex_lower_bound, flexvar
      end;
      (* ~changes: don't really care, already logging fv *)
      fv_set_lower ~changes v (join_flexvars v.lower [fv]); (* wf: levels equal *)
-     (* To preserve matchability, need to freshen the strictly covariant variables in pv.upper. *)
-     (* FIXME: why only strictly covariant? Is there a bug here?
-        How are the non-strictly-covariant ones joined?
-        See also fresh_below_cons, same deal. *)
+     (* To preserve matchability, need to freshen the covariant variables in pv.upper. *)
      (* No hoisting needed since we're at the same level as v *)
-     let upper = List.map (map_ctor_rig id (fresh_below_var fv.level)) upper in
+     let upper = List.map (duplicate_covariant_upper fv.level) upper in
      fv_set_upper ~changes fv (UBcons upper);
      upper
 
@@ -442,7 +442,8 @@ and hoist_flex ~error ~changes env level v =
        else begin
          fv_set_level ~changes v level;
          (* FIXME hoisting: seems wrong - need to drop some rigvars here? *)
-         let cns = List.map (map_ctor_rig (join_lower ~error ~changes env level bottom) (fun v -> hoist_flex ~error ~changes env level v; v)) cns in
+         let cns = List.map (map_ctor_rig (join_lower ~error ~changes env level bottom)
+                               (fun v -> hoist_flex ~error ~changes env level v; v)) cns in
          fv_set_upper ~changes v (UBcons cns);
          hoist_lower ~error ~changes env level v.lower;
 
