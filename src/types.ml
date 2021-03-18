@@ -96,13 +96,6 @@ let join_cons
      | None -> Top
      end
 
-let contains_rigvar (v : rigvar) vs =
-  List.exists (fun rv -> rv = v) vs
-
-let join_rigvars c vs =
-  let vs = List.filter (fun v -> not (contains_rigvar v c.rigvars)) vs in
-  { c with rigvars = c.rigvars @ vs }
-
 (* There are two ways to represent a constraint α ≤ β between two flexible variables.
    (I). Make the upper bound of α be UBvar β. (Ensure also that LB(β) contains LB(α))
    (II). Make the lower bound of β contain α. (Ensure also that UB(α) contains UB(β)) *)
@@ -110,9 +103,9 @@ let join_rigvars c vs =
 
 let noerror _ = failwith "subtyping error should not be possible here!"
 
-let bottom = {ctor={cons=Bot;rigvars=[]};flexvars=[]}
+let bottom = {ctor={cons=Bot;rigvars=Rvset.empty};flexvars=[]}
 
-let flexlb_fv fv = { ctor = { cons = Bot; rigvars = [] }; flexvars = [fv] }
+let flexlb_fv fv = { ctor = { cons = Bot; rigvars = Rvset.empty }; flexvars = [fv] }
 
 
 (*
@@ -136,8 +129,7 @@ let duplicate_covariant_upper lvl c =
 (* equivalent to making a fresh var and constraining <= cn
    cn must be wf at lvl. FIXME: check this thoroughly *)
 let fresh_below_cons lvl {cons;rigvars} =
-  List.iter (fun (rv : rigvar) -> assert (Env_level.extends rv.level lvl)) rigvars;
-  let rigvars = List.sort_uniq compare_rigvar rigvars in (* FIXME: hideous *)
+  List.iter (fun (rv : rigvar) -> assert (Env_level.extends rv.level lvl)) (rigvars :> rigvar list);
   (* need to freshen covariant parts of cons to preserve matchability. *)
   let ctor = duplicate_covariant_upper lvl {cons; rigvars} in
   fresh_flexvar_gen lvl (UBcons [ctor])
@@ -159,12 +151,12 @@ let rec flex_cons_upper ~changes env (fv : flexvar) : (flex_lower_bound, flexvar
   | UBcons c -> c
   | UBnone ->
      (* FIXME: should be [], but this hits more nasty cases in tests for now *)
-     assert (fv.lower = { ctor = { cons = Bot; rigvars = [] } ; flexvars = [] });
-     let triv = [{cons=Top; rigvars=[]}] in
+     assert (fv.lower = { ctor = { cons = Bot; rigvars = Rvset.empty } ; flexvars = [] });
+     let triv = [{cons=Top; rigvars=Rvset.empty}] in
      fv_set_upper ~changes fv (UBcons triv);
      triv
   | UBvar v ->
-     assert (fv.lower = { ctor = { cons = Bot; rigvars = [] } ; flexvars = [] });
+     assert (fv.lower = { ctor = { cons = Bot; rigvars = Rvset.empty } ; flexvars = [] });
      assert (Env_level.extends v.level fv.level);
      let upper = flex_cons_upper ~changes env v in (* NB: may hoist v! *)
      if not (Env_level.equal v.level fv.level) then begin
@@ -200,8 +192,8 @@ and subtype_t_cons ~error ~changes env (p : flex_lower_bound) (cn : (flex_lower_
   subtype_ctor_rig ~error ~changes env p.ctor cn
 
 and subtype_ctor_rig ~error ~changes env cp cn =
-  cp.rigvars |> List.iter (fun pv ->
-    if contains_rigvar pv cn.rigvars then ()
+  (cp.rigvars :> rigvar list) |> List.iter (fun pv ->
+    if Rvset.contains cn.rigvars pv then ()
     else subtype_ctor_rig ~error ~changes env (env_rigid_bound env pv) cn);
   subtype_cons ~error
     ~neg:(subtype_t_var ~error ~changes env)
@@ -240,18 +232,18 @@ and subtype_flex_cons ~error ~changes env pv cn =
    appears in its upper bounds.
      rv <= a <= C implies rv <= a <= C | rv since rv <= C is C = C | rv *)
 and ensure_rigvars_present ~changes env (fv : flexvar) =
-  match fv.lower.ctor.rigvars with
-  | [] -> ()
-  | rvlow ->
+  let rvlow = fv.lower.ctor.rigvars in
+  if Rvset.is_empty rvlow then ()
+  else
      let cbs = flex_cons_upper ~changes env fv in
      let rv_present, rv_absent = cbs |> List.partition (fun {cons=_;rigvars} ->
-       rvlow |> List.for_all (fun rv -> List.exists (equal_rigvar rv) rigvars)) in
+       (rvlow :> rigvar list) |> List.for_all (fun rv -> Rvset.contains rigvars rv)) in
      match rv_absent with
      | [] -> ()
      | rv_absent ->
         fv_set_upper ~changes fv (UBcons rv_present);
         rv_absent |> List.iter (fun cb ->
-          let cb = { cb with rigvars = List.sort_uniq compare_rigvar (cb.rigvars @ rvlow) } in
+          let cb = { cb with rigvars = Rvset.join cb.rigvars rvlow } in
           (* This shouldn't fail because we already have fv <= cb *)
           subtype_flex_cons ~error:noerror ~changes env fv cb)
 
@@ -259,12 +251,8 @@ and ensure_rigvars_present ~changes env (fv : flexvar) =
    Returns the constructed upper bound. *)
 and ensure_upper_matches ~error ~changes env (pv : flexvar) (cn : (flex_lower_bound, unit) ctor_ty) : (unit, flexvar) cons_head =
   let cbs = flex_cons_upper ~changes env pv in
-  let cnrig =
-    cn.rigvars
-    |> List.filter (fun (rv : rigvar) -> Env_level.extends rv.level pv.level)
-    |> List.sort_uniq compare_rigvar in
-  let cbs_match, cbs_rest =
-    List.partition (fun cb -> equal_lists equal_rigvar cb.rigvars cnrig) cbs in
+  let cnrig = Rvset.filter (fun rv -> Env_level.extends rv.level pv.level) cn.rigvars in
+  let cbs_match, cbs_rest = List.partition (fun cb -> Rvset.equal cnrig cb.rigvars) cbs in
   let cb, new_rvset =
     match cbs_match with
     | [] -> Top, true
@@ -290,7 +278,7 @@ and ensure_upper_matches ~error ~changes env (pv : flexvar) (cn : (flex_lower_bo
 
 and subtype_cons_flex ~error ~changes env (cp : (flexvar, flex_lower_bound) ctor_ty) (nv : flexvar) =
   match cp with
-  | { cons = Bot; rigvars = [] } ->
+  | { cons = Bot; rigvars } when Rvset.is_empty rigvars ->
      (* avoid even calling flex_cons_upper in the trivial case *)
      ()
   | cp ->
@@ -321,12 +309,13 @@ and join_ctor ~error ~changes env level lower cp =
        lower.ctor.cons cp.cons in
   (* FIXME: Top case of rigvars? check. *)
   List.fold_left (fun c rv ->
-    if contains_rigvar rv c.ctor.rigvars then c
+    if Rvset.contains c.ctor.rigvars rv then c
     else if Env_level.extends rv.level level then begin
-      { c with ctor = { c.ctor with rigvars = c.ctor.rigvars @ [rv] } }
+      { c with ctor = { c.ctor with rigvars = Rvset.add c.ctor.rigvars rv } }
     end else
       join_ctor ~error ~changes env level c (env_rigid_bound env rv))
-    { ctor = { cons; rigvars = lower.ctor.rigvars }; flexvars = lower.flexvars} cp.rigvars
+    { ctor = { cons; rigvars = lower.ctor.rigvars }; flexvars = lower.flexvars}
+    (cp.rigvars :> rigvar list)
 
 and join_lower ~error ~changes env level lower {ctor; flexvars} =
   let ctor = join_ctor ~error ~changes env level lower ctor in
@@ -389,29 +378,29 @@ let rec simple_ptyp lvl : ptyp -> flex_lower_bound = function
   | Tsimple t -> t
   | Tcons cp ->
      let cons = map_head (simple_ntyp_var lvl) (simple_ptyp lvl) cp in
-     { ctor = { cons; rigvars = [] } ; flexvars = [] }
+     { ctor = { cons; rigvars = Rvset.empty } ; flexvars = [] }
   | Tpoly _ -> intfail "simple_ptyp: Tpoly is not simple"
   | Tvjoin (_, Vbound _) | Tvar (Vbound _) -> intfail "simple_ptyp: not locally closed"
   | Tvar (Vflex fv) ->
      assert (Env_level.extends fv.level lvl);
-     { ctor = {cons=Bot;rigvars=[]}; flexvars = [fv] }
+     { ctor = {cons=Bot;rigvars=Rvset.empty}; flexvars = [fv] }
   | Tvar (Vrigid rv) ->
      assert (Env_level.extends rv.level lvl);
-     { ctor = {cons=Bot; rigvars=[rv]}; flexvars = [] }
+     { ctor = {cons=Bot; rigvars=Rvset.singleton rv}; flexvars = [] }
   | Tvjoin (t, Vflex fv) ->
      assert (Env_level.extends fv.level lvl);
      join_flexvars (simple_ptyp lvl t) [fv]
   | Tvjoin (t, Vrigid rv) ->
      assert (Env_level.extends rv.level lvl);
      let {ctor={cons;rigvars};flexvars} = simple_ptyp lvl t in
-     {ctor={cons;rigvars=if contains_rigvar rv rigvars then rigvars else rigvars@[rv]};flexvars}
+     {ctor={cons;rigvars=Rvset.add rigvars rv};flexvars}
 
 (* FIXME: styp_neg isn't really the right type here *)
 and simple_ntyp lvl : ntyp -> styp_neg = function
   | Tsimple t -> UBvar t
   | Tcons Top -> UBnone
   | Tcons cn ->
-     UBcons [{cons = map_head (simple_ptyp lvl) (simple_ntyp_var lvl) cn; rigvars=[]}]
+     UBcons [{cons = map_head (simple_ptyp lvl) (simple_ntyp_var lvl) cn; rigvars=Rvset.empty}]
   | Tpoly _ -> intfail "simple_ntyp: Tpoly is not simple"
   | Tvjoin (_, Vbound _) | Tvar (Vbound _) -> intfail "simple_ntyp: not locally closed"
   | Tvar (Vflex fv) ->
@@ -419,7 +408,7 @@ and simple_ntyp lvl : ntyp -> styp_neg = function
      UBvar fv
   | Tvar (Vrigid rv) ->
      assert (Env_level.extends rv.level lvl);
-     UBcons [{cons=Bot; rigvars=[rv]}]
+     UBcons [{cons=Bot; rigvars=Rvset.singleton rv}]
   | Tvjoin (_, Vflex _) -> intfail "simple_ntyp: negative join"
   | Tvjoin (t, Vrigid rv) ->
      assert (Env_level.extends rv.level lvl);
@@ -427,8 +416,7 @@ and simple_ntyp lvl : ntyp -> styp_neg = function
      | UBnone -> UBnone
      | UBvar _ -> intfail "simple_ntyp: rigid/flex negative join"
      | UBcons [{cons;rigvars}] ->
-        let rigvars = if contains_rigvar rv rigvars then rigvars else rv::rigvars in
-        UBcons [{cons;rigvars}]
+        UBcons [{cons;rigvars = Rvset.add rigvars rv}]
      | UBcons _ -> assert false (* FIXME ugly *)
 
 and simple_ntyp_var lvl (t : ntyp) : flexvar =
@@ -440,7 +428,7 @@ and simple_ntyp_var lvl (t : ntyp) : flexvar =
 
 let simple_ntyp_bound lvl t =
   match simple_ntyp lvl t with
-  | UBnone -> { cons = Top; rigvars = [] }
+  | UBnone -> { cons = Top; rigvars = Rvset.empty }
   | UBcons [c] -> c
   | UBvar _ -> intfail "simple_ntyp_bound: flexvars present in bound"
   | UBcons _ -> assert false (* FIXME ugly *)
@@ -459,7 +447,7 @@ let instantiate_flex env vars body =
 let rec approx_ptyp env : ptyp -> flex_lower_bound = function
   | Tcons cp ->
      let cons = map_head (approx_ntyp_var env) (approx_ptyp env) cp in
-     { ctor = { cons; rigvars = [] }; flexvars = [] }
+     { ctor = { cons; rigvars = Rvset.empty }; flexvars = [] }
   | (Tvar _ | Tvjoin _ | Tsimple _) as t -> simple_ptyp (env_level env) t
   | Tpoly {vars;body} ->
      let body = instantiate_flex env vars body in
@@ -470,7 +458,7 @@ let rec approx_ptyp env : ptyp -> flex_lower_bound = function
 and approx_ntyp env : ntyp -> styp_neg = function
   | Tcons cn ->
      let cons = map_head (approx_ptyp env) (approx_ntyp_var env) cn in
-     UBcons [{cons;rigvars=[]}]
+     UBcons [{cons;rigvars=Rvset.empty}]
   | (Tvar _ | Tvjoin _ | Tsimple _) as t ->
      simple_ntyp (env_level env) t
   | Tpoly {vars; body} ->
@@ -529,11 +517,11 @@ let rec match_simple_typ ~error ~changes env lvl (p : flex_lower_bound) (head : 
   subtype_cons ~error cons head
     ~neg:(subtype_t_var ~error ~changes env)
     ~pos:(fun p r -> r := join_lower ~error ~changes env lvl !r p);
-  rigvars |> List.iter (fun rv ->
+  (rigvars :> rigvar list) |> List.iter (fun rv ->
     match_simple_typ ~error ~changes env lvl {ctor=env_rigid_bound env rv;flexvars=[]} head);
   flexvars |> List.iter (fun fv ->
     let mhead = map_head id ignore head in
-    let m = ensure_upper_matches ~error ~changes:(ref []) env fv {cons=mhead;rigvars=[]} in
+    let m = ensure_upper_matches ~error ~changes:(ref []) env fv {cons=mhead;rigvars=Rvset.empty} in
     subtype_cons ~error:noerror m head
       ~neg:(fun _t () -> () (*already filled*))
       (* FIXME levels: fine as long as lvl = env_level env? Enforce? *)
@@ -681,15 +669,14 @@ and expand_fv_neg visit ~changes env level nv =
     | UBcons cns ->
        let cns = List.map (map_ctor_rig (expand visit ~changes env level) (expand_fv_neg visit ~changes env level)) cns in
 
-       let all_rigvars =
-         List.concat_map (fun c -> c.rigvars) cns |> List.sort_uniq compare_rigvar in
-       let keep_rigvars = all_rigvars |> List.filter (fun rv ->
+       let all_rigvars = List.fold_left (fun s c -> Rvset.join s c.rigvars) Rvset.empty cns in
+       let keep_rigvars = all_rigvars |> Rvset.filter (fun rv ->
          cns |> List.for_all (fun cn ->
            let temp_changes = ref [] in
            let error _ = raise Exit in
            (* FIXME: speculative subtyping is very dodgy *)
            match subtype_ctor_rig ~error ~changes:temp_changes env
-                   {cons=Bot; rigvars=[rv]} cn with
+                   {cons=Bot; rigvars=Rvset.singleton rv} cn with
            | () when !temp_changes = [] -> true
 
            | () ->
@@ -750,12 +737,12 @@ type genvar =
 
 let rec substn visit bvars level ~index ({ctor={cons;rigvars};flexvars} : flex_lower_bound) : ptyp =
   let cons = map_head (substn_fv_neg visit bvars level ~index) (substn visit bvars level ~index) cons in
-  let rigvars_gen, rigvars_keep = List.partition (fun (rv:rigvar) -> Env_level.equal rv.level level) rigvars in
+  let rigvars_gen, rigvars_keep = Rvset.peel_level level rigvars in
   let flexvars_gen, flexvars_keep = List.partition (fun (fv:flexvar) -> Env_level.equal fv.level level) flexvars in
 
   let rigvars_gen = rigvars_gen |> List.map (fun (rv:rigvar) ->
     Vbound {index; var = rv.var}) in
-  let rigvars_keep = rigvars_keep |> List.map (fun rv -> Vrigid rv) in
+  let rigvars_keep = (rigvars_keep :> rigvar list) |> List.map (fun rv -> Vrigid rv) in
   let flexvars_gen = flexvars_gen |> List.filter_map (fun pv ->
     if is_visited_neg visit pv then
       Some (Vbound {index; var = substn_bvar visit bvars level pv})
@@ -787,9 +774,9 @@ and substn_upper visit bvars level ~index = function
   | UBcons (_ :: _ :: _) -> intfail "multirig gen"
   | UBcons [{cons;rigvars}] ->
      let cons = map_head (substn visit bvars level ~index) (substn_fv_neg visit bvars level ~index) cons in
-     let rigvars_gen, rigvars_keep = List.partition (fun (rv:rigvar) -> Env_level.equal rv.level level) rigvars in
+     let rigvars_gen, rigvars_keep = Rvset.peel_level level rigvars in
      (* Drop rigvars_gen if needed to avoid contravariant joins. *)
-     match cons, rigvars_keep, rigvars_gen with
+     match cons, (rigvars_keep :> rigvar list), rigvars_gen with
      | Bot, [], [v] ->
         assert (Vector.get bvars v.var = Gen_rigid v);
         Tvar (Vbound {index; var=v.var})

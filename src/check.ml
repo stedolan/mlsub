@@ -114,7 +114,7 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
   let level = Env_level.extend (env_level env) in
   let stubs =
     vars
-    |> List.map (fun ((name,_),_) -> {name; upper={cons=Top;rigvars=[]}})
+    |> List.map (fun ((name,_),_) -> {name; upper={cons=Top;rigvars=Rvset.empty}})
     |> IArray.of_list in
   let mkbound rig_names bound =
     match bound with
