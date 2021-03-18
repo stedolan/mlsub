@@ -507,8 +507,12 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|A|B, c:an
 >     {a: {bar: bool} | A, b: {foo: int} | A | B, c: any} {
 >     {a: x, b: x, c: x}
 >   }
-> [A <: {foo: int}, B <: {bar: bool}] (A) -> {a: {bar: bool} | A, b: {foo: int} | A | B, c: any}
+> [A <: {foo: int}, B <: {bar: bool}] (A) -> {a: {bar: bool} | A, b: {foo: int} | B, c: any}
 
+fn[A](x: any, y:A) { if true {x} else {y} }
+> fn [A](x: any, y: A) { if true { x } else { y } }
+>   fn [A](x: any, y: A) -> any { if true { x } else { y } }
+> [A] (any, A) -> any
 
 
 fn(x, y, k1, k2, k3) {

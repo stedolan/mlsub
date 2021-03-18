@@ -305,7 +305,6 @@ and join_ctor ~error ~changes env level lower cp =
        ~pright:(fun x -> join_lower ~error ~changes env level bottom x)
        ~pboth:(fun x y -> join_lower ~error ~changes env level x y)
        lower.ctor.cons cp.cons in
-  (* FIXME: Top case of rigvars? check. *)
   List.fold_left (fun c rv ->
     if Rvset.contains c.ctor.rigvars rv then c
     else if Env_level.extends rv.level level then begin
@@ -620,6 +619,37 @@ let is_visited_neg visit fv =
   assert (fv.neg_visit_count land 1 = 0);
   fv.neg_visit_count = visit
 
+(* Speculative subtyping.
+   Dodgy, order-dependent, and probably not principal.
+   In its defence:
+     (a) only used during generalisation, where order is visible and
+         nonprincipality only risks β-expansion (I think?)
+     (b) only matters in higher-rank / checked rigvar contexts, where
+         nonprincipality is less of an issue *)
+let spec_sub_rigid_cons env (rv : rigvar) cn =
+  let changes = ref [] in
+  let error _ = raise Exit in
+  match subtype_ctor_rig ~error ~changes env
+          {cons=Bot; rigvars=Rvset.singleton rv} cn with
+  | () when !changes = [] -> true
+  | () ->
+     (* Dubious case: we could also choose to keep these changes *)
+     revert !changes; false
+  | exception Exit ->
+     revert !changes; false
+
+let spec_sub_rigid_pos env (rv : rigvar) p =
+  let changes = ref [] in
+  let error _ = raise Exit in
+  match join_lower ~error ~changes env (env_level env) p {ctor=env_rigid_bound env rv; flexvars=[]} with
+  | p' when equal_flex_lower_bound p p' && !changes = [] -> true
+  | _ ->
+     revert !changes; false
+  | exception Exit ->
+     revert !changes; false
+
+
+
 
 (* FIXME: I think this is all dodgy re flexvars at upper levels
    Are there enough level checks in expand / substn? *)
@@ -627,7 +657,10 @@ let is_visited_neg visit fv =
 
 let rec expand visit ~changes ?(vexpand=[]) env level (p : flex_lower_bound) =
   wf_flex_lower_bound ~seen:(Hashtbl.create 10) env level p;
-  let ctor = map_ctor_rig (expand_fv_neg visit ~changes env level) (expand visit ~changes env level) p.ctor in
+  let cons = map_head (expand_fv_neg visit ~changes env level) (expand visit ~changes env level) p.ctor.cons in
+  let rigvars = p.ctor.rigvars |> Rvset.filter (fun rv ->
+    not (spec_sub_rigid_pos env rv {ctor={cons;rigvars=Rvset.empty};flexvars=[]})) in
+  let ctor = { cons; rigvars } in
   let flexvars_gen, flexvars_keep = List.partition (fun fv -> Env_level.equal fv.level level) p.flexvars in
   flexvars_keep |> List.iter (fun fv ->
     (* Hoist to avoid making invalid Tvjoins later *)
@@ -669,21 +702,7 @@ and expand_fv_neg visit ~changes env level nv =
 
        let all_rigvars = List.fold_left (fun s c -> Rvset.join s c.rigvars) Rvset.empty cns in
        let keep_rigvars = all_rigvars |> Rvset.filter (fun rv ->
-         cns |> List.for_all (fun cn ->
-           let temp_changes = ref [] in
-           let error _ = raise Exit in
-           (* FIXME: speculative subtyping is very dodgy *)
-           match subtype_ctor_rig ~error ~changes:temp_changes env
-                   {cons=Bot; rigvars=Rvset.singleton rv} cn with
-           | () when !temp_changes = [] -> true
-
-           | () ->
-              (* FIXME: which of these is less bad? *)
-              revert !temp_changes; false
-              (* commit ~changes !temp_changes; true *)
-
-           | exception Exit -> revert !temp_changes; false
-         )) in
+         cns |> List.for_all (fun cn -> spec_sub_rigid_cons env rv cn)) in
 
        fv_set_upper ~changes nv (UBcons []);
        cns |> List.iter (fun cn ->
