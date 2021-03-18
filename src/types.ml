@@ -103,8 +103,6 @@ let join_cons
 
 let noerror _ = failwith "subtyping error should not be possible here!"
 
-let bottom = {ctor={cons=Bot;rigvars=Rvset.empty};flexvars=[]}
-
 let flexlb_fv fv = { ctor = { cons = Bot; rigvars = Rvset.empty }; flexvars = [fv] }
 
 
@@ -150,13 +148,13 @@ let rec flex_cons_upper ~changes env (fv : flexvar) : (flex_lower_bound, flexvar
   match fv.upper with
   | UBcons c -> c
   | UBnone ->
+     assert (is_bottom fv.lower);
      (* FIXME: should be [], but this hits more nasty cases in tests for now *)
-     assert (fv.lower = { ctor = { cons = Bot; rigvars = Rvset.empty } ; flexvars = [] });
      let triv = [{cons=Top; rigvars=Rvset.empty}] in
      fv_set_upper ~changes fv (UBcons triv);
      triv
   | UBvar v ->
-     assert (fv.lower = { ctor = { cons = Bot; rigvars = Rvset.empty } ; flexvars = [] });
+     assert (is_bottom fv.lower);
      assert (Env_level.extends v.level fv.level);
      let upper = flex_cons_upper ~changes env v in (* NB: may hoist v! *)
      if not (Env_level.equal v.level fv.level) then begin

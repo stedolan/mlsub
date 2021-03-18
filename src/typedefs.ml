@@ -340,6 +340,10 @@ let equal_styp_neg (p : styp_neg) (q : styp_neg) =
        equal_cons equal_flex_lower_bound equal_flexvar cp.cons cq.cons) cps cqs
   | (UBnone|UBvar _|UBcons _), _ -> false
 
+
+let bottom = {ctor={cons=Bot;rigvars=Rvset.empty};flexvars=[]}
+let is_bottom t = equal_flex_lower_bound bottom t
+
 (*
  * Flexvar mutations and backtracking log
  *)
@@ -507,7 +511,7 @@ let next_flexvar_id = ref 0
 let fresh_flexvar_gen level upper : flexvar =
   let id = !next_flexvar_id in
   incr next_flexvar_id;
-  { level; upper; lower = { ctor = { cons = Bot; rigvars = Rvset.empty } ; flexvars = [] }; id;
+  { level; upper; lower = bottom; id;
     pos_visit_count = 0; neg_visit_count = 0; bound_var = -1 }
 
 
@@ -569,9 +573,9 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   List.iter (fun fv' -> assert (fv != fv')) fv.lower.flexvars;
   wf_flex_lower_bound ~seen env fv.level fv.lower;
   match fv.upper with
-  | UBnone -> assert (fv.lower = {ctor={cons=Bot;rigvars=Rvset.empty};flexvars=[]})
+  | UBnone -> assert (is_bottom fv.lower)
   | UBvar v ->
-     assert (fv.lower = {ctor={cons=Bot;rigvars=Rvset.empty};flexvars=[]});
+     assert (is_bottom fv.lower);
      (* FIXME: same level? *)
      wf_flexvar ~seen env fv.level v
   | UBcons cns ->
@@ -809,9 +813,8 @@ let dump_ptyp ppf t =
        Hashtbl.add fvs fv.id (fv_name, None);
        fv_list := fv.id :: !fv_list;
        let l =
-         match fv.lower with
-         | {ctor={cons=Bot; rigvars}; flexvars=[]} when Rvset.(equal rigvars empty) -> None
-         | l -> Some (unparse_flex_lower_bound ~flexvar l) in
+         if equal_flex_lower_bound fv.lower bottom then None
+         else Some (unparse_flex_lower_bound ~flexvar fv.lower) in
        let u =
          match fv.upper with
          | UBvar v -> [unparse_flexvar ~flexvar v]
