@@ -805,26 +805,17 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:b} } else { a } } }
 # hoists a to avoid an invalid Tvjoin
 fn(f) { fn(a,b) { let z = f(b); if true { {foo:a} } else { b } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { {foo: a} } else { b } } }
-> File "src/types.ml", line 594, characters 2-8: Assertion failed
-> Raised at Lang__Types.begin_visit_pos in file "src/types.ml", line 594, characters 2-38
-> Called from Lang__Types.expand.(fun) in file "src/types.ml", line 670, characters 10-34
-> Called from Stdlib__list.iter in file "list.ml", line 110, characters 12-15
-> Called from Lang__Types.expand in file "src/types.ml", line 669, characters 2-996
-> Called from Stdlib__map.Make.mapi in file "map.ml", line 312, characters 19-24
-> Called from Lang__Tuple_fields.map_fields in file "src/tuple_fields.ml", line 56, characters 21-65
-> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 114, characters 28-68
-> Called from Lang__Types.expand in file "src/types.ml", line 660, characters 13-108
-> Called from Lang__Types.expand_ptyp in file "src/types.ml", line 730, characters 13-68
-> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 116, characters 49-56
-> Called from Lang__Types.expand_ptyp in file "src/types.ml", line 724, characters 21-111
-> Called from Lang__Typedefs.map_head in file "src/typedefs.ml", line 116, characters 49-56
-> Called from Lang__Types.expand_ptyp in file "src/types.ml", line 724, characters 21-111
-> Called from Lang__Check.elab_gen.fixpoint in file "src/check.ml", line 157, characters 13-53
-> Called from Lang__Check.elab_gen in file "src/check.ml", line 167, characters 23-45
-> Called from Lang__Check.infer' in file "src/check.ml", line 331, characters 7-1023
-> Called from Lang__Check.infer in file "src/check.ml", line 288, characters 17-29
-> Called from Lang__Check.elab_gen in file "src/check.ml", line 151, characters 32-39
-> Called from Dune__exe__Test_runner.run_cmd in file "test/test_runner.ml", line 54, characters 17-75
+>   fn [A, B, C](f: (B) -> C) -> (A, B) -> {foo: A} | B {
+>     fn (a: A, b: B) -> {foo: A} | B {
+>       let z : C = f(b);
+>       if true {
+>         {foo: a}
+>       } else {
+>         b
+>       }
+>     }
+>   }
+> [A, B, C] ((B) -> C) -> (A, B) -> {foo: A} | B
 
 # no need to hoist in these cases, with no cons (because join commutes)
 fn(f) { fn(a,b) { let z = f(b); if true { b } else { a } } }

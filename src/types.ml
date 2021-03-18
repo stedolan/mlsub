@@ -586,38 +586,6 @@ let rec match_typ ~error env lvl (p : ptyp) (head : (ntyp Ivar.put, ptyp Ivar.pu
  * Generalisation
  *)
 
-(* visit counters: odd = visiting, even = done *)
-
-type visit_status = Unvisited | Visiting | Visited
-
-let begin_visit_pos visit fv =
-  assert (fv.pos_visit_count <= visit);
-  if fv.pos_visit_count = visit - 1 then Visiting
-  else if fv.pos_visit_count = visit then Visited
-  else (fv.pos_visit_count <- visit - 1; Unvisited)
-
-let end_visit_pos visit fv =
-  assert (fv.pos_visit_count = visit - 1);
-  fv.pos_visit_count <- visit
-
-let begin_visit_neg visit fv =
-  assert (fv.neg_visit_count <= visit);
-  if fv.neg_visit_count = visit - 1 then
-    intfail "neg cycle found on %s but rec types not implemented!" (flexvar_name fv)
-  else if fv.neg_visit_count = visit then false
-  else (fv.neg_visit_count <- visit - 1; true)
-
-let end_visit_neg visit fv =
-  assert (fv.neg_visit_count = visit - 1);
-  fv.neg_visit_count <- visit
-
-let is_visited_pos visit fv =
-  assert (fv.pos_visit_count land 1 = 0);
-  fv.pos_visit_count = visit
-
-let is_visited_neg visit fv =
-  assert (fv.neg_visit_count land 1 = 0);
-  fv.neg_visit_count = visit
 
 (* Speculative subtyping.
    Dodgy, order-dependent, and probably not principal.
@@ -667,37 +635,41 @@ let rec expand visit ~changes ?(vexpand=[]) env level (p : flex_lower_bound) =
     (* FIXME: pretty sure this can fail *)
     hoist_lower ~error:noerror ~changes env fv.level {p with flexvars=[]});
   flexvars_gen |> List.iter (fun pv ->
-    match begin_visit_pos visit pv with
-    | Visited -> ()
-    | Unvisited ->
+    fv_gen_visit_pos level visit pv (function
+    | First_visit ->
        ignore (flex_cons_upper ~changes env pv); (* ensure upper not UBvar *)
        (* Add pv to vexpand so we know to ignore it if we see it again before going
           under a constructor. (This is basically a bad quadratic SCC algorithm) *)
        let lower = expand visit ~changes ~vexpand:(pv :: vexpand) env level pv.lower in
-       (* FIXME! recheck level *)
-       (* Remove useless reflexive constraints, if they appeared by expanding a cycle *)
-       let lower = { lower with flexvars = List.filter (fun v -> not (equal_flexvar v pv)) lower.flexvars } in
-       if fv_maybe_set_lower ~changes pv lower then
-         ensure_rigvars_present ~changes env pv;
-       end_visit_pos visit pv
-    | Visiting ->
+       (* We may have hoisted the variable during that expansion, so check if we
+          still need to generalise it *)
+       if Env_level.equal pv.level level then begin
+         (* Remove useless reflexive constraints, if they appeared by expanding a cycle *)
+         let lower = { lower with flexvars = List.filter (fun v -> not (equal_flexvar v pv)) lower.flexvars } in
+         if fv_maybe_set_lower ~changes pv lower then
+           ensure_rigvars_present ~changes env pv;
+       end
+    | Recursive_visit ->
        (* recursive occurrences are fine if not under a constructor *)
        if List.memq pv vexpand then ()
-       else unimp "positive recursion on flexvars");
+       else unimp "positive recursion on flexvars"));
   (* NB: flexvars_gen occurs twice below, re-adding the reflexive constraints: α expands to (α|α.lower) *)
   List.fold_left (fun p v -> join_lower ~error:noerror (*FIXME*) ~changes env level p v.lower)
     { ctor; flexvars = flexvars_keep @ flexvars_gen }
     flexvars_gen
 
 and expand_fv_neg visit ~changes env level nv =
-  if Env_level.equal nv.level level && begin_visit_neg visit nv then begin
+  fv_gen_visit_neg level visit nv (function
+  | Recursive_visit ->
+     intfail "neg cycle found on %s but rec types not implemented!" (flexvar_name nv)
+  | First_visit ->
     begin match nv.upper with
     | UBnone | UBcons [] -> ()
     | UBvar v -> ignore (expand_fv_neg visit ~changes env level v)
     | UBcons [cn] ->
        let upper = UBcons [map_ctor_rig (expand visit ~changes env level) (expand_fv_neg visit ~changes env level) cn] in
-       let _:bool = fv_maybe_set_upper ~changes nv upper in
-       ()
+       if Env_level.equal nv.level level then
+         ignore (fv_maybe_set_upper ~changes nv upper : bool)
     | UBcons cns ->
        let cns = List.map (map_ctor_rig (expand visit ~changes env level) (expand_fv_neg visit ~changes env level)) cns in
 
@@ -705,12 +677,12 @@ and expand_fv_neg visit ~changes env level nv =
        let keep_rigvars = all_rigvars |> Rvset.filter (fun rv ->
          cns |> List.for_all (fun cn -> spec_sub_rigid_cons env rv cn)) in
 
-       fv_set_upper ~changes nv (UBcons []);
-       cns |> List.iter (fun cn ->
-         subtype_flex_cons ~error:noerror ~changes env nv {cn with rigvars = keep_rigvars })
-    end;
-    end_visit_neg visit nv
-  end;
+       if Env_level.equal nv.level level then begin
+         fv_set_upper ~changes nv (UBcons []);
+         cns |> List.iter (fun cn ->
+           subtype_flex_cons ~error:noerror ~changes env nv {cn with rigvars = keep_rigvars })
+       end
+    end);
   nv
 
 
@@ -778,6 +750,20 @@ type subst_info = {
   index: int;
   mode: [`Poly | `Elab]
 }
+
+let is_visited_pos visit fv =
+  match fv.gen with
+  | Not_generalising -> assert false
+  | Generalising {visit={pos;_};_} ->
+     assert (pos land 1 = 0);
+     pos = visit
+
+let is_visited_neg visit fv =
+  match fv.gen with
+  | Not_generalising -> assert false
+  | Generalising {visit={neg;_};_} ->
+     assert (neg land 1 = 0);
+     neg = visit
 
 let rec substn : 'a 'b . subst_info -> flex_lower_bound -> ('a, 'b) typ =
   fun s {ctor={cons;rigvars};flexvars} ->
@@ -847,24 +833,29 @@ and substn_upper : 'a 'b . subst_info -> styp_neg -> ('a, 'b) typ =
 (* FIXME!!: gen constraints. What can upper bounds be? *)
 and substn_bvar s fv =
   assert (Env_level.equal fv.level s.level);
-  if not (is_visited_neg s.visit fv && is_visited_pos s.visit fv) then
-    None
-  else begin
-    if fv.bound_var = -2 then unimp "flexvar recursive in own bound";
-    if fv.bound_var <> -1 then
-      Some (Vbound {index=s.index; var=fv.bound_var})
-    else if s.mode = `Elab then
-      (* Don't generalise a variable just for the sake of Elab *)
-      None
-    else begin
-      let r = ref (Tcons Top) in
-      fv.bound_var <- -2;
-      r := substn_upper {s with index=0} fv.upper;
-      let n = Vector.push s.bvars (Gen_flex (fv, r)) in
-      fv.bound_var <- n;
-      Some (Vbound {index=s.index; var=n})
-    end
-  end
+  match fv.gen with
+  | Not_generalising ->
+     (* FIXME is this possible? *)
+     assert false
+  | Generalising gen ->
+     if not (gen.visit.pos = s.visit && gen.visit.neg = s.visit) then
+       None
+     else begin
+       if gen.bound_var = -2 then unimp "flexvar recursive in own bound";
+       if gen.bound_var <> -1 then
+         Some (Vbound {index=s.index; var=gen.bound_var})
+       else if s.mode = `Elab then
+         (* Don't generalise a variable just for the sake of Elab *)
+         None
+       else begin
+         let r = ref (Tcons Top) in
+         gen.bound_var <- -2;
+         r := substn_upper {s with index=0} fv.upper;
+         let n = Vector.push s.bvars (Gen_flex (fv, r)) in
+         gen.bound_var <- n;
+         Some (Vbound {index=s.index; var=n})
+       end
+     end
 
 (* FIXME: deja vu? *)
 let rec substn_ptyp s : ptyp -> ptyp = function

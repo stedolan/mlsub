@@ -250,6 +250,15 @@ type (+'neg,+'pos) ctor_ty =
 let map_ctor_rig neg pos { cons; rigvars } = { cons = map_head neg pos cons; rigvars }
 
 
+(* Temporary structure used during generalisation *)
+type flexvar_gen_visit_counts = { mutable pos : int; mutable neg : int }
+type flexvar_gen =
+  | Not_generalising
+  | Generalising of {
+      level: env_level;
+      visit : flexvar_gen_visit_counts;
+      mutable bound_var : int;
+    }
 
 (* Flexvars are mutable but only in one direction.
      - level may decrease
@@ -258,12 +267,8 @@ type flexvar =
   { mutable level: env_level;
     mutable upper: styp_neg; (* strictly covariant parts are matchable *)
     mutable lower: flex_lower_bound; (* If lower is nontrivial, then upper must be UBcons. FIXME: encode this? *)
-    (* used for printing *)
-    id: int;
-    (* used during generalisation *)
-    mutable pos_visit_count : int;
-    mutable neg_visit_count : int;
-    mutable bound_var : int; }
+    id: int;    (* just for printing *)
+    mutable gen: flexvar_gen; }
 
 (* A well-formed negative styp is either:
      - a single flexible variable
@@ -354,8 +359,13 @@ type flexvar_change =
   | Change_lower of flexvar * flex_lower_bound
 
 let fv_set_level ~changes fv level =
-  changes := Change_level (fv, fv.level) :: !changes;
-  fv.level <- level
+  assert (Env_level.extends level fv.level);
+  if not (Env_level.equal level fv.level) then begin
+    changes := Change_level (fv, fv.level) :: !changes;
+    fv.level <- level;
+    (* Cancel any generalisation in progress (see expand) *)
+    if fv.gen <> Not_generalising then fv.gen <- Not_generalising;
+  end
 
 let fv_set_upper ~changes fv upper =
   changes := Change_upper (fv, fv.upper) :: !changes;
@@ -375,6 +385,45 @@ let fv_maybe_set_upper ~changes (fv : flexvar) upper =
   if not (equal_styp_neg fv.upper upper) then
     (fv_set_upper ~changes fv upper; true)
   else false
+
+(* visit counters: odd = visiting, even = done *)
+let fv_gen_visit_counts level fv =
+  assert (Env_level.extends fv.level level);
+  if not (Env_level.equal fv.level level) then None
+  else match fv.gen with
+  | Generalising g ->
+     assert (Env_level.equal fv.level g.level);
+     Some g.visit
+  | Not_generalising ->
+     let visit = { pos = 0; neg = 0 } in
+     fv.gen <- Generalising { level = fv.level; visit; bound_var = -1 };
+     Some visit
+
+type visit_type = First_visit | Recursive_visit
+let fv_gen_visit_pos level visit fv k =
+  match fv_gen_visit_counts level fv with
+  | None -> ()
+  | Some v ->
+     assert (v.pos <= visit);
+     if v.pos = visit then () (* visited already *)
+     else if v.pos = visit - 1 then k Recursive_visit
+     else begin
+       v.pos <- visit - 1;
+       k First_visit;
+       v.pos <- visit
+     end
+let fv_gen_visit_neg level visit fv k =
+  match fv_gen_visit_counts level fv with
+  | None -> ()
+  | Some v ->
+     assert (v.neg <= visit);
+     if v.neg = visit then () (* visited already *)
+     else if v.neg = visit - 1 then k Recursive_visit
+     else begin
+       v.neg <- visit - 1;
+       k First_visit;
+       v.neg <- visit
+     end
 
 let revert changes =
   changes |> List.iter (function
@@ -511,8 +560,7 @@ let next_flexvar_id = ref 0
 let fresh_flexvar_gen level upper : flexvar =
   let id = !next_flexvar_id in
   incr next_flexvar_id;
-  { level; upper; lower = bottom; id;
-    pos_visit_count = 0; neg_visit_count = 0; bound_var = -1 }
+  { level; upper; lower = bottom; id; gen = Not_generalising }
 
 
 (*
@@ -692,13 +740,6 @@ let unparse_rigid_var {level;var} =
 let unparse_flexvar ~flexvar fv =
   flexvar fv;
   let name = flexvar_name fv in
-  let name = 
-    if fv.pos_visit_count <> 0 || fv.neg_visit_count <> 0 then
-      (*Format.sprintf "%s[-%d+%d]" name fv.neg_visit_count fv.pos_visit_count*)
-      name
-    else
-      name (*Format.sprintf "%s@%d" name (Env_level.to_int fv.level)*)
- in
   mktyexp (named_type name)
 
 let unparse_var ~flexvar ~ext = function
