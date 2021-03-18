@@ -308,8 +308,6 @@ fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
 
 
 # some invalid types that should be rejected because of bad joins
-# FIXME: reject these at an appropriate position
-
 (@bot : [A] [B] ({foo: B} | A))
 > (@bot : [A] [B] ({foo: B} | A))
 > typechecking error: Failure("rigvar B not allowed inside join with rigvar bound earlier")

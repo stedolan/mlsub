@@ -1041,3 +1041,40 @@ fn (f) { fn(g) { fn(x) { (f(x.foo), g(x.foo)) } } }
 >     }
 >   }
 > [A, B] ((B) -> A) -> [A_2] ((B) -> A_2) -> ({foo: B, ...}) -> (A, A_2)
+
+
+
+# FIXME: implement entailment check
+# No need for a generalised variable here
+fn (x) { if x.cond { x } else { {cond: false} } }
+> fn (x) { if x.cond { x } else { {cond: false} } }
+>   fn [A <: {cond: bool, ...}](x: A) -> {cond: bool} | A {
+>     if x.cond {
+>       x
+>     } else {
+>       {cond: false}
+>     }
+>   }
+> [A <: {cond: bool, ...}] (A) -> {cond: bool} | A
+
+fn (f) { let () = f(1); 42 }
+> fn (f) { let () = f(1); 42 }
+>   fn [A <: ()](f: (int) -> A) -> int { let () : A = f(1); 42 }
+> [A <: ()] ((int) -> A) -> int
+
+# even this one, with A used at both variances, could maybe delete the var?
+# (relying on some nonextensible logic about atomic types covering bottom)
+# in any case, () : A is a stupid elaboration
+# deleting is trickier here: we'd want to first constrain () <: A
+fn (f) { let () = f(1); f(2) }
+> fn (f) { let () = f(1); f(2) }
+>   fn [A <: ()](f: (int) -> A) -> A { let () : A = f(1); f(2) }
+> [A <: ()] ((int) -> A) -> A
+
+# fixing the above example will break this one (seems fine though?)
+((fn (f) { let () = f(1); f(2) })(fn(x){@bot}) : int)
+> ((fn (f) { let () = f(1); f(2) })(fn (x) { @bot }) : int)
+>   ((fn [A <: ()](f: (int) -> A) -> A { let () : A = f(1); f(2) })(
+>     fn (x) { @bot }
+>   ) : int)
+> int
