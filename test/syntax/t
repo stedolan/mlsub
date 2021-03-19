@@ -25,12 +25,12 @@ fn(a) { { foo: if true { fn(x) { x } } else { a } } }
 >   fn [A, B](a: B) -> {foo: ((A) -> A) | B} {
 >     {foo: if true { fn [A_2](x: A_2) -> A_2 { x } } else { a }}
 >   }
-> [A, B] (B) -> {foo: (A) -> A | B}
+> [A, B] (B) -> {foo: ((A) -> A) | B}
 
 fn[A,B](x:A) -> A | (A) -> B { x }
 > fn [A, B](x: A) -> A | (A) -> B { x }
 >   fn [A, B](x: A) -> ((A) -> B) | A { x }
-> [A, B] (A) -> (A) -> B | A
+> [A, B] (A) -> ((A) -> B) | A
 
 : [A <: ([] int) -> int ] A <: int
 > typechecking error: Failure("bounds must be simple")

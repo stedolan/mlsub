@@ -535,7 +535,7 @@ fn(x, y, k1, k2, k3) {
 >     let z : A | B = ch(x, y)(fn (x: D) -> C { k1(x) });
 >     (x(k2), y(k3))
 >   }
-> [A, B, C, D, E, F] (((D) -> C | E) -> A, ((D) -> C | F) -> B, (D) -> C, E, F) -> (A, B)
+> [A, B, C, D, E, F] ((((D) -> C) | E) -> A, (((D) -> C) | F) -> B, (D) -> C, E, F) -> (A, B)
 
 
 # flex_cons_upper freshening matchability bug

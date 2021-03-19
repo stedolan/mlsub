@@ -70,7 +70,7 @@ let run_cmd s =
 
         let env0 = Env_nil in
         let te = Typedefs.unparse_ptyp ~flexvar:ignore (*Env_nil*) t in
-        pprintln (Print.tyexp te);
+        pprintln (Print.tyexp (Exp.(map_tyexp normalise te)));
         begin try
           wf_ptyp env0 t;
           let t = Check.typ_of_tyexp env0 te in
