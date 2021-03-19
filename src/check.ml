@@ -241,13 +241,13 @@ and check' env e ty =
      let* e = check env e (Tcons (Record r)) in
      Proj (e, (field, loc))
   | Let (p, pty, e, body), _ ->
-     let pty, e = check_or_infer' env pty e in
+     let pty, e = check_or_infer env pty e in
      let pty, vs = check_pat env pty p in
      let env = Env_vals { vals = vs; rest = env } in
      let* e = e and* pty = elab_ptyp pty and* body = check env body ty in
      Let(p, Some pty, e, body)
   (* FIXME should I combine Tpoly and Func? *)
-  | Fn (None, params, ret, body), Tpoly { vars; body = Tcons (Func (ptypes, rtype)) } ->
+  | Fn _ as f, Tpoly { vars; body } ->
      (* FIXME share code with elab_gen *)
      let level = Env_level.extend (env_level env) in
      let rigvars = IArray.mapi (fun var _ -> {level;var}) vars in
@@ -255,15 +255,9 @@ and check' env e ty =
        { name; upper = simple_ptyp_bound level (open_typ_rigid rigvars bound) }) in
      (* rigvars not in scope in body, so no rig_names *)
      let env' = Env_types { level; rig_names = SymMap.empty; rig_defns; rest = env } in
-     (* FIXME share with below *)
-     let ptypes = map_fields (fun _fn t -> open_typ_rigid rigvars t) ptypes in
-     let _, vals = check_parameters env' params ptypes in
-     let env'' = Env_vals { vals; rest = env' } in
-     let rtype = open_typ_rigid rigvars rtype in
-     let* body = check env'' body (check_annot env'' ret rtype) in
-     (* No elaboration.
-        FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
-     Fn (None, params, ret, body)
+     let body = open_typ_rigid rigvars body in
+     check' env' f body
+     (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
   | Fn (None, params, ret, body), Tcons (Func (ptypes, rtype)) ->
      (* If poly <> None, then we should infer & subtype *)
      (* FIXME: do we need another level here? Does hoisting break things? *)
@@ -318,7 +312,7 @@ and infer' env : exp' -> ptyp * exp' elab = function
   | Pragma "bot" as e -> Tcons Bot, elab_pure e
   | Pragma s -> failwith ("pragma: " ^ s)
   | Let (p, pty, e, body) ->
-     let pty, e = check_or_infer' env pty e in
+     let pty, e = check_or_infer env pty e in
      let pty, vals = check_pat env pty p in
      let env = Env_vals { rest=env; vals } in
      let res, body = infer env body in
@@ -333,9 +327,9 @@ and infer' env : exp' -> ptyp * exp' elab = function
            | Some ty -> typ_of_tyexp env ty, p
            | None -> fresh_flow env, p) params in
          let ptys = map_fields (fun _fn (t, p) -> check_pat env t p) params in
-         let vs = fold_fields (fun acc _fn (_, b) -> merge_bindings acc b) SymMap.empty ptys in
+         let _, vs = merge_bindings ptys in
          let env' = Env_vals { vals = vs; rest = env } in
-         let res, body = check_or_infer' env' ret body in
+         let res, body = check_or_infer env' ret body in
          let _ = map_fields (fun _fn (t,_) -> wf_ntyp env t) params in
          (* FIXME params or ptys? What happens if they disagree? *)
          Tcons (Func (map_fields (fun _fn (t,_) -> t) params, res)),
@@ -366,13 +360,15 @@ and infer' env : exp' -> ptyp * exp' elab = function
      let* f = f and* args = elab_fields args in
      App(f, args)
 
-and merge_bindings b1 b2 =
+and merge_bindings bs =
   let merge k a b =
     match a, b with
     | x, None | None, x -> x
     | Some _, Some _ ->
        failwith ("duplicate bindings " ^ k) in
-  SymMap.merge merge b1 b2
+  map_fields (fun _fn (ty, _) -> ty) bs,
+  fold_fields (fun acc _fn (_, b) ->
+      SymMap.merge merge acc b) SymMap.empty bs
 
 and check_pat env ty = function
   | None, _ -> failwith "bad pat"
@@ -386,10 +382,8 @@ and check_pat' env ty = function
      match_typ ~error:report env (env_level env) ty (Record trec);
      let fs = map_fields (fun _fn (p, (_,r)) ->
        check_pat env (Ivar.get r) p) fs in
-
-     Tcons (Record (map_fields (fun _fn (ty,_) -> ty) fs)),
-     fold_fields (fun acc _fn (_,b) -> merge_bindings acc b)
-       SymMap.empty fs
+     let fs, bindings = merge_bindings fs in
+     Tcons (Record fs), bindings
 
 and check_parameters env params ptypes =
   let merged =
@@ -406,9 +400,7 @@ and check_parameters env params ptypes =
       ~left:(fun _fn (_p, _aty) -> failwith "extra param")
       ~right:(fun _fn _typ -> failwith "missing param")
       ~extra:(fun _ -> `Closed) in
-  map_fields (fun _fn (t, _) -> t) merged,
-  fold_fields (fun acc _fn (_, b) -> merge_bindings acc b)
-    SymMap.empty merged
+  merge_bindings merged
 
 and infer_lit = function
   | l, loc -> infer_lit' l, elab_pure (Lit (l, loc))
@@ -417,22 +409,7 @@ and infer_lit' = function
   | Int _ -> Tcons Int
   | String _ -> Tcons String
 
-and check_or_infer env ty e : ptyp * (exp * tyexp) elab =
-  match ty with
-  | None ->
-     let ty, e = infer env e in
-     ty,
-     let* e = e and* ty = elab_ptyp ty in
-     e, ty
-  | Some ty ->
-     let t = typ_of_tyexp env ty in
-     t,
-     let* e = check env e t
-     and* ty = elab_pure ty in
-     e, ty
-
-(* when rolling your own elab *)
-and check_or_infer' env ty e : ptyp * exp elab =
+and check_or_infer env ty e : ptyp * exp elab =
   match ty with
   | None ->
      infer env e
