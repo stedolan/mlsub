@@ -294,8 +294,7 @@ let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
 
 let {x: foo, y: bar, ...} = {x: 10, y: true, z: 42}; (foo, bar)
 > let {x: foo, y: bar, ...} = {x: 10, y: true, z: 42}; (foo, bar)
->   let {x: foo, y: bar, ...} : {x: int, y: bool, z: int} =
->   {x: 10, y: true, z: 42};
+>   let {x: foo, y: bar, ...} : {x: int, y: bool, ...} = {x: 10, y: true, z: 42};
 >   (foo, bar)
 > (int, bool)
 
@@ -309,7 +308,7 @@ let (x, y) = (1, true); (y, x)
 
 let (x, y, ...) = (false, (), 3); {x,y}
 > let (x, y, ...) = (false, (), 3); {x, y}
->   let (x, y, ...) : (bool, (), int) = (false, (), 3); {x, y}
+>   let (x, y, ...) : (bool, (), ...) = (false, (), 3); {x, y}
 > {x: bool, y: ()}
 
 
@@ -487,44 +486,47 @@ fn (x) { if x.cond { {q:2,p:1} } else { {p:2,q:1} } }
 
 fn (x) { let {p,q,...}=x; x }
 > fn (x) { let {p, q, ...} = x; x }
->   fn [A <: {p: any, q: any, ...}](x: A) -> A { let {p, q, ...} : A = x; x }
-> [A <: {p: any, q: any, ...}] (A) -> A
+>   fn [A, B, C <: {p: A, q: B, ...}](x: C) -> C {
+>     let {p, q, ...} : {p: A, q: B, ...} = x;
+>     x
+>   }
+> [A, B, C <: {p: A, q: B, ...}] (C) -> C
 
 fn (x) { let {p,q} = x; let {p,q,r} = x; {p,q} }
 > fn (x) { let {p, q} = x; let {p, q, r} = x; {p, q} }
->   fn [A <: nothing](x: A) -> {p: nothing, q: nothing} {
->     let {p, q} : A = x;
->     let {p, q, r} : A = x;
+>   fn (x: nothing) -> {p: nothing, q: nothing} {
+>     let {p, q} : {p: nothing, q: nothing} = x;
+>     let {p, q, r} : {p: nothing, q: nothing, r: nothing} = x;
 >     {p, q}
 >   }
-> [A <: nothing] (A) -> {p: nothing, q: nothing}
+> (nothing) -> {p: nothing, q: nothing}
 
 fn (x) { let {p,q,...} = x; let {p,q,r} = x; {p,q} }
 > fn (x) { let {p, q, ...} = x; let {p, q, r} = x; {p, q} }
->   fn [A, B, C <: {p: A, q: B, r: any}](x: C) -> {p: A, q: B} {
->     let {p, q, ...} : C = x;
->     let {p, q, r} : C = x;
+>   fn [A, B, C](x: {p: A, q: B, r: C}) -> {p: A, q: B} {
+>     let {p, q, ...} : {p: A, q: B, ...} = x;
+>     let {p, q, r} : {p: A, q: B, r: C} = x;
 >     {p, q}
 >   }
-> [A, B, C <: {p: A, q: B, r: any}] (C) -> {p: A, q: B}
+> [A, B, C] ({p: A, q: B, r: C}) -> {p: A, q: B}
 
 fn (x) { let {p,q} = x; let {p,q,r,...} = x; {p,q} }
 > fn (x) { let {p, q} = x; let {p, q, r, ...} = x; {p, q} }
->   fn [A <: nothing](x: A) -> {p: nothing, q: nothing} {
->     let {p, q} : A = x;
->     let {p, q, r, ...} : A = x;
+>   fn (x: nothing) -> {p: nothing, q: nothing} {
+>     let {p, q} : {p: nothing, q: nothing} = x;
+>     let {p, q, r, ...} : {p: nothing, q: nothing, r: nothing, ...} = x;
 >     {p, q}
 >   }
-> [A <: nothing] (A) -> {p: nothing, q: nothing}
+> (nothing) -> {p: nothing, q: nothing}
 
 fn (x) { let {p,q,...} = x; let {p,q,r,...} = x; {p,q} }
 > fn (x) { let {p, q, ...} = x; let {p, q, r, ...} = x; {p, q} }
->   fn [A, B, C <: {p: A, q: B, r: any, ...}](x: C) -> {p: A, q: B} {
->     let {p, q, ...} : C = x;
->     let {p, q, r, ...} : C = x;
+>   fn [A, B, C](x: {p: A, q: B, r: C, ...}) -> {p: A, q: B} {
+>     let {p, q, ...} : {p: A, q: B, ...} = x;
+>     let {p, q, r, ...} : {p: A, q: B, r: C, ...} = x;
 >     {p, q}
 >   }
-> [A, B, C <: {p: A, q: B, r: any, ...}] (C) -> {p: A, q: B}
+> [A, B, C] ({p: A, q: B, r: C, ...}) -> {p: A, q: B}
 
 
 fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { {foo: 1, cond: false} }) }
@@ -1032,8 +1034,8 @@ fn (x) { if x.cond { x } else { {cond: false} } }
 
 fn (f) { let () = f(1); 42 }
 > fn (f) { let () = f(1); 42 }
->   fn [A <: ()](f: (int) -> A) -> int { let () : A = f(1); 42 }
-> [A <: ()] ((int) -> A) -> int
+>   fn (f: (int) -> ()) -> int { let () : () = f(1); 42 }
+> ((int) -> ()) -> int
 
 # even this one, with A used at both variances, could maybe delete the var?
 # (relying on some nonextensible logic about atomic types covering bottom)
@@ -1041,13 +1043,13 @@ fn (f) { let () = f(1); 42 }
 # deleting is trickier here: we'd want to first constrain () <: A
 fn (f) { let () = f(1); f(2) }
 > fn (f) { let () = f(1); f(2) }
->   fn [A <: ()](f: (int) -> A) -> A { let () : A = f(1); f(2) }
+>   fn [A <: ()](f: (int) -> A) -> A { let () : () = f(1); f(2) }
 > [A <: ()] ((int) -> A) -> A
 
 # fixing the above example will break this one (seems fine though?)
 ((fn (f) { let () = f(1); f(2) })(fn(x){@bot}) : int)
 > ((fn (f) { let () = f(1); f(2) })(fn (x) { @bot }) : int)
->   ((fn [A <: ()](f: (int) -> A) -> A { let () : A = f(1); f(2) })(
+>   ((fn [A <: ()](f: (int) -> A) -> A { let () : () = f(1); f(2) })(
 >     fn (x) { @bot }
 >   ) : int)
 > int

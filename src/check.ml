@@ -241,12 +241,11 @@ and check' env e ty =
      let* e = check env e (Tcons (Record r)) in
      Proj (e, (field, loc))
   | Let (p, pty, e, body), _ ->
-     let pty, e = check_or_infer env pty e in
-     let vs = check_pat env SymMap.empty pty p in
+     let pty, e = check_or_infer' env pty e in
+     let pty, vs = check_pat env pty p in
      let env = Env_vals { vals = vs; rest = env } in
-     let* e, ety = e and* body = check env body ty in
-     (* FIXME: I think the type should be the type of the pattern, not ety. Maybe check_pat returns this? *)
-     Let(p, Some ety, e, body)
+     let* e = e and* pty = elab_ptyp pty and* body = check env body ty in
+     Let(p, Some pty, e, body)
   (* FIXME should I combine Tpoly and Func? *)
   | Fn (None, params, ret, body), Tpoly { vars; body = Tcons (Func (ptypes, rtype)) } ->
      (* FIXME share code with elab_gen *)
@@ -258,7 +257,7 @@ and check' env e ty =
      let env' = Env_types { level; rig_names = SymMap.empty; rig_defns; rest = env } in
      (* FIXME share with below *)
      let ptypes = map_fields (fun _fn t -> open_typ_rigid rigvars t) ptypes in
-     let vals = check_parameters env' SymMap.empty params ptypes in
+     let _, vals = check_parameters env' params ptypes in
      let env'' = Env_vals { vals; rest = env' } in
      let rtype = open_typ_rigid rigvars rtype in
      let* body = check env'' body (check_annot env'' ret rtype) in
@@ -268,7 +267,7 @@ and check' env e ty =
   | Fn (None, params, ret, body), Tcons (Func (ptypes, rtype)) ->
      (* If poly <> None, then we should infer & subtype *)
      (* FIXME: do we need another level here? Does hoisting break things? *)
-     let vals = check_parameters env SymMap.empty params ptypes in
+     let _, vals = check_parameters env params ptypes in
      let env' = Env_vals { vals; rest = env } in
      let* body = check env' body (check_annot env' ret rtype) in
      (* No elaboration. Arguably we could *delete* annotations here! *)
@@ -319,13 +318,13 @@ and infer' env : exp' -> ptyp * exp' elab = function
   | Pragma "bot" as e -> Tcons Bot, elab_pure e
   | Pragma s -> failwith ("pragma: " ^ s)
   | Let (p, pty, e, body) ->
-     let pty, e = check_or_infer env pty e in
-     let vals = check_pat env SymMap.empty pty p in
+     let pty, e = check_or_infer' env pty e in
+     let pty, vals = check_pat env pty p in
      let env = Env_vals { rest=env; vals } in
      let res, body = infer env body in
      res,
-     let* e, ety = e and* body = body in
-     Let(p, Some ety, e, body)
+     let* e = e and* pty = elab_ptyp pty and* body = body in
+     Let(p, Some pty, e, body)
   | Fn (poly, params, ret, body) ->
      let ty, elab =
        elab_gen env poly (fun env ->
@@ -333,27 +332,14 @@ and infer' env : exp' -> ptyp * exp' elab = function
            match ty with
            | Some ty -> typ_of_tyexp env ty, p
            | None -> fresh_flow env, p) params in
-         let vs = fold_fields (fun acc fn (t, p) ->
-           match fn, p with
-           | _, p -> check_pat env acc t p) SymMap.empty params in
+         let ptys = map_fields (fun _fn (t, p) -> check_pat env t p) params in
+         let vs = fold_fields (fun acc _fn (_, b) -> merge_bindings acc b) SymMap.empty ptys in
          let env' = Env_vals { vals = vs; rest = env } in
          let res, body = check_or_infer' env' ret body in
          let _ = map_fields (fun _fn (t,_) -> wf_ntyp env t) params in
-         (* FIXME bug here
-            There are different rules for elaborating types in the function signature and body.
-            (Because the generalised vars are rigid in the body, but may be flex in the signature)
-            We should make sure that the elaborated param / return types are those from the sig, not the body.
-            Here they're getting elaborated separately, which is wrong.
-            FIXME probably the same bug exists in checking
-          *)
+         (* FIXME params or ptys? What happens if they disagree? *)
          Tcons (Func (map_fields (fun _fn (t,_) -> t) params, res)),
-         body
-         (*
-         let* params =
-           elab_fields (map_fields (fun _fn (t, pat) ->
-             elab_pair (elab_pure pat) (elab_ntyp t)) params)
-         and* body = body in
-         params, body*) ) in
+         body) in
      ty,
      let* poly, ty, body = elab in
      let tparams, tret =
@@ -380,26 +366,32 @@ and infer' env : exp' -> ptyp * exp' elab = function
      let* f = f and* args = elab_fields args in
      App(f, args)
 
+and merge_bindings b1 b2 =
+  let merge k a b =
+    match a, b with
+    | x, None | None, x -> x
+    | Some _, Some _ ->
+       failwith ("duplicate bindings " ^ k) in
+  SymMap.merge merge b1 b2
 
-and check_pat_field env acc (ty : ptyp) fn p =
-  match fn, p with
-  | _, p -> check_pat env acc ty p
-
-and check_pat env acc ty = function
+and check_pat env ty = function
   | None, _ -> failwith "bad pat"
-  | Some p, _ -> check_pat' env acc ty p
-and check_pat' env acc ty = function
-  | Pvar (s,_) when SymMap.mem s acc -> failwith "duplicate bindings"
-  | Pvar (s,_) -> SymMap.add s ty acc
-  | Pparens p -> check_pat env acc ty p
+  | Some p, _ -> check_pat' env ty p
+and check_pat' env ty = function
+  | Pvar (s,_) -> ty, SymMap.singleton s ty
+  | Pparens p -> check_pat env ty p
   | Ptuple fs ->
      let fs = map_fields (fun _fn p -> p, Ivar.make ()) fs in
      let trec : _ tuple_fields = map_fields (fun _fn (_p, (r,_)) -> r) fs in
      match_typ ~error:report env (env_level env) ty (Record trec);
-     fold_fields (fun acc fn (p, (_,r)) ->
-         check_pat_field env acc (Ivar.get r) fn p) acc fs
+     let fs = map_fields (fun _fn (p, (_,r)) ->
+       check_pat env (Ivar.get r) p) fs in
 
-and check_parameters env acc params ptypes =
+     Tcons (Record (map_fields (fun _fn (ty,_) -> ty) fs)),
+     fold_fields (fun acc _fn (_,b) -> merge_bindings acc b)
+       SymMap.empty fs
+
+and check_parameters env params ptypes =
   let merged =
     merge_fields params ptypes
       ~both:(fun _fn (p,aty) typ ->
@@ -410,12 +402,13 @@ and check_parameters env acc params ptypes =
              let t = typ_of_tyexp env ty in
              subtype ~error:report env typ t;
              t in
-        Some (p, ty))
+        Some (check_pat env ty p))
       ~left:(fun _fn (_p, _aty) -> failwith "extra param")
       ~right:(fun _fn _typ -> failwith "missing param")
       ~extra:(fun _ -> `Closed) in
-  fold_fields (fun acc _fn (p, ty) ->
-    check_pat env acc ty p) acc merged
+  map_fields (fun _fn (t, _) -> t) merged,
+  fold_fields (fun acc _fn (_, b) -> merge_bindings acc b)
+    SymMap.empty merged
 
 and infer_lit = function
   | l, loc -> infer_lit' l, elab_pure (Lit (l, loc))

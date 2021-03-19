@@ -173,10 +173,10 @@ let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let () =
 > }
 >   let wid : ([B] ({foo: B}) -> B) -> int =
 >   fn (id: [B] ({foo: B}) -> B) -> int { id({foo: 5}) };
->   fn [A <: ()](f: (int) -> A) -> int {
->     wid(fn (x) { let () : A = f(5); x.foo })
+>   fn (f: (int) -> ()) -> int {
+>     wid(fn (x) { let () : () = f(5); x.foo })
 >   }
-> [A <: ()] ((int) -> A) -> int
+> ((int) -> ()) -> int
 
 
 # making this work requires an annotation on f, due to hoisting
@@ -198,10 +198,10 @@ let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let () =
 > }
 >   let wid : ([B] ({foo: B}) -> B) -> int =
 >   fn (id: [B] ({foo: B}) -> B) -> int { id({foo: 5}) };
->   fn [A <: ()](f: ({foo: any}) -> A) -> int {
->     wid(fn (x) { let () : A = f(x); x.foo })
+>   fn (f: ({foo: any}) -> ()) -> int {
+>     wid(fn (x) { let () : () = f(x); x.foo })
 >   }
-> [A <: ()] (({foo: any}) -> A) -> int
+> (({foo: any}) -> ()) -> int
 
 let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f : (any) -> ()) { wid(fn(x){let () = f(x); x.foo}) }
 > let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) };

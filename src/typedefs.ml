@@ -27,6 +27,8 @@ module Ivar : sig
   val make : unit -> 'a put * 'a get
   val put : 'a put -> 'a -> unit
   val get : 'a get -> 'a
+  (* FIXME kinda nasty *)
+  val is_init  : 'a put -> bool
 end = struct
   type 'a put = 'a option ref
   type 'a get = 'a option ref
@@ -36,6 +38,7 @@ end = struct
     r := Some x
   let get r =
     Option.get !r
+  let is_init x = !x <> None
 end
 
 (* Immutable arrays *)
@@ -805,6 +808,14 @@ let rec unparse_flex_lower_bound ~flexvar { ctor; flexvars } =
   | Some t -> t
   | None -> unparse_cons ~neg:never ~pos:never Bot
 
+let unparse_styp_neg ~flexvar = function
+  | UBvar v -> [unparse_flexvar ~flexvar v]
+  | UBnone -> []
+  | UBcons cns ->
+     cns |> List.map (fun {cons;rigvars} ->
+       let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) cons in
+       unparse_join cons rigvars)
+
 let unparse_ptyp ~flexvar ?(ext=[]) (t : ptyp) =
   unparse_gen_typ ~flexvar ~ext ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) t
 let unparse_ntyp ~flexvar ?(ext=[]) (t : ntyp) =
@@ -813,11 +824,14 @@ let unparse_ntyp ~flexvar ?(ext=[]) (t : ntyp) =
 
 
 (* For debugging *)
-let pp_tyexp ppf ty =
+let pp_doc ppf doc =
   let buf = Buffer.create 100 in
-  let ty = Exp.map_tyexp Exp.normalise ty in
-  PPrint.ToBuffer.pretty 1. 10000 buf (PPrint.group (Print.tyexp ty));
+  PPrint.ToBuffer.pretty 1. 10000 buf (PPrint.group doc);
   Format.fprintf ppf "%s" (Buffer.to_bytes buf |> Bytes.to_string)
+
+let pp_tyexp ppf ty =
+  let ty = Exp.map_tyexp Exp.normalise ty in
+  pp_doc ppf (Print.tyexp ty)
 
 let pp_cons_pos ppf t =
   let cons = unparse_cons ~neg:(unparse_flexvar ~flexvar:ignore) ~pos:(unparse_flex_lower_bound ~flexvar:ignore) t.cons in
@@ -832,6 +846,11 @@ let pp_cons_neg ppf t =
 let pp_flexlb ppf t =
   let doc = unparse_flex_lower_bound ~flexvar:ignore t in
   pp_tyexp ppf doc
+
+let pp_styp_neg ppf t =
+  let tys = unparse_styp_neg ~flexvar:ignore t in
+  let docs = List.map (fun t -> Print.tyexp (Exp.map_tyexp Exp.normalise t)) tys in
+  pp_doc ppf (PPrint.(separate (comma ^^ space) docs))
 
 let pp_flexvar ppf v =
   pp_tyexp ppf (unparse_flexvar ~flexvar:ignore v)
@@ -856,14 +875,7 @@ let dump_ptyp ppf t =
        let l =
          if equal_flex_lower_bound fv.lower bottom then None
          else Some (unparse_flex_lower_bound ~flexvar fv.lower) in
-       let u =
-         match fv.upper with
-         | UBvar v -> [unparse_flexvar ~flexvar v]
-         | UBnone -> []
-         | UBcons cns ->
-            cns |> List.map (fun {cons;rigvars} ->
-            let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) cons in
-            unparse_join cons rigvars) in
+       let u = unparse_styp_neg ~flexvar fv.upper in
        Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
        ()
   and unparse t =

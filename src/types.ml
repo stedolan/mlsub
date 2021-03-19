@@ -562,7 +562,12 @@ let rec match_typ ~error env lvl (p : ptyp) (head : (ntyp Ivar.put, ptyp Ivar.pu
   wf_ptyp env p;
   match p with
   | Tcons c ->
-     subtype_cons ~error ~neg:(fun v t -> Ivar.put v t) ~pos:(fun t v -> Ivar.put v t) c head
+     subtype_cons ~error ~neg:(fun v t -> Ivar.put v t) ~pos:(fun t v -> Ivar.put v t) c head;
+     (* FIXME urgh, would this just be better with typ refs? *)
+     ignore (map_head
+               (fun v -> if not (Ivar.is_init v) then Ivar.put v (Tcons Top))
+               (fun v -> if not (Ivar.is_init v) then Ivar.put v (Tcons Bot))
+               head)
   | Tpoly {vars; body} ->
      let body = instantiate_flex env vars body in
      match_typ ~error env lvl body head
@@ -709,11 +714,14 @@ and expand_ntyp visit ~changes env level (n : ntyp) =
   match n with
   | Tcons c -> Tcons (map_head (expand_ptyp visit ~changes env level) (expand_ntyp visit ~changes env level) c)
   | Tsimple s -> Tsimple (expand_fv_neg visit ~changes env level s)
-  | Tvar (Vflex fv) when Env_level.equal fv.level level ->
-     Tvar (Vflex (expand_fv_neg visit ~changes env level fv))
-  | Tvar v -> Tvar v
-  | Tvjoin (t, (Vbound _ | Vrigid _ as v)) ->
+  | Tvar (Vflex fv) ->
+     Tsimple (expand_fv_neg visit ~changes env level fv)
+  | Tvar (Vbound v) -> Tvar (Vbound v)
+  | Tvjoin (t, (Vbound _ as v)) ->
      Tvjoin (expand_ntyp visit ~changes env level t, v)
+  | Tvjoin (_, (Vrigid _)) | Tvar (Vrigid _) ->
+     (* must be locally closed since inside tvjoin flex/rigid *)
+     Tsimple (expand_fv_neg visit ~changes env level (simple_ntyp_var level n))
   | Tvjoin (_, Vflex _) -> intfail "expand_ntyp: unexpected Vflex"
   | Tpoly {vars; body} ->
      let vars = IArray.map (fun (s, t) -> s, expand_ptyp visit ~changes env level t) vars in
@@ -808,7 +816,8 @@ and substn_fv_neg : 'a 'b . subst_info -> flexvar -> ('a, 'b) typ =
   end
 
 and substn_upper : 'a 'b . subst_info -> styp_neg -> ('a, 'b) typ =
-  fun s -> function
+  fun s t ->
+  match t with
   | UBvar v -> substn_fv_neg s v
   | UBnone | UBcons [] -> Tcons Top
   | UBcons (_ :: _ :: _) -> intfail "multirig gen"
@@ -864,9 +873,10 @@ let rec substn_ptyp s : ptyp -> ptyp = function
   | Tvar (Vbound v) -> Tvar (Vbound v)
   | Tvjoin (t, Vbound v) -> Tvjoin (substn_ptyp s t, Vbound v)
 
-  | Tvjoin (_, (Vflex _ | Vrigid _)) | Tvar (Vflex _ | Vrigid _) as p ->
-     (* must be locally closed since inside tvjoin flex/rigid *)
-     (substn s (simple_ptyp s.level p))
+  | Tvjoin (_, (Vflex _ | Vrigid _)) | Tvar (Vflex _ | Vrigid _) ->
+     (* should have been expanded to a Tsimple *)
+     (* FIXME: later, allow this for types that don't reference the gen level *)
+     assert false
   | Tpoly {vars;body} ->
      let ss = {s with index = s.index + 1} in
      let vars = IArray.map (fun (s,t) -> s, substn_ntyp ss t) vars in
@@ -880,8 +890,9 @@ and substn_ntyp s : ntyp -> ntyp = function
   | Tvjoin (t, Vbound v) -> Tvjoin (substn_ntyp s t, Vbound v)
 
   | Tvjoin (_, (Vflex _ | Vrigid _)) | Tvar (Vflex _ | Vrigid _) as n ->
-     (* must be locally closed since inside tvjoin flex/rigid *)
-     substn_upper s (simple_ntyp s.level n)
+     (* should have been expanded to a Tsimple *)
+     (* FIXME: later allow this for types that don't reference the gen level *)
+     intfail "subst on unexpanded type %a" pp_ntyp n
 
   | Tpoly {vars;body} ->
      let ss = {s with index = s.index + 1} in
