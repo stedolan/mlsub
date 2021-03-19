@@ -690,43 +690,39 @@ and expand_fv_neg visit ~changes env level nv =
     end);
   nv
 
-
-(* FIXME: could expand and subst be the same function?
-   subst by referring to *previous* visit state, keep going until fixpoint.\
-   (Assumption: if a variable wasn't reachable with a given polarity on pass 1,
-    then it will never be reachable with that polarity) *)
-
-let rec expand_ptyp visit ~changes env level (p : ptyp) =
-  match p with
-  | Tcons c -> Tcons (map_head (expand_ntyp visit ~changes env level) (expand_ptyp visit ~changes env level) c)
-  | Tsimple s -> Tsimple (expand visit ~changes env level s)
+(* This function could be optimised by skipping subtrees that have no use
+   of the outermost level, Remy-style *)
+let rec map_typ_simple : 'neg 'pos .
+  neg:(index:int -> ('pos,'neg) typ -> ('pos, 'neg) typ) ->
+  pos:(index:int -> ('neg,'pos) typ -> ('neg, 'pos) typ) ->
+  index:int -> ('neg, 'pos) typ -> ('neg, 'pos) typ =
+  fun ~neg ~pos ~index -> function
+  | Tcons c ->
+     Tcons (map_head
+              (map_typ_simple ~pos:neg ~neg:pos ~index)
+              (map_typ_simple ~neg ~pos ~index)
+              c)
+  | Tvjoin (t, Vbound v) -> Tvjoin(map_typ_simple ~neg ~pos ~index t, Vbound v)
   | Tvar (Vbound v) -> Tvar (Vbound v)
-  | Tvjoin (t, Vbound v) -> Tvjoin (expand_ptyp visit ~changes env level t, Vbound v)
-  | Tvjoin (_, (Vflex _ | Vrigid _)) | Tvar (Vflex _ | Vrigid _) ->
-     (* must be locally closed since inside tvjoin flex/rigid *)
-     Tsimple (expand visit ~changes env level (simple_ptyp level p))
+  | Tsimple _
+  | Tvjoin (_, (Vflex _ | Vrigid _))
+  | Tvar (Vflex _ | Vrigid _) as t ->
+     pos ~index t
   | Tpoly {vars; body} ->
-     let vars = IArray.map (fun (s, t) -> s, expand_ntyp visit ~changes env level t) vars in
-     let body = expand_ptyp visit ~changes env level body in
+     let index = index + 1 in
+     let vars = IArray.map (fun (n, t) -> n, map_typ_simple ~neg:pos ~pos:neg ~index t) vars in
+     let body = map_typ_simple ~neg ~pos ~index body in
      Tpoly {vars; body}
 
-and expand_ntyp visit ~changes env level (n : ntyp) =
-  match n with
-  | Tcons c -> Tcons (map_head (expand_ptyp visit ~changes env level) (expand_ntyp visit ~changes env level) c)
-  | Tsimple s -> Tsimple (expand_fv_neg visit ~changes env level s)
-  | Tvar (Vflex fv) ->
-     Tsimple (expand_fv_neg visit ~changes env level fv)
-  | Tvar (Vbound v) -> Tvar (Vbound v)
-  | Tvjoin (t, (Vbound _ as v)) ->
-     Tvjoin (expand_ntyp visit ~changes env level t, v)
-  | Tvjoin (_, (Vrigid _)) | Tvar (Vrigid _) ->
-     (* must be locally closed since inside tvjoin flex/rigid *)
-     Tsimple (expand_fv_neg visit ~changes env level (simple_ntyp_var level n))
-  | Tvjoin (_, Vflex _) -> intfail "expand_ntyp: unexpected Vflex"
-  | Tpoly {vars; body} ->
-     let vars = IArray.map (fun (s, t) -> s, expand_ptyp visit ~changes env level t) vars in
-     let body = expand_ntyp visit ~changes env level body in
-     Tpoly {vars; body}
+let expand_typ visit ~changes env level =
+  let pos ~index:_ t =
+    Tsimple (expand visit ~changes env level (simple_ptyp level t)) in
+  let neg ~index:_ t =
+    Tsimple (expand_fv_neg visit ~changes env level (simple_ntyp_var level t)) in
+  map_typ_simple ~neg:pos ~pos:neg ~index:0, map_typ_simple ~neg ~pos ~index:0
+
+let expand_ntyp visit ~changes env level = fst (expand_typ visit ~changes env level)
+let expand_ptyp visit ~changes env level = snd (expand_typ visit ~changes env level)
 
 (* FIXME: bit weird... There must be a better representation for bvars here *)
 
@@ -866,36 +862,15 @@ and substn_bvar s fv =
        end
      end
 
-(* FIXME: deja vu? *)
-let rec substn_ptyp s : ptyp -> ptyp = function
-  | Tcons c -> Tcons (map_head (substn_ntyp s) (substn_ptyp s) c)
-  | Tsimple t -> substn s t
-  | Tvar (Vbound v) -> Tvar (Vbound v)
-  | Tvjoin (t, Vbound v) -> Tvjoin (substn_ptyp s t, Vbound v)
+let substn_typ s =
+  let simple = function
+    | Tsimple t -> t
+    | _ -> intfail "subst on unexpanded simple type" in
+  let pos ~index t =
+    substn {s with index} (simple t) in
+  let neg ~index t =
+    substn_fv_neg {s with index} (simple t) in
+  map_typ_simple ~neg:pos ~pos:neg ~index:s.index, map_typ_simple ~neg ~pos ~index:s.index
 
-  | Tvjoin (_, (Vflex _ | Vrigid _)) | Tvar (Vflex _ | Vrigid _) ->
-     (* should have been expanded to a Tsimple *)
-     (* FIXME: later, allow this for types that don't reference the gen level *)
-     assert false
-  | Tpoly {vars;body} ->
-     let ss = {s with index = s.index + 1} in
-     let vars = IArray.map (fun (s,t) -> s, substn_ntyp ss t) vars in
-     let body = substn_ptyp ss body in
-     Tpoly {vars; body}
-
-and substn_ntyp s : ntyp -> ntyp = function
-  | Tcons c -> Tcons (map_head (substn_ptyp s) (substn_ntyp s) c)
-  | Tsimple t -> substn_fv_neg s t
-  | Tvar (Vbound v) -> Tvar (Vbound v)
-  | Tvjoin (t, Vbound v) -> Tvjoin (substn_ntyp s t, Vbound v)
-
-  | Tvjoin (_, (Vflex _ | Vrigid _)) | Tvar (Vflex _ | Vrigid _) as n ->
-     (* should have been expanded to a Tsimple *)
-     (* FIXME: later allow this for types that don't reference the gen level *)
-     intfail "subst on unexpanded type %a" pp_ntyp n
-
-  | Tpoly {vars;body} ->
-     let ss = {s with index = s.index + 1} in
-     let vars = IArray.map (fun (s,t) -> s, substn_ptyp ss t) vars in
-     let body = substn_ntyp ss body in
-     Tpoly {vars; body}
+let substn_ntyp s : ntyp -> ntyp = fst (substn_typ s)
+let substn_ptyp s : ptyp -> ptyp = snd (substn_typ s)
