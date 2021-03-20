@@ -622,6 +622,27 @@ let spec_sub_rigid_pos env (rv : rigvar) p =
      revert !changes; false
 
 
+(* Returns true only if a <= b
+   Not complete, never changes anything.
+   Used only for optimisations, to avoid generalising a when x <= a <= x.
+   Not a bug if it spuriously returns false sometimes (but leads to uglier types) *)
+let rec clearly_subtype (a :  flexvar) ({ctor; flexvars} as b : flex_lower_bound) : bool =
+  ctor.cons = Top ||
+  List.memq a flexvars ||
+  match a.upper with
+  | UBnone -> false
+  | UBvar a -> clearly_subtype a b
+  | UBcons cs -> cs |> List.exists (fun cn ->
+    (cn.rigvars :> rigvar list) |> List.for_all (fun rv ->
+      Rvset.contains ctor.rigvars rv) &&
+    match
+      subtype_cons ~error:(fun _ -> raise Exit) cn.cons ctor.cons
+        ~neg:(fun a b -> if not (clearly_subtype a b) then raise Exit)
+        ~pos:(fun a b -> if not (clearly_subtype a b) then raise Exit)
+    with
+    | exception Exit -> false
+    | () -> true)
+
 
 
 (* FIXME: I think this is all dodgy re flexvars at upper levels
@@ -639,6 +660,9 @@ let rec expand visit ~changes ?(vexpand=[]) env level (p : flex_lower_bound) =
     (* Hoist to avoid making invalid Tvjoins later *)
     (* FIXME: pretty sure this can fail *)
     hoist_lower ~error:noerror ~changes env fv.level {p with flexvars=[]});
+  (* C|a = C, if a <= C, so we might be able to drop some flexvars *)
+  let fbrest = { ctor; flexvars = flexvars_keep } in
+  let flexvars_gen = flexvars_gen |> List.filter (fun fv -> not (clearly_subtype fv fbrest)) in
   flexvars_gen |> List.iter (fun pv ->
     fv_gen_visit_pos level visit pv (function
     | First_visit ->
@@ -727,7 +751,7 @@ let expand_ptyp visit ~changes env level = snd (expand_typ visit ~changes env le
 (* FIXME: bit weird... There must be a better representation for bvars here *)
 
 type genvar =
-  | Gen_flex of flexvar * ntyp ref
+  | Gen_flex of flexvar * ntyp
   | Gen_rigid of rigvar
 
 (* 
@@ -845,18 +869,16 @@ and substn_bvar s fv =
   | Generalising gen ->
      if not (gen.visit.pos = s.visit && gen.visit.neg = s.visit) then
        None
+     else if gen.bound_var = -2 then unimp "flexvar recursive in own bound"
+     else if gen.bound_var >= 0 then Some (Vbound {index=s.index; var=gen.bound_var})
      else begin
-       if gen.bound_var = -2 then unimp "flexvar recursive in own bound";
-       if gen.bound_var <> -1 then
-         Some (Vbound {index=s.index; var=gen.bound_var})
-       else if s.mode = `Elab then
+       if s.mode = `Elab then
          (* Don't generalise a variable just for the sake of Elab *)
          None
        else begin
-         let r = ref (Tcons Top) in
          gen.bound_var <- -2;
-         r := substn_upper {s with index=0} fv.upper;
-         let n = Vector.push s.bvars (Gen_flex (fv, r)) in
+         let bound = substn_upper {s with index=0} fv.upper in
+         let n = Vector.push s.bvars (Gen_flex (fv, bound)) in
          gen.bound_var <- n;
          Some (Vbound {index=s.index; var=n})
        end

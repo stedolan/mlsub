@@ -189,7 +189,7 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
       match env_lookup_type_var env' (env_level env') name with
       | None -> name
       | Some _ -> mkname () in
-    let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex (_,r) -> mkname (), !r) |> IArray.of_array in
+    let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex (_,r) -> mkname (), r) |> IArray.of_array in
     let tpoly = Tpoly { vars = bounds; body = ty } in
     wf_ptyp env tpoly;
     tpoly,

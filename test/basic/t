@@ -1017,8 +1017,7 @@ fn (f) { fn(g) { fn(x) { (f(x.foo), g(x.foo)) } } }
 
 
 
-# FIXME: implement entailment check
-# No need for a generalised variable here
+# Generalised variable here, for the '...'
 fn (x) { if x.cond { x } else { {cond: false} } }
 > fn (x) { if x.cond { x } else { {cond: false} } }
 >   fn [A <: {cond: bool, ...}](x: A) -> {cond: bool} | A {
@@ -1029,6 +1028,11 @@ fn (x) { if x.cond { x } else { {cond: false} } }
 >     }
 >   }
 > [A <: {cond: bool, ...}] (A) -> {cond: bool} | A
+
+fn (x) { if x.cond { x.cond } else { true } }
+> fn (x) { if x.cond { x.cond } else { true } }
+>   fn (x: {cond: bool, ...}) -> bool { if x.cond { x.cond } else { true } }
+> ({cond: bool, ...}) -> bool
 
 fn (f) { let () = f(1); 42 }
 > fn (f) { let () = f(1); 42 }

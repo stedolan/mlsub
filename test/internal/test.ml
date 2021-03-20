@@ -42,7 +42,7 @@ let dump env level (t : ptyp) =
   Vector.iteri bvars (fun ix v -> match v with
   | Gen_rigid _ -> assert false
   | Gen_flex (_, r) ->
-    PPrint.ToChannel.pretty 1. 120 stdout PPrint.(utf8string (Printf.sprintf "  $%d ≤ " ix) ^^ group (Print.tyexp (unparse_ntyp ~flexvar:nope !r)) ^^ hardline));
+    PPrint.ToChannel.pretty 1. 120 stdout PPrint.(utf8string (Printf.sprintf "  $%d ≤ " ix) ^^ group (Print.tyexp (unparse_ntyp ~flexvar:nope r)) ^^ hardline));
   print_endline ""
 
 let fresh_flow lvl =

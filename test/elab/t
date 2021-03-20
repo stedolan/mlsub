@@ -17,11 +17,11 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let 
 
 fn (x, wid : ((any) -> any) -> int) { let f = fn(a){x(a)}; wid(f) }
 > fn (x, wid: ((any) -> any) -> int) { let f = fn (a) { x(a) }; wid(f) }
->   fn [A, B](x: (any | B) -> A, wid: ((any) -> any) -> int) -> int {
->     let f : (any | B) -> A = fn (a: any | B) -> A { x(a) };
+>   fn [A](x: (any) -> A, wid: ((any) -> any) -> int) -> int {
+>     let f : (any) -> A = fn (a: any) -> A { x(a) };
 >     wid(f)
 >   }
-> [A, B] ((any | B) -> A, ((any) -> any) -> int) -> int
+> [A] ((any) -> A, ((any) -> any) -> int) -> int
 
 fn (x) { (fn(a){x(a)})(6) }
 > fn (x) { (fn (a) { x(a) })(6) }
@@ -44,11 +44,11 @@ let id=fn[A](){fn(a:A){a}}; fn(){let x=id(); x(1)}
 
 fn (x) -> (any) -> any { let f = fn(a){x(a)}; f }
 > fn (x) -> (any) -> any { let f = fn (a) { x(a) }; f }
->   fn [A, B](x: (any | B) -> A) -> (any) -> any {
->     let f : (any | B) -> A = fn (a: any | B) -> A { x(a) };
+>   fn [A](x: (any) -> A) -> (any) -> any {
+>     let f : (any) -> A = fn (a: any) -> A { x(a) };
 >     f
 >   }
-> [A, B] ((any | B) -> A) -> (any) -> any
+> [A] ((any) -> A) -> (any) -> any
 
 fn (f) { fn(g,x) { (g(x.foo), f(x)) } }
 > fn (f) { fn (g, x) { (g(x.foo), f(x)) } }
