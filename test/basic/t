@@ -721,8 +721,6 @@ fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 > [A] ((any) -> A, ([A_2] (A_2) -> A_2) -> int) -> int
 
 
-# FIXME: not convinced by this type: why (a : B) : A? Fails elab.
-
 fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let f = fn(a){x(a)}; wid(f) }
 > fn (x, wid: (([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int)) {
 >   let f = fn (a) { x(a) };

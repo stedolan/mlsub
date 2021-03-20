@@ -190,7 +190,6 @@ let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let
 > typechecking error: Failure("incompat top <: bot")
 
 # works in checking mode (bidir)
-# FIXME: [A <: ()] is correct, but not great
 let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let () = f(x); x.foo}) }
 > let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) };
 > fn (f) {
@@ -607,10 +606,25 @@ fn (x, y, k1, k2, k3) {
 > [A <: ((any) -> int) -> int] (((int) -> int) -> int, A, (any) -> int, any, any) -> (((int) -> int) -> int, A)
 
 
-# FIXME: hits the elab bug
-# fn (x, y, k) {
-#   let ch = fn[X](a:X,b:X){if true {a} else {b}};
-#   let z = ch(x,y)(fn (a) {let z : int = k(a); 1});
-#   (x(fn(x) { x }), y(fn (x) { x}))
-# }
-# > ?
+fn (x, y, k) {
+  let ch = fn[X](a:X,b:X){if true {a} else {b}};
+  let z = ch(x,y)(fn (a) {let z : int = k(a); 1});
+  (x(fn(x) { x }), y(fn (x) { x}))
+}
+> fn (x, y, k) {
+>   let ch = fn [X](a: X, b: X) { if true { a } else { b } };
+>   let z = ch(x, y)(fn (a) { let z : int = k(a); 1 });
+>   (x(fn (x) { x }), y(fn (x) { x }))
+> }
+>   fn [A, B, C, D, E, F, G, H](
+>     x: ((D) -> int | C | D) -> A,
+>     y: ((F) -> int | E | F) -> B,
+>     k: (G | H | D | F) -> int
+>   ) -> (A, B) {
+>     let ch : [X] (X, X) -> X =
+>     fn [X](a: X, b: X) -> X { if true { a } else { b } };
+>     let z : A | B =
+>     ch(x, y)(fn (a: H | D | F | G) -> int { let z : int = k(a); 1 });
+>     (x(fn [A_2](x: A_2) -> A_2 { x }), y(fn [A_2](x: A_2) -> A_2 { x }))
+>   }
+> [A, B, C, D, E, F, G, H] (((D) -> int | C | D) -> A, ((F) -> int | E | F) -> B, (G | H | D | F) -> int) -> (A, B)

@@ -87,6 +87,15 @@ let run_cmd s =
         with e ->
             println "ELAB: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
         end;
+        begin try
+          let t', _elab2 = Check.elab_gen Env_nil None (fun env -> Check.infer env elab) in
+          let te' = Typedefs.unparse_ptyp ~flexvar:ignore t' in
+          Types.subtype ~error:Check.report Env_nil t' (Check.typ_of_tyexp Env_nil te);
+          Types.subtype ~error:Check.report Env_nil t (Check.typ_of_tyexp Env_nil te');
+          ()
+        with e ->
+          println "ELABINF: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
+        end;
         end
      | exception ((Assert_failure _ | Typedefs.Internal _ | Out_of_memory | Invalid_argument _) as e) ->
         println "%s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())

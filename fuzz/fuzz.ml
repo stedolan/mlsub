@@ -5,16 +5,19 @@ open Lang.Exp
 let mkident s : ident = { label = s; shift = 0}, noloc
 
 let mkty t = (Some t, noloc)
+let mkexp e = (Some e, noloc)
 
-let tyexp = fix @@ fun tyexp ->
-  let tfields =
+let fields gen =
     (* FIXME extend *)
     let dots = function true -> [Tuple_fields.Fdots] | false -> [] in
     choose [
-      (map [tyexp; bool] @@ fun a d -> Tuple_fields.(collect_fields (Fnamed ("foo", a) :: dots d)));
-      (map [tyexp; tyexp; bool] @@ fun a b d -> Tuple_fields.(collect_fields (Fnamed ("foo", a) :: Fnamed ("bar", b) :: dots d)));
-      (map [tyexp; bool] @@ fun a d -> Tuple_fields.(collect_fields (Fnamed ("bar", a) :: dots d)));
-      map [tyexp; tyexp; bool] @@ fun a b d -> Tuple_fields.(collect_fields (Fpos a :: Fpos b :: dots d))] in
+      (map [gen; bool] @@ fun a d -> Tuple_fields.(collect_fields (Fnamed ("foo", a) :: dots d)));
+      (map [gen; gen; bool] @@ fun a b d -> Tuple_fields.(collect_fields (Fnamed ("foo", a) :: Fnamed ("bar", b) :: dots d)));
+      (map [gen; bool] @@ fun a d -> Tuple_fields.(collect_fields (Fnamed ("bar", a) :: dots d)));
+      map [gen; gen; bool] @@ fun a b d -> Tuple_fields.(collect_fields (Fpos a :: Fpos b :: dots d))]
+  
+
+let tyexp = fix @@ fun tyexp ->
   let bound =
     map [choose [const "A";const "B";const "C";const "D"]; option tyexp] @@ fun s t -> ((s,Exp.noloc), t) in
   let tyexp' = choose [
@@ -29,8 +32,8 @@ let tyexp = fix @@ fun tyexp ->
     const (Tnamed (mkident "D"));
 
     map [tyexp; tyexp] (fun a b -> Tjoin (a, b));
-    map [tfields; tyexp] (fun a b -> Tfunc (a, b));
-    map [tfields] (fun a -> Trecord a);
+    map [fields tyexp; tyexp] (fun a b -> Tfunc (a, b));
+    map [fields tyexp] (fun a -> Trecord a);
 
     map [list bound; tyexp] (fun a b -> Tforall (a, b))
   ] in
@@ -38,10 +41,11 @@ let tyexp = fix @@ fun tyexp ->
 
 let tyexp = with_printer Typedefs.pp_tyexp tyexp
 
+let typolybounds =
+  list1 @@ map [choose [const "A";const "B";const "C";const "D"]; option tyexp] @@ fun s t -> ((s,Exp.noloc), t)
+
 let tyexp' =
-  let bound =
-    map [choose [const "A";const "B";const "C";const "D"]; option tyexp] @@ fun s t -> ((s,Exp.noloc), t) in
-  map [list1 bound; tyexp] (fun a b -> mkty (Tforall (a, b)))
+  map [typolybounds; tyexp] (fun a b -> mkty (Tforall (a, b)))
 
 let tyexp' = with_printer Typedefs.pp_tyexp tyexp'
 
@@ -97,19 +101,75 @@ let transitive a b c =
   assert ((ba && ac) <= bc)
   
 
-
+(*
 let () =
   add_test ~name:"refl" [tyexp'] refl
 
-(*
 let () =
   add_test ~name:"compare" [tyexp; tyexp] compare
 
 let () =
   add_test ~name:"commute" [option tyexp;option tyexp;option tyexp;option tyexp;tyexp;tyexp;tyexp;tyexp] commute
-*)
 
-(*
 let () =
   add_test ~name:"trans" [tyexp'; tyexp'; tyexp'] transitive
 *)
+
+let pat = fix @@ fun pat ->
+  let pat' = choose [
+    const (Pvar ("a",noloc));
+    const (Pvar ("b",noloc));
+    const (Pvar ("c",noloc));
+    map [fields pat] (fun f -> Ptuple f)
+  ] in
+  map [pat'] mkexp
+
+let exp = fix @@ fun exp ->
+  let exp' = choose [
+    const (Lit (Int 1, noloc));
+    const (Lit (Bool true, noloc));
+    const (Var (mkident "a"));
+    const (Var (mkident "b"));
+    const (Var (mkident "c"));
+    map [option typolybounds;
+         fields (pair pat (option tyexp'));
+         option tyexp;
+         exp]
+      (fun poly p t e -> Fn (poly,p,t,e));
+    map [exp; fields exp] (fun f e -> App (f, e));
+    map [fields exp] (fun t -> Tuple t);
+    map [pat; option tyexp; exp; exp] (fun p t e b -> Let (p, t, e, b));
+    map [exp; choose [const "foo"; const "bar"]] (fun e s -> Proj (e, (s,noloc)));
+    map [exp; exp; exp] (fun e1 e2 e3 -> If (e1,e2,e3));
+    map [exp; tyexp] (fun e t -> Typed (e, t));
+  ] in
+  map [exp'] mkexp
+
+let exp = with_printer Typedefs.pp_exp exp
+
+let typeable_exp =
+  map [exp] @@ fun e ->
+    match Check.elab_gen Env_nil None (fun env -> Check.infer env e) with
+    | t, elab ->
+       let poly, _ty, elab = Elab.elaborate Env_nil elab in
+       (* weak poly *)
+       if poly <> None then bad_test ();
+       e, elab, t
+    | exception (Failure _ | Typedefs.Unimplemented _) -> bad_test ()
+
+let typeable_exp =
+  with_printer (fun ppf (e,elab,t) -> Format.fprintf ppf "%a@ %a@ %a" Typedefs.pp_exp e Typedefs.pp_exp elab Typedefs.pp_ptyp t) typeable_exp
+
+let retype (e, elab, t) =
+  try
+  let te = Typedefs.unparse_ptyp ~flexvar:ignore t in
+  let t' = Check.typ_of_tyexp Env_nil te in
+  let _ = Check.check Env_nil e t' in
+  let _ = Check.check Env_nil elab t' in
+  ()
+  with
+  (* known bug *)
+  | Failure "rig var bounds must be Tcons" -> bad_test ()
+
+let () =
+  add_test ~name:"retype" [typeable_exp] retype

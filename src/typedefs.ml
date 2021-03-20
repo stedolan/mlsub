@@ -833,6 +833,9 @@ let pp_tyexp ppf ty =
   let ty = Exp.map_tyexp Exp.normalise ty in
   pp_doc ppf (Print.tyexp ty)
 
+let pp_exp ppf e =
+  pp_doc ppf (Print.exp e)
+
 let pp_cons_pos ppf t =
   let cons = unparse_cons ~neg:(unparse_flexvar ~flexvar:ignore) ~pos:(unparse_flex_lower_bound ~flexvar:ignore) t.cons in
   let doc = unparse_join cons t.rigvars in

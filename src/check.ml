@@ -228,7 +228,7 @@ and check' env e ty =
          ~right:(fun fn _ty -> failwith ("missing " ^ string_of_field_name fn) )
          ~extra:(function
            | _, (`Closed, `Extra) -> failwith "extra"
-           | (`Open, _), _ -> assert false (* no open tuples *)
+           | (`Open, _), _ -> failwith "invalid open tuple ctor" (* no open tuples *)
            | (`Closed, `Extra), _ -> failwith "missing"
            | _ -> `Closed) in
      let* ef = elab_fields merged in
@@ -305,6 +305,7 @@ and infer' env : exp' -> ptyp * exp' elab = function
      match_typ ~error:report env (env_level env) ty tmpl;
      Ivar.get res, let* e = e in Proj (e, (field,loc))
   | Tuple fields ->
+     if fields.fopen = `Open then failwith "invalid open tuple ctor";
      let fields = map_fields (fun _fn e -> infer env e) fields in
      Tcons (Record (map_fields (fun _ (ty, _e) -> ty) fields)),
      let* fields = elab_fields (map_fields (fun _fn (_ty, e) -> e) fields) in
@@ -320,6 +321,7 @@ and infer' env : exp' -> ptyp * exp' elab = function
      let* e = e and* pty = elab_ptyp pty and* body = body in
      Let(p, Some pty, e, body)
   | Fn (poly, params, ret, body) ->
+     if params.fopen = `Open then failwith "invalid ... in params";
      let ty, elab =
        elab_gen env poly (fun env ->
          let params = map_fields (fun _fn (p, ty) ->
