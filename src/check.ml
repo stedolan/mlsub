@@ -305,7 +305,7 @@ and infer' env : exp' -> ptyp * exp' elab = function
      let resp, res = Ivar.make () in
      let tmpl = (Record { fields = FieldMap.singleton (Field_named field) resp;
                           fnames = [Field_named field]; fopen = `Open }) in
-     match_typ ~error:report env (env_level env) ty tmpl;
+     match_typ ~error:report env ty tmpl;
      Ivar.get res, let* e = e in Proj (e, (field,loc))
   | Tuple fields ->
      if fields.fopen = `Open then failwith "invalid open tuple ctor";
@@ -358,7 +358,7 @@ and infer' env : exp' -> ptyp * exp' elab = function
      let resp, res = Ivar.make () in
      let argtmpl = map_fields (fun _fn (_e, (r, _)) -> r) args in
      wf_ptyp env fty;
-     match_typ ~error:report env (env_level env) fty (Func (argtmpl, resp));
+     match_typ ~error:report env fty (Func (argtmpl, resp));
      wf_ptyp env fty;
      let args = map_fields (fun _fn (e, (_,r)) -> check env e (Ivar.get r)) args in
      Ivar.get res,
@@ -384,7 +384,7 @@ and check_pat' env ty = function
   | Ptuple fs ->
      let fs = map_fields (fun _fn p -> p, Ivar.make ()) fs in
      let trec : _ tuple_fields = map_fields (fun _fn (_p, (r,_)) -> r) fs in
-     match_typ ~error:report env (env_level env) ty (Record trec);
+     match_typ ~error:report env ty (Record trec);
      let fs = map_fields (fun _fn (p, (_,r)) ->
        check_pat env (Ivar.get r) p) fs in
      let fs, bindings = merge_bindings fs in

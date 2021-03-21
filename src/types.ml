@@ -469,19 +469,18 @@ let join_simple env lvl p q =
 let join_ptyp env (p : ptyp) (q : ptyp) : ptyp =
   Tsimple (join_simple env (env_level env) (approx_ptyp env p) (approx_ptyp env q))
 
-let rec match_simple_typ ~error ~changes env lvl (p : flex_lower_bound) (head : (flex_lower_bound, flex_lower_bound ref) cons_head) =
+let rec match_simple_typ ~error ~changes env (p : flex_lower_bound) (head : (flex_lower_bound, flex_lower_bound ref) cons_head) =
   let {ctor = {cons; rigvars}; flexvars} = p in
   subtype_cons ~error cons head
     ~neg:(subtype_t_var ~error ~changes env)
-    ~pos:(fun p r -> r := join_lower ~error ~changes env lvl !r p);
+    ~pos:(fun p r -> r := join_lower ~error ~changes env (env_level env) !r p);
   (rigvars :> rigvar list) |> List.iter (fun rv ->
-    match_simple_typ ~error ~changes env lvl (env_rigid_bound env rv) head);
+    match_simple_typ ~error ~changes env (env_rigid_bound env rv) head);
   flexvars |> List.iter (fun fv ->
     let mhead = map_head id ignore head in
     let m = ensure_upper_matches ~error ~changes:(ref []) env fv {cons=mhead;rigvars=Rvset.empty} in
     subtype_cons ~error:noerror m head
       ~neg:(fun _t () -> () (*already filled*))
-      (* FIXME levels: fine as long as lvl = env_level env? Enforce? *)
       ~pos:(fun v r -> r := join_flexvars !r [v]));
   ()
 
@@ -511,14 +510,14 @@ let rec subtype ~error env (p : ptyp) (n : ntyp) =
      subtype ~error env body n; ()
   | p, Tcons cn ->
      let shead = map_head (approx_ptyp env) (fun _ -> ref bottom) cn in
-     match_simple_typ ~error ~changes:(ref []) env (env_level env) (approx_ptyp env p) shead;
+     match_simple_typ ~error ~changes:(ref []) env (approx_ptyp env p) shead;
      subtype_cons ~error:noerror shead cn
        ~neg:(fun _ _ -> () (* already done above *))
        ~pos:(fun p n -> subtype ~error env (Tsimple !p) n)
   | p, ((Tsimple _ | Tvar _ | Tvjoin _) as n) ->
      subtype_t_var ~error ~changes:(ref []) env (approx_ptyp env p) (approx_ntyp_var env n); ()
 
-let rec match_typ ~error env lvl (p : ptyp) (head : (ntyp Ivar.put, ptyp Ivar.put) cons_head) =
+let rec match_typ ~error env (p : ptyp) (head : (ntyp Ivar.put, ptyp Ivar.put) cons_head) =
   wf_ptyp env p;
   match p with
   | Tcons c ->
@@ -530,14 +529,14 @@ let rec match_typ ~error env lvl (p : ptyp) (head : (ntyp Ivar.put, ptyp Ivar.pu
                head)
   | Tpoly {vars; body} ->
      let body = instantiate_flex env vars body in
-     match_typ ~error env lvl body head
+     match_typ ~error env body head
   | t ->
      let instneg v =
-       let fv = fresh_flexvar lvl in
+       let fv = fresh_flexvar (env_level env) in
        Ivar.put v (Tsimple fv);
        flexlb_fv fv in
      let shead = map_head instneg (fun _ -> ref bottom) head in
-     match_simple_typ ~error ~changes:(ref []) env lvl (approx_ptyp env t) shead;
+     match_simple_typ ~error ~changes:(ref []) env (approx_ptyp env t) shead;
      subtype_cons ~error:noerror shead head
        ~neg:(fun _ _ -> () (*already inserted by instneg*))
        ~pos:(fun t v -> Ivar.put v (Tsimple !t));

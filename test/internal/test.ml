@@ -50,7 +50,7 @@ let choosy () =
   let apply f x =
     let argp, arg = Ivar.make () in
     let resp, res = Ivar.make () in
-    match_typ ~error env lvl f (func [argp] resp);
+    match_typ ~error env f (func [argp] resp);
     subtype ~error env x (Ivar.get arg);
     Ivar.get res in
   let fx = apply fp xp in
@@ -81,10 +81,10 @@ let lbs () =
   let ty = (Tcons (func [r1n;r2n] (Tcons (tuple [fp;d1p;d2p])))) in
   dump env lvl ty
 
-let match_as_fn ~error env lvl f =
+let match_as_fn ~error env f =
   let argp, arg = Ivar.make () in
   let resp, res = Ivar.make () in
-  match_typ ~error env lvl f (func [argp] resp);
+  match_typ ~error env f (func [argp] resp);
   Ivar.get arg, Ivar.get res
 
 
@@ -95,8 +95,8 @@ let match_bug () =
   let an, ap = fresh_flow lvl in
   let bn, bp = fresh_flow lvl in
   subtype ~error env ap bn;
-  let b1, b2 = match_as_fn ~error env lvl bp in
-  let a1, a2 = match_as_fn ~error env lvl ap in
+  let b1, b2 = match_as_fn ~error env bp in
+  let a1, a2 = match_as_fn ~error env ap in
   subtype ~error env a2 (Tcons Bot);
   dump env lvl (Tcons (func [a1; b1; an] (Tcons (tuple [a2; b2; bp]))))
   
