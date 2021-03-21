@@ -134,3 +134,4 @@
 > ok
 : [C] (C | {bar: C}) <: [C <: {bar: bool}] {bar: C}
 > ok
+> FIXPOINTS: 0

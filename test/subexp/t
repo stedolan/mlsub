@@ -295,11 +295,11 @@ let id = fn(y) { y }; (fn(x) {id(x)} : [A] (A) -> A)
 
 fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> B { x }
 > fn [A, B](x: [X <: B] (X | A) -> X) -> (A) -> B { x }
-> typechecking error: Failure("rig var bounds must be Tcons")
+> typechecking error: Failure("contravariant join")
 
 fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
 > fn [A, B](x: [X <: B] (X | A) -> X) -> (A) -> A | B { x }
-> typechecking error: Failure("rig var bounds must be Tcons")
+> typechecking error: Failure("contravariant join")
 
 # wtf:
 # fn[A,B,A <: B](x : [X, X <: A, X :> B](X) -> X) -> [X <: A, Y :> B, X <: Y](X) -> Y { x }
@@ -317,7 +317,7 @@ fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
 
 (@bot : [A <: [B]int]int)
 > (@bot : [A <: [B] int] int)
-> typechecking error: Failure("rig var bounds must be Tcons")
+> typechecking error: Failure("bounds must be simple")
 
 # bug in substn_ntyp
 fn[A](id: [B](A) -> int) { id }
@@ -616,15 +616,21 @@ fn (x, y, k) {
 >   let z = ch(x, y)(fn (a) { let z : int = k(a); 1 });
 >   (x(fn (x) { x }), y(fn (x) { x }))
 > }
->   fn [A, B, C, D, E, F, G, H](
+>   fn [A, B, C, D, E, F, G](
 >     x: ((D) -> int | C | D) -> A,
 >     y: ((F) -> int | E | F) -> B,
->     k: (G | H | D | F) -> int
+>     k: (G | D | F) -> int
 >   ) -> (A, B) {
 >     let ch : [X] (X, X) -> X =
 >     fn [X](a: X, b: X) -> X { if true { a } else { b } };
 >     let z : A | B =
->     ch(x, y)(fn (a: H | D | F | G) -> int { let z : int = k(a); 1 });
+>     ch(x, y)(fn (a: D | F | G) -> int { let z : int = k(a); 1 });
 >     (x(fn [A_2](x: A_2) -> A_2 { x }), y(fn [A_2](x: A_2) -> A_2 { x }))
 >   }
-> [A, B, C, D, E, F, G, H] (((D) -> int | C | D) -> A, ((F) -> int | E | F) -> B, (G | H | D | F) -> int) -> (A, B)
+> [A, B, C, D, E, F, G] (((D) -> int | C | D) -> A, ((F) -> int | E | F) -> B, (G | D | F) -> int) -> (A, B)
+
+fn  [A](a) -> A { let x = a; x }
+> fn [A](a) -> A { let x = a; x }
+>   fn [A, B <: A](a: B) -> A { let x : B = a; x }
+> [A, B <: A] (B) -> A
+> FIXPOINTS: 64

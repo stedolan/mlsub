@@ -72,7 +72,8 @@ fn() { twice(id, id)(id) }
 >   let twice : [A, B] ((B | A) -> A, B) -> A =
 >   fn [A, B](f: (B | A) -> A, x: B) -> A { f(f(x)) };
 >   let id : [A] (A) -> A = fn [A](a: A) -> A { a };
->   fn [A, B, C, D, E, F]() -> (D) -> A | B | C | D | E | F {
+>   fn [A]() -> (A) -> A {
 >     twice(id, id)(id)
 >   }
-> [A, B, C, D, E, F] () -> (D) -> A | B | C | D | E | F
+> [A] () -> (A) -> A
+> FIXPOINTS: 15

@@ -1055,3 +1055,39 @@ fn (f) { let () = f(1); f(2) }
 >     fn (x) { @bot }
 >   ) : int)
 > int
+
+fn(f) { fn(x) { (x, f(x)) } }
+> fn (f) { fn (x) { (x, f(x)) } }
+>   fn [A, B](f: (A) -> B) -> (A) -> (A, B) { fn (x: A) -> (A, B) { (x, f(x)) } }
+> [A, B] ((A) -> B) -> (A) -> (A, B)
+
+fn(x) { let y = (fn(x){x})(x); (x.foo.bar.a.b.c, y.foo.bar.a.b.c) }
+> fn (x) { let y = (fn (x) { x })(x); (x.foo.bar.a.b.c, y.foo.bar.a.b.c) }
+>   fn [A, B <: {foo: {bar: {a: {b: {c: A, ...}, ...}, ...}, ...}, ...}](x: B) ->
+>     (A, A) {
+>     let y : B = (fn [A_2](x: A_2) -> A_2 { x })(x);
+>     (x.foo.bar.a.b.c, y.foo.bar.a.b.c)
+>   }
+> [A, B <: {foo: {bar: {a: {b: {c: A, ...}, ...}, ...}, ...}, ...}] (B) -> (A, A)
+
+fn(x) {
+  let idf = fn(x) { let y = x.foo; x };
+  let choose = fn[A](x:A,y:A) { if true {x} else {y} };
+  idf(choose(x,{foo:5}))
+}
+> fn (x) {
+>   let idf = fn (x) { let y = x.foo; x };
+>   let choose = fn [A](x: A, y: A) { if true { x } else { y } };
+>   idf(choose(x, {foo: 5}))
+> }
+>   fn [A <: {foo: any, ...}](x: A) -> {foo: int} | A {
+>     let idf : [A_2, B <: {foo: A_2, ...}] (B) -> B =
+>     fn [A_2, B <: {foo: A_2, ...}](x: B) -> B { let y : A_2 = x.foo; x };
+>     let choose : [A_2] (A_2, A_2) -> A_2 =
+>     fn [A_2](x: A_2, y: A_2) -> A_2 { if true { x } else { y } };
+>     idf(choose(x, {foo: 5}))
+>   }
+> [A <: {foo: any, ...}] (A) -> {foo: int} | A
+
+
+> FIXPOINTS: 62

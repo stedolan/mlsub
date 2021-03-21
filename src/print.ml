@@ -151,5 +151,5 @@ and typolybounds bs =
   let bound = function
     | (a, None) -> symbol a
     | (a, Some ty ) ->
-       symbol a ^^ op "<:" ^^ tyexp ty in
+       group (symbol a ^^ op "<:" ^^ tyexp ty) in
   brackets (separate (comma ^^ break 1) (List.map bound bs))

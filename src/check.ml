@@ -95,7 +95,7 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> tyexp' -> ('a, 'b) typ =
      let level = Env_level.extend (env_level env) in
      let rigvars = IArray.mapi (fun var _ -> {level;var}) vars in
      let rig_defns = vars |> IArray.map (fun (name, bound) ->
-       { name; upper = simple_ptyp_bound level (open_typ_rigid rigvars bound) }) in
+       { name; upper = simple_ptyp level (open_typ_rigid rigvars bound) }) in
      let env = Env_types { level; rig_names = name_ix; rig_defns; rest = env } in
      let body = close_typ_rigid ~ispos:true level (typ_of_tyexp env (env_level env) body) in
      Tpoly { vars; body }
@@ -114,19 +114,17 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
   let level = Env_level.extend (env_level env) in
   let stubs =
     vars
-    |> List.map (fun ((name,_),_) -> {name; upper={cons=Top;rigvars=Rvset.empty}})
+    |> List.map (fun ((name,_),_) -> {name; upper={ctor={cons=Top;rigvars=Rvset.empty};flexvars=[]}})
     |> IArray.of_list in
   let mkbound rig_names bound =
     match bound with
     | None -> Tcons Top
     | Some b ->
        let temp_env = Env_types { level; rig_names; rig_defns = stubs; rest = env } in
-       match close_typ_rigid ~ispos:false level (typ_of_tyexp temp_env (env_level temp_env) b) with
-       | (Tcons c) as t ->
-          if not (check_simple t) then failwith "bounds must be simple";
-          Tcons c
-       (* FIXME: some vjoin cases are also fine. Var even? *)
-       | _ -> failwith "rig var bounds must be Tcons" in
+       let bound = close_typ_rigid ~ispos:false level (typ_of_tyexp temp_env (env_level temp_env) b) in
+       if not (check_simple bound) then failwith "bounds must be simple";
+       bound
+  in
   let name_ix, vars = IArray.map_fold_left (fun names ((name,_), bound) ->
     let names' = SymMap.add name (SymMap.find name name_ix) names in
     names', (name, mkbound names bound)) SymMap.empty (IArray.of_list vars) in
@@ -137,6 +135,9 @@ let typ_of_tyexp env t = typ_of_tyexp env (env_level env) t
 
 open Elab
 
+let fixpoint_iters = ref 0
+let verbose_types = match Sys.getenv "VERBOSE_TYPES" with _ -> true | exception Not_found -> false
+
 let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds option * tyexp * 'a) elab =
   let level = Env_level.extend (env_level env) in
   let rigvars', rig_names =
@@ -145,26 +146,28 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
     | Some poly -> enter_polybounds env poly in
   let rigvars = IArray.mapi (fun var _ -> {level;var}) rigvars' in
   let rig_defns = rigvars' |> IArray.map (fun (name, bound) ->
-    { name; upper = simple_ptyp_bound level (open_typ_rigid rigvars bound) }) in
+    { name; upper = simple_ptyp level (open_typ_rigid rigvars bound) }) in
 
   let env' = Env_types { level; rig_names; rig_defns; rest = env } in
   let orig_ty, Elab (erq, ek) = fn env' in
   wf_ptyp env' orig_ty;
 
-  let rec fixpoint visit erq ty =
+  let rec fixpoint visit erq prev_ty =
+    if verbose_types then Format.printf "FIX: %a" dump_ptyp orig_ty;
     if visit > 10 then intfail "looping?";
     let changes = ref [] in
-    let ty = expand_ptyp visit ~changes env' level ty in
+    let ty = expand_ptyp visit ~changes env' level prev_ty in
     wf_ptyp env' ty;
     let erq = elabreq_map_typs erq ~index:0
                 ~neg:(fun ~index:_ -> expand_ntyp visit ~changes env' level)
                 ~pos:(fun ~index:_ -> expand_ptyp visit ~changes env' level) in
-    (* Format.printf "FIX: %a\n" dump_ptyp orig_ty; *)
-    if !changes <> [] then
-      fixpoint (visit+2) erq ty
+    if verbose_types then Format.printf "CHANGED: %a\n\n" pp_changes !changes;
+    if !changes = [] then
+      (visit, erq, ty)
     else
-      (visit, erq, ty) in
+      (incr fixpoint_iters; fixpoint (visit+2) erq ty) in
   let visit, erq, ty = fixpoint 2 erq orig_ty in
+  (* Format.printf "FIXPOINT: %d\n" (visit/2); *)
 
   let bvars = Vector.create () in
   rigvars |> IArray.iter (fun rv -> ignore (Vector.push bvars (Gen_rigid rv)));
@@ -252,7 +255,7 @@ and check' env e ty =
      let level = Env_level.extend (env_level env) in
      let rigvars = IArray.mapi (fun var _ -> {level;var}) vars in
      let rig_defns = vars |> IArray.map (fun (name, bound) ->
-       { name; upper = simple_ptyp_bound level (open_typ_rigid rigvars bound) }) in
+       { name; upper = simple_ptyp level (open_typ_rigid rigvars bound) }) in
      (* rigvars not in scope in body, so no rig_names *)
      let env' = Env_types { level; rig_names = SymMap.empty; rig_defns; rest = env } in
      let body = open_typ_rigid rigvars body in

@@ -268,7 +268,7 @@ type flexvar_gen =
      - bounds may become tighter (upper decreases, lower increases) *)
 type flexvar =
   { mutable level: env_level;
-    mutable upper: styp_neg; (* strictly covariant parts are matchable *)
+    mutable upper: styp_neg list; (* strictly covariant parts are matchable *)
     mutable lower: flex_lower_bound; (* If lower is nontrivial, then upper must be UBcons. FIXME: encode this? *)
     id: int;    (* just for printing *)
     mutable gen: flexvar_gen; }
@@ -277,13 +277,9 @@ type flexvar =
      - a single flexible variable
      - a constructed type, possibly joined with some rigid variables *)
 and styp_neg =
-    (* f.upper = UBnone: no upper bound *)
-  | UBnone
-    (* f.upper = UBvar v: *only* upper bound is v. *)
   | UBvar of flexvar
-    (* arbitrary upper bounds.
-       Only one allowed per set of rigid variables *)
-  | UBcons of (flex_lower_bound, flexvar) ctor_ty list
+    (* Only one allowed per set of rigid variables *)
+  | UBcons of (flex_lower_bound, flexvar) ctor_ty
 
 (* Matchability constraint: the contravariant parts of a flexible variable's lower bound must be flexible variables.
    Flexible variables appearing in vars must not have UBvar upper bounds, as they are also constrained above here.
@@ -323,9 +319,9 @@ and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string;
-  (* FIXME: ctor_ty? Are rigid vars allowed in upper bound heads?
+  (* FIXME: flex_lower_bound? Are rigid vars allowed in upper bound heads?
      FIXME: this seems very dubious *)
-  upper : (flexvar, flex_lower_bound) ctor_ty;
+  upper : flex_lower_bound;
 }
 
 (*
@@ -340,14 +336,11 @@ let rec equal_flex_lower_bound (p : flex_lower_bound) (q : flex_lower_bound) =
   equal_cons equal_flexvar equal_flex_lower_bound p.ctor.cons q.ctor.cons
 let equal_styp_neg (p : styp_neg) (q : styp_neg) =
   match p, q with
-  | UBnone, UBnone -> true
   | UBvar pv, UBvar qv -> equal_flexvar pv qv
-  | UBcons cps, UBcons cqs ->
-     equal_lists (fun cp cq ->
-       Rvset.equal cp.rigvars cq.rigvars &&
-       equal_cons equal_flex_lower_bound equal_flexvar cp.cons cq.cons) cps cqs
-  | (UBnone|UBvar _|UBcons _), _ -> false
-
+  | UBcons cp, UBcons cq ->
+     Rvset.equal cp.rigvars cq.rigvars &&
+     equal_cons equal_flex_lower_bound equal_flexvar cp.cons cq.cons
+  | (UBvar _|UBcons _), _ -> false
 
 let bottom = {ctor={cons=Bot;rigvars=Rvset.empty};flexvars=[]}
 let is_bottom t = equal_flex_lower_bound bottom t
@@ -357,8 +350,9 @@ let is_bottom t = equal_flex_lower_bound bottom t
  *)
 
 type flexvar_change =
+  | Change_expanded_mark (* hack for logging expand changes *)
   | Change_level of flexvar * env_level
-  | Change_upper of flexvar * styp_neg
+  | Change_upper of flexvar * styp_neg list
   | Change_lower of flexvar * flex_lower_bound
 
 let fv_set_level ~changes fv level =
@@ -385,7 +379,7 @@ let fv_maybe_set_lower ~changes fv lower =
   else false
 
 let fv_maybe_set_upper ~changes (fv : flexvar) upper =
-  if not (equal_styp_neg fv.upper upper) then
+  if not (equal_lists equal_styp_neg fv.upper upper) then
     (fv_set_upper ~changes fv upper; true)
   else false
 
@@ -430,6 +424,7 @@ let fv_gen_visit_neg level visit fv k =
 
 let revert changes =
   changes |> List.iter (function
+  | Change_expanded_mark -> ()
   | Change_level (fv, level) -> fv.level <- level
   | Change_upper (fv, upper) -> fv.upper <- upper
   | Change_lower (fv, lower) -> fv.lower <- lower)
@@ -623,22 +618,18 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   (* FIXME rectypes *)
   List.iter (fun fv' -> assert (fv != fv')) fv.lower.flexvars;
   wf_flex_lower_bound ~seen env fv.level fv.lower;
-  match fv.upper with
-  | UBnone -> assert (is_bottom fv.lower)
+  (* Rigvar sets must be distinct *)
+  let rvsets = List.filter_map (function UBvar _ -> None | UBcons c -> Some c.rigvars) fv.upper in
+  assert (List.length rvsets = List.length (List.sort_uniq Rvset.compare rvsets));
+  fv.upper |> List.iter (function
   | UBvar v ->
-     assert (is_bottom fv.lower);
-     (* FIXME: same level? *)
      wf_flexvar ~seen env fv.level v
-  | UBcons cns ->
-     (* Rigvar sets must be distinct *)
-     let rvsets = List.map (fun rv -> rv.rigvars) cns in
-     assert (List.length rvsets = List.length (List.sort_uniq Rvset.compare rvsets));
+  | UBcons {cons;rigvars} ->
      (* Each rigvar set must contain all of the rigvars in the lower bound *)
      let rvlow = (fv.lower.ctor.rigvars :> rigvar list) in
      (* Well-formedness of bounds *)
-     cns |> List.iter (fun {cons;rigvars} ->
-       rvlow |> List.iter (fun rv -> assert (Rvset.contains rigvars rv));
-       map_head (wf_flex_lower_bound ~seen env fv.level) (wf_flexvar ~seen env fv.level) cons |> ignore)
+     rvlow |> List.iter (fun rv -> assert (Rvset.contains rigvars rv));
+     map_head (wf_flex_lower_bound ~seen env fv.level) (wf_flexvar ~seen env fv.level) cons |> ignore)
   end
 
 and wf_rigvar env lvl (rv : rigvar) =
@@ -743,6 +734,7 @@ let unparse_rigid_var {level;var} =
 let unparse_flexvar ~flexvar fv =
   flexvar fv;
   let name = flexvar_name fv in
+(*  let name = Printf.sprintf "%s@%d" name (Env_level.to_int fv.level) in*)
   mktyexp (named_type name)
 
 let unparse_var ~flexvar ~ext = function
@@ -809,12 +801,10 @@ let rec unparse_flex_lower_bound ~flexvar { ctor; flexvars } =
   | None -> unparse_cons ~neg:never ~pos:never Bot
 
 let unparse_styp_neg ~flexvar = function
-  | UBvar v -> [unparse_flexvar ~flexvar v]
-  | UBnone -> []
-  | UBcons cns ->
-     cns |> List.map (fun {cons;rigvars} ->
-       let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) cons in
-       unparse_join cons rigvars)
+  | UBvar v -> unparse_flexvar ~flexvar v
+  | UBcons {cons;rigvars} ->
+     let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) cons in
+     unparse_join cons rigvars
 
 let unparse_ptyp ~flexvar ?(ext=[]) (t : ptyp) =
   unparse_gen_typ ~flexvar ~ext ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) t
@@ -851,7 +841,7 @@ let pp_flexlb ppf t =
   pp_tyexp ppf doc
 
 let pp_styp_neg ppf t =
-  let tys = unparse_styp_neg ~flexvar:ignore t in
+  let tys = List.map (unparse_styp_neg ~flexvar:ignore) t in
   let docs = List.map (fun t -> Print.tyexp (Exp.map_tyexp Exp.normalise t)) tys in
   pp_doc ppf (PPrint.(separate (comma ^^ space) docs))
 
@@ -878,7 +868,7 @@ let dump_ptyp ppf t =
        let l =
          if equal_flex_lower_bound fv.lower bottom then None
          else Some (unparse_flex_lower_bound ~flexvar fv.lower) in
-       let u = unparse_styp_neg ~flexvar fv.upper in
+       let u = List.map (unparse_styp_neg ~flexvar) fv.upper in
        Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
        ()
   and unparse t =
@@ -898,6 +888,20 @@ let dump_ptyp ppf t =
        us |> List.iteri (fun i u ->
          Format.fprintf ppf "%s %a" (if i = 0 then " <=" else ";") pp_tyexp u);
        Format.fprintf ppf "\n")
+
+let pp_changes ppf changes =
+  Format.fprintf ppf "[";
+  List.rev changes |> List.iteri (fun i ch ->
+    let sp = if i = 0 then "" else " " in
+    let pv fv ty =
+      Format.fprintf ppf "%s%s%s" sp (flexvar_name fv) ty in
+    match ch with
+    | Change_expanded_mark -> Format.fprintf ppf "%s!" sp
+    | Change_upper(v,_) -> pv v "-"
+    | Change_lower(v,_) -> pv v "+"
+    | Change_level(v,_) -> pv v "@");
+  Format.fprintf ppf "]"
+
 
 
 let wf_ptyp env (t : ptyp) =

@@ -8,7 +8,6 @@ let mkty t = (Some t, noloc)
 let mkexp e = (Some e, noloc)
 
 let fields gen =
-    (* FIXME extend *)
     let dots = function true -> [Tuple_fields.Fdots] | false -> [] in
     choose [
       (map [gen; bool] @@ fun a d -> Tuple_fields.(collect_fields (Fnamed ("foo", a) :: dots d)));
@@ -161,15 +160,11 @@ let typeable_exp =
   with_printer (fun ppf (e,elab,t) -> Format.fprintf ppf "%a@ %a@ %a" Typedefs.pp_exp e Typedefs.pp_exp elab Typedefs.pp_ptyp t) typeable_exp
 
 let retype (e, elab, t) =
-  try
   let te = Typedefs.unparse_ptyp ~flexvar:ignore t in
   let t' = Check.typ_of_tyexp Env_nil te in
   let _ = Check.check Env_nil e t' in
   let _ = Check.check Env_nil elab t' in
   ()
-  with
-  (* known bug *)
-  | Failure "rig var bounds must be Tcons" -> bad_test ()
 
 let () =
   add_test ~name:"retype" [typeable_exp] retype

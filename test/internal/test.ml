@@ -12,17 +12,6 @@ let tuple xs = Record (Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) 
 
 let nope _ = assert false
 
-let pp_changes ppf changes =
-  Printf.fprintf ppf "[";
-  List.rev changes |> List.iteri (fun i ch ->
-    let fv,ty =
-      match ch with
-      | Change_upper(v,_) -> v, "-"
-      | Change_lower(v,_) -> v, "+"
-      | Change_level(v,_) -> v, "@" in
-    Printf.fprintf ppf "%s%s%s" (if i = 0 then "" else " ") (flexvar_name fv) ty);
-  Printf.fprintf ppf "]"
-
 let dump env level (t : ptyp) =
   dump t;
   flush stdout;
@@ -30,7 +19,7 @@ let dump env level (t : ptyp) =
   let rec fixpoint visit fl =
     let changes = ref [] in
     let fl = expand visit ~changes env level fl in
-    Printf.printf "changed: %a\n" pp_changes !changes;
+    Format.printf "changed: %a\n" pp_changes !changes;
     dump (Tsimple fl);
     if !changes = [] then visit, fl
     else fixpoint (visit + 2) fl in
