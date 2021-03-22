@@ -39,6 +39,13 @@ let fresh_flow lvl =
   Tvar (Vflex fv), Tvar (Vflex fv)
 
 
+let match_as_fn ~error env f =
+  let ((), arg), ((), res) =
+    match_typ ~error env f (func [()] ())
+    |> function Func (a, r) -> Tuple_fields.(FieldMap.find (Field_positional 0) a.fields), r 
+              | _ -> assert false in
+  arg, res
+
 (* λ f, g, x . f x or g x *)
 let choosy () =
   let env =  Env_nil and lvl = Env_level.initial in
@@ -48,11 +55,9 @@ let choosy () =
   let xn, xp = fresh_flow lvl in
   let resn, resp = fresh_flow lvl in
   let apply f x =
-    let argp, arg = Ivar.make () in
-    let resp, res = Ivar.make () in
-    match_typ ~error env f (func [argp] resp);
-    subtype ~error env x (Ivar.get arg);
-    Ivar.get res in
+    let arg, res = match_as_fn ~error env f in
+    subtype ~error env x arg;
+    res in
   let fx = apply fp xp in
   let gx = apply gp xp in
   subtype ~error env fx resn;
@@ -80,12 +85,6 @@ let lbs () =
   subtype ~error env (Tcons (func [d2n] r2p)) fn;
   let ty = (Tcons (func [r1n;r2n] (Tcons (tuple [fp;d1p;d2p])))) in
   dump env lvl ty
-
-let match_as_fn ~error env f =
-  let argp, arg = Ivar.make () in
-  let resp, res = Ivar.make () in
-  match_typ ~error env f (func [argp] resp);
-  Ivar.get arg, Ivar.get res
 
 
 let match_bug () =

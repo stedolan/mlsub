@@ -19,28 +19,6 @@ let id x = x
 type zero = |
 let never : zero -> 'a = function _ -> .
 
-
-(* FIXME move *)
-module Ivar : sig
-  type 'a put
-  type 'a get
-  val make : unit -> 'a put * 'a get
-  val put : 'a put -> 'a -> unit
-  val get : 'a get -> 'a
-  (* FIXME kinda nasty *)
-  val is_init  : 'a put -> bool
-end = struct
-  type 'a put = 'a option ref
-  type 'a get = 'a option ref
-  let make () = let r = ref None in r,r
-  let put r x =
-    assert (!r = None);
-    r := Some x
-  let get r =
-    Option.get !r
-  let is_init x = !x <> None
-end
-
 (* Immutable arrays *)
 module IArray : sig
   type +'a t

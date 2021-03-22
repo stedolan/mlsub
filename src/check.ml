@@ -302,11 +302,13 @@ and infer' env : exp' -> ptyp * exp' elab = function
      If (e, ifso, ifnot)
   | Proj (e, (field, loc)) ->
      let ty, e = infer env e in
-     let resp, res = Ivar.make () in
-     let tmpl = (Record { fields = FieldMap.singleton (Field_named field) resp;
-                          fnames = [Field_named field]; fopen = `Open }) in
-     match_typ ~error:report env ty tmpl;
-     Ivar.get res, let* e = e in Proj (e, (field,loc))
+     let f = Field_named field in
+     let (), tyf =
+       match_typ ~error:report env ty
+         (Record { fields = FieldMap.singleton f ();
+                   fnames = [Field_named field]; fopen = `Open })
+       |> function Record r -> FieldMap.find f r.fields | _ -> assert false in
+     tyf, let* e = e in Proj (e, (field, loc))
   | Tuple fields ->
      if fields.fopen = `Open then failwith "invalid open tuple ctor";
      let fields = map_fields (fun _fn e -> infer env e) fields in
@@ -354,14 +356,11 @@ and infer' env : exp' -> ptyp * exp' elab = function
      Fn (poly, params, Some tret, body)
   | App (f, args) ->
      let fty, f = infer env f in
-     let args = map_fields (fun _fn e -> e, Ivar.make ()) args in
-     let resp, res = Ivar.make () in
-     let argtmpl = map_fields (fun _fn (_e, (r, _)) -> r) args in
-     wf_ptyp env fty;
-     match_typ ~error:report env fty (Func (argtmpl, resp));
-     wf_ptyp env fty;
-     let args = map_fields (fun _fn (e, (_,r)) -> check env e (Ivar.get r)) args in
-     Ivar.get res,
+     let tyargs, ((), tyret) =
+       match_typ ~error:report env fty (Func (args, ()))
+       |> function Func (a,r) -> a,r | _ -> assert false in
+     let args = map_fields (fun _fn (e, t) -> check env e t) tyargs in
+     tyret,
      let* f = f and* args = elab_fields args in
      App(f, args)
 
@@ -382,11 +381,10 @@ and check_pat' env ty = function
   | Pvar (s,_) -> ty, SymMap.singleton s ty
   | Pparens p -> check_pat env ty p
   | Ptuple fs ->
-     let fs = map_fields (fun _fn p -> p, Ivar.make ()) fs in
-     let trec : _ tuple_fields = map_fields (fun _fn (_p, (r,_)) -> r) fs in
-     match_typ ~error:report env ty (Record trec);
-     let fs = map_fields (fun _fn (p, (_,r)) ->
-       check_pat env (Ivar.get r) p) fs in
+     let fs =
+       match_typ ~error:report env ty (Record fs)
+       |> function Record fs -> fs | _ -> assert false in
+     let fs = map_fields (fun _fn (p, t) -> check_pat env t p) fs in
      let fs, bindings = merge_bindings fs in
      Tcons (Record fs), bindings
 

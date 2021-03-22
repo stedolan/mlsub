@@ -517,32 +517,33 @@ let rec subtype ~error env (p : ptyp) (n : ntyp) =
   | p, ((Tsimple _ | Tvar _ | Tvjoin _) as n) ->
      subtype_t_var ~error ~changes:(ref []) env (approx_ptyp env p) (approx_ntyp_var env n); ()
 
-let rec match_typ ~error env (p : ptyp) (head : (ntyp Ivar.put, ptyp Ivar.put) cons_head) =
-  wf_ptyp env p;
+
+let rec match_typ ~error env (p : ptyp) head =
   match p with
   | Tcons c ->
-     subtype_cons ~error ~neg:(fun v t -> Ivar.put v t) ~pos:(fun t v -> Ivar.put v t) c head;
-     (* FIXME urgh, would this just be better with typ refs? *)
-     ignore (map_head
-               (fun v -> if not (Ivar.is_init v) then Ivar.put v (Tcons Top))
-               (fun v -> if not (Ivar.is_init v) then Ivar.put v (Tcons Bot))
-               head)
+     subtype_cons ~error c head
+       ~neg:(fun (_,v) t -> assert (!v = Tcons Top); v := t)
+       ~pos:(fun t (_,v) -> assert (!v = Tcons Bot); v := t);
   | Tpoly {vars; body} ->
      let body = instantiate_flex env vars body in
      match_typ ~error env body head
   | t ->
-     let instneg v =
+     let instneg (_,v) =
        let fv = fresh_flexvar (env_level env) in
-       Ivar.put v (Tsimple fv);
+       v := Tsimple fv;
        flexlb_fv fv in
      let shead = map_head instneg (fun _ -> ref bottom) head in
      match_simple_typ ~error ~changes:(ref []) env (approx_ptyp env t) shead;
      subtype_cons ~error:noerror shead head
        ~neg:(fun _ _ -> () (*already inserted by instneg*))
-       ~pos:(fun t v -> Ivar.put v (Tsimple !t));
-     wf_ptyp env p;
-     ()
+       ~pos:(fun t (_,v) -> v := Tsimple !t)
 
+let match_typ ~error env ty head =
+  let head = map_head (fun x -> x, ref (Tcons Top)) (fun x -> x, ref (Tcons Bot)) head in
+  wf_ptyp env ty;
+  match_typ ~error env ty head;
+  wf_ptyp env ty;
+  map_head (fun (x, r) -> x, !r) (fun (x, r) -> x, !r) head
 
 
 
