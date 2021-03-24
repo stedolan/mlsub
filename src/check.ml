@@ -128,6 +128,7 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
 
 let typ_of_tyexp env t = typ_of_tyexp env (env_level env) t
 
+let unit = Tcons (Record (Tuple_fields.collect_fields []))
 
 open Elab
 
@@ -241,6 +242,10 @@ and check' env e ty =
      let env = Env_vals { vals = vs; rest = env } in
      let* e = e and* pty = elab_ptyp pty and* body = check env body ty in
      Let(p, Some pty, e, body)
+  | Seq (e1, e2), ty ->
+     let e1 = check env e1 unit in
+     let e2 = check env e2 ty in
+     let* e1 = e1 and* e2 = e2 in Seq (e1, e2)
   (* FIXME should I combine Tpoly and Func? *)
   | Fn _ as f, Tpoly { vars; body } ->
      (* rigvars not in scope in body, so no rig_names *)
@@ -312,6 +317,10 @@ and infer' env : exp' -> ptyp * exp' elab = function
      res,
      let* e = e and* pty = elab_ptyp pty and* body = body in
      Let(p, Some pty, e, body)
+  | Seq (e1, e2) ->
+     let e1 = check env e1 unit in
+     let ty, e2 = infer env e2 in
+     ty, let* e1 = e1 and* e2 = e2 in Seq(e1, e2)
   | Fn (poly, params, ret, body) ->
      if params.fopen = `Open then failwith "invalid ... in params";
      let ty, elab =

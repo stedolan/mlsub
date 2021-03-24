@@ -1034,26 +1034,24 @@ fn (x) { if x.cond { x.cond } else { true } }
 >   fn (x: {cond: bool, ...}) -> bool { if x.cond { x.cond } else { true } }
 > ({cond: bool, ...}) -> bool
 
-fn (f) { let () = f(1); 42 }
-> fn (f) { let () = f(1); 42 }
->   fn (f: (int) -> ()) -> int { let () : () = f(1); 42 }
+fn (f) { f(1); 42 }
+> fn (f) { f(1); 42 }
+>   fn (f: (int) -> ()) -> int { f(1); 42 }
 > ((int) -> ()) -> int
 
 # even this one, with A used at both variances, could maybe delete the var?
 # (relying on some nonextensible logic about atomic types covering bottom)
 # in any case, () : A is a stupid elaboration
 # deleting is trickier here: we'd want to first constrain () <: A
-fn (f) { let () = f(1); f(2) }
-> fn (f) { let () = f(1); f(2) }
->   fn [A <: ()](f: (int) -> A) -> A { let () : () = f(1); f(2) }
+fn (f) { f(1); f(2) }
+> fn (f) { f(1); f(2) }
+>   fn [A <: ()](f: (int) -> A) -> A { f(1); f(2) }
 > [A <: ()] ((int) -> A) -> A
 
 # fixing the above example will break this one (seems fine though?)
-((fn (f) { let () = f(1); f(2) })(fn(x){@bot}) : int)
-> ((fn (f) { let () = f(1); f(2) })(fn (x) { @bot }) : int)
->   ((fn [A <: ()](f: (int) -> A) -> A { let () : () = f(1); f(2) })(
->     fn (x) { @bot }
->   ) : int)
+((fn (f) { f(1); f(2) })(fn(x){@bot}) : int)
+> ((fn (f) { f(1); f(2) })(fn (x) { @bot }) : int)
+>   ((fn [A <: ()](f: (int) -> A) -> A { f(1); f(2) })(fn (x) { @bot }) : int)
 > int
 
 fn(f) { fn(x) { (x, f(x)) } }

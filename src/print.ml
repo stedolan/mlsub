@@ -52,6 +52,8 @@ let rec exp e = mayloc e @@ function
         | Some ty ->
            indent (blank 1 ^^ group (string "->" ^^ break 1 ^^ group (tyexp ty))))) ^^
      block body
+  | Seq (e1, e2) ->
+     group (exp e1 ^^ semi) ^^ break 1 ^^ exp e2
   | Let (p, ty, e, body) ->
      group (string "let" ^^ space ^^
        pat p ^^ opt_type_annotation ty ^^

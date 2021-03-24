@@ -166,51 +166,51 @@ let ch = fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }; fn (a,b) { c
 
 # debugging
 
-let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let () = f(5); x.foo}) }
+let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){f(5); x.foo}) }
 > let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) };
 > fn (f) {
->   wid(fn (x) { let () = f(5); x.foo })
+>   wid(fn (x) { f(5); x.foo })
 > }
 >   let wid : ([B] ({foo: B}) -> B) -> int =
 >   fn (id: [B] ({foo: B}) -> B) -> int { id({foo: 5}) };
 >   fn (f: (int) -> ()) -> int {
->     wid(fn (x) { let () : () = f(5); x.foo })
+>     wid(fn (x) { f(5); x.foo })
 >   }
 > ((int) -> ()) -> int
 
 
 # making this work requires an annotation on f, due to hoisting
 # (by design, but a bit weird)
-let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let () = f(x); x.foo}); wid(g) }
+let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
 > let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) };
 > fn (f) {
->   let g = (fn (x) { let () = f(x); x.foo });
+>   let g = (fn (x) { f(x); x.foo });
 >   wid(g)
 > }
 > typechecking error: Failure("incompat top <: bot")
 
 # works in checking mode (bidir)
-let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let () = f(x); x.foo}) }
+let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){f(x); x.foo}) }
 > let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) };
 > fn (f) {
->   wid(fn (x) { let () = f(x); x.foo })
+>   wid(fn (x) { f(x); x.foo })
 > }
 >   let wid : ([B] ({foo: B}) -> B) -> int =
 >   fn (id: [B] ({foo: B}) -> B) -> int { id({foo: 5}) };
 >   fn (f: ({foo: any}) -> ()) -> int {
->     wid(fn (x) { let () : () = f(x); x.foo })
+>     wid(fn (x) { f(x); x.foo })
 >   }
 > (({foo: any}) -> ()) -> int
 
-let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f : (any) -> ()) { wid(fn(x){let () = f(x); x.foo}) }
+let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f : (any) -> ()) { wid(fn(x){f(x); x.foo}) }
 > let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) };
 > fn (f: (any) -> ()) {
->   wid(fn (x) { let () = f(x); x.foo })
+>   wid(fn (x) { f(x); x.foo })
 > }
 >   let wid : ([B] ({foo: B}) -> B) -> int =
 >   fn (id: [B] ({foo: B}) -> B) -> int { id({foo: 5}) };
 >   fn (f: (any) -> ()) -> int {
->     wid(fn (x) { let () : () = f(x); x.foo })
+>     wid(fn (x) { f(x); x.foo })
 >   }
 > ((any) -> ()) -> int
 

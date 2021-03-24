@@ -11,8 +11,8 @@
 
 %nonassoc ARROW
 %left VBAR
-%right AS 
-
+%right AS
+%right SEMI
 
 %{ open Tuple_fields open Exp %}
 %start <[`Exp of Exp.exp | `Sub of Exp.tyexp * Exp.tyexp]> prog
@@ -69,6 +69,8 @@ exp_:
   { Let (p, None, e, body) }
 | LET; p = pat; COLON; t = tyexp; EQUALS; e = exp; SEMI; body = exp
   { Let (p, Some t, e, body) }
+| e1 = exp; SEMI; e2 = exp
+  { Seq (e1, e2) }
 | t = term_
   { t }
 

@@ -35,6 +35,8 @@ type exp = exp' mayloc and exp' =
   | Tuple of exp tuple_fields
   (* let a : t = ...; ... *)
   | Let of pat * tyexp option * exp * exp
+  (* e; e *)
+  | Seq of exp * exp
   (* a.foo *)
   | Proj of exp * symbol
   (* if a { foo } else { bar } *)
@@ -104,6 +106,8 @@ let mapper =
        Tuple (map_fields (fun _fn e -> r.exp r e) es)
     | Let (p, ty, e, body) ->
        Let (r.pat r p, Option.map (r.tyexp r) ty, r.exp r e, r.exp r body)
+    | Seq (e1, e2) ->
+       Seq (r.exp r e1, r.exp r e2)
     | Proj (e, s) ->
        Proj (r.exp r e, sym r s)
     | If (e, et, ef) ->
