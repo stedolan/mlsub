@@ -92,12 +92,8 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> tyexp' -> ('a, 'b) typ =
      List.fold_left (fun c r -> Tvjoin (c, Vrigid r)) (Tcons cons) rigvars
   | Tforall (vars, body) ->
      let vars, name_ix = enter_polybounds env vars in
-     let level = Env_level.extend (env_level env) in
-     let rigvars = IArray.mapi (fun var _ -> {level;var}) vars in
-     let rig_defns = vars |> IArray.map (fun (name, bound) ->
-       { name; upper = simple_ptyp level (open_typ_rigid rigvars bound) }) in
-     let env = Env_types { level; rig_names = name_ix; rig_defns; rest = env } in
-     let body = close_typ_rigid ~ispos:true level (typ_of_tyexp env (env_level env) body) in
+     let env, _rigvars = enter_rigid env vars name_ix in
+     let body = close_typ_rigid ~ispos:true (env_level env) (typ_of_tyexp env (env_level env) body) in
      Tpoly { vars; body }
 
 and typs_of_tuple_tyexp : 'a 'b . env -> Env_level.t -> tyexp tuple_fields -> ('a, 'b) typ tuple_fields =
@@ -139,16 +135,12 @@ let fixpoint_iters = ref 0
 let verbose_types = match Sys.getenv "VERBOSE_TYPES" with _ -> true | exception Not_found -> false
 
 let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds option * tyexp * 'a) elab =
-  let level = Env_level.extend (env_level env) in
   let rigvars', rig_names =
     match poly with
     | None -> IArray.empty, SymMap.empty
     | Some poly -> enter_polybounds env poly in
-  let rigvars = IArray.mapi (fun var _ -> {level;var}) rigvars' in
-  let rig_defns = rigvars' |> IArray.map (fun (name, bound) ->
-    { name; upper = simple_ptyp level (open_typ_rigid rigvars bound) }) in
 
-  let env' = Env_types { level; rig_names; rig_defns; rest = env } in
+  let env', rigvars = enter_rigid env rigvars' rig_names in
   let orig_ty, Elab (erq, ek) = fn env' in
   wf_ptyp env' orig_ty;
 
@@ -156,11 +148,11 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
     if verbose_types then Format.printf "FIX: %a" dump_ptyp orig_ty;
     if visit > 10 then intfail "looping?";
     let changes = ref [] in
-    let ty = expand_ptyp visit ~changes env' level prev_ty in
+    let ty = expand_ptyp visit ~changes env' prev_ty in
     wf_ptyp env' ty;
     let erq = elabreq_map_typs erq ~index:0
-                ~neg:(fun ~index:_ -> expand_ntyp visit ~changes env' level)
-                ~pos:(fun ~index:_ -> expand_ptyp visit ~changes env' level) in
+                ~neg:(fun ~index:_ -> expand_ntyp visit ~changes env')
+                ~pos:(fun ~index:_ -> expand_ptyp visit ~changes env') in
     if verbose_types then Format.printf "CHANGED: %a\n\n" pp_changes !changes;
     if !changes = [] then
       (visit, erq, ty)
@@ -172,7 +164,7 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
   let bvars = Vector.create () in
   rigvars |> IArray.iter (fun rv -> ignore (Vector.push bvars (Gen_rigid rv)));
 
-  let subst = { mode = `Poly; visit; bvars; level; index = 0 } in
+  let subst = { mode = `Poly; visit; bvars; level=env_level env'; index = 0 } in
   let ty = substn_ptyp subst ty in
   (* Format.printf "GEN: %a\n --> %a\n%!" dump_ptyp orig_ty pp_ptyp ty; *)
   let erq = elabreq_map_typs erq ~index:0
@@ -251,13 +243,8 @@ and check' env e ty =
      Let(p, Some pty, e, body)
   (* FIXME should I combine Tpoly and Func? *)
   | Fn _ as f, Tpoly { vars; body } ->
-     (* FIXME share code with elab_gen *)
-     let level = Env_level.extend (env_level env) in
-     let rigvars = IArray.mapi (fun var _ -> {level;var}) vars in
-     let rig_defns = vars |> IArray.map (fun (name, bound) ->
-       { name; upper = simple_ptyp level (open_typ_rigid rigvars bound) }) in
      (* rigvars not in scope in body, so no rig_names *)
-     let env' = Env_types { level; rig_names = SymMap.empty; rig_defns; rest = env } in
+     let env', rigvars = enter_rigid env vars SymMap.empty in
      let body = open_typ_rigid rigvars body in
      check' env' f body
      (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)

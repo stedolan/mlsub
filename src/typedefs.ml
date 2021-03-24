@@ -126,9 +126,7 @@ module Env_level : sig
   type t
 
   val initial : t
-
   val extend : t -> t
-  val replace : t -> t
 
   val equal : t -> t -> bool
   val compare : t -> t -> int
@@ -143,7 +141,6 @@ end = struct
 
   let initial = { level = 0 }
   let extend { level } = { level = level + 1 }
-  let replace { level } = { level }
 
   let compare { level=l1} {level=l2} = compare l1 l2
 
@@ -361,45 +358,6 @@ let fv_maybe_set_upper ~changes (fv : flexvar) upper =
     (fv_set_upper ~changes fv upper; true)
   else false
 
-(* visit counters: odd = visiting, even = done *)
-let fv_gen_visit_counts level fv =
-  assert (Env_level.extends fv.level level);
-  if not (Env_level.equal fv.level level) then None
-  else match fv.gen with
-  | Generalising g ->
-     assert (Env_level.equal fv.level g.level);
-     Some g.visit
-  | Not_generalising ->
-     let visit = { pos = 0; neg = 0 } in
-     fv.gen <- Generalising { level = fv.level; visit; bound_var = -1 };
-     Some visit
-
-type visit_type = First_visit | Recursive_visit
-let fv_gen_visit_pos level visit fv k =
-  match fv_gen_visit_counts level fv with
-  | None -> ()
-  | Some v ->
-     assert (v.pos <= visit);
-     if v.pos = visit then () (* visited already *)
-     else if v.pos = visit - 1 then k Recursive_visit
-     else begin
-       v.pos <- visit - 1;
-       k First_visit;
-       v.pos <- visit
-     end
-let fv_gen_visit_neg level visit fv k =
-  match fv_gen_visit_counts level fv with
-  | None -> ()
-  | Some v ->
-     assert (v.neg <= visit);
-     if v.neg = visit then () (* visited already *)
-     else if v.neg = visit - 1 then k Recursive_visit
-     else begin
-       v.neg <- visit - 1;
-       k First_visit;
-       v.neg <- visit
-     end
-
 let revert changes =
   changes |> List.iter (function
   | Change_expanded_mark -> ()
@@ -437,6 +395,47 @@ let rec env_level env =
   | Env_types tys -> tys.level
   | Env_vals vs -> env_level vs.rest
   | Env_nil -> Env_level.initial
+
+(* visit counters: odd = visiting, even = done *)
+let fv_gen_visit_counts env fv =
+  let level = env_level env in
+  assert (Env_level.extends fv.level level);
+  if not (Env_level.equal fv.level level) then None
+  else match fv.gen with
+  | Generalising g ->
+     assert (Env_level.equal fv.level g.level);
+     Some g.visit
+  | Not_generalising ->
+     let visit = { pos = 0; neg = 0 } in
+     fv.gen <- Generalising { level = fv.level; visit; bound_var = -1 };
+     Some visit
+
+type visit_type = First_visit | Recursive_visit
+let fv_gen_visit_pos env visit fv k =
+  match fv_gen_visit_counts env fv with
+  | None -> ()
+  | Some v ->
+     assert (v.pos <= visit);
+     if v.pos = visit then () (* visited already *)
+     else if v.pos = visit - 1 then k Recursive_visit
+     else begin
+       v.pos <- visit - 1;
+       k First_visit;
+       v.pos <- visit
+     end
+let fv_gen_visit_neg env visit fv k =
+  match fv_gen_visit_counts env fv with
+  | None -> ()
+  | Some v ->
+     assert (v.neg <= visit);
+     if v.neg = visit then () (* visited already *)
+     else if v.neg = visit - 1 then k Recursive_visit
+     else begin
+       v.neg <- visit - 1;
+       k First_visit;
+       v.neg <- visit
+     end
+
 
 (*
  * Opening/closing of binders
@@ -533,10 +532,10 @@ let close_typ_rigid ~ispos level ty =
 
 
 let next_flexvar_id = ref 0
-let fresh_flexvar_gen level upper : flexvar =
+let fresh_flexvar level : flexvar =
   let id = !next_flexvar_id in
   incr next_flexvar_id;
-  { level; upper; lower = bottom; id; gen = Not_generalising }
+  { level; upper = []; lower = bottom; id; gen = Not_generalising }
 
 
 (*
