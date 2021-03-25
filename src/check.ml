@@ -327,12 +327,23 @@ and infer' env : exp' -> ptyp * exp' elab = function
        elab_gen env poly (fun env ->
          let params = map_fields (fun _fn (p, ty) ->
            match ty with
-           | Some ty -> typ_of_tyexp env ty, p
+           | Some ty ->
+              let ty = typ_of_tyexp env ty in
+              (* check for contravariant joins *)
+              ignore (close_typ_rigid ~ispos:false (env_level env) ty);
+              ty, p
            | None -> fresh_flow env, p) params in
          let ptys = map_fields (fun _fn (t, p) -> check_pat env t p) params in
          let _, vs = merge_bindings ptys in
          let env' = Env_vals { vals = vs; rest = env } in
-         let res, body = check_or_infer env' ret body in
+         let res, body =
+           match ret with
+           | Some ty ->
+              let ty = typ_of_tyexp env ty in
+              ignore (close_typ_rigid ~ispos:true (env_level env) ty);
+              ty, check env' body ty
+           | None ->
+              infer env' body in
          let _ = map_fields (fun _fn (t,_) -> wf_ntyp env t) params in
          (* FIXME params or ptys? What happens if they disagree? *)
          Tcons (Func (map_fields (fun _fn (t,_) -> t) params, res)),

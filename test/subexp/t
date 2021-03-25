@@ -28,6 +28,65 @@ fn(f) { fn[A](x : A) { f(x) } }
 >   fn [A](f: (any) -> A) -> [A_2] (A_2) -> A { fn [A_2](x: A_2) -> A { f(x) } }
 > [A] ((any) -> A) -> [A_2] (A_2) -> A
 
+fn[A,B <: A](x : A) -> B { x }
+> fn [A, B <: A](x: A) -> B { x }
+> typechecking error: Failure("incompat top <: bot")
+
+fn[A,B <: A](x : B) -> A { x }
+> fn [A, B <: A](x: B) -> A { x }
+>   fn [A, B <: A](x: B) -> A { x }
+> [A, B <: A] (B) -> A
+
+# contravariant join checks
+fn[A,B](x : A|B) -> A|B {x}
+> fn [A, B](x: A | B) -> A | B { x }
+> typechecking error: Failure("contravariant join")
+
+fn[A,B](x : (A|B) -> A) { fn(a){x(a)} }
+> fn [A, B](x: (A | B) -> A) { fn (a) { x(a) } }
+>   fn [A, B](x: (A | B) -> A) -> (nothing) -> A { fn (a: A | B) -> A { x(a) } }
+> [A, B] ((A | B) -> A) -> (nothing) -> A
+
+fn[A,B](x) -> (A|B) -> A {x}
+> fn [A, B](x) -> (A | B) -> A { x }
+> typechecking error: Failure("contravariant join")
+
+fn[A,B](x) -> A|B {x}
+> fn [A, B](x) -> A | B { x }
+>   fn [A, B](x: nothing) -> A | B { x }
+> [A, B] (nothing) -> A | B
+
+fn[A,B](f : (A|B) -> A, x: B) -> ((A|B) -> A, B) { (f,x) }
+> fn [A, B](f: (A | B) -> A, x: B) -> ((A | B) -> A, B) { (f, x) }
+> typechecking error: Failure("contravariant join")
+
+fn (f,x) { (fn(f, x) { let y = f(f(x)); (f, x) })(f,x) }
+> fn (f, x) { (fn (f, x) { let y = f(f(x)); (f, x) })(f, x) }
+>   fn [A, B, C <: (B | A) -> A](f: C, x: B) -> (C, B) {
+>     (fn [A_2, B_2, C_2 <: (B_2 | A_2) -> A_2](f: C_2, x: B_2) -> (C_2, B_2) {
+>       let y : A_2 = f(f(x));
+>       (f, x)
+>     })(f, x)
+>   }
+> [A, B, C <: (B | A) -> A] (C, B) -> (C, B)
+
+fn[P,Q,R](f : (P|Q|R) -> P, x : Q) -> (((R) -> (P|R)), Q) { (f, x) }
+> fn [P, Q, R](f: (P | Q | R) -> P, x: Q) -> (((R) -> (P | R)), Q) { (f, x) }
+>   fn [P, Q, R](f: (P | Q | R) -> P, x: Q) -> ((R) -> P | R, Q) { (f, x) }
+> [P, Q, R] ((P | Q | R) -> P, Q) -> ((R) -> P | R, Q)
+
+fn (f,x) { (fn(f, x) { let y = f(f(x)); (fn(p){f(p)}, x) })(f,x) }
+
+
+> fn (f, x) { (fn (f, x) { let y = f(f(x)); (fn (p) { f(p) }, x) })(f, x) }
+>   fn [A, B, C](f: (B | A | C) -> A, x: C) -> ((B) -> A, C) {
+>     (fn [A_2, B_2, C_2](f: (B_2 | A_2 | C_2) -> A_2, x: C_2) ->
+>       ((B_2) -> A_2, C_2) {
+>       let y : A_2 = f(f(x));
+>       (fn (p: B_2) -> A_2 { f(p) }, x)
+>     })(f, x)
+>   }
+> [A, B, C] ((B | A | C) -> A, C) -> ((B) -> A, C)
 # partial poly
 fn[A,C](a : A, b, c : C, d) { (a, b, c, d) }
 > fn [A, C](a: A, b, c: C, d) { (a, b, c, d) }
@@ -633,4 +692,4 @@ fn  [A](a) -> A { let x = a; x }
 > fn [A](a) -> A { let x = a; x }
 >   fn [A, B <: A](a: B) -> A { let x : B = a; x }
 > [A, B <: A] (B) -> A
-> FIXPOINTS: 64
+> FIXPOINTS: 72
