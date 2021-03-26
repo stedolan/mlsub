@@ -175,7 +175,7 @@ and rotate_flex ~error ~changes env (pv : flexvar) =
   | [] -> ()
   | rotate ->
      (* make sure this var stays rotated by giving it a dummy UBcons bound if needed *)
-     let keep = match keep with [] -> [UBcons {cons=Top; rigvars=Rvset.empty}] | k -> k in
+     let keep = match keep with [] -> [UBcons {cons=Top; rigvars=pv.lower.ctor.rigvars}] | k -> k in
      fv_set_upper ~changes pv keep;
      rotate |> List.iter (function
        | UBcons _ -> assert false
