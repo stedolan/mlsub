@@ -129,4 +129,4 @@ let () =
        List.iter (Printf.printf "%s\n") cmd;
        let out = run_cmd cmd in
        out |> String.trim |> String.split_on_char '\n' |> List.iter (Printf.printf "> %s\n"));
-  Printf.printf "> FIXPOINTS: %d\n" !Lang.Check.fixpoint_iters
+  Printf.printf "> STATS: fix: %d, flex: %d\n" !Lang.Check.fixpoint_iters !Lang.Typedefs.next_flexvar_id

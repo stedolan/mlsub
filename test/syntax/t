@@ -34,4 +34,4 @@ fn[A,B](x:A) -> A | (A) -> B { x }
 
 : [A <: ([] int) -> int ] A <: int
 > typechecking error: Failure("bounds must be simple")
-> FIXPOINTS: 0
+> STATS: fix: 0, flex: 103

@@ -3,4 +3,4 @@
 (fn (x) { x(x) }) (fn (x) { x(x) })
 > (fn (x) { x(x) })(fn (x) { x(x) })
 > typechecking error: unimplemented: flexvar recursive in own bound
-> FIXPOINTS: 1
+> STATS: fix: 1, flex: 3

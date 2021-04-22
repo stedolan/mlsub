@@ -134,4 +134,4 @@
 > ok
 : [C] (C | {bar: C}) <: [C <: {bar: bool}] {bar: C}
 > ok
-> FIXPOINTS: 0
+> STATS: fix: 0, flex: 115
