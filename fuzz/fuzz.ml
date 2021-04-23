@@ -1,5 +1,6 @@
 open Crowbar
 open Lang
+open Lang.Location
 open Lang.Exp
 
 let mkident s : ident = { label = s; shift = 0}, noloc
@@ -18,7 +19,7 @@ let fields gen =
 
 let tyexp = fix @@ fun tyexp ->
   let bound =
-    map [choose [const "A";const "B";const "C";const "D"]; option tyexp] @@ fun s t -> ((s,Exp.noloc), t) in
+    map [choose [const "A";const "B";const "C";const "D"]; option tyexp] @@ fun s t -> ((s,Location.noloc), t) in
   let tyexp' = choose [
     const (Tnamed (mkident "int"));
     const (Tnamed (mkident "bool"));
@@ -41,7 +42,7 @@ let tyexp = fix @@ fun tyexp ->
 let tyexp = with_printer Typedefs.pp_tyexp tyexp
 
 let typolybounds =
-  list1 @@ map [choose [const "A";const "B";const "C";const "D"]; option tyexp] @@ fun s t -> ((s,Exp.noloc), t)
+  list1 @@ map [choose [const "A";const "B";const "C";const "D"]; option tyexp] @@ fun s t -> ((s,Location.noloc), t)
 
 let tyexp' =
   map [typolybounds; tyexp] (fun a b -> mkty (Tforall (a, b)))

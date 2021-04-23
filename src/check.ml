@@ -30,7 +30,7 @@ let rec split_tjoin env lvl cons vars rest =
   match rest with
   | [] -> cons, List.rev vars
   | (None, _) :: _ -> failwith "type syntax error"
-  | (Some ty, _) as ty' :: rest ->
+  | (Some ty, loc) as ty' :: rest ->
      match ty with
      | Tjoin (a, b) ->
         split_tjoin env lvl cons vars (a :: b :: rest)
@@ -42,7 +42,7 @@ let rec split_tjoin env lvl cons vars rest =
           match ty with
           | Tnamed (name, _) ->
              (* FIXME shifting? *)
-             env_lookup_type_var env lvl name.label
+             Option.map (fun v -> v, loc) (env_lookup_type_var env lvl name.label)
           | _ -> None in
         match as_var with
         | Some v -> split_tjoin env lvl cons (v :: vars) rest
@@ -50,46 +50,48 @@ let rec split_tjoin env lvl cons vars rest =
            match cons with
            | None -> split_tjoin env lvl (Some ty') vars rest
            | Some _ -> failwith "multiple cons in join"
+
+let tcons loc cons = Tcons (mk_cons_locs loc cons, cons)
      
 let rec typ_of_tyexp : 'a 'b . env -> Env_level.t -> tyexp -> ('a, 'b) typ =
   fun env lvl ty -> match ty with
   | None, _ -> failwith "type syntax error"
-  | Some t, _ -> typ_of_tyexp' env lvl t
-and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> tyexp' -> ('a, 'b) typ =
-  fun env lvl ty -> match ty with
+  | Some t, loc -> typ_of_tyexp' env lvl loc t
+and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, 'b) typ =
+  fun env lvl loc ty -> match ty with
   | Tnamed (name, _) ->
      (* FIXME shifting? *)
      let name = name.label in
      begin match lookup_named_type name with
-     | Some cons -> Tcons cons
+     | Some cons -> tcons loc cons
      | None ->
         match env_lookup_type_var env lvl name with
-        | Some v -> Tvar (Vrigid v)
+        | Some v -> Tvar (Location.single loc, Vrigid v)
         | None -> failwith ("unknown type " ^ name)
      end
   | Trecord fields ->
-     Tcons (Record (typs_of_tuple_tyexp env lvl fields))
+     tcons loc (Record (typs_of_tuple_tyexp env lvl fields))
   | Tfunc (args, res) ->
-     Tcons (Func (typs_of_tuple_tyexp env lvl args, typ_of_tyexp env lvl res))
+     tcons loc (Func (typs_of_tuple_tyexp env lvl args, typ_of_tyexp env lvl res))
   | Tparen t ->
      typ_of_tyexp env lvl t
   | Tjoin (a, b) ->
      let cons, rigvars = split_tjoin env lvl None [] [a;b] in
-     let rigvars = List.stable_sort (fun (v : rigvar) (v' : rigvar) -> Env_level.compare v.level v'.level) rigvars in
+     let rigvars = List.stable_sort (fun ((v : rigvar),_) ((v' : rigvar),_) -> Env_level.compare v.level v'.level) rigvars in
      let join_lvl =
        match rigvars with
        | [] -> lvl
-       | rv :: _ -> rv.level in
-     let cons =
+       | (rv,_) :: _ -> rv.level in
+     let cloc, cons =
        match cons with
-       | None -> Bot
+       | None -> Location.empty, Bot
        | Some c ->
           match typ_of_tyexp env join_lvl c with
-          | Tcons c -> c
+          | Tcons (l, c) -> l, c
           | _ -> failwith "Expected a constructed type" in
-     if rigvars <> [] && not (check_simple (Tcons cons)) then
+     if rigvars <> [] && not (check_simple (Tcons (cloc, cons))) then
        failwith "Poly type under join";
-     List.fold_left (fun c r -> Tvjoin (c, Vrigid r)) (Tcons cons) rigvars
+     List.fold_left (fun c (r,l) -> Tvjoin (c, Location.single l, Vrigid r)) (Tcons (cloc, cons)) rigvars
   | Tforall (vars, body) ->
      let vars, name_ix = enter_polybounds env vars in
      let env, _rigvars = enter_rigid env vars name_ix in
@@ -110,11 +112,11 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
   let level = Env_level.extend (env_level env) in
   let stubs =
     vars
-    |> List.map (fun ((name,_),_) -> {name; upper={ctor={cons=Top;rigvars=Rvset.empty};flexvars=[]}})
+    |> List.map (fun ((name,_),_) -> {name; upper={ctor={cons=Top;rigvars=Rvset.empty;cons_locs=[]};flexvars=[]}})
     |> IArray.of_list in
   let mkbound rig_names bound =
     match bound with
-    | None -> Tcons Top
+    | None -> Tcons (Location.empty, Top)
     | Some b ->
        let temp_env = Env_types { level; rig_names; rig_defns = stubs; rest = env } in
        let bound = close_typ_rigid ~ispos:false level (typ_of_tyexp temp_env (env_level temp_env) b) in
@@ -128,7 +130,7 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
 
 let typ_of_tyexp env t = typ_of_tyexp env (env_level env) t
 
-let unit = Tcons (Record (Tuple_fields.collect_fields []))
+let unit loc = tcons loc (Record (Tuple_fields.collect_fields []))
 
 open Elab
 
@@ -193,26 +195,26 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
   
 let fresh_flow env =
   let fv = fresh_flexvar (env_level env) in
-  Tvar (Vflex fv)
+  Tvar (Location.empty, Vflex fv)
 
 let rec check env e (ty : ntyp) : exp elab =
   wf_ntyp env ty;
   match e with
   | None, _ -> failwith "bad exp"
   | Some e, loc ->
-     let* e = check' env e ty in
+     let* e = check' env loc e ty in
      Some e, loc
-and check' env e ty =
+and check' env eloc e ty =
   match e, ty with
   | If (e, ifso, ifnot), _ ->
-     let* e = check env e (Tcons Bool)
+     let* e = check env e (tcons eloc Bool)
      and* ifso = check env ifso ty
      and* ifnot = check env ifnot ty in
      If (e, ifso, ifnot)
   | Parens e, _ ->
      let* e = check env e ty in
      Parens e
-  | Tuple ef, Tcons (Record tf) ->
+  | Tuple ef, Tcons (tloc, Record tf) ->
      let infer_typed env ((_,loc) as e) =
        let ty, e = infer env e in
        let* e = e and* ty = elab_ptyp ty in
@@ -234,7 +236,7 @@ and check' env e ty =
      let r = { fields = FieldMap.singleton (Field_named field) ty;
                fnames = [Field_named field];
                fopen = `Open } in
-     let* e = check env e (Tcons (Record r)) in
+     let* e = check env e (tcons eloc (Record r)) in
      Proj (e, (field, loc))
   | Let (p, pty, e, body), _ ->
      let pty, e = check_or_infer env pty e in
@@ -243,7 +245,7 @@ and check' env e ty =
      let* e = e and* pty = elab_ptyp pty and* body = check env body ty in
      Let(p, Some pty, e, body)
   | Seq (e1, e2), ty ->
-     let e1 = check env e1 unit in
+     let e1 = check env e1 (unit eloc) in
      let e2 = check env e2 ty in
      let* e1 = e1 and* e2 = e2 in Seq (e1, e2)
   (* FIXME should I combine Tpoly and Func? *)
@@ -251,9 +253,9 @@ and check' env e ty =
      (* rigvars not in scope in body, so no rig_names *)
      let env', rigvars = enter_rigid env vars SymMap.empty in
      let body = open_typ_rigid rigvars body in
-     check' env' f body
+     check' env' eloc f body
      (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
-  | Fn (None, params, ret, body), Tcons (Func (ptypes, rtype)) ->
+  | Fn (None, params, ret, body), Tcons (tloc, Func (ptypes, rtype)) ->
      (* If poly <> None, then we should infer & subtype *)
      (* FIXME: do we need another level here? Does hoisting break things? *)
      let _, vals = check_parameters env params ptypes in
@@ -261,11 +263,11 @@ and check' env e ty =
      let* body = check env' body (check_annot env' ret rtype) in
      (* No elaboration. Arguably we could *delete* annotations here! *)
      Fn (None, params, ret, body)
-  | Pragma "true", Tcons Bool -> elab_pure e
-  | Pragma "false", Tcons Bool -> elab_pure e
+  | Pragma "true", Tcons (_,Bool) -> elab_pure e
+  | Pragma "false", Tcons (_,Bool) -> elab_pure e
   | e, _ ->
      (* Default case: infer and subtype. *)
-     let ty', e = infer' env e in
+     let ty', e = infer' env eloc e in
      subtype ~error:report env ty' ty;
      wf_ntyp env ty;
      let* e = e in e
@@ -273,10 +275,10 @@ and check' env e ty =
 and infer env : exp -> ptyp * exp elab = function
   | None, _ -> failwith "bad exp"
   | Some e, loc ->
-     let ty, e = infer' env e in
+     let ty, e = infer' env loc e in
      wf_ptyp env ty;
      ty, (let* e = e in Some e, loc)
-and infer' env : exp' -> ptyp * exp' elab = function
+and infer' env eloc : exp' -> ptyp * exp' elab = function
   | Lit l -> infer_lit l
   | Var (id, _loc) as e -> env_lookup_var env id, elab_pure e
   | Typed (e, ty) ->
@@ -286,7 +288,7 @@ and infer' env : exp' -> ptyp * exp' elab = function
      let ty, e = infer env e in
      ty, let* e = e in Parens e
   | If (e, ifso, ifnot) ->
-     let e = check env e (Tcons Bool)
+     let e = check env e (tcons eloc Bool)
      and tyso, ifso = infer env ifso
      and tynot, ifnot = infer env ifnot in
      join_ptyp env tyso tynot,
@@ -296,7 +298,7 @@ and infer' env : exp' -> ptyp * exp' elab = function
      let ty, e = infer env e in
      let f = Field_named field in
      let (), tyf =
-       match_typ ~error:report env ty
+       match_typ ~error:report env ty eloc
          (Record { fields = FieldMap.singleton f ();
                    fnames = [Field_named field]; fopen = `Open })
        |> function Record r -> FieldMap.find f r.fields | _ -> assert false in
@@ -304,10 +306,10 @@ and infer' env : exp' -> ptyp * exp' elab = function
   | Tuple fields ->
      if fields.fopen = `Open then failwith "invalid open tuple ctor";
      let fields = map_fields (fun _fn e -> infer env e) fields in
-     Tcons (Record (map_fields (fun _ (ty, _e) -> ty) fields)),
+     tcons eloc (Record (map_fields (fun _ (ty, _e) -> ty) fields)),
      let* fields = elab_fields (map_fields (fun _fn (_ty, e) -> e) fields) in
      Tuple fields
-  | Pragma "bot" as e -> Tcons Bot, elab_pure e
+  | Pragma "bot" as e -> tcons eloc Bot, elab_pure e
   | Pragma s -> failwith ("pragma: " ^ s)
   | Let (p, pty, e, body) ->
      let pty, e = check_or_infer env pty e in
@@ -318,7 +320,7 @@ and infer' env : exp' -> ptyp * exp' elab = function
      let* e = e and* pty = elab_ptyp pty and* body = body in
      Let(p, Some pty, e, body)
   | Seq (e1, e2) ->
-     let e1 = check env e1 unit in
+     let e1 = check env e1 (unit eloc) in
      let ty, e2 = infer env e2 in
      ty, let* e1 = e1 and* e2 = e2 in Seq(e1, e2)
   | Fn (poly, params, ret, body) ->
@@ -346,7 +348,7 @@ and infer' env : exp' -> ptyp * exp' elab = function
               infer env' body in
          let _ = map_fields (fun _fn (t,_) -> wf_ntyp env t) params in
          (* FIXME params or ptys? What happens if they disagree? *)
-         Tcons (Func (map_fields (fun _fn (t,_) -> t) params, res)),
+         tcons eloc (Func (map_fields (fun _fn (t,_) -> t) params, res)),
          body) in
      ty,
      let* poly, ty, body = elab in
@@ -364,7 +366,7 @@ and infer' env : exp' -> ptyp * exp' elab = function
   | App (f, args) ->
      let fty, f = infer env f in
      let tyargs, ((), tyret) =
-       match_typ ~error:report env fty (Func (args, ()))
+       match_typ ~error:report env fty eloc (Func (args, ()))
        |> function Func (a,r) -> a,r | _ -> assert false in
      let args = map_fields (fun _fn (e, t) -> check env e t) tyargs in
      tyret,
@@ -383,17 +385,17 @@ and merge_bindings bs =
 
 and check_pat env ty = function
   | None, _ -> failwith "bad pat"
-  | Some p, _ -> check_pat' env ty p
-and check_pat' env ty = function
+  | Some p, loc -> check_pat' env ty loc p
+and check_pat' env ty ploc = function
   | Pvar (s,_) -> ty, SymMap.singleton s ty
   | Pparens p -> check_pat env ty p
   | Ptuple fs ->
      let fs =
-       match_typ ~error:report env ty (Record fs)
+       match_typ ~error:report env ty ploc (Record fs)
        |> function Record fs -> fs | _ -> assert false in
      let fs = map_fields (fun _fn (p, t) -> check_pat env t p) fs in
      let fs, bindings = merge_bindings fs in
-     Tcons (Record fs), bindings
+     tcons ploc (Record fs), bindings
 
 and check_parameters env params ptypes =
   let merged =
@@ -413,11 +415,11 @@ and check_parameters env params ptypes =
   merge_bindings merged
 
 and infer_lit = function
-  | l, loc -> infer_lit' l, elab_pure (Lit (l, loc))
-and infer_lit' = function
-  | Bool _ -> Tcons Bool
-  | Int _ -> Tcons Int
-  | String _ -> Tcons String
+  | l, loc -> infer_lit' loc l, elab_pure (Lit (l, loc))
+and infer_lit' loc = function
+  | Bool _ -> tcons loc Bool
+  | Int _ -> tcons loc Int
+  | String _ -> tcons loc String
 
 and check_or_infer env ty e : ptyp * exp elab =
   match ty with

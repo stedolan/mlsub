@@ -14,7 +14,7 @@
 %right AS
 %right SEMI
 
-%{ open Tuple_fields open Exp %}
+%{ open Tuple_fields open Exp open Location %}
 %start <[`Exp of Exp.exp | `Sub of Exp.tyexp * Exp.tyexp]> prog
 
 %{

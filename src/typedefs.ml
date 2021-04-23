@@ -174,11 +174,14 @@ let compare_rigvar (p : rigvar) (q : rigvar) =
 
 (* Sets of rigid variables *)
 module Rvset : sig
-  type t = private rigvar list
+  type t
   val empty : t
-  val singleton : rigvar -> t
-  val add : t -> rigvar -> t
+  val singleton : rigvar -> Location.set -> t
+  val add : t -> rigvar -> Location.set -> t
   val join : t -> t -> t
+
+  val to_list : t -> rigvar list
+  val to_list_loc : t -> (rigvar * Location.set) list
 
   val contains : t -> rigvar -> bool
 
@@ -187,45 +190,60 @@ module Rvset : sig
   val equal : t -> t -> bool
   val compare : t -> t -> int
 
-  val peel_level : Env_level.t -> t -> (rigvar list * t)
+  val peel_level : Env_level.t -> t -> ((rigvar * Location.set) list * t)
 
   val filter : (rigvar -> bool) -> t -> t
-end = struct
-  type t = rigvar list
-  let empty = []
-  let singleton x = [x]
 
-  let add t rv =
+  val fold : ('s -> rigvar * Location.set -> 's) -> 's -> t -> 's
+end = struct
+  type t = (rigvar * Location.set) list
+  let empty = []
+  let singleton x l = [x, l]
+
+  let cmprv (r, _) (s, _) = compare_rigvar r s
+
+  let add t rv l =
     (* FIXME hilarious *)
-    List.sort_uniq compare_rigvar (rv :: t)
+    List.sort_uniq cmprv ((rv, l) :: t)
+
+  let to_list t = List.map fst t
+  let to_list_loc t = t
 
   let contains t rv =
-    List.exists (equal_rigvar rv) t
+    List.exists (fun (r, _) -> equal_rigvar r rv) t
 
   let join t vs =
     (* FIXME *)
-    List.sort_uniq compare_rigvar (t @ vs)
+    List.sort_uniq cmprv (t @ vs)
 
   let is_empty = function [] -> true | _ -> false
 
-  let equal a b = equal_lists equal_rigvar a b
-  let compare a b = compare_lists compare_rigvar a b
+  let equal a b = equal_lists (fun (r, _) (s, _) -> equal_rigvar r s) a b
+  let compare a b = compare_lists cmprv a b
 
   let peel_level lvl xs =
     (* FIXME: since lvl is always at the start, this could be faster *)
-    List.partition (fun (rv : rigvar) ->
+    List.partition (fun ((rv : rigvar), _) ->
       assert (Env_level.extends rv.level lvl);
       Env_level.equal rv.level lvl) xs
 
-  let filter p t = List.filter p t
+  let filter p t = List.filter (fun (r, _) -> p r) t
+
+  let fold = List.fold_left
 end
+
+type cons_locs = ((unit,unit) cons_head * Location.set) list
+let mk_cons_locs loc cons =
+  [map_head ignore ignore cons, Location.single loc]
 
 (* A ctor_ty is a join of a constructed type and some rigid variables *)
 type (+'neg,+'pos) ctor_ty =
-  { cons: ('neg,'pos) cons_head; rigvars: Rvset.t }
+  { cons: ('neg,'pos) cons_head; rigvars: Rvset.t;
+    cons_locs: cons_locs }
 
 (* FIXME: most uses of this function are probably bugs: rigvars need attention *)
-let map_ctor_rig neg pos { cons; rigvars } = { cons = map_head neg pos cons; rigvars }
+let map_ctor_rig neg pos { cons; rigvars; cons_locs } =
+  { cons = map_head neg pos cons; rigvars; cons_locs }
 
 
 (* Temporary structure used during generalisation *)
@@ -270,9 +288,9 @@ type typ_var =
 
 type (+'neg, +'pos) typ =
   | Tsimple of 'pos
-  | Tcons of ('neg, 'pos) cons_typ
-  | Tvar of typ_var
-  | Tvjoin of ('neg, 'pos) typ * typ_var
+  | Tcons of cons_locs * ('neg, 'pos) cons_typ
+  | Tvar of Location.set * typ_var
+  | Tvjoin of ('neg, 'pos) typ * Location.set * typ_var
      (* Tvjoin(t,v): t must be well-scoped at level of var *)
   | Tpoly of {
      (* names must be distinct *)
@@ -300,7 +318,7 @@ and rigvar_defn = {
 }
 
 (*
- * Equality checks (Syntactic, not subtyping-aware)
+ * Equality checks (Syntactic, not subtyping-aware, ignore locations)
  *)
 
 let equal_flexvar (p : flexvar) (q : flexvar) =
@@ -317,7 +335,7 @@ let equal_styp_neg (p : styp_neg) (q : styp_neg) =
      equal_cons equal_flex_lower_bound equal_flexvar cp.cons cq.cons
   | (UBvar _|UBcons _), _ -> false
 
-let bottom = {ctor={cons=Bot;rigvars=Rvset.empty};flexvars=[]}
+let bottom = {ctor={cons=Bot;rigvars=Rvset.empty;cons_locs=[]};flexvars=[]}
 let is_bottom t = equal_flex_lower_bound bottom t
 
 (*
@@ -450,9 +468,9 @@ let rec assert_locally_closed :
   'a 'b . int -> ('a, 'b) typ -> unit =
   fun ix ty -> match ty with
   | Tsimple _ -> ()
-  | Tcons c -> ignore (map_head (assert_locally_closed ix) (assert_locally_closed ix) c)
-  | Tvar v -> assert_locally_closed_var ix v
-  | Tvjoin (t, v) -> assert_locally_closed ix t; assert_locally_closed_var ix v
+  | Tcons (_,c) -> ignore (map_head (assert_locally_closed ix) (assert_locally_closed ix) c)
+  | Tvar (_, v) -> assert_locally_closed_var ix v
+  | Tvjoin (t, _, v) -> assert_locally_closed ix t; assert_locally_closed_var ix v
   | Tpoly {vars; body} ->
      let ix = ix + 1 in
      vars |> IArray.iter (fun (_, b) -> assert_locally_closed ix b);
@@ -461,40 +479,40 @@ let rec assert_locally_closed :
 let map_head_cons pol f fields =
   map_fields (fun _fn x -> f pol x) fields
 
-let tvjoin_opt t v =
+let tvjoin_opt t l v =
   match t with
-  | None -> Tvar v
-  | Some t -> Tvjoin (t, v)
+  | None -> Tvar (l, v)
+  | Some t -> Tvjoin (t, l, v)
 
-let open_typ_var f rest ix = function
+let open_typ_var f rest loc ix = function
   | Vbound {index; var} when index >= ix ->
      assert (index = ix);
      Option.iter (assert_locally_closed ix) rest;
-     let res = f rest var in
+     let res = f rest loc var in
      assert_locally_closed ix res;
      res
-  | v -> tvjoin_opt rest v
+  | v -> tvjoin_opt rest loc v
 
 let rec open_typ :
   'neg 'pos . 
-    neg:(('pos, 'neg) typ option -> int -> ('pos, 'neg) typ) ->
-    pos:(('neg, 'pos) typ option -> int -> ('neg, 'pos) typ) ->
+    neg:(('pos, 'neg) typ option -> Location.set -> int -> ('pos, 'neg) typ) ->
+    pos:(('neg, 'pos) typ option -> Location.set -> int -> ('neg, 'pos) typ) ->
     int -> ('neg, 'pos) typ -> ('neg, 'pos) typ =
   fun ~neg ~pos ix t -> match t with
   | Tsimple _ as s -> s
-  | Tcons c -> Tcons (map_head (open_typ ~neg:pos ~pos:neg ix) (open_typ ~neg ~pos ix) c)
-  | Tvar v -> open_typ_var pos None ix v
-  | Tvjoin (t, v) -> open_typ_var pos (Some (open_typ ~neg ~pos ix t)) ix v
+  | Tcons (l,c) -> Tcons (l, map_head (open_typ ~neg:pos ~pos:neg ix) (open_typ ~neg ~pos ix) c)
+  | Tvar (l,v) -> open_typ_var pos None l ix v
+  | Tvjoin (t, l, v) -> open_typ_var pos (Some (open_typ ~neg ~pos ix t)) l ix v
   | Tpoly {vars; body} ->
      let ix = ix + 1 in
      Tpoly {vars = IArray.map (fun (n, b) -> n, open_typ ~neg:pos ~pos:neg ix b) vars;
             body = open_typ ~neg ~pos ix body}
 
 let open_typ_rigid vars t =
-  let mkv rest i = tvjoin_opt rest (Vrigid (IArray.get vars i)) in
+  let mkv rest loc i = tvjoin_opt rest loc (Vrigid (IArray.get vars i)) in
   open_typ ~neg:mkv ~pos:mkv 0 t
 let open_typ_flex vars t =
-  let mkv rest i = tvjoin_opt rest (Vflex (IArray.get vars i)) in
+  let mkv rest loc i = tvjoin_opt rest loc (Vflex (IArray.get vars i)) in
   open_typ ~neg:mkv ~pos:mkv 0 t
 
 
@@ -511,11 +529,11 @@ let rec close_typ :
   'a 'b . env_level -> (typ_var -> ispos:bool -> isjoin:bool -> int) -> ispos:bool -> int -> (zero, zero) typ -> ('a, 'b) typ
   = fun lvl var ~ispos ix ty -> match ty with
   | Tsimple z -> never z
-  | Tcons c -> Tcons (map_head (close_typ lvl var ~ispos:(not ispos) ix) (close_typ lvl var ~ispos ix) c)
-  | Tvar v -> Tvar (close_typ_var lvl var ~ispos ~isjoin:false ix v)
-  | Tvjoin (t, v) -> 
+  | Tcons (l, c) -> Tcons (l, map_head (close_typ lvl var ~ispos:(not ispos) ix) (close_typ lvl var ~ispos ix) c)
+  | Tvar (l, v) -> Tvar (l, close_typ_var lvl var ~ispos ~isjoin:false ix v)
+  | Tvjoin (t, l, v) -> 
      Tvjoin(close_typ lvl var ~ispos ix t,
-            close_typ_var lvl var ~ispos ~isjoin:true ix v)
+            l, close_typ_var lvl var ~ispos ~isjoin:true ix v)
   | Tpoly {vars; body} ->
      let ix = ix + 1 in
      Tpoly {vars = IArray.map (fun (n, b) -> n, close_typ lvl var ~ispos:(not ispos) ix b) vars;
@@ -601,9 +619,9 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   fv.upper |> List.iter (function
   | UBvar v ->
      wf_flexvar ~seen env fv.level v
-  | UBcons {cons;rigvars} ->
+  | UBcons {cons;rigvars;cons_locs=_} ->
      (* Each rigvar set must contain all of the rigvars in the lower bound *)
-     let rvlow = (fv.lower.ctor.rigvars :> rigvar list) in
+     let rvlow = Rvset.to_list fv.lower.ctor.rigvars in
      (* Well-formedness of bounds *)
      rvlow |> List.iter (fun rv -> assert (Rvset.contains rigvars rv));
      map_head (wf_flex_lower_bound ~seen env fv.level) (wf_flexvar ~seen env fv.level) cons |> ignore)
@@ -614,10 +632,10 @@ and wf_rigvar env lvl (rv : rigvar) =
   let rvs = env_rigid_vars env rv.level in
   assert (0 <= rv.var && rv.var < IArray.length rvs)
 
-and wf_flex_lower_bound ~seen env lvl ({ctor={cons;rigvars}; flexvars} : flex_lower_bound) =
+and wf_flex_lower_bound ~seen env lvl ({ctor={cons;rigvars;cons_locs=_}; flexvars} : flex_lower_bound) =
   (* FIXME check for duplicate vars? (Not really a problem, but annoying) *)
   List.iter (wf_flexvar ~seen env lvl) flexvars;
-  List.iter (wf_rigvar env lvl) (rigvars :> rigvar list);
+  List.iter (wf_rigvar env lvl) (Rvset.to_list rigvars);
   map_head (wf_flexvar ~seen env lvl) (wf_flex_lower_bound ~seen env lvl) cons |> ignore
 
 
@@ -637,10 +655,10 @@ let rec wf_typ : 'pos 'neg .
   fun ~seen ~neg ~pos ~ispos env ext ty ->
   match ty with
   | Tsimple s -> pos s
-  | Tcons c ->
+  | Tcons (_, c) ->
      map_head (wf_typ ~seen ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) (wf_typ ~seen ~neg ~pos ~ispos env ext) c |> ignore
-  | Tvar v -> wf_var ~seen env ext v
-  | Tvjoin (t, v) ->
+  | Tvar (_, v) -> wf_var ~seen env ext v
+  | Tvjoin (t, _, v) ->
      wf_var ~seen env ext v;
      begin match v with
      | Vbound v ->
@@ -670,7 +688,7 @@ let rec wf_typ : 'pos 'neg .
  * Unparsing: converting a typ back to a Exp.tyexp
  *)
 
-let loc : Exp.location =
+let loc : Location.t =
  { source = "<none>";
    loc_start = {pos_fname="";pos_lnum=0;pos_cnum=0;pos_bol=0};
    loc_end = {pos_fname="";pos_lnum=0;pos_cnum=0;pos_bol=0} }
@@ -720,18 +738,18 @@ let unparse_var ~flexvar ~ext = function
   | Vrigid rv -> unparse_rigid_var rv
 
 let unparse_join ty (rigvars : Rvset.t) =
-  List.fold_left (fun c r -> mktyexp (Exp.Tjoin (c, unparse_rigid_var r))) ty (rigvars :> rigvar list)
+  List.fold_left (fun c r -> mktyexp (Exp.Tjoin (c, unparse_rigid_var r))) ty (Rvset.to_list rigvars)
 
 let rec unparse_gen_typ :
   'neg 'pos . flexvar:_ -> ext:_ -> neg:('neg -> Exp.tyexp) -> pos:('pos -> Exp.tyexp) ->
              ('neg,'pos) typ -> Exp.tyexp =
   fun ~flexvar ~ext ~neg ~pos ty -> match ty with
   | Tsimple t -> pos t
-  | Tcons c -> unparse_cons ~neg:(unparse_gen_typ ~flexvar ~ext ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~flexvar ~ext ~neg ~pos) c
-  | Tvar var
-  | Tvjoin (Tcons Bot, var) ->
+  | Tcons (_, c) -> unparse_cons ~neg:(unparse_gen_typ ~flexvar ~ext ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~flexvar ~ext ~neg ~pos) c
+  | Tvar (_, var)
+  | Tvjoin (Tcons (_, Bot), _, var) ->
      unparse_var ~flexvar ~ext var
-  | Tvjoin (rest, var) ->
+  | Tvjoin (rest, _, var) ->
      mktyexp (Exp.Tjoin (unparse_gen_typ ~flexvar ~ext ~neg ~pos rest, unparse_var ~flexvar ~ext var))
   | Tpoly { vars; body } ->
      let ext, bounds = unparse_bounds ~flexvar ~ext ~neg ~pos vars in
@@ -755,7 +773,7 @@ and unparse_bounds :
   ext, IArray.map (fun (s, bound) ->
        let s = (s, loc) in
        match bound with
-       | Tcons Top ->
+       | Tcons (_, Top) ->
           s, None
        | t ->
           s, Some (unparse_gen_typ ~flexvar ~ext ~pos:neg ~neg:pos t)) vars |> IArray.to_list
@@ -763,8 +781,8 @@ and unparse_bounds :
 let rec unparse_flex_lower_bound ~flexvar { ctor; flexvars } =
   let t =
     match ctor with
-    | { cons = Bot; rigvars } when Rvset.(equal rigvars empty) -> None
-    | { cons; rigvars } ->
+    | { cons = Bot; rigvars; cons_locs=_ } when Rvset.(equal rigvars empty) -> None
+    | { cons; rigvars; cons_locs=_ } ->
        let cons = unparse_cons ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) cons in
        Some (unparse_join cons rigvars) in
   let tjoin a b =
@@ -779,7 +797,7 @@ let rec unparse_flex_lower_bound ~flexvar { ctor; flexvars } =
 
 let unparse_styp_neg ~flexvar = function
   | UBvar v -> unparse_flexvar ~flexvar v
-  | UBcons {cons;rigvars} ->
+  | UBcons {cons;rigvars;cons_locs=_} ->
      let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) cons in
      unparse_join cons rigvars
 
