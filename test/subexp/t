@@ -692,4 +692,4 @@ fn  [A](a) -> A { let x = a; x }
 > fn [A](a) -> A { let x = a; x }
 >   fn [A, B <: A](a: B) -> A { let x : B = a; x }
 > [A, B <: A] (B) -> A
-> STATS: fix: 77, flex: 3067
+> STATS: fix: 79, flex: 3069

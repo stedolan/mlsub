@@ -225,7 +225,7 @@ and ensure_upper_matches ~error ~changes env (pv : flexvar) (cn : (flex_lower_bo
   let cbnew =
     meet_cons
       ~nleft:id
-      ~nright:(fun b -> join_lower ~error ~changes env pv.level bottom b) (* FIXME bad hoist fn *)
+      ~nright:(fun b -> join_lower ~error ~changes env pv.level bottom b)
       ~nboth:(fun a b -> join_lower ~error ~changes env pv.level a b)
       ~pleft:id
       ~pright:(fun _ -> fresh_flexvar pv.level)
@@ -235,7 +235,6 @@ and ensure_upper_matches ~error ~changes env (pv : flexvar) (cn : (flex_lower_bo
     let bound = { cons = cbnew; rigvars = cnrig; cons_locs = cn.cons_locs } in
     fv_set_upper ~changes pv (UBcons bound :: up_rest);
     rotate_flex ~changes env pv; (* improves sharing between match vars *)
-    (* FIXME is this all still wf, despite hoisting? *)
     subtype_t_cons ~error ~changes env pv.lower bound;
     if new_rvset then ensure_rigvars_present ~changes env pv;
   end;
@@ -573,26 +572,21 @@ let rec clearly_subtype (a :  flexvar) ({ctor; flexvars} as b : flex_lower_bound
 (* FIXME: Probably every error:noerror below is wrong *)
 
 
-let rec hoist_flex ~error ~changes env level v =
+let hoist_flex ~error ~changes env level v =
   if Env_level.extends v.level level then ()
   else begin
+    (* This might not be efficient: maybe better to hoist more eagerly *)
+    let lower = v.lower and upper = v.upper in
+    fv_set_lower ~changes v bottom;
+    fv_set_upper ~changes v [];
     fv_set_level ~changes v level;
-    (* FIXME hoisting: seems wrong - need to drop some rigvars here? *)
-    List.iter (hoist_flex ~error ~changes env level) v.lower.flexvars;
-    fv_set_lower ~changes v (join_ctor ~error ~changes env level
-      {bottom with flexvars = v.lower.flexvars} v.lower.ctor);
-    (* hoist_lower ~error ~changes env level v.lower; *)
-    v.upper |> List.iter (function
-      | UBvar v' ->
-         (* FIXME hoisting: rotate rather than hoist here? *)
-         hoist_flex ~error ~changes env level v'
-      | UBcons cn ->
-         (* FIXME hoisting: seems wrong - need to drop some rigvars here? *)
-         map_ctor_rig (hoist_lower ~error ~changes env level) (hoist_flex ~error ~changes env level) cn |> ignore);
-    (* FIXME hoisting: recheck *)
+    subtype_t_var ~error ~changes env lower v;
+    upper |> List.iter (function
+      | UBvar v' -> subtype_flex_flex ~error ~changes env v v'
+      | UBcons c -> subtype_flex_cons ~error ~changes env v c)
   end
 
-and hoist_lower ~error ~changes env level {ctor;flexvars} =
+let rec hoist_lower ~error ~changes env level {ctor;flexvars} =
   (* FIXME hoisting: this looks wrong: what about the levels of ctor.rigvars?  *)
   map_ctor_rig (hoist_flex ~error ~changes env level) (hoist_lower ~error ~changes env level) ctor |> ignore;
   List.iter (hoist_flex ~error ~changes env level) flexvars;
@@ -602,15 +596,7 @@ and hoist_lower ~error ~changes env level {ctor;flexvars} =
 let rec expand visit ~changes ?(vexpand=[]) env (p : flex_lower_bound) =
   let level = env_level env in
   wf_flex_lower_bound ~seen:(Hashtbl.create 10) env level p;
-  let cons = map_head (expand_fv_neg visit ~changes env) (expand visit ~changes env) p.ctor.cons in
-  let rigvars = p.ctor.rigvars |> Rvset.filter (fun rv ->
-    not (spec_sub_rigid_pos env rv {ctor={cons;rigvars=Rvset.empty;cons_locs=p.ctor.cons_locs};flexvars=[]})) in
-  let ctor = { cons; rigvars; cons_locs=p.ctor.cons_locs } in
   let flexvars_gen, flexvars_keep = List.partition (fun fv -> Env_level.equal fv.level level) p.flexvars in
-  flexvars_keep |> List.iter (fun fv ->
-    (* Hoist to avoid making invalid Tvjoins later *)
-    (* FIXME: pretty sure this can fail *)
-    hoist_lower ~error:noerror ~changes env fv.level {p with flexvars=[]});
   flexvars_gen |> List.iter (fun pv ->
     fv_gen_visit_pos env visit pv (function
     | First_visit ->
@@ -631,6 +617,27 @@ let rec expand visit ~changes ?(vexpand=[]) env (p : flex_lower_bound) =
        (* recursive occurrences are fine if not under a constructor *)
        if List.memq pv vexpand then ()
        else unimp "positive recursion on flexvars"));
+
+  (* Avoid making invalid Tvjoins by hoisting if needed *)
+  let keep_level =
+    List.fold_left
+      (fun level fv -> if Env_level.extends fv.level level then fv.level else level)
+      level flexvars_keep in
+
+
+  let p = { p with flexvars = [] } in
+  let p =
+    (* FIXME: noerror? *)
+    if Env_level.equal level keep_level then p
+    else (hoist_lower ~error:noerror ~changes env keep_level p;
+          join_lower ~error:noerror ~changes env keep_level bottom p )in
+
+  let cons = map_head (expand_fv_neg visit ~changes env) (expand visit ~changes env) p.ctor.cons in
+  let rigvars = p.ctor.rigvars |> Rvset.filter (fun rv ->
+    not (spec_sub_rigid_pos env rv {ctor={cons;rigvars=Rvset.empty;cons_locs=p.ctor.cons_locs};flexvars=[]})) in
+  let ctor = { cons; rigvars; cons_locs=p.ctor.cons_locs } in
+
+
   (* NB: flexvars_gen occurs twice below, re-adding the reflexive constraints: α expands to (α|α.lower) *)
   (* NB: this is careful to preserve order if no change is made *)
   let { ctor; flexvars = flexvars_exp } =
