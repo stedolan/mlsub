@@ -214,7 +214,7 @@ and check' env eloc e ty =
   | Parens e, _ ->
      let* e = check env e ty in
      Parens e
-  | Tuple ef, Tcons (tloc, Record tf) ->
+  | Tuple ef, Tcons (_tloc, Record tf) ->
      let infer_typed env ((_,loc) as e) =
        let ty, e = infer env e in
        let* e = e and* ty = elab_ptyp ty in
@@ -255,7 +255,7 @@ and check' env eloc e ty =
      let body = open_typ_rigid rigvars body in
      check' env' eloc f body
      (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
-  | Fn (None, params, ret, body), Tcons (tloc, Func (ptypes, rtype)) ->
+  | Fn (None, params, ret, body), Tcons (_tloc, Func (ptypes, rtype)) ->
      (* If poly <> None, then we should infer & subtype *)
      (* FIXME: do we need another level here? Does hoisting break things? *)
      let _, vals = check_parameters env params ptypes in
