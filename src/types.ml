@@ -158,7 +158,7 @@ and subtype_flex_flex ~error ~changes env (pv : flexvar) (nv : flexvar) =
       subtype_t_var ~error ~changes env pv.lower nv;
     end else begin
       assert (Env_level.extends pv.level nv.level);
-      rotate_flex ~error ~changes env pv;
+      rotate_flex ~changes env pv;
       fv_set_lower ~changes nv (join_flexvars nv.lower [pv]);
       nv.upper |> List.iter (function
         | UBvar nv -> subtype_flex_flex ~error ~changes env pv nv
@@ -166,8 +166,7 @@ and subtype_flex_flex ~error ~changes env (pv : flexvar) (nv : flexvar) =
     end
   end
 
-(* FIXME can this really fail? *)
-and rotate_flex ~error ~changes env (pv : flexvar) =
+and rotate_flex ~changes env (pv : flexvar) =
   let rotate, keep = pv.upper |> List.partition (function
      | UBvar v' -> Env_level.equal v'.level pv.level
      | UBcons _ -> false) in
@@ -179,7 +178,7 @@ and rotate_flex ~error ~changes env (pv : flexvar) =
      fv_set_upper ~changes pv keep;
      rotate |> List.iter (function
        | UBcons _ -> assert false
-       | UBvar v' -> subtype_flex_flex ~error ~changes env pv v')
+       | UBvar v' -> subtype_flex_flex ~error:noerror ~changes env pv v')
 
 and subtype_flex_cons ~error ~changes env pv cn =
   if cn.cons <> Top then begin
@@ -235,7 +234,7 @@ and ensure_upper_matches ~error ~changes env (pv : flexvar) (cn : (flex_lower_bo
   if not (equal_cons equal_flex_lower_bound equal_flexvar cb cbnew) then begin
     let bound = { cons = cbnew; rigvars = cnrig; cons_locs = cn.cons_locs } in
     fv_set_upper ~changes pv (UBcons bound :: up_rest);
-    rotate_flex ~error ~changes env pv; (* improves sharing between match vars *)
+    rotate_flex ~changes env pv; (* improves sharing between match vars *)
     (* FIXME is this all still wf, despite hoisting? *)
     subtype_t_cons ~error ~changes env pv.lower bound;
     if new_rvset then ensure_rigvars_present ~changes env pv;
@@ -616,7 +615,7 @@ let rec expand visit ~changes ?(vexpand=[]) env (p : flex_lower_bound) =
     fv_gen_visit_pos env visit pv (function
     | First_visit ->
        (* This var is +-reachable, so rotate. (It's unlikely to be deleted by subst_fv_neg) *)
-       rotate_flex ~error:noerror ~changes env pv;
+       rotate_flex ~changes env pv;
        (* Add pv to vexpand so we know to ignore it if we see it again before going
           under a constructor. (This is basically a bad quadratic SCC algorithm) *)
        let lower = expand visit ~changes ~vexpand:(pv :: vexpand) env pv.lower in
