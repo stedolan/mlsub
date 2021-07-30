@@ -246,15 +246,24 @@ let map_ctor_rig neg pos { cons; rigvars; cons_locs } =
   { cons = map_head neg pos cons; rigvars; cons_locs }
 
 
+
 (* Temporary structure used during generalisation *)
 type flexvar_gen_visit_counts = { mutable pos : int; mutable neg : int }
+
+type flexvar_gen_status =
+  | No_var_chosen
+  | Computing_bound
+  | Generalised of int
+  | Replace_with_rigid of (rigvar * Location.set) list
+
 type flexvar_gen =
   | Not_generalising
   | Generalising of {
       level: env_level;
       visit : flexvar_gen_visit_counts;
-      mutable bound_var : int;
+      mutable bound_var : flexvar_gen_status
     }
+
 
 (* Flexvars are mutable but only in one direction.
      - level may decrease
@@ -263,7 +272,7 @@ type flexvar =
   { mutable level: env_level;
     mutable upper: styp_neg list; (* strictly covariant parts are matchable *)
     mutable lower: flex_lower_bound; (* If lower is nontrivial, then upper must be UBcons. FIXME: encode this? *)
-    id: int;    (* just for printing *)
+    id: int;    (* just for printing/sorting *)
     mutable gen: flexvar_gen; }
 
 (* A well-formed negative styp is either:
@@ -280,6 +289,7 @@ and styp_neg =
  *)
 and flex_lower_bound =
   { ctor: (flexvar, flex_lower_bound) ctor_ty; flexvars: flexvar list }
+
 
 type typ_var =
   | Vbound of {index: int; var:int}
@@ -314,7 +324,7 @@ and rigvar_defn = {
   name : string;
   (* FIXME: flex_lower_bound? Are rigid vars allowed in upper bound heads?
      FIXME: this seems very dubious *)
-  upper : flex_lower_bound;
+  upper : (flexvar, flex_lower_bound) cons_head;
 }
 
 (*
@@ -425,7 +435,7 @@ let fv_gen_visit_counts env fv =
      Some g.visit
   | Not_generalising ->
      let visit = { pos = 0; neg = 0 } in
-     fv.gen <- Generalising { level = fv.level; visit; bound_var = -1 };
+     fv.gen <- Generalising { level = fv.level; visit; bound_var = No_var_chosen };
      Some visit
 
 type visit_type = First_visit | Recursive_visit

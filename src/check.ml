@@ -112,7 +112,7 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
   let level = Env_level.extend (env_level env) in
   let stubs =
     vars
-    |> List.map (fun ((name,_),_) -> {name; upper={ctor={cons=Top;rigvars=Rvset.empty;cons_locs=[]};flexvars=[]}})
+    |> List.map (fun ((name,_),_) -> {name; upper=Top})
     |> IArray.of_list in
   let mkbound rig_names bound =
     match bound with
@@ -120,6 +120,7 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
     | Some b ->
        let temp_env = Env_types { level; rig_names; rig_defns = stubs; rest = env } in
        let bound = close_typ_rigid ~ispos:false level (typ_of_tyexp temp_env (env_level temp_env) b) in
+       begin match bound with Tcons _ -> () | _ -> failwith "bounds must be cons" end;
        if not (check_simple bound) then failwith "bounds must be simple";
        bound
   in
@@ -167,7 +168,7 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
   let bvars = Vector.create () in
   rigvars |> IArray.iter (fun rv -> ignore (Vector.push bvars (Gen_rigid rv)));
 
-  let subst = { mode = `Poly; visit; bvars; level=env_level env'; index = 0 } in
+  let subst = { mode = `Poly; visit; bvars; env = env'; level=env_level env'; index = 0 } in
   let ty = substn_ptyp subst ty in
   (* Format.printf "GEN: %a\n --> %a\n%!" dump_ptyp orig_ty pp_ptyp ty; *)
   let erq = elabreq_map_typs erq ~index:0

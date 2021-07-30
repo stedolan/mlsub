@@ -30,12 +30,11 @@ fn(f) { fn[A](x : A) { f(x) } }
 
 fn[A,B <: A](x : A) -> B { x }
 > fn [A, B <: A](x: A) -> B { x }
-> typechecking error: Failure("incompat top <: bot")
+> typechecking error: Failure("bounds must be cons")
 
 fn[A,B <: A](x : B) -> A { x }
 > fn [A, B <: A](x: B) -> A { x }
->   fn [A, B <: A](x: B) -> A { x }
-> [A, B <: A] (B) -> A
+> typechecking error: Failure("bounds must be cons")
 
 # contravariant join checks
 fn[A,B](x : A|B) -> A|B {x}
@@ -62,13 +61,13 @@ fn[A,B](f : (A|B) -> A, x: B) -> ((A|B) -> A, B) { (f,x) }
 
 fn (f,x) { (fn(f, x) { let y = f(f(x)); (f, x) })(f,x) }
 > fn (f, x) { (fn (f, x) { let y = f(f(x)); (f, x) })(f, x) }
->   fn [A, B, C <: (B | A) -> A](f: C, x: B) -> (C, B) {
->     (fn [A_2, B_2, C_2 <: (B_2 | A_2) -> A_2](f: C_2, x: B_2) -> (C_2, B_2) {
+>   fn [A, B, C <: (A | B) -> A](f: C, x: B) -> (C, B) {
+>     (fn [A_2, B_2, C_2 <: (A_2 | B_2) -> A_2](f: C_2, x: B_2) -> (C_2, B_2) {
 >       let y : A_2 = f(f(x));
 >       (f, x)
 >     })(f, x)
 >   }
-> [A, B, C <: (B | A) -> A] (C, B) -> (C, B)
+> [A, B, C <: (A | B) -> A] (C, B) -> (C, B)
 
 fn[P,Q,R](f : (P|Q|R) -> P, x : Q) -> (((R) -> (P|R)), Q) { (f, x) }
 > fn [P, Q, R](f: (P | Q | R) -> P, x: Q) -> (((R) -> (P | R)), Q) { (f, x) }
@@ -79,14 +78,14 @@ fn (f,x) { (fn(f, x) { let y = f(f(x)); (fn(p){f(p)}, x) })(f,x) }
 
 
 > fn (f, x) { (fn (f, x) { let y = f(f(x)); (fn (p) { f(p) }, x) })(f, x) }
->   fn [A, B, C](f: (B | A | C) -> A, x: C) -> ((B) -> A, C) {
->     (fn [A_2, B_2, C_2](f: (B_2 | A_2 | C_2) -> A_2, x: C_2) ->
+>   fn [A, B, C](f: (A | B | C) -> A, x: C) -> ((B) -> A, C) {
+>     (fn [A_2, B_2, C_2](f: (A_2 | B_2 | C_2) -> A_2, x: C_2) ->
 >       ((B_2) -> A_2, C_2) {
 >       let y : A_2 = f(f(x));
 >       (fn (p: B_2) -> A_2 { f(p) }, x)
 >     })(f, x)
 >   }
-> [A, B, C] ((B | A | C) -> A, C) -> ((B) -> A, C)
+> [A, B, C] ((A | B | C) -> A, C) -> ((B) -> A, C)
 # partial poly
 fn[A,C](a : A, b, c : C, d) { (a, b, c, d) }
 > fn [A, C](a: A, b, c: C, d) { (a, b, c, d) }
@@ -354,11 +353,11 @@ let id = fn(y) { y }; (fn(x) {id(x)} : [A] (A) -> A)
 
 fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> B { x }
 > fn [A, B](x: [X <: B] (X | A) -> X) -> (A) -> B { x }
-> typechecking error: Failure("contravariant join")
+> typechecking error: Failure("bounds must be cons")
 
 fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
 > fn [A, B](x: [X <: B] (X | A) -> X) -> (A) -> A | B { x }
-> typechecking error: Failure("contravariant join")
+> typechecking error: Failure("bounds must be cons")
 
 # wtf:
 # fn[A,B,A <: B](x : [X, X <: A, X :> B](X) -> X) -> [X <: A, Y :> B, X <: Y](X) -> Y { x }
@@ -376,7 +375,7 @@ fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
 
 (@bot : [A <: [B]int]int)
 > (@bot : [A <: [B] int] int)
-> typechecking error: Failure("bounds must be simple")
+> typechecking error: Failure("bounds must be cons")
 
 # bug in substn_ntyp
 fn[A](id: [B](A) -> int) { id }
@@ -470,31 +469,31 @@ let f = fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }; fn() {
 > }
 >   let f : [A, B <: {foo: int, ...}, C <: {bar: B}] (
 >     [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
->     ((C) -> C | B) -> A
+>     ((C) -> B | C) -> A
 >   ) -> A =
 >   fn [A, B <: {foo: int, ...}, C <: {bar: B}](
 >     f: [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
->     g: ((C) -> C | B) -> A
+>     g: ((C) -> B | C) -> A
 >   ) -> A {
 >     g(f)
 >   };
 >   fn [A, B <: {foo: int, ...}, C <: {bar: B}]() ->
->     (({bar: {foo: int, ...}}) -> nothing, ((C) -> C | B) -> A) -> A {
+>     (({bar: {foo: int, ...}}) -> nothing, ((C) -> B | C) -> A) -> A {
 >     (fn [A_2](x: A_2) -> A_2 { x })(f)
 >   }
-> [A, B <: {foo: int, ...}, C <: {bar: B}] () -> (({bar: {foo: int, ...}}) -> nothing, ((C) -> C | B) -> A) -> A
+> [A, B <: {foo: int, ...}, C <: {bar: B}] () -> (({bar: {foo: int, ...}}) -> nothing, ((C) -> B | C) -> A) -> A
 
 fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }
 > fn (f: [B <: {foo: int, ...}, A <: {bar: B}] (A) -> A | B, g) { g(f) }
 >   fn [A, B <: {foo: int, ...}, C <: {bar: B}](
 >     f: [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
->     g: ((C) -> C | B) -> A
+>     g: ((C) -> B | C) -> A
 >   ) -> A {
 >     g(f)
 >   }
 > [A, B <: {foo: int, ...}, C <: {bar: B}] (
 >   [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
->   ((C) -> C | B) -> A
+>   ((C) -> B | C) -> A
 > ) -> A
 
 # wfrig check in ensure_upper_matches
@@ -678,7 +677,7 @@ fn (x, y, k) {
 >   fn [A, B, C, D, E, F, G](
 >     x: ((D) -> int | C | D) -> A,
 >     y: ((F) -> int | E | F) -> B,
->     k: (G | D | F) -> int
+>     k: (D | F | G) -> int
 >   ) -> (A, B) {
 >     let ch : [X] (X, X) -> X =
 >     fn [X](a: X, b: X) -> X { if true { a } else { b } };
@@ -686,10 +685,16 @@ fn (x, y, k) {
 >     ch(x, y)(fn (a: D | F | G) -> int { let z : int = k(a); 1 });
 >     (x(fn [A_2](x: A_2) -> A_2 { x }), y(fn [A_2](x: A_2) -> A_2 { x }))
 >   }
-> [A, B, C, D, E, F, G] (((D) -> int | C | D) -> A, ((F) -> int | E | F) -> B, (G | D | F) -> int) -> (A, B)
+> [A, B, C, D, E, F, G] (((D) -> int | C | D) -> A, ((F) -> int | E | F) -> B, (D | F | G) -> int) -> (A, B)
 
 fn  [A](a) -> A { let x = a; x }
 > fn [A](a) -> A { let x = a; x }
->   fn [A, B <: A](a: B) -> A { let x : B = a; x }
-> [A, B <: A] (B) -> A
-> STATS: fix: 79, flex: 3069
+>   fn [A](a: A) -> A { let x : A = a; x }
+> [A] (A) -> A
+
+fn [A](x:A, f:[B <: A](B) -> B) { x }
+
+
+> fn [A](x: A, f: [B <: A] (B) -> B) { x }
+> typechecking error: Failure("bounds must be cons")
+> STATS: fix: 79, flex: 3043

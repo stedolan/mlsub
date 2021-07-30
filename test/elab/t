@@ -69,8 +69,8 @@ fn() { twice(id, id)(id) }
 > fn () {
 >   twice(id, id)(id)
 > }
->   let twice : [A, B] ((B | A) -> A, B) -> A =
->   fn [A, B](f: (B | A) -> A, x: B) -> A { f(f(x)) };
+>   let twice : [A, B] ((A | B) -> A, B) -> A =
+>   fn [A, B](f: (A | B) -> A, x: B) -> A { f(f(x)) };
 >   let id : [A] (A) -> A = fn [A](a: A) -> A { a };
 >   fn [A]() -> (A) -> A {
 >     twice(id, id)(id)

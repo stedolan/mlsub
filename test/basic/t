@@ -575,14 +575,14 @@ fn (x) { (x.foo, x.bar, x.foo) }
 
 fn (x) { if (x.cond) { (x.foo, x.bar) } else { (x.foo, x.foo) } }
 > fn (x) { if (x.cond) { (x.foo, x.bar) } else { (x.foo, x.foo) } }
->   fn [A, B](x: {cond: bool, foo: A, bar: B, ...}) -> (A, B | A) {
+>   fn [A, B](x: {cond: bool, foo: A, bar: B, ...}) -> (A, A | B) {
 >     if (x.cond) {
 >       (x.foo, x.bar)
 >     } else {
 >       (x.foo, x.foo)
 >     }
 >   }
-> [A, B] ({cond: bool, foo: A, bar: B, ...}) -> (A, B | A)
+> [A, B] ({cond: bool, foo: A, bar: B, ...}) -> (A, A | B)
 
 fn (x) { ((fn(x){x.foo})(x), (fn(x){x.foo})(x))  }
 > fn (x) { ((fn (x) { x.foo })(x), (fn (x) { x.foo })(x)) }
@@ -633,14 +633,14 @@ fn (x) { (fn (y) { 5 })(if (x.cond) { (x.a, x.b) } else { (x.b, x.a) }) }
 
 fn (x) { if (x.cond) { (x.a, x.b) } else { (x.b, x.a) } }
 > fn (x) { if (x.cond) { (x.a, x.b) } else { (x.b, x.a) } }
->   fn [A, B](x: {cond: bool, a: A, b: B, ...}) -> (A | B, B | A) {
+>   fn [A, B](x: {cond: bool, a: A, b: B, ...}) -> (A | B, A | B) {
 >     if (x.cond) {
 >       (x.a, x.b)
 >     } else {
 >       (x.b, x.a)
 >     }
 >   }
-> [A, B] ({cond: bool, a: A, b: B, ...}) -> (A | B, B | A)
+> [A, B] ({cond: bool, a: A, b: B, ...}) -> (A | B, A | B)
 
 fn (x) { if (x.cond) { (x, 5) } else { (x, x) } }
 > fn (x) { if (x.cond) { (x, 5) } else { (x, x) } }
@@ -673,8 +673,8 @@ fn (f, x) { f(x) }
 # twice!
 fn (f, x) { f(f(x)) }
 > fn (f, x) { f(f(x)) }
->   fn [A, B](f: (B | A) -> A, x: B) -> A { f(f(x)) }
-> [A, B] ((B | A) -> A, B) -> A
+>   fn [A, B](f: (A | B) -> A, x: B) -> A { f(f(x)) }
+> [A, B] ((A | B) -> A, B) -> A
 
 # can I hit approx with nested lambda-generalisations? trickier than I thought.
 fn (f) { fn(x) { (f(x), x) } }
