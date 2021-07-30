@@ -664,41 +664,32 @@ and expand_fv_neg visit ~changes env nv =
   | First_visit ->
     (* Ensure there is at most one upper bound *)
     let level = env_level env in
-    begin match nv.upper with
-    | [] -> ()
-    | [UBvar v] when Env_level.equal v.level level -> ignore (expand_fv_neg visit ~changes env v)
-    | [UBcons cn] ->
-       let cn = map_ctor_rig (expand visit ~changes env) (expand_fv_neg visit ~changes env) cn in
-       if Env_level.equal nv.level level then
-         ignore (fv_maybe_set_upper ~changes nv [UBcons cn] : bool)
-    | upper ->
-       let rec go cns vars = function
-         | _ when not (Env_level.equal nv.level level) ->
-            (* we were hoisted, not generalising any more *)
-            assert (nv.gen = Not_generalising);
-            ()
-         | UBvar v :: rest ->
-            hoist_flex ~error:noerror ~changes env v.level nv;
-            go cns (v::vars) rest
-         | UBcons cn :: rest ->
-            let cn = map_ctor_rig (expand visit ~changes env) (expand_fv_neg visit ~changes env) cn in
-            go (cn :: cns) vars rest
-         | [] ->
-            let cns = List.rev cns and vars = List.rev vars in
-            let cons_locs = List.concat_map (fun cn -> cn.cons_locs) cns in
-            let all_rigvars = List.fold_left (fun s c -> Rvset.join s c.rigvars) Rvset.empty cns in
-            let keep_rigvars = all_rigvars |> Rvset.filter (fun rv ->
-              cns |> List.for_all (fun cn -> spec_sub_rigid_cons env rv cn)) in
-            fv_set_upper ~changes nv [UBcons {cons=Top; rigvars = keep_rigvars; cons_locs}];
-            cns |> List.iter (fun cn ->
-              subtype_flex_cons ~error:noerror ~changes env nv {cn with rigvars = keep_rigvars });
-            assert (List.length nv.upper <= 1);
-            (* FIXME hoisting: what if something just got hoisted? Can that happen? *)
-            vars |> List.iter (fun v ->
-              subtype_flex_flex ~error:noerror ~changes env nv v)
-       in
-       go [] [] upper
-    end);
+    let rec collect level vars cns = function
+      | [] -> level, List.rev vars, List.rev cns
+      | UBvar v :: rest ->
+         collect (Env_level.min level v.level) (v :: vars) cns rest
+      | UBcons cn :: rest ->
+         let cn = map_ctor_rig (expand visit ~changes env) (expand_fv_neg visit ~changes env) cn in
+         collect level vars (cn :: cns) rest in
+    match collect level [] [] nv.upper with
+    | vlevel, _, _ when not (Env_level.equal level vlevel) ->
+       hoist_flex ~error:noerror ~changes env vlevel nv
+    | _, [], [] -> ()
+    | _, [v], [] -> ignore (expand_fv_neg visit ~changes env v)
+    | _, [], [cn] -> ignore (fv_maybe_set_upper ~changes nv [UBcons cn])
+    | _, vars, cns ->
+       let cons_locs = List.concat_map (fun cn -> cn.cons_locs) cns in
+       let all_rigvars = List.fold_left (fun s c -> Rvset.join s c.rigvars) Rvset.empty cns in
+       let keep_rigvars = all_rigvars |> Rvset.filter (fun rv ->
+         cns |> List.for_all (fun cn -> spec_sub_rigid_cons env rv cn)) in
+       fv_set_upper ~changes nv [UBcons {cons=Top; rigvars = keep_rigvars; cons_locs}];
+       cns |> List.iter (fun cn ->
+         subtype_flex_cons ~error:noerror ~changes env nv {cn with rigvars = keep_rigvars });
+       assert (List.length nv.upper <= 1);
+       (* FIXME hoisting: what if something just got hoisted? Can that happen? *)
+       vars |> List.iter (fun v ->
+         subtype_flex_flex ~error:noerror ~changes env nv v)
+  );
   nv
 
 (* This function could be optimised by skipping subtrees that have no use

@@ -132,6 +132,9 @@ module Env_level : sig
   val compare : t -> t -> int
   val extends : t -> t -> bool
 
+  val min : t -> t -> t
+  val max : t -> t -> t
+
   val to_int : t -> int
 end = struct
   (* Not actually mutable, but marking it as such
@@ -151,6 +154,9 @@ end = struct
       (assert (l1 == l2); true)
     else
       false
+
+  let min l1 l2 = if extends l1 l2 then l1 else l2
+  let max l1 l2 = if extends l2 l1 then l1 else l2
 
   let to_int l = l.level
 end
