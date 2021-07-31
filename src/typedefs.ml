@@ -277,8 +277,8 @@ type flexvar_gen =
 type flexvar =
   { mutable level: env_level;
     mutable upper: styp_neg list; (* strictly covariant parts are matchable *)
-    mutable lower: flex_lower_bound; (* If lower is nontrivial, then upper must be UBcons. FIXME: encode this? *)
-    id: int;    (* just for printing/sorting *)
+    mutable lower: flex_lower_bound;
+    id: int;    (* for printing/sorting *)
     mutable gen: flexvar_gen; }
 
 (* A well-formed negative styp is either:
@@ -328,8 +328,6 @@ and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string;
-  (* FIXME: flex_lower_bound? Are rigid vars allowed in upper bound heads?
-     FIXME: this seems very dubious *)
   upper : (flexvar, flex_lower_bound) cons_head;
 }
 
