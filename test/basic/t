@@ -39,7 +39,12 @@ false
 
 (42 : string)
 > (42 : string)
-> typechecking error: Failure("incompat int <: string")
+> test:1: Type error
+>   (42 : string)
+>    ^^
+> The type int does not match type string from test:1:
+>   (42 : string)
+>         ^^^^^^
 
 #
 # If
@@ -106,7 +111,12 @@ if (false) { 1 } else { false }
 
 ((1,) : (int))
 > ((1,) : (int))
-> typechecking error: Failure("incompat record <: int")
+> test:1: Type error
+>   ((1,) : (int))
+>    ^^^^
+> The type (_,) does not match type int from test:1:
+>   ((1,) : (int))
+>            ^^^
 
 # and patterns
 let (x,) = (1,); {x}
@@ -142,7 +152,7 @@ if (false) { {foo:1,bar:2} } else { {foo:1,baz:()} }
 
 ((1,2,asdf) : (int, int, ...))
 > ((1, 2, asdf) : (int, int, ...))
-> typechecking error: Failure("asdf not in scope")
+> test:1: Unknown variable name: asdf
 
 ((1,2,3) : (int, int, ...))
 > ((1, 2, 3) : (int, int, ...))
@@ -152,7 +162,10 @@ if (false) { {foo:1,bar:2} } else { {foo:1,baz:()} }
 
 true.foo
 > true.foo
-> typechecking error: Failure("incompat bool <: record")
+> test:1: Type error
+>   true.foo
+>   ^^^^^^^^
+> The type bool does not match type {foo: _, ...}
 
 @bot
 > @bot
@@ -272,7 +285,12 @@ let x = (1, 2); x
 
 let x : int = (1, 2); x
 > let x : int = (1, 2); x
-> typechecking error: Failure("incompat record <: int")
+> test:1: Type error
+>   let x : int = (1, 2); x
+>                 ^^^^^^
+> The type (_, _) does not match type int from test:1:
+>   let x : int = (1, 2); x
+>           ^^^
 
 let x : bool = true; x
 > let x : bool = true; x
@@ -281,7 +299,12 @@ let x : bool = true; x
 
 let x : bool = 5; x
 > let x : bool = 5; x
-> typechecking error: Failure("incompat int <: bool")
+> test:1: Type error
+>   let x : bool = 5; x
+>                  ^
+> The type int does not match type bool from test:1:
+>   let x : bool = 5; x
+>           ^^^^
 
 let {x: foo, y: bar} = {x: 10, y: true}; (foo, bar)
 > let {x: foo, y: bar} = {x: 10, y: true}; (foo, bar)
@@ -290,7 +313,13 @@ let {x: foo, y: bar} = {x: 10, y: true}; (foo, bar)
 
 let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
 > let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
-> typechecking error: Failure("extra")
+> test:1: A surplus field 'z' is present.
+>   let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
+>       ^^^^^^^^^^^^^^^^
+> The type {x: _, y: _, z: _} arising from test:1:
+>   let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
+>                          ^^^^^^^^^^^^^^^^^^^^^^^
+> does not match type {x: _, y: _}
 
 let {x: foo, y: bar, ...} = {x: 10, y: true, z: 42}; (foo, bar)
 > let {x: foo, y: bar, ...} = {x: 10, y: true, z: 42}; (foo, bar)
@@ -321,7 +350,12 @@ let {x: foo, y: bar} : {x:int} = {x:1, y:true}; foo
 > typechecking error: Failure("extra")
 let {x: foo, y: bar} : {x:int,y:int} = {x:1, y:true}; foo
 > let {x: foo, y: bar} : {x: int, y: int} = {x: 1, y: true}; foo
-> typechecking error: Failure("incompat bool <: int")
+> test:1: Type error
+>   let {x: foo, y: bar} : {x:int,y:int} = {x:1, y:true}; foo
+>                                                  ^^^^
+> The type bool does not match type int from test:1:
+>   let {x: foo, y: bar} : {x:int,y:int} = {x:1, y:true}; foo
+>                                   ^^^
 let {x: foo, y: bar} : {x:int,y:bool,z:bool} = {x:1, y:true}; foo
 > let {x: foo, y: bar} : {x: int, y: bool, z: bool} = {x: 1, y: true}; foo
 > typechecking error: Failure("missing z")
@@ -360,7 +394,15 @@ let a = {foo: 1, bar: 2}; let b : {foo: int, bar: int} = a; b
 
 let a = {foo: 1, bar: 2}; let b : {bar: int} = a; b
 > let a = {foo: 1, bar: 2}; let b : {bar: int} = a; b
-> typechecking error: Failure("extra")
+> test:1: A surplus field 'foo' is present.
+>   let a = {foo: 1, bar: 2}; let b : {bar: int} = a; b
+>                                                  ^
+> The type {foo: _, bar: _} arising from test:1:
+>   let a = {foo: 1, bar: 2}; let b : {bar: int} = a; b
+>           ^^^^^^^^^^^^^^^^
+> does not match type {bar: _} from test:1:
+>   let a = {foo: 1, bar: 2}; let b : {bar: int} = a; b
+>                                     ^^^^^^^^^^
 
 let a = {foo: 1, bar: 2}; let b : {bar: any, ...} = a; b
 > let a = {foo: 1, bar: 2}; let b : {bar: any, ...} = a; b
@@ -371,7 +413,15 @@ let a = {foo: 1, bar: 2}; let b : {bar: any, ...} = a; b
 
 let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
 > let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
-> typechecking error: Failure("incompat int <: bot")
+> test:1: Type error
+>   let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
+>                                                           ^
+> The type {foo: _, bar: int} arising from test:1:
+>   let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
+>                         ^
+> does not match type {bar: nothing, ...} from test:1:
+>   let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
+>                                           ^^^^^^^
 
 # function types
 fn (f: (int,int) -> int) { f(1,2) }
@@ -452,7 +502,10 @@ fn (a) { if (a.foo) { {bar: a.bar} } else { a } }
 
 (fn (a,b) { a })(5,if 5 { 5 } else { 5 })
 > (fn (a, b) { a })(5, if 5 { 5 } else { 5 })
-> typechecking error: Failure("incompat int <: bool")
+> test:1: Type error
+>   (fn (a,b) { a })(5,if 5 { 5 } else { 5 })
+>                         ^
+> The type int does not match type bool
 
 # more tuple cases
 fn (f) { (f({x:1,y:2}), f({x:1,z:2})) }
@@ -700,7 +753,7 @@ fn (x, wid : (([A] (A) -> A) -> int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
 >   let f = fn (a) { {x: x(a), y: a}.y };
 >   wid(f)
 > }
-> typechecking error: Failure("incompat top <: bot")
+> error: incompat top [] <: bot []
 
 # with annotation
 fn (x : (any)->(), wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }

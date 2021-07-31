@@ -238,6 +238,7 @@ end = struct
   let fold = List.fold_left
 end
 
+(* FIXME: refactor: might be easier to move cons_locs into cons? *)
 type cons_locs = ((unit,unit) cons_head * Location.set) list
 let mk_cons_locs loc cons =
   [map_head ignore ignore cons, Location.single loc]
@@ -320,7 +321,11 @@ type ntyp = (flex_lower_bound, flexvar) typ
 
 type env =
   | Env_vals of { vals : ptyp SymMap.t; rest : env }
-  | Env_types of { level : env_level; rig_names : int SymMap.t; rig_defns : rigvar_defn iarray; rest : env }
+  | Env_types of {
+     level : env_level;
+     rig_names : int SymMap.t;
+     rig_defns : rigvar_defn iarray;
+     rest : env }
   | Env_nil
 
 (* Rigid type variables. *)
@@ -328,6 +333,7 @@ and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string;
+  upper_locs : cons_locs;
   upper : (flexvar, flex_lower_bound) cons_head;
 }
 
@@ -419,8 +425,12 @@ let env_rigid_vars env lvl =
      assert (Env_level.equal tys.level lvl); tys.rig_defns
   | _ -> intfail "env_rigid_vars"
 
+let env_rigid_var env (rv : rigvar) =
+  IArray.get (env_rigid_vars env rv.level) rv.var
+
 let env_rigid_bound env (rv : rigvar) =
-  (IArray.get (env_rigid_vars env rv.level) rv.var).upper
+  let r = env_rigid_var env rv in
+  (r.upper_locs, r.upper)
 
 let rec env_level env =
   match env with
@@ -702,15 +712,14 @@ let rec wf_typ : 'pos 'neg .
  * Unparsing: converting a typ back to a Exp.tyexp
  *)
 
-let loc : Location.t =
- { source = "<none>";
-   loc_start = {pos_fname="";pos_lnum=0;pos_cnum=0;pos_bol=0};
-   loc_end = {pos_fname="";pos_lnum=0;pos_cnum=0;pos_bol=0} }
+let noloc : Location.t =
+ { loc_start = {pos_fname="_";pos_lnum=0;pos_cnum=0;pos_bol=0};
+   loc_end = {pos_fname="_";pos_lnum=0;pos_cnum=0;pos_bol=0} }
 
-let mktyexp t = (Some t, loc)
+let mktyexp t = (Some t, noloc)
 
 let named_type s : Exp.tyexp' =
-  Tnamed ({label=s; shift=0}, loc)
+  Tnamed ({label=s; shift=0}, noloc)
 
 let unparse_cons ~neg ~pos ty =
   let ty = match ty with
@@ -785,7 +794,7 @@ and unparse_bounds :
   let vars = IArray.map (fun (s, b) -> freshen s, b) vars in
   let ext = IArray.map fst vars :: ext in
   ext, IArray.map (fun (s, bound) ->
-       let s = (s, loc) in
+       let s = (s, noloc) in
        match bound with
        | Tcons (_, Top) ->
           s, None

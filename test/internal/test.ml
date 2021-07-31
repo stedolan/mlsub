@@ -39,31 +39,32 @@ let fresh_flow lvl =
   Tvar (Location.empty, Vflex fv), Tvar (Location.empty, Vflex fv)
 
 
-let match_as_fn ~error env f =
+let match_as_fn env f =
   let ((), arg), ((), res) =
-    match_typ ~error env f Location.noloc (func [()] ())
-    |> function Func (a, r) -> Tuple_fields.(FieldMap.find (Field_positional 0) a.fields), r 
+    match_typ env f Location.noloc (func [()] ())
+    |> function Ok (Func (a, r)) -> Tuple_fields.(FieldMap.find (Field_positional 0) a.fields), r 
               | _ -> assert false in
   arg, res
 
 let tcons cons = Tcons (Location.empty, cons)
 
+let ok = function Ok () -> () | Error _ -> failwith "nope"
+
 (* λ f, g, x . f x or g x *)
 let choosy () =
   let env =  Env_nil and lvl = Env_level.initial in
-  let error _ = failwith "nope" in
   let fn, fp = fresh_flow lvl in
   let gn, gp = fresh_flow lvl in
   let xn, xp = fresh_flow lvl in
   let resn, resp = fresh_flow lvl in
   let apply f x =
-    let arg, res = match_as_fn ~error env f in
-    subtype ~error env x arg;
+    let arg, res = match_as_fn env f in
+    subtype env x arg |> ok;
     res in
   let fx = apply fp xp in
   let gx = apply gp xp in
-  subtype ~error env fx resn;
-  subtype ~error env gx resn;
+  subtype env fx resn |> ok;
+  subtype env gx resn |> ok;
   let ty = tcons (func [fn;gn;xn] resp) in
   dump env ty
 (*
@@ -75,16 +76,15 @@ let choosy () =
 let lbs () =
   next_flexvar_id := 0;
   let env = Env_nil and lvl = Env_level.initial in
-  let error _ = failwith "nope" in
   let fn, fp = fresh_flow lvl in
   let d1n, d1p = fresh_flow lvl in
   let d2n, d2p = fresh_flow lvl in
   let r1n, r1p = fresh_flow lvl in
   let r1'n, _r1'p = fresh_flow lvl in
   let r2n, r2p = fresh_flow lvl in
-  subtype ~error env r1p r1'n;
-  subtype ~error env (tcons (func [d1n] r1p)) fn;
-  subtype ~error env (tcons (func [d2n] r2p)) fn;
+  subtype env r1p r1'n |> ok;
+  subtype env (tcons (func [d1n] r1p)) fn |> ok;
+  subtype env (tcons (func [d2n] r2p)) fn |> ok;
   let ty = (tcons (func [r1n;r2n] (tcons (tuple [fp;d1p;d2p])))) in
   dump env ty
 
@@ -92,50 +92,46 @@ let lbs () =
 let match_bug () =
   next_flexvar_id := 0;
   let env = Env_nil and lvl = Env_level.initial in
-  let error _ = failwith "nope" in
   let an, ap = fresh_flow lvl in
   let bn, bp = fresh_flow lvl in
-  subtype ~error env ap bn;
-  let b1, b2 = match_as_fn ~error env bp in
-  let a1, a2 = match_as_fn ~error env ap in
-  subtype ~error env a2 (tcons Bot);
+  subtype env ap bn |> ok;
+  let b1, b2 = match_as_fn env bp in
+  let a1, a2 = match_as_fn env ap in
+  subtype env a2 (tcons Bot) |> ok;
   dump env (tcons (func [a1; b1; an] (tcons (tuple [a2; b2; bp]))))
   
 
 let chain () =
   next_flexvar_id := 0;
   let env = Env_nil and lvl = Env_level.initial in
-  let error _ = failwith "nope" in
   let a = Array.init 10 (fun _ -> fresh_flow lvl) in
   let n = Array.map fst a and p = Array.map snd a in
-  subtype ~error env p.(5) (tcons Int);
-  subtype ~error env p.(4) n.(5);
-  subtype ~error env p.(3) n.(4);
-  subtype ~error env p.(8) n.(9);
-  subtype ~error env p.(5) n.(6);
-  subtype ~error env p.(0) n.(1);
-  subtype ~error env p.(3) (tcons Top);
-  subtype ~error env p.(2) n.(3);
-  subtype ~error env p.(1) n.(2);
-  subtype ~error env p.(7) n.(8);
-  subtype ~error env p.(6) n.(7);
+  subtype env p.(5) (tcons Int) |> ok;
+  subtype env p.(4) n.(5) |> ok;
+  subtype env p.(3) n.(4) |> ok;
+  subtype env p.(8) n.(9) |> ok;
+  subtype env p.(5) n.(6) |> ok;
+  subtype env p.(0) n.(1) |> ok;
+  subtype env p.(3) (tcons Top) |> ok;
+  subtype env p.(2) n.(3) |> ok;
+  subtype env p.(1) n.(2) |> ok;
+  subtype env p.(7) n.(8) |> ok;
+  subtype env p.(6) n.(7) |> ok;
   dump env (tcons (func [n.(0)] p.(9)))
 
 let dirbug () =
   next_flexvar_id := 0;
   let env = Env_nil and lvl = Env_level.initial in
-  let error _ = failwith "nope" in
   let an, _ap = fresh_flow lvl in
   let _bn, bp = fresh_flow lvl in
   let cn, cp = fresh_flow lvl in
   let dn, dp = fresh_flow lvl in
-  subtype ~error env (tcons (func [an] bp)) (tcons (func [cp] dn));
+  subtype env (tcons (func [an] bp)) (tcons (func [cp] dn)) |> ok;
   dump env (tcons (tuple [tcons (func [an] bp); tcons (func [cn] dp)]))
 
 let poly () =
   next_flexvar_id := 0;
   let env = Env_nil and _lvl = Env_level.initial in
-  let error _ = failwith "nope" in
   let bvar ?(index=0) ?(rest) var =
     match rest with
     | None -> Tvar (Location.empty, Vbound {index; var})
@@ -156,16 +152,17 @@ let poly () =
              Tpoly {vars=IArray.of_array [| "Q", tcons Top |];
                     body = tcons (func [bvar 0] (bvar ~rest:(bvar ~index:1 0) 0))}))} in
   print_endline "t1 = t2";
-  subtype ~error env (t1 ()) (t2 ());
-  subtype ~error env (t2 ()) (t1 ());
+  subtype env (t1 ()) (t2 ()) |> ok;
+  subtype env (t2 ()) (t1 ()) |> ok;
   print_endline "t3 <= t1, t2";
-  subtype ~error env (t3 ()) (t2 ());
-  subtype ~error env (t3 ()) (t1 ());
-  let sub = ref true in
-  subtype ~error:(fun _ -> sub := false) env (t1 ()) (t3 ());
-  Printf.printf "t1 <= t3: %b\n" !sub;
-            
-(*  subtype ~error env (t2 ()) (t3 ());*)
+  subtype env (t3 ()) (t2 ()) |> ok;
+  subtype env (t3 ()) (t1 ()) |> ok;
+  let sub = 
+    match subtype env (t1 ()) (t3 ()) with
+    | Ok () -> true
+    | Error _ -> false in
+  Printf.printf "t1 <= t3: %b\n" sub;
+(*  subtype env (t2 ()) (t3 ()) |> ok;*)
   ()
 
 let flexself () =
@@ -176,10 +173,9 @@ let flexself () =
   let an, ap = fresh_flow lvl in
   let bn, bp = fresh_flow lvl in
   let cn, cp = fresh_flow lvl in
-  let error _ = failwith "nope" in
-  subtype ~error env ap bn;
-  subtype ~error env bp cn;
-  subtype ~error env ap cn;
+  subtype env ap bn |> ok;
+  subtype env bp cn |> ok;
+  subtype env ap cn |> ok;
   dump env (tcons (func [an] cp));
 
   (* Attempted UBvar recursion (should become UBcons) *)
@@ -187,10 +183,9 @@ let flexself () =
   let an, ap = fresh_flow lvl in
   let bn, bp = fresh_flow lvl in
   let cn, cp = fresh_flow lvl in
-  let error _ = failwith "nope" in
-  subtype ~error env ap bn;
-  subtype ~error env bp cn;
-  subtype ~error env cp an;
+  subtype env ap bn |> ok;
+  subtype env bp cn |> ok;
+  subtype env cp an |> ok;
   dump env ap;
 
   (* UBcons recursion, multiple steps to fixed point *)
@@ -198,10 +193,10 @@ let flexself () =
   let an, ap = fresh_flow lvl in
   let bn, bp = fresh_flow lvl in
   let cn, cp = fresh_flow lvl in
-  subtype ~error env (tcons Int) cn;
-  subtype ~error env bp an;
-  subtype ~error env cp an;
-  subtype ~error env ap bn;
+  subtype env (tcons Int) cn |> ok;
+  subtype env bp an |> ok;
+  subtype env cp an |> ok;
+  subtype env ap bn |> ok;
   dump env ap
 
 let () = choosy ()

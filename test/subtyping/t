@@ -2,13 +2,20 @@
 > ok
 
 : int <: bool
-> typechecking error: Failure("incompat int <: bool")
+> _:0: Type error
+>   
+> The type int arising from test:1:
+>   : int <: bool
+>     ^^^
+> does not match type bool from test:1:
+>   : int <: bool
+>            ^^^^
 
 : [A] (A) -> A <: (int) -> int
 > ok
 
 : (int) -> int <: [A] (A) -> A
-> typechecking error: Failure("incompat top <: int")
+> _:0: Type error
 
 : [A, B] (A, B) -> (A|B) <: [X] (X, X) -> X
 > ok
@@ -23,10 +30,17 @@
 > ok
 
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
-> typechecking error: Failure("incompat int <: string")
+> _:0: Type error
+>   
+> The type () -> {foo: (string) -> _, bar: _} arising from test:1:
+>   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
+>                                                                                            ^^^^^^
+> does not match type () -> {foo: (int) -> _, bar: _} from test:1:
+>   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
+>                                                              ^^^
 
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
-> typechecking error: Failure("incompat top <: bot")
+> error: incompat top [] <: bot []
 
 : [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y} <: [X] () -> {foo: (X) -> X, bar: (X) -> X}
 > ok
@@ -41,22 +55,29 @@
 : [X <: int] (X) -> X <: (int) -> int
 > ok
 : (int) -> int <: [X <: int] (X) -> X
-> typechecking error: Failure("incompat int <: bot")
+> error: incompat int [11-14] <: bot []
 
 : [X] (X) -> (X|int) <: (int) -> int
 > ok
 : (int) -> int <: [X] (X) -> (X|int)
-> typechecking error: Failure("incompat top <: int")
+> error: incompat top [] <: int [3-6]
 
 : [X] (X) -> (X) <: (int) -> int
 > ok
 : (int) -> int <: [X] (X) -> (X)
-> typechecking error: Failure("incompat top <: int")
+> error: incompat top [] <: int [3-6]
 
 
 
 : [X <: int] (X) -> (X|bool) <: (int) -> bool
-> typechecking error: Failure("incompat int <: bot")
+> _:0: Type error
+>   
+> The type (_) -> int arising from test:1:
+>   : [X <: int] (X) -> (X|bool) <: (int) -> bool
+>                                    ^^^
+> does not match type (_) -> nothing from test:1:
+>   : [X <: int] (X) -> (X|bool) <: (int) -> bool
+>                                            ^^^^
 : (int) -> bool <: [X <: int] (X) -> (X|bool)
 > ok
 
@@ -73,7 +94,7 @@
 > ok
 
 : [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
-> typechecking error: Failure("incompat int <: bot")
+> error: incompat int [46-49] <: bot []
 
 : (int) -> (int, [A <: int] (A) -> A) <: [A <: int] (A) -> (int, ([B] (A) -> A))
 > ok
@@ -89,13 +110,13 @@
 : [A] ((A) -> A) -> ((A) -> A) <: [C] ([B] (B) -> B) -> ((C) -> C)
 > ok
 : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
-> typechecking error: Failure("incompat top <: bot")
+> error: incompat top [] <: bot []
 
 
 
 # scope escape check
 : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
-> typechecking error: Failure("incompat top <: bot")
+> error: incompat top [] <: bot []
 
 
 # tricky case of spec sub & rigvars (see cnrig <> [] case in ensure_upper_matches)

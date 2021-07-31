@@ -16,7 +16,7 @@ fn(id : [A](A) -> A, (x,y)) { (id(y),id(x)) }
 
 fn[A](x : A) { if x.cond {x} else {x} }
 > fn [A](x: A) { if x.cond { x } else { x } }
-> typechecking error: Failure("incompat top <: record")
+> error: incompat top [] <: record [18-24]
 
 fn[A <: {cond:bool}](x : A) { if x.cond {x} else {x} }
 > fn [A <: {cond: bool}](x: A) { if x.cond { x } else { x } }
@@ -30,11 +30,11 @@ fn(f) { fn[A](x : A) { f(x) } }
 
 fn[A,B <: A](x : A) -> B { x }
 > fn [A, B <: A](x: A) -> B { x }
-> typechecking error: Failure("bounds must be cons")
+> test:1: Bounds must be constructed types
 
 fn[A,B <: A](x : B) -> A { x }
 > fn [A, B <: A](x: B) -> A { x }
-> typechecking error: Failure("bounds must be cons")
+> test:1: Bounds must be constructed types
 
 # contravariant join checks
 fn[A,B](x : A|B) -> A|B {x}
@@ -106,15 +106,15 @@ fn (a) { (fn(x) { (x, fn(x) { x }) })(a) }
 
 (fn (x: A) { x } : [A] (A) -> A)
 > (fn (x: A) { x } : [A] (A) -> A)
-> typechecking error: Failure("unknown type A")
+> test:1: Unknown type name: A
 
 (fn (x: bool) { x } : [A] (A) -> A)
 > (fn (x: bool) { x } : [A] (A) -> A)
-> typechecking error: Failure("incompat top <: bool")
+> error: incompat top [] <: bool [8-12]
 
 (fn (x: any) { x } : [A] (A) -> A)
 > (fn (x: any) { x } : [A] (A) -> A)
-> typechecking error: Failure("incompat top <: bot")
+> error: incompat top [8-11] <: bot []
 
 (fn[B] (x: B) { x } : [A] (A) -> A)
 > (fn [B](x: B) { x } : [A] (A) -> A)
@@ -215,7 +215,7 @@ let ch = fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }; fn (a,b) { c
 >     y
 >   }
 > } : [A] (A, A) -> A)
-> typechecking error: Failure("incompat top <: bot")
+> error: incompat top [] <: bot []
 
 (fn[A,B,R](x : A, y : B) -> R|A { x } : [A] (A, A) -> A)
 > (fn [A, B, R](x: A, y: B) -> R | A { x } : [A] (A, A) -> A)
@@ -245,7 +245,7 @@ let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x
 >   let g = (fn (x) { f(x); x.foo });
 >   wid(g)
 > }
-> typechecking error: Failure("incompat top <: bot")
+> error: incompat top [] <: bot []
 
 # works in checking mode (bidir)
 let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){f(x); x.foo}) }
@@ -279,7 +279,7 @@ let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn
 >   let g = (fn (x) { let z = f({bar: x}); x.foo });
 >   wid(g)
 > }
-> typechecking error: Failure("incompat top <: bot")
+> error: incompat top [] <: bot []
 
 let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let z = f({bar:x}); x.foo}) }
 > let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) };
@@ -353,11 +353,11 @@ let id = fn(y) { y }; (fn(x) {id(x)} : [A] (A) -> A)
 
 fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> B { x }
 > fn [A, B](x: [X <: B] (X | A) -> X) -> (A) -> B { x }
-> typechecking error: Failure("bounds must be cons")
+> test:1: Bounds must be constructed types
 
 fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
 > fn [A, B](x: [X <: B] (X | A) -> X) -> (A) -> A | B { x }
-> typechecking error: Failure("bounds must be cons")
+> test:1: Bounds must be constructed types
 
 # wtf:
 # fn[A,B,A <: B](x : [X, X <: A, X :> B](X) -> X) -> [X <: A, Y :> B, X <: Y](X) -> Y { x }
@@ -367,15 +367,15 @@ fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
 # some invalid types that should be rejected because of bad joins
 (@bot : [A] [B] ({foo: B} | A))
 > (@bot : [A] [B] ({foo: B} | A))
-> typechecking error: Failure("rigvar B not allowed inside join with rigvar bound earlier")
+> test:1: Rigid variable B not allowed in join with variable bound earlier
 
 (@bot : [A, B] (int, [C] ({foo: int | C} | B)))
 > (@bot : [A, B] (int, [C] ({foo: int | C} | B)))
-> typechecking error: Failure("rigvar C not allowed inside join with rigvar bound earlier")
+> test:1: Rigid variable C not allowed in join with variable bound earlier
 
 (@bot : [A <: [B]int]int)
 > (@bot : [A <: [B] int] int)
-> typechecking error: Failure("bounds must be cons")
+> test:1: Bounds must be constructed types
 
 # bug in substn_ntyp
 fn[A](id: [B](A) -> int) { id }
@@ -445,7 +445,12 @@ let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(fn(x) { 1
 
 let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(3, 1) }
 > let appf = fn [B, C, A <: (B) -> C](f: A, x: B) { f(x) }; fn () { appf(3, 1) }
-> typechecking error: Failure("incompat int <: func")
+> test:1: Type error
+>   let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(3, 1) }
+>                                                                          ^
+> The type int does not match type (_) -> _ from test:1:
+>   let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(3, 1) }
+>                            ^^^^^^^^
 
 # approx_ntyp
 fn[P, Q <: {foo:P}] (x) -> [A, B <: {bar: Q}, C <: {x:B, y:Q}] (A, B, C) -> (A, B|(P,Q), C) { x }
@@ -696,5 +701,5 @@ fn [A](x:A, f:[B <: A](B) -> B) { x }
 
 
 > fn [A](x: A, f: [B <: A] (B) -> B) { x }
-> typechecking error: Failure("bounds must be cons")
+> test:1: Bounds must be constructed types
 > STATS: fix: 79, flex: 3043

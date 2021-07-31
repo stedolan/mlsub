@@ -1,10 +1,10 @@
 let f = fn (x) { x, x }; f
 > let f = fn (x) { <err> }; f
-> typechecking error: Failure("bad exp")
+> test:1: syntax error
 
 let x = 1; (let y = 2 2; {x,y})
 > let x = 1; (<err>)
-> typechecking error: Failure("bad exp")
+> test:1: syntax error
 
 fn (id : [A]. A -> A) { id(42) }
 > fn (<err>) { id(42) }
@@ -12,7 +12,7 @@ fn (id : [A]. A -> A) { id(42) }
 
 fn(x, y, ~k: int) { (x:int,k,y) }
 > fn (x, y, ~k : int) { (<err>) }
-> typechecking error: Failure("bad exp")
+> test:1: syntax error
 
 
 fn (x)
@@ -33,5 +33,5 @@ fn[A,B](x:A) -> A | (A) -> B { x }
 > [A, B] (A) -> ((A) -> B) | A
 
 : [A <: ([] int) -> int ] A <: int
-> typechecking error: Failure("bounds must be simple")
+> test:1: Bounds must be simple types
 > STATS: fix: 0, flex: 103

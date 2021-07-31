@@ -88,6 +88,8 @@ let rec parse p (toks : lexforest) =
 
 let parse_string s =
   let lexbuf = Sedlexing.Utf8.from_string s in
+  Sedlexing.set_position lexbuf {pos_lnum=1; pos_fname=""; pos_cnum=0; pos_bol=0};
+  Sedlexing.set_filename lexbuf "test";
   let startpos = fst (Sedlexing.lexing_positions lexbuf) in
   let tokens = scan lexbuf File [] in
   match parse (Grammar.Incremental.prog startpos) tokens with

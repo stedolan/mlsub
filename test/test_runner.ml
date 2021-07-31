@@ -40,6 +40,13 @@ let run_cmd s =
       Buffer.add_string outbuf s; Buffer.add_char outbuf '\n') fmt in
   let pprintln ?(width=120) d =
     PPrint.ToBuffer.pretty 1. width outbuf PPrint.(PPrint.group d ^^ hardline) in
+  let pexn = function
+    | ((Assert_failure _ | Typedefs.Internal _ | Out_of_memory | Invalid_argument _) as e) ->
+       println "%s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
+    | Check.Fail (loc, err) ->
+       pprintln (Check.pp_err s loc err)
+    | e ->
+       println "typechecking error: %s" (Printexc.to_string e) in
   begin match Parse.parse_string text with
   | Ok (`Exp e) ->
      let rendered = to_string (Print.exp e) in
@@ -90,29 +97,25 @@ let run_cmd s =
         begin try
           let t', _elab2 = Check.elab_gen Env_nil None (fun env -> Check.infer env elab) in
           let te' = Typedefs.unparse_ptyp ~flexvar:ignore t' in
-          Types.subtype ~error:Check.report Env_nil t' (Check.typ_of_tyexp Env_nil te);
-          Types.subtype ~error:Check.report Env_nil t (Check.typ_of_tyexp Env_nil te');
+          Types.subtype Env_nil t' (Check.typ_of_tyexp Env_nil te) |> Check.or_raise `Subtype noloc;
+          Types.subtype Env_nil t (Check.typ_of_tyexp Env_nil te') |> Check.or_raise `Subtype noloc;
           ()
         with e ->
           println "ELABINF: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
         end;
         end
-     | exception ((Assert_failure _ | Typedefs.Internal _ | Out_of_memory | Invalid_argument _) as e) ->
-        println "%s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
      | exception e ->
-        println "typechecking error: %s" (Printexc.to_string e)
+        pexn e
      end
   | Ok (`Sub (t1, t2)) ->
      (match
        let t1 = Check.typ_of_tyexp Env_nil t1 in
        let t2 = Check.typ_of_tyexp Env_nil t2 in
        (*PPrint.(ToChannel.pretty 1. 80 stdout (Typedefs.pr_typ Pos t1 ^^ string " <: " ^^ Typedefs.pr_typ Neg t2 ^^ hardline));*)
-       Types.subtype ~error:Check.report Env_nil t1 t2
+       Types.subtype Env_nil t1 t2 |> Check.or_raise `Subtype Typedefs.noloc
      with
       | () -> println "ok"
-      | exception ((Assert_failure _ | Typedefs.Internal _ | Stack_overflow) as e) ->
-         println "exception: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
-      | exception e -> println "typechecking error: %s" (Printexc.to_string e))
+      | exception e -> pexn e)
   | Error _ -> println "parse error"
   | exception (Failure s) -> println "parser failure: %s" s
   end;

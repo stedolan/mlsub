@@ -3,17 +3,114 @@ open Exp
 open Typedefs
 open Types
 
-let report = function
-  | Incompatible (s,t) -> failwith (Printf.sprintf "incompat %s <: %s" s t)
-  | Missing k -> failwith ("missing " ^ string_of_field_name k)
-  | Extra _ -> failwith ("extra")
+type error_kind =
+  | Syntax
+  | Bad_name of [`Unknown|`Duplicate] * [`Type|`Var] * string
+  | Illformed_type of [`Join_multi_cons | `Join_not_cons_or_var | `Join_poly | `Bound_not_simple | `Bound_not_cons | `Bound_crosses_levels of string]
+  | Conflict of [`Expr|`Pat|`Subtype] * Types.subtyping_error
+
+exception Fail of Location.t * error_kind
+let fail loc k = raise (Fail (loc, k))
+
+let or_raise kind loc = function
+  | Ok () -> ()
+  | Error c -> fail loc (Conflict (kind, c))
+
+let pp_err input loc err : PPrint.document =
+  let open PPrint in
+  let pp fmt = Format.ksprintf PPrint.utf8string fmt in
+  let pp_ty t =
+    Typedefs.unparse_gen_typ t
+      ~flexvar:ignore
+      ~ext:[]
+      ~neg:(fun () -> Typedefs.(mktyexp (named_type "_")))
+      ~pos:(fun () -> Typedefs.(mktyexp (named_type "_")))
+    |> Print.tyexp
+  in
+  let pp_loc (loc : Location.t) =
+    (* FIXME character numbers also *)
+    pp "%s:%d" loc.loc_start.pos_fname loc.loc_start.pos_lnum in
+  let pp_context (loc : Location.t) =
+    if loc.loc_start.pos_lnum = 0 then empty else
+      let line = List.nth input (loc.loc_start.pos_lnum - 1) in
+      let offs = loc.loc_start.pos_cnum - loc.loc_start.pos_bol in
+      let cend =
+        if loc.loc_end.pos_lnum = loc.loc_start.pos_lnum then
+          loc.loc_end.pos_cnum - loc.loc_start.pos_bol 
+        else
+          String.length line in
+      pp "%s" line ^^
+      hardline ^^ pp "%*s" cend (String.make (cend-offs) '^')
+  in
+  (* FIXME: more of these could use context *)
+  pp_loc loc ^^ pp ": " ^^ match err with
+  | Syntax -> pp "syntax error"
+  | Bad_name (err,kind,name) ->
+     pp "%s %s name: %s"
+       (match err with `Unknown -> "Unknown" | `Duplicate -> "Duplicate")
+       (match kind with `Type -> "type" | `Var -> "variable")
+       name
+  | Illformed_type `Join_multi_cons ->
+     pp "Joins may only contain one non-variable type"
+  | Illformed_type `Join_not_cons_or_var ->
+     pp "Joins may only contain constructed types and variables"
+  | Illformed_type `Join_poly ->
+     pp "Joins may not contain polymorphic types"
+  | Illformed_type `Bound_not_simple ->
+     pp "Bounds must be simple types"
+  | Illformed_type `Bound_not_cons ->
+     pp "Bounds must be constructed types"
+  | Illformed_type (`Bound_crosses_levels n) ->
+     pp "Rigid variable %s not allowed in join with variable bound earlier" n
+  | Conflict (kind, err) ->
+     let premsg, postmsg =
+       match kind with
+       | `Expr -> "This expression has type", "but the expected type was"
+       | `Subtype -> "The type", "is not a subtype of"
+       | _ -> "??FIXME", "??FIXME"
+     in
+     let _msg = pp "%s" premsg ^^
+       nest 4 (break 1 ^^ pp_ty err.lhs) ^^
+       break 1 ^^ pp "%s" postmsg ^^
+       nest 4 (break 1 ^^ pp_ty err.rhs) in
+     let conflict =
+       match err.conflict with
+        | Incompatible ->
+           pp "Type error"
+        (* FIXME improve tuple field names *)
+        | Field (`Missing name) ->
+           pp "The field '%s' is missing." (Tuple_fields.string_of_field_name name)
+        | Field (`Extra (Some name)) ->
+           pp "A surplus field '%s' is present." (Tuple_fields.string_of_field_name name)
+        | Field (`Extra None) ->
+           pp "Surplus fields are present." in
+     let explanation =
+       match err.lhs_loc, err.rhs_loc with
+       | l :: _, r :: _ ->
+          let lty = nest 4 (break 1 ^^ pp_ty err.lhs) ^^ break 1 in
+          let rty = nest 4 (break 1 ^^ pp_ty err.rhs) ^^ break 1 in
+          hardline ^^
+          group (
+          (if Location.subset l loc then
+             group (pp "The type" ^^ lty)
+           else
+             group (pp "The type" ^^ lty ^^ pp "arising from " ^^ pp_loc l ^^ pp ":")
+               ^^ nest 2 (hardline ^^ pp_context l) ^^ hardline) ^^
+          (if Location.subset r loc then
+             group (pp "does not match type" ^^ rty)
+           else
+             group (pp "does not match type" ^^ rty ^^ pp "from " ^^ pp_loc r ^^ pp ":")
+                ^^ nest 2 (hardline ^^ pp_context r)))
+       | _ -> empty
+     in
+     conflict ^^ nest 2 (hardline ^^ pp_context loc) ^^ (*hardline ^^ msg ^^*) explanation
 
 let rec env_lookup_var env v =
   match env with
-  | Env_nil -> failwith (v.label ^ " not in scope")
+  | Env_nil -> Error (Bad_name (`Unknown, `Var, v.label))
   | Env_vals { vals = vs; rest; _ }
        when SymMap.mem v.label vs ->
-     if v.shift = 0 then SymMap.find v.label vs else
+     if v.shift = 0 then Ok (SymMap.find v.label vs) else
        env_lookup_var rest { v with shift = v.shift - 1 }
   | Env_types { rest; _ } | Env_vals {rest; _}->
      env_lookup_var rest v
@@ -22,40 +119,45 @@ let env_lookup_type_var env lvl name =
   match env_lookup_type_var env name with
   | Some v ->
      if not (Env_level.extends v.level lvl) then
-       failwith ("rigvar " ^ name ^ " not allowed inside join with rigvar bound earlier");
-     Some v
-  | None -> None
+       Error (Illformed_type (`Bound_crosses_levels name))
+     else
+       Ok v
+  | None -> Error (Bad_name (`Unknown, `Type, name))
 
 let rec split_tjoin env lvl cons vars rest =
   match rest with
   | [] -> cons, List.rev vars
-  | (None, _) :: _ -> failwith "type syntax error"
+  | (None, loc) :: _ -> fail loc Syntax
   | (Some ty, loc) as ty' :: rest ->
      match ty with
      | Tjoin (a, b) ->
         split_tjoin env lvl cons vars (a :: b :: rest)
      | Tparen a ->
         split_tjoin env lvl cons vars (a :: rest)
-     | Tforall _ -> failwith "Tforall in join"
+     | Tforall _ -> fail loc (Illformed_type `Join_poly)
      | ty ->
         let as_var =
           match ty with
           | Tnamed (name, _) ->
              (* FIXME shifting? *)
-             Option.map (fun v -> v, loc) (env_lookup_type_var env lvl name.label)
+             begin match env_lookup_type_var env lvl name.label with
+             | Ok v -> Some (v, loc)
+             | Error (Bad_name (`Unknown, `Type, _)) -> None
+             | Error e -> fail loc e
+             end
           | _ -> None in
         match as_var with
         | Some v -> split_tjoin env lvl cons (v :: vars) rest
         | None ->
            match cons with
            | None -> split_tjoin env lvl (Some ty') vars rest
-           | Some _ -> failwith "multiple cons in join"
+           | Some _ -> fail loc (Illformed_type `Join_multi_cons)
 
 let tcons loc cons = Tcons (mk_cons_locs loc cons, cons)
      
 let rec typ_of_tyexp : 'a 'b . env -> Env_level.t -> tyexp -> ('a, 'b) typ =
   fun env lvl ty -> match ty with
-  | None, _ -> failwith "type syntax error"
+  | None, loc -> fail loc Syntax
   | Some t, loc -> typ_of_tyexp' env lvl loc t
 and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, 'b) typ =
   fun env lvl loc ty -> match ty with
@@ -66,8 +168,8 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
      | Some cons -> tcons loc cons
      | None ->
         match env_lookup_type_var env lvl name with
-        | Some v -> Tvar (Location.single loc, Vrigid v)
-        | None -> failwith ("unknown type " ^ name)
+        | Ok v -> Tvar (Location.single loc, Vrigid v)
+        | Error e -> fail loc e
      end
   | Trecord fields ->
      tcons loc (Record (typs_of_tuple_tyexp env lvl fields))
@@ -88,9 +190,9 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
        | Some c ->
           match typ_of_tyexp env join_lvl c with
           | Tcons (l, c) -> l, c
-          | _ -> failwith "Expected a constructed type" in
+          | _ -> fail (snd c) (Illformed_type `Join_not_cons_or_var) in
      if rigvars <> [] && not (check_simple (Tcons (cloc, cons))) then
-       failwith "Poly type under join";
+       fail loc (Illformed_type `Join_poly);
      List.fold_left (fun c (r,l) -> Tvjoin (c, Location.single l, Vrigid r)) (Tcons (cloc, cons)) rigvars
   | Tforall (vars, body) ->
      let vars, name_ix = enter_polybounds env vars in
@@ -105,14 +207,14 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
   fun env vars ->
   let name_ix =
     vars
-    |> List.mapi (fun i ((n, _), _bound) -> i, n)
-    |> List.fold_left (fun smap ((i : int), n) ->
-      if SymMap.mem n smap then failwith ("duplicate rigvar name " ^ n);
+    |> List.mapi (fun i ((n, l), _bound) -> i, l, n)
+    |> List.fold_left (fun smap ((i : int), loc, n) ->
+      if SymMap.mem n smap then fail loc (Bad_name (`Duplicate, `Type, n));
       SymMap.add n i smap) SymMap.empty in
   let level = Env_level.extend (env_level env) in
   let stubs =
     vars
-    |> List.map (fun ((name,_),_) -> {name; upper=Top})
+    |> List.map (fun ((name,_),_) -> {name; upper=Top; upper_locs=Location.empty})
     |> IArray.of_list in
   let mkbound rig_names bound =
     match bound with
@@ -120,8 +222,8 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
     | Some b ->
        let temp_env = Env_types { level; rig_names; rig_defns = stubs; rest = env } in
        let bound = close_typ_rigid ~ispos:false level (typ_of_tyexp temp_env (env_level temp_env) b) in
-       begin match bound with Tcons _ -> () | _ -> failwith "bounds must be cons" end;
-       if not (check_simple bound) then failwith "bounds must be simple";
+       begin match bound with Tcons _ -> () | _ -> fail (snd b) (Illformed_type `Bound_not_cons) end;
+       if not (check_simple bound) then fail (snd b) (Illformed_type `Bound_not_simple);
        bound
   in
   let name_ix, vars = IArray.map_fold_left (fun names ((name,_), bound) ->
@@ -147,7 +249,6 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
   let env', rigvars = enter_rigid env rigvars' rig_names in
   let orig_ty, Elab (erq, ek) = fn env' in
   wf_ptyp env' orig_ty;
-
   let rec fixpoint visit erq prev_ty =
     if verbose_types then Format.printf "FIX: %a" dump_ptyp orig_ty;
     if visit > 10 then intfail "looping?";
@@ -186,8 +287,8 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
         | n -> Printf.sprintf "T_%d" (n-26) in
       (* NB: look up env', to ensure no collisions with rigvars *)
       match env_lookup_type_var env' (env_level env') name with
-      | None -> name
-      | Some _ -> mkname () in
+      | Error _ -> name
+      | Ok _ -> mkname () in
     let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex (_,r) -> mkname (), r) |> IArray.of_array in
     let tpoly = Tpoly { vars = bounds; body = ty } in
     wf_ptyp env tpoly;
@@ -201,14 +302,14 @@ let fresh_flow env =
 let rec check env e (ty : ntyp) : exp elab =
   wf_ntyp env ty;
   match e with
-  | None, _ -> failwith "bad exp"
+  | None, loc -> fail loc Syntax
   | Some e, loc ->
      let* e = check' env loc e ty in
      Some e, loc
 and check' env eloc e ty =
   match e, ty with
   | If (e, ifso, ifnot), _ ->
-     let* e = check env e (tcons eloc Bool)
+     let* e = check env e (tcons (snd e) Bool)
      and* ifso = check env ifso ty
      and* ifnot = check env ifnot ty in
      If (e, ifso, ifnot)
@@ -268,20 +369,26 @@ and check' env eloc e ty =
   | Pragma "false", Tcons (_,Bool) -> elab_pure e
   | e, _ ->
      (* Default case: infer and subtype. *)
+     (* FIXME: we probably shouldn't even attempt this on intro forms
+        at the wrong type. e.g. checking (1,2) against int *)
      let ty', e = infer' env eloc e in
-     subtype ~error:report env ty' ty;
+     subtype env ty' ty |> or_raise `Expr eloc;
      wf_ntyp env ty;
      let* e = e in e
 
 and infer env : exp -> ptyp * exp elab = function
-  | None, _ -> failwith "bad exp"
+  | None, loc -> fail loc Syntax
   | Some e, loc ->
      let ty, e = infer' env loc e in
      wf_ptyp env ty;
      ty, (let* e = e in Some e, loc)
 and infer' env eloc : exp' -> ptyp * exp' elab = function
   | Lit l -> infer_lit l
-  | Var (id, _loc) as e -> env_lookup_var env id, elab_pure e
+  | Var (id,loc) as e ->
+     begin match env_lookup_var env id with
+     | Ok v -> v, elab_pure e
+     | Error e -> fail loc e
+     end
   | Typed (e, ty) ->
      let t = typ_of_tyexp env ty in
      t, let* e = check env e t in Typed (e, ty)
@@ -289,7 +396,7 @@ and infer' env eloc : exp' -> ptyp * exp' elab = function
      let ty, e = infer env e in
      ty, let* e = e in Parens e
   | If (e, ifso, ifnot) ->
-     let e = check env e (tcons eloc Bool)
+     let e = check env e (tcons (snd e) Bool)
      and tyso, ifso = infer env ifso
      and tynot, ifnot = infer env ifnot in
      join_ptyp env tyso tynot,
@@ -299,10 +406,14 @@ and infer' env eloc : exp' -> ptyp * exp' elab = function
      let ty, e = infer env e in
      let f = Field_named field in
      let (), tyf =
-       match_typ ~error:report env ty eloc
+       match
+        match_typ env ty eloc
          (Record { fields = FieldMap.singleton f ();
                    fnames = [Field_named field]; fopen = `Open })
-       |> function Record r -> FieldMap.find f r.fields | _ -> assert false in
+       with
+       | Ok (Record r) -> FieldMap.find f r.fields
+       | Ok _ -> assert false
+       | Error c -> fail eloc (Conflict (`Expr, c)) in
      tyf, let* e = e in Proj (e, (field, loc))
   | Tuple fields ->
      if fields.fopen = `Open then failwith "invalid open tuple ctor";
@@ -367,8 +478,12 @@ and infer' env eloc : exp' -> ptyp * exp' elab = function
   | App (f, args) ->
      let fty, f = infer env f in
      let tyargs, ((), tyret) =
-       match_typ ~error:report env fty eloc (Func (args, ()))
-       |> function Func (a,r) -> a,r | _ -> assert false in
+       match
+        match_typ env fty eloc (Func (args, ()))
+       with
+       | Ok (Func (a, r)) -> a, r
+       | Ok _ -> assert false
+       | Error e -> fail eloc (Conflict (`Expr, e)) in
      let args = map_fields (fun _fn (e, t) -> check env e t) tyargs in
      tyret,
      let* f = f and* args = elab_fields args in
@@ -392,8 +507,12 @@ and check_pat' env ty ploc = function
   | Pparens p -> check_pat env ty p
   | Ptuple fs ->
      let fs =
-       match_typ ~error:report env ty ploc (Record fs)
-       |> function Record fs -> fs | _ -> assert false in
+       match
+        match_typ env ty ploc (Record fs)
+       with
+       | Ok (Record fs) -> fs
+       | Ok _ -> assert false
+       | Error e -> fail ploc (Conflict (`Pat, e)) in
      let fs = map_fields (fun _fn (p, t) -> check_pat env t p) fs in
      let fs, bindings = merge_bindings fs in
      tcons ploc (Record fs), bindings
@@ -407,7 +526,7 @@ and check_parameters env params ptypes =
           | None -> typ
           | Some ty ->
              let t = typ_of_tyexp env ty in
-             subtype ~error:report env typ t;
+             subtype env typ t |> or_raise `Pat (snd ty);
              t in
         Some (check_pat env ty p))
       ~left:(fun _fn (_p, _aty) -> failwith "extra param")
@@ -436,5 +555,5 @@ and check_annot env annot ty =
   | None -> ty
   | Some ty' ->
      let t = typ_of_tyexp env ty' in
-     subtype ~error:report env t ty;
+     subtype env t ty |> or_raise `Subtype (snd ty');
      t
