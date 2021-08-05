@@ -16,7 +16,15 @@ fn(id : [A](A) -> A, (x,y)) { (id(y),id(x)) }
 
 fn[A](x : A) { if x.cond {x} else {x} }
 > fn [A](x: A) { if x.cond { x } else { x } }
-> error: incompat top [] <: record [18-24]
+> test:1: Type error
+>   fn[A](x : A) { if x.cond {x} else {x} }
+>                     ^
+> The type 2.0 from test:1:
+>   fn[A](x : A) { if x.cond {x} else {x} }
+>             ^
+> does not match type {cond: _, ...} from test:1:
+>   fn[A](x : A) { if x.cond {x} else {x} }
+>                     ^^^^^^
 
 fn[A <: {cond:bool}](x : A) { if x.cond {x} else {x} }
 > fn [A <: {cond: bool}](x: A) { if x.cond { x } else { x } }
@@ -110,11 +118,25 @@ fn (a) { (fn(x) { (x, fn(x) { x }) })(a) }
 
 (fn (x: bool) { x } : [A] (A) -> A)
 > (fn (x: bool) { x } : [A] (A) -> A)
-> error: incompat top [] <: bool [8-12]
+> test:1: Type error
+>   (fn (x: bool) { x } : [A] (A) -> A)
+>           ^^^^
+> The type 2.0 from test:1:
+>   (fn (x: bool) { x } : [A] (A) -> A)
+>                              ^
+> does not match type bool
 
 (fn (x: any) { x } : [A] (A) -> A)
 > (fn (x: any) { x } : [A] (A) -> A)
-> error: incompat top [8-11] <: bot []
+> test:1: Type error
+>   (fn (x: any) { x } : [A] (A) -> A)
+>                  ^
+> The type any from test:1:
+>   (fn (x: any) { x } : [A] (A) -> A)
+>           ^^^
+> does not match type 2.0 from test:1:
+>   (fn (x: any) { x } : [A] (A) -> A)
+>                                   ^
 
 (fn[B] (x: B) { x } : [A] (A) -> A)
 > (fn [B](x: B) { x } : [A] (A) -> A)
@@ -215,7 +237,15 @@ let ch = fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }; fn (a,b) { c
 >     y
 >   }
 > } : [A] (A, A) -> A)
-> error: incompat top [] <: bot []
+> test:1: Type error
+>   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
+>                                                          ^
+> The type 3.1 from test:1:
+>   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
+>                         ^
+> does not match type 3.0 | 3.2 from test:1:
+>   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
+>                                 ^
 
 (fn[A,B,R](x : A, y : B) -> R|A { x } : [A] (A, A) -> A)
 > (fn [A, B, R](x: A, y: B) -> R | A { x } : [A] (A, A) -> A)
@@ -245,7 +275,15 @@ let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x
 >   let g = (fn (x) { f(x); x.foo });
 >   wid(g)
 > }
-> error: incompat top [] <: bot []
+> test:1: Type error
+>   let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
+>                                                                                                   ^
+> The type (_) -> any from test:1:
+>   let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
+>                              ^
+> does not match type (_) -> nothing from test:1:
+>   let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
+>                                     ^
 
 # works in checking mode (bidir)
 let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){f(x); x.foo}) }
@@ -279,7 +317,15 @@ let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn
 >   let g = (fn (x) { let z = f({bar: x}); x.foo });
 >   wid(g)
 > }
-> error: incompat top [] <: bot []
+> test:1: Type error
+>   let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
+>                                                                                                                        ^
+> The type (_) -> any from test:1:
+>   let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
+>                                  ^
+> does not match type (_) -> nothing from test:1:
+>   let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
+>                                            ^
 
 let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let z = f({bar:x}); x.foo}) }
 > let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) };

@@ -4,7 +4,7 @@
 : int <: bool
 > _:0: Type error
 >   
-> The type int arising from test:1:
+> The type int from test:1:
 >   : int <: bool
 >     ^^^
 > does not match type bool from test:1:
@@ -16,6 +16,13 @@
 
 : (int) -> int <: [A] (A) -> A
 > _:0: Type error
+>   
+> The type (int) -> _ from test:1:
+>   : (int) -> int <: [A] (A) -> A
+>      ^^^
+> does not match type (1.0) -> _ from test:1:
+>   : (int) -> int <: [A] (A) -> A
+>                          ^
 
 : [A, B] (A, B) -> (A|B) <: [X] (X, X) -> X
 > ok
@@ -32,7 +39,7 @@
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
 > _:0: Type error
 >   
-> The type () -> {foo: (string) -> _, bar: _} arising from test:1:
+> The type () -> {foo: (string) -> _, bar: _} from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
 >                                                                                            ^^^^^^
 > does not match type () -> {foo: (int) -> _, bar: _} from test:1:
@@ -40,7 +47,14 @@
 >                                                              ^^^
 
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
-> error: incompat top [] <: bot []
+> _:0: Type error
+>   
+> The type () -> {foo: (1.1) -> _, bar: _} from test:1:
+>   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
+>                                                                                          ^
+> does not match type () -> {foo: (1.0) -> _, bar: _} from test:1:
+>   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
+>                                                                     ^
 
 : [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y} <: [X] () -> {foo: (X) -> X, bar: (X) -> X}
 > ok
@@ -55,24 +69,45 @@
 : [X <: int] (X) -> X <: (int) -> int
 > ok
 : (int) -> int <: [X <: int] (X) -> X
-> error: incompat int [11-14] <: bot []
+> _:0: Type error
+>   
+> The type (_) -> int from test:1:
+>   : (int) -> int <: [X <: int] (X) -> X
+>              ^^^
+> does not match type (_) -> 1.0 from test:1:
+>   : (int) -> int <: [X <: int] (X) -> X
+>                                       ^
 
 : [X] (X) -> (X|int) <: (int) -> int
 > ok
 : (int) -> int <: [X] (X) -> (X|int)
-> error: incompat top [] <: int [3-6]
+> _:0: Type error
+>   
+> The type (int) -> _ from test:1:
+>   : (int) -> int <: [X] (X) -> (X|int)
+>      ^^^
+> does not match type (1.0) -> _ from test:1:
+>   : (int) -> int <: [X] (X) -> (X|int)
+>                          ^
 
 : [X] (X) -> (X) <: (int) -> int
 > ok
 : (int) -> int <: [X] (X) -> (X)
-> error: incompat top [] <: int [3-6]
+> _:0: Type error
+>   
+> The type (int) -> _ from test:1:
+>   : (int) -> int <: [X] (X) -> (X)
+>      ^^^
+> does not match type (1.0) -> _ from test:1:
+>   : (int) -> int <: [X] (X) -> (X)
+>                          ^
 
 
 
 : [X <: int] (X) -> (X|bool) <: (int) -> bool
 > _:0: Type error
 >   
-> The type (_) -> int arising from test:1:
+> The type (_) -> int from test:1:
 >   : [X <: int] (X) -> (X|bool) <: (int) -> bool
 >                                    ^^^
 > does not match type (_) -> nothing from test:1:
@@ -94,7 +129,14 @@
 > ok
 
 : [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
-> error: incompat int [46-49] <: bot []
+> _:0: Type error
+>   
+> The type (_) -> (_, (_) -> int) from test:1:
+>   : [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
+>                                                 ^^^
+> does not match type (_) -> (_, (_) -> nothing) from test:1:
+>   : [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
+>                                                                                 ^
 
 : (int) -> (int, [A <: int] (A) -> A) <: [A <: int] (A) -> (int, ([B] (A) -> A))
 > ok
@@ -110,13 +152,27 @@
 : [A] ((A) -> A) -> ((A) -> A) <: [C] ([B] (B) -> B) -> ((C) -> C)
 > ok
 : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
-> error: incompat top [] <: bot []
+> _:0: Type error
+>   
+> The type ((3.0) -> _) -> _ from test:1:
+>   : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
+>               ^
+> does not match type ((1.0) -> _) -> _ from test:1:
+>   : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
+>                                               ^
 
 
 
 # scope escape check
 : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
-> error: incompat top [] <: bot []
+> _:0: Type error
+>   
+> The type (_) -> (_) -> any from test:1:
+>   : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
+>                                                           ^
+> does not match type (_) -> (_) -> nothing from test:1:
+>   : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
+>                                                                 ^
 
 
 # tricky case of spec sub & rigvars (see cnrig <> [] case in ensure_upper_matches)

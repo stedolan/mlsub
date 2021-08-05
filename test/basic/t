@@ -316,7 +316,7 @@ let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
 > test:1: A surplus field 'z' is present.
 >   let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
 >       ^^^^^^^^^^^^^^^^
-> The type {x: _, y: _, z: _} arising from test:1:
+> The type {x: _, y: _, z: _} from test:1:
 >   let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
 >                          ^^^^^^^^^^^^^^^^^^^^^^^
 > does not match type {x: _, y: _}
@@ -397,7 +397,7 @@ let a = {foo: 1, bar: 2}; let b : {bar: int} = a; b
 > test:1: A surplus field 'foo' is present.
 >   let a = {foo: 1, bar: 2}; let b : {bar: int} = a; b
 >                                                  ^
-> The type {foo: _, bar: _} arising from test:1:
+> The type {foo: _, bar: _} from test:1:
 >   let a = {foo: 1, bar: 2}; let b : {bar: int} = a; b
 >           ^^^^^^^^^^^^^^^^
 > does not match type {bar: _} from test:1:
@@ -416,7 +416,7 @@ let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
 > test:1: Type error
 >   let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
 >                                                           ^
-> The type {foo: _, bar: int} arising from test:1:
+> The type {foo: _, bar: int} from test:1:
 >   let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
 >                         ^
 > does not match type {bar: nothing, ...} from test:1:
@@ -753,7 +753,15 @@ fn (x, wid : (([A] (A) -> A) -> int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
 >   let f = fn (a) { {x: x(a), y: a}.y };
 >   wid(f)
 > }
-> error: incompat top [] <: bot []
+> test:1: Type error
+>   fn (x, wid : (([A] (A) -> A) -> int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
+>                                                                              ^
+> The type (_) -> any from test:1:
+>   fn (x, wid : (([A] (A) -> A) -> int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
+>                       ^
+> does not match type (_) -> nothing from test:1:
+>   fn (x, wid : (([A] (A) -> A) -> int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
+>                             ^
 
 # with annotation
 fn (x : (any)->(), wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }

@@ -550,18 +550,24 @@ let close_typ_var lvl f ~ispos ~isjoin index = function
 (* Can only be used on typs without Tsimple nodes.
    (This limits it to use during parsing, which does not generate Tsimple) *)
 let rec close_typ :
-  'a 'b . env_level -> (typ_var -> ispos:bool -> isjoin:bool -> int) -> ispos:bool -> int -> (zero, zero) typ -> ('a, 'b) typ
-  = fun lvl var ~ispos ix ty -> match ty with
-  | Tsimple z -> never z
-  | Tcons (l, c) -> Tcons (l, map_head (close_typ lvl var ~ispos:(not ispos) ix) (close_typ lvl var ~ispos ix) c)
+  'a 'b . env_level -> (typ_var -> ispos:bool -> isjoin:bool -> int) -> simple:('a -> 'b)  -> ispos:bool -> int -> ('a, 'a) typ -> ('b, 'b) typ
+  = fun lvl var ~simple ~ispos ix ty -> match ty with
+  | Tsimple z -> Tsimple (simple z)
+  | Tcons (l, c) -> Tcons (l, map_head (close_typ lvl var ~simple ~ispos:(not ispos) ix) (close_typ lvl var ~simple ~ispos ix) c)
   | Tvar (l, v) -> Tvar (l, close_typ_var lvl var ~ispos ~isjoin:false ix v)
   | Tvjoin (t, l, v) -> 
-     Tvjoin(close_typ lvl var ~ispos ix t,
+     Tvjoin(close_typ lvl var ~simple ~ispos ix t,
             l, close_typ_var lvl var ~ispos ~isjoin:true ix v)
   | Tpoly {vars; body} ->
      let ix = ix + 1 in
-     Tpoly {vars = IArray.map (fun (n, b) -> n, close_typ lvl var ~ispos:(not ispos) ix b) vars;
-            body = close_typ lvl var ~ispos ix body}
+     Tpoly {vars = IArray.map (fun (n, b) -> n, close_typ lvl var ~simple ~ispos:(not ispos) ix b) vars;
+            body = close_typ lvl var ~simple ~ispos ix body}
+
+let diag x = (x, x)
+let xs = diag []
+let ys = (fst xs, snd xs)
+
+let gen_zero : (zero, zero) typ -> ('a, 'b) typ = Obj.magic
 
 let close_typ_rigid ~ispos level ty =
   let close_var v ~ispos ~isjoin =
@@ -570,7 +576,7 @@ let close_typ_rigid ~ispos level ty =
     match v with
     | Vrigid v when Env_level.equal v.level level -> v.var
     | _ -> intfail "close_typ_rigid: not a rigid variable" in
-  close_typ level close_var ~ispos 0 ty
+  close_typ level close_var ~simple:never ~ispos 0 ty |> gen_zero
 
 
 let next_flexvar_id = ref 0

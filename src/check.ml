@@ -85,23 +85,23 @@ let pp_err input loc err : PPrint.document =
         | Field (`Extra None) ->
            pp "Surplus fields are present." in
      let explanation =
-       match err.lhs_loc, err.rhs_loc with
-       | l :: _, r :: _ ->
-          let lty = nest 4 (break 1 ^^ pp_ty err.lhs) ^^ break 1 in
-          let rty = nest 4 (break 1 ^^ pp_ty err.rhs) ^^ break 1 in
-          hardline ^^
-          group (
-          (if Location.subset l loc then
-             group (pp "The type" ^^ lty)
-           else
-             group (pp "The type" ^^ lty ^^ pp "arising from " ^^ pp_loc l ^^ pp ":")
-               ^^ nest 2 (hardline ^^ pp_context l) ^^ hardline) ^^
-          (if Location.subset r loc then
-             group (pp "does not match type" ^^ rty)
-           else
-             group (pp "does not match type" ^^ rty ^^ pp "from " ^^ pp_loc r ^^ pp ":")
-                ^^ nest 2 (hardline ^^ pp_context r)))
-       | _ -> empty
+       let interesting_loc ls =
+         if List.exists (fun l -> Location.subset l loc) ls then None
+         else match ls with [] -> None | l::_ -> Some l in
+       let lty = nest 4 (break 1 ^^ pp_ty err.lhs) ^^ break 1 in
+       let rty = nest 4 (break 1 ^^ pp_ty err.rhs) ^^ break 1 in
+       hardline ^^
+       group (
+       (match interesting_loc err.lhs_loc with
+        | None -> group (pp "The type" ^^ lty)
+        | Some l ->
+          group (pp "The type" ^^ lty ^^ pp "from " ^^ pp_loc l ^^ pp ":")
+            ^^ nest 2 (hardline ^^ pp_context l) ^^ hardline) ^^
+       (match interesting_loc err.rhs_loc with
+        | None -> group (pp "does not match type" ^^ rty)
+        | Some r ->
+          group (pp "does not match type" ^^ rty ^^ pp "from " ^^ pp_loc r ^^ pp ":")
+             ^^ nest 2 (hardline ^^ pp_context r)))
      in
      conflict ^^ nest 2 (hardline ^^ pp_context loc) ^^ (*hardline ^^ msg ^^*) explanation
 
@@ -216,9 +216,9 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
     vars
     |> List.map (fun ((name,_),_) -> {name; upper=Top; upper_locs=Location.empty})
     |> IArray.of_list in
-  let mkbound rig_names bound =
+  let mkbound rig_names loc bound =
     match bound with
-    | None -> Tcons (Location.empty, Top)
+    | None -> Tcons ([Top, [loc]], Top)
     | Some b ->
        let temp_env = Env_types { level; rig_names; rig_defns = stubs; rest = env } in
        let bound = close_typ_rigid ~ispos:false level (typ_of_tyexp temp_env (env_level temp_env) b) in
@@ -226,9 +226,9 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
        if not (check_simple bound) then fail (snd b) (Illformed_type `Bound_not_simple);
        bound
   in
-  let name_ix, vars = IArray.map_fold_left (fun names ((name,_), bound) ->
+  let name_ix, vars = IArray.map_fold_left (fun names ((name,loc), bound) ->
     let names' = SymMap.add name (SymMap.find name name_ix) names in
-    names', (name, mkbound names bound)) SymMap.empty (IArray.of_list vars) in
+    names', (name, mkbound names loc bound)) SymMap.empty (IArray.of_list vars) in
   vars, name_ix
 
 let typ_of_tyexp env t = typ_of_tyexp env (env_level env) t
