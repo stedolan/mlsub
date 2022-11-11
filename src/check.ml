@@ -186,7 +186,7 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
        | (rv,_) :: _ -> rv.level in
      let cloc, cons =
        match cons with
-       | None -> Location.empty, Bot
+       | None -> Location.empty, Cons.Bot
        | Some c ->
           match typ_of_tyexp env join_lvl c with
           | Tcons (l, c) -> l, c
