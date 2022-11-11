@@ -294,6 +294,12 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
     wf_ptyp env tpoly;
     tpoly,
     Elab (Gen{bounds; body=Pair(Ptyp ty, erq)}, fun (poly, (t,e)) -> Some poly, t, ek e)
+
+let elab_ptyp = function
+  | Tsimple {ctor; flexvars=[fv]} when is_bottom {ctor;flexvars=[]} ->
+     Elab (Ntyp (Tsimple fv), fun x -> x)
+  | ty ->
+     Elab (Ptyp ty, fun x -> x)
   
 let fresh_flow env =
   let fv = fresh_flexvar (env_level env) in

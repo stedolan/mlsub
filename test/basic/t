@@ -776,10 +776,10 @@ fn (x : (any)->(), wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 # bidir version requires no annotation
 fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 > fn (x, wid: (([A] (A) -> A) -> int)) { wid(fn (a) { {x: x(a), y: a}.y }) }
->   fn [A](x: (any) -> A, wid: ([A_2] (A_2) -> A_2) -> int) -> int {
->     wid(fn (a) { {x: (x(a) : A), y: a}.y })
+>   fn (x: (any) -> any, wid: ([A] (A) -> A) -> int) -> int {
+>     wid(fn (a) { {x: (x(a) : any), y: a}.y })
 >   }
-> [A] ((any) -> A, ([A_2] (A_2) -> A_2) -> int) -> int
+> ((any) -> any, ([A] (A) -> A) -> int) -> int
 
 
 fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let f = fn(a){x(a)}; wid(f) }
@@ -850,9 +850,9 @@ fn() { (fn (x) { x })(fn (x) { x }) }
 # this way around is fine: {foo:b}|a, when a is bound more deeply
 fn(f) { fn(a,b) { let z = f(b); if true { {foo:b} } else { a } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { {foo: b} } else { a } } }
->   fn [A, B](f: (A) -> B) -> [A_2] (A_2, A) -> {foo: A} | A_2 {
+>   fn [A](f: (A) -> any) -> [A_2] (A_2, A) -> {foo: A} | A_2 {
 >     fn [A_2](a: A_2, b: A) -> {foo: A} | A_2 {
->       let z : B = f(b);
+>       let z : any = f(b);
 >       if true {
 >         {foo: b}
 >       } else {
@@ -860,15 +860,15 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:b} } else { a } } }
 >       }
 >     }
 >   }
-> [A, B] ((A) -> B) -> [A_2] (A_2, A) -> {foo: A} | A_2
+> [A] ((A) -> any) -> [A_2] (A_2, A) -> {foo: A} | A_2
 
 # this way around is harder: {foo:a}|b, when a is bound more deeply
 # hoists a to avoid an invalid Tvjoin
 fn(f) { fn(a,b) { let z = f(b); if true { {foo:a} } else { b } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { {foo: a} } else { b } } }
->   fn [A, B, C](f: (B) -> C) -> (A, B) -> {foo: A} | B {
+>   fn [A, B](f: (B) -> any) -> (A, B) -> {foo: A} | B {
 >     fn (a: A, b: B) -> {foo: A} | B {
->       let z : C = f(b);
+>       let z : any = f(b);
 >       if true {
 >         {foo: a}
 >       } else {
@@ -876,14 +876,14 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:a} } else { b } } }
 >       }
 >     }
 >   }
-> [A, B, C] ((B) -> C) -> (A, B) -> {foo: A} | B
+> [A, B] ((B) -> any) -> (A, B) -> {foo: A} | B
 
 # no need to hoist in these cases, with no cons (because join commutes)
 fn(f) { fn(a,b) { let z = f(b); if true { b } else { a } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { b } else { a } } }
->   fn [A, B](f: (A) -> B) -> [A_2] (A_2, A) -> A | A_2 {
+>   fn [A](f: (A) -> any) -> [A_2] (A_2, A) -> A | A_2 {
 >     fn [A_2](a: A_2, b: A) -> A | A_2 {
->       let z : B = f(b);
+>       let z : any = f(b);
 >       if true {
 >         b
 >       } else {
@@ -891,13 +891,13 @@ fn(f) { fn(a,b) { let z = f(b); if true { b } else { a } } }
 >       }
 >     }
 >   }
-> [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A | A_2
+> [A] ((A) -> any) -> [A_2] (A_2, A) -> A | A_2
 
 fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { a } else { b } } }
->   fn [A, B](f: (A) -> B) -> [A_2] (A_2, A) -> A | A_2 {
+>   fn [A](f: (A) -> any) -> [A_2] (A_2, A) -> A | A_2 {
 >     fn [A_2](a: A_2, b: A) -> A | A_2 {
->       let z : B = f(b);
+>       let z : any = f(b);
 >       if true {
 >         a
 >       } else {
@@ -905,7 +905,7 @@ fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
 >       }
 >     }
 >   }
-> [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A | A_2
+> [A] ((A) -> any) -> [A_2] (A_2, A) -> A | A_2
 
 # type validity may require sorting rigvars
 (@bot : [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A | A_2)
@@ -1140,8 +1140,8 @@ fn(x) {
 >   idf(choose(x, {foo: 5}))
 > }
 >   fn [A <: {foo: any, ...}](x: A) -> {foo: int} | A {
->     let idf : [A_2, B <: {foo: A_2, ...}] (B) -> B =
->     fn [A_2, B <: {foo: A_2, ...}](x: B) -> B { let y : A_2 = x.foo; x };
+>     let idf : [A_2 <: {foo: any, ...}] (A_2) -> A_2 =
+>     fn [A_2 <: {foo: any, ...}](x: A_2) -> A_2 { let y : any = x.foo; x };
 >     let choose : [A_2] (A_2, A_2) -> A_2 =
 >     fn [A_2](x: A_2, y: A_2) -> A_2 { if true { x } else { y } };
 >     idf(choose(x, {foo: 5}))
@@ -1149,4 +1149,4 @@ fn(x) {
 > [A <: {foo: any, ...}] (A) -> {foo: int} | A
 
 
-> STATS: fix: 63, flex: 2738
+> STATS: fix: 63, flex: 2701
