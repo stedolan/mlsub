@@ -1,3 +1,4 @@
+open Util
 open Tuple_fields
 open Typedefs
 open Exp
@@ -9,7 +10,7 @@ type _ elab_req =
   | Ptyp : ptyp -> tyexp elab_req
   | Ntyp : ntyp -> tyexp elab_req
   | Gen :
-      { bounds : (string * ntyp) IArray.t;
+      { bounds : (string Location.loc * ntyp option) IArray.t;
         body : 'a elab_req } ->
       (typolybounds * 'a) elab_req
 type +'a elab =
@@ -56,7 +57,7 @@ let rec elabreq_map_typs :
   | Ntyp n -> Ntyp (neg ~index n)
   | Gen {bounds; body} ->
      let index = index + 1 in
-     let bounds = IArray.map (fun (n,b) -> n, neg ~index b) bounds in
+     let bounds = IArray.map (fun (n,b) -> n, Option.map (neg ~index) b) bounds in
      let body = elabreq_map_typs ~neg ~pos ~index body in
      Gen{bounds;body}
 

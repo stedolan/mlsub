@@ -1,117 +1,10 @@
 (*
  * Core definitions used by the typechecker
  *)
+open Util
 
 module StrMap = Map.Make (struct type t = string let compare = compare end)
 
-exception Internal of string
-let intfail fmt =
-  Format.kasprintf (fun s -> raise (Internal s)) fmt
-let () = Printexc.register_printer (function Internal s -> Some ("internal error: " ^ s) | _ -> None)
-
-exception Unimplemented of string
-let unimp fmt =
-  Format.kasprintf (fun s -> raise (Unimplemented s)) fmt
-let () = Printexc.register_printer (function Unimplemented s -> Some ("unimplemented: " ^ s) | _ -> None)
-
-let id x = x
-
-type zero = |
-let never : zero -> 'a = function _ -> .
-
-(* Immutable arrays *)
-module IArray : sig
-  type +'a t
-  val empty : 'a t
-  val make : 'a array -> 'a t
-  val get : 'a t -> int -> 'a
-  val length : 'a t -> int
-  val of_list : 'a list -> 'a t
-  val of_array : 'a array -> 'a t
-  val to_list : 'a t -> 'a list
-  val to_array : 'a t -> 'a array
-  val mapi : (int -> 'a -> 'b) -> 'a t -> 'b t
-  val map : ('a -> 'b) -> 'a t -> 'b t
-  val iter : ('a -> unit) -> 'a t -> unit
-  val iteri : (int -> 'a -> unit) -> 'a t -> unit
-  val iter2 : ('a -> 'b -> unit) -> 'a t -> 'b t -> unit
-  val exists : ('a -> bool) -> 'a t -> bool
-  val map_fold_left : ('s -> 'a -> 's * 'b) -> 's -> 'a t -> 's * 'b t
-end = struct
-  type +'a t = Mk : 'b array * ('b -> 'a) -> 'a t
-  let acopy a = Array.map id a
-  let empty = Mk ([| |], id)
-  let make x = Mk (Array.map id x, id)
-  let get (Mk (a, r)) i = r a.(i)
-  let length (Mk (a, _r)) = Array.length a
-  let of_list l = make (Array.of_list l)
-  let of_array a = Mk(acopy a, id)
-  let to_array (Mk (a, r)) = Array.map r a
-  let to_list x = to_array x |> Array.to_list
-  let map f (Mk (a, r)) = Mk (Array.init (Array.length a) (fun i -> f (r a.(i))), id)
-  let mapi f (Mk (a, r)) = Mk (Array.init (Array.length a) (fun i -> f i (r a.(i))), id)
-  let iteri f (Mk (a, ra)) =
-    Array.iteri (fun i x -> f i (ra x)) a
-  let iter2 f (Mk (a, ra)) (Mk (b, rb)) =
-    Array.iter2 (fun a b -> f (ra a) (rb b)) a b
-  let iter f (Mk (a, r)) = Array.iter (fun x -> f (r x)) a
-  let exists f (Mk (a, r)) = Array.exists (fun x -> f (r x)) a
-  let map_fold_left f s (Mk (a, r)) =
-    let st = ref s in
-    let out = ref [| |] in
-    for i = 0 to Array.length a - 1 do
-      let x = a.(i) in
-      let s, b = f !st (r x) in
-      let out =
-        match !out with
-        | [| |] -> out := Array.make (Array.length a) b; !out
-        | o -> o in
-      out.(i) <- b;
-      st := s
-    done;
-    !st, of_array !out
-end
-type 'a iarray = 'a IArray.t
-
-module Cons = struct
-  open Tuple_fields
-
-  (* Head type constructors. These do not bind type variables. *)
-  type (+'neg, +'pos) t =
-    | Top
-    | Bot
-    (* FIXME: maybe delete these once abstypes exist? *)
-    | Bool
-    | Int
-    | String
-    | Record of 'pos tuple_fields
-    | Func of 'neg tuple_fields * 'pos
-
-  let equal ~neg ~pos p q =
-    match p, q with
-    | Top, Top -> true
-    | Bot, Bot -> true
-    | Bool, Bool -> true
-    | Int, Int -> true
-    | String, String -> true
-    | Record p, Record q ->
-       equal_fields pos p q
-    | Func (pa, pr), Func (qa, qr) ->
-       equal_fields neg pa qa && pos pr qr
-    | (Top|Bot|Bool|Int|String|Record _|Func _), _ -> false
-
-  let map ~neg ~pos = function
-    | Top -> Top
-    | Bot -> Bot
-    | Bool -> Bool
-    | Int -> Int
-    | String -> String
-    | Record fields -> Record (map_fields (fun _fn x -> pos x) fields)
-    | Func (args, res) ->
-       Func (map_fields (fun _fn x -> neg x) args, pos res)
-end
-
-module SymMap = Tuple_fields.SymMap
 
 let equal_lists f p q =
   try List.for_all2 f p q
@@ -125,6 +18,289 @@ let rec compare_lists f p q =
      if cmp = 0 then compare_lists f ps qs else cmp
   | [], _::_ -> -1
   | _::_, [] -> 1
+
+
+module Cons = struct
+  open Tuple_fields
+
+  (* Head type constructors. These do not bind type variables. *)
+  type (+'neg, +'pos) t =
+    (* FIXME: maybe delete these once abstypes exist? *)
+    | Bool
+    | Int
+    | String
+    | Record of 'pos tuple_fields
+    | Func of 'neg tuple_fields * 'pos
+
+
+  let equal_one ~neg ~pos p q =
+    match p, q with
+    | Bool, Bool -> true
+    | Int, Int -> true
+    | String, String -> true
+    | Record p, Record q ->
+       equal_fields pos p q
+    | Func (pa, pr), Func (qa, qr) ->
+       equal_fields neg pa qa && pos pr qr
+    | (Bool|Int|String|Record _|Func _), _ -> false
+
+  (* same_component isn't quite right: the lattice is more complicated
+     than that because of Record(Closed) *)
+  let same_component p q =
+    match p, q with
+    | Bool, Bool
+    | Int, Int
+    | String, String
+    | Record _, Record _
+    | Func _, Func _
+      -> true
+    | (Bool|Int|String|Record _|Func _), _ -> false
+
+  let map_one ~neg ~pos = function
+    | Bool -> Bool
+    | Int -> Int
+
+    | String -> String
+    | Record fields -> Record (map_fields (fun _fn x -> pos x) fields)
+    | Func (args, res) ->
+       let args = map_fields (fun _fn x -> neg x) args in
+       let res = pos res in
+       Func (args, res)
+
+  type field_neg =
+    | Func_arg of Tuple_fields.field_name
+
+  type field_pos =
+    | Record_field of Tuple_fields.field_name
+    | Func_res
+
+  type field = F_neg of field_neg | F_pos of field_pos
+
+  let equal_field_neg a b =
+    match a, b with
+    | Func_arg a, Func_arg b -> Tuple_fields.equal_field_name a b
+
+  let equal_field_pos a b =
+    match a, b with
+    | Record_field a, Record_field b -> Tuple_fields.equal_field_name a b
+    | Func_res, Func_res -> true
+    | _ -> false
+
+  let equal_field a b =
+    match a, b with
+    | F_neg a, F_neg b -> equal_field_neg a b
+    | F_pos a, F_pos b -> equal_field_pos a b
+    | _ -> false
+
+  let mapi_one ~neg ~pos = function
+    | Bool -> Bool
+    | Int -> Int
+
+    | String -> String
+    | Record fields -> Record (map_fields (fun fn x -> pos (Record_field fn) x) fields)
+    | Func (args, res) ->
+       let args = map_fields (fun fn x -> neg (Func_arg fn) x) args in
+       let res = pos Func_res res in
+       Func (args, res)
+
+
+  module One_or_two = struct
+    type ('a, 'b) t =
+      | L of 'a
+      | R of 'b
+      | LR of 'a * 'b
+
+    let left x = L x
+    let right x = R x
+    let both x y = LR (x,y)
+  end
+
+  (* meet and join return None iff not same_component *)
+
+  let meet_one a b =
+    match a, b with
+    | Bool, Bool -> Some Bool
+    | Int, Int -> Some Int
+    | String, String -> Some String
+    | (Bool|Int|String), _ | _, (Bool|Int|String) -> None
+
+    | Record c, Record c' ->
+       Option.map (fun r -> Record r)
+         One_or_two.(Tuple_fields.union ~left ~right ~both c c')
+
+    | Func (args, res), Func (args', res') ->
+       (* FIXME: fail here rather than assuming variadic functions?
+          Could/should enforce that functions are always `Closed *)
+       let args = One_or_two.(Tuple_fields.inter ~both) args args' in
+       Some (Func (args, LR (res, res')))
+
+    | Record _, Func _ | Func _, Record _ -> None
+
+  let join_one a b =
+    assert (same_component a b); (* FIXME *)
+    match a, b with
+    | Bool, Bool -> Bool
+    | Int, Int -> Int
+    | String, String -> String
+    | (Bool|Int|String), _ | _, (Bool|Int|String) -> assert false
+  
+    | Record c, Record c' ->
+       Record One_or_two.(Tuple_fields.inter ~both c c')
+  
+    | Func (args, res), Func (args', res') ->
+       (* FIXME: components wrong here? Check variadic functions, are these possible? *)
+       begin match One_or_two.(Tuple_fields.union ~left ~right ~both args args') with
+       | Some r ->
+          let res =
+            if true then One_or_two.both res res'
+            else (if false then One_or_two.left res else One_or_two.right res')
+          in
+          Func (r, res)
+       | None -> assert false
+       end
+  
+    | Record _, Func _ | Func _, Record _ -> assert false
+
+  type cons_head = (unit, unit) t list
+
+  (* FIXME: can intern these if it turns out to be slow *)
+  type cons_loc = cons_head * Location.t
+  module Locs = UniqList.Make (struct
+    type nonrec t = cons_loc
+    let equal (a, _) (b, _) = equal_lists (equal_one ~neg:(fun () () -> true) ~pos:(fun () () -> true)) a b
+  end)
+
+
+  type ('n,'p) conses = {
+    (* At most one of each component *)
+    (* FIXME: enforce *)
+    conses: ('n, 'p) t list;
+    locs: Locs.t
+   }
+
+  let equal ~neg ~pos a b = equal_lists (equal_one ~neg ~pos) a.conses b.conses
+
+  let map ~neg ~pos t = { conses = List.map (map_one ~neg ~pos) t.conses; locs = t.locs }
+  let mapi ~neg ~pos t = { conses = List.map (mapi_one ~neg ~pos) t.conses; locs = t.locs }
+
+  let rec join a b =
+    match a with
+    | [] -> List.map (map_one ~neg:One_or_two.right ~pos:One_or_two.right) b
+    | ac :: arest ->
+       let bc, brest = List.partition (same_component ac) b in
+       match bc with
+       | [] ->
+          map_one ~neg:One_or_two.left ~pos:One_or_two.left ac ::
+            join arest brest
+       | [bc] ->
+          join_one ac bc ::
+            join arest brest
+       | _ :: _ :: _ ->
+          failwith "multiple joinable conses"
+
+  let join a b = { conses = join a.conses b.conses; locs = Locs.append a.locs b.locs ~merge:(fun a _ -> a) }
+
+  let meet a b =
+    a |> List.concat_map (fun a ->
+      b |> List.concat_map (fun b ->
+        match meet_one a b with
+        | None -> []
+        | Some m -> [m]))
+
+  let meet a b = { conses = meet a.conses b.conses; locs = Locs.append a.locs b.locs ~merge:(fun a _ -> a) }
+
+  let bottom = { conses = []; locs = Locs.empty }
+  let bottom_loc loc = { conses = []; locs = Locs.single ([], loc) }
+  let is_bottom = function { conses = []; _ } -> true | _ -> false
+
+  let get_single = function { conses = [c]; _ } -> Some c | _ -> None
+
+  let make ~loc c = { conses = [c]; locs = Locs.single ([map_one ~pos:ignore ~neg:ignore c], loc) }
+
+  type ('neg, 'pos) subfield =
+    | S_neg of field_neg * 'neg
+    | S_pos of field_pos * 'pos
+
+  type field_conflict = [`Missing of field_name | `Extra of field_name option]
+  type conflict =
+    | Fields of field_conflict
+    | Args of field_conflict
+    | Incompatible
+
+
+  type subtype_error =
+    {
+      conflict: conflict;
+      (* more specific mismatch *)
+      located: ((cons_head * Location.t) * (cons_head * Location.t)) option;
+    }
+
+  exception FieldError of field_conflict
+  let subtype_fields ~sub af bf =
+    if bf.fopen = `Closed then begin
+      if af.fopen = `Open then raise (FieldError (`Extra None));
+      (* check dom a ⊆ dom b *)
+      List.iter (fun k ->
+        match FieldMap.find k bf.fields with
+        | exception Not_found -> raise (FieldError (`Extra (Some k)))
+        | _ -> ()) af.fnames
+    end;
+    FieldMap.bindings bf.fields |> List.map (fun (k, b) ->
+      match FieldMap.find k af.fields with
+      | exception Not_found -> raise (FieldError (`Missing k))
+      | a -> sub k (a, b))
+
+  let subtype_one a b =
+    match a, b with
+    | Bool, Bool
+    | Int, Int
+    | String, String -> Ok []
+    | Func (args, res), Func (args', res') ->
+       begin match subtype_fields ~sub:(fun k s -> S_neg (Func_arg k, s)) args' args with
+       | sub -> Ok (sub @ [S_pos (Func_res, (res, res'))])
+       | exception FieldError con -> Error (Args con)
+       end
+    | Record fs, Record fs' ->
+       begin match subtype_fields ~sub:(fun k s -> S_pos (Record_field k, s)) fs fs' with
+       | sub -> Ok sub
+       | exception FieldError con -> Error (Fields con)
+       end
+    | _, _ -> Error Incompatible
+
+  let partition_results x =
+    List.partition_map (function Ok x -> Left x | Error x -> Right x) x
+
+  let subtype' a b =
+    let parts =
+      a |> List.map (fun a ->
+        (* At most one of these should hold *)
+        match partition_results (List.map (fun b -> subtype_one a b) b) with
+        | [s], _ -> Ok s
+        | [], [] -> Error (a, Incompatible)
+        | [], e :: _ -> Error (a, e)
+        (* FIXME: prove this does not occur *)
+        | _ :: _ :: _, _ -> intfail "bad cons join - unmerged ctors")
+    in
+    match partition_results parts with
+    | subs, [] -> Ok (List.concat subs)
+    | _, err :: _ -> Error err
+
+  let subtype a b =
+    match subtype' a.conses b.conses with
+    | Ok subs -> Ok subs
+    | Error (lhs, conflict) ->
+       let located =
+         (a.locs :> cons_loc list) |> List.find_map (fun (a, al) ->
+           if Result.is_error (subtype' a [lhs]) then None
+           else (b.locs :> cons_loc list) |> List.find_map (fun (b, bl) ->
+             if Result.is_ok (subtype' a b) then None
+             else Some ((a, al), (b, bl))))
+       in
+       Error { conflict;
+               located }
+end
+
+module SymMap = Tuple_fields.SymMap
 
 module Env_level : sig
   type t
@@ -242,19 +418,14 @@ end = struct
   let fold = List.fold_left
 end
 
-(* FIXME: refactor: might be easier to move cons_locs into cons? *)
-type cons_locs = ((unit,unit) Cons.t * Location.set) list
-let mk_cons_locs loc cons =
-  [Cons.map ~neg:ignore ~pos:ignore cons, Location.single loc]
-
 (* A ctor_ty is a join of a constructed type and some rigid variables *)
 type (+'neg,+'pos) ctor_ty =
-  { cons: ('neg,'pos) Cons.t; rigvars: Rvset.t;
-    cons_locs: cons_locs }
+  { cons: ('neg,'pos) Cons.conses;
+    rigvars: Rvset.t }
 
 (* FIXME: most uses of this function are probably bugs: rigvars need attention *)
-let map_ctor_rig neg pos { cons; rigvars; cons_locs } =
-  { cons = Cons.map ~neg ~pos cons; rigvars; cons_locs }
+let map_ctor_rig neg pos { cons; rigvars } =
+  { cons = Cons.map ~neg ~pos cons; rigvars }
 
 
 
@@ -284,7 +455,9 @@ type flexvar =
     mutable upper: styp_neg list; (* strictly covariant parts are matchable *)
     mutable lower: flex_lower_bound;
     id: int;    (* for printing/sorting *)
-    mutable gen: flexvar_gen; }
+    mutable gen: flexvar_gen;
+    mutable rotated: bool
+  }
 
 (* A well-formed negative styp is either:
      - a single flexible variable
@@ -299,32 +472,42 @@ and styp_neg =
    Flexible variables appearing negatively in ctor might well have UBvar upper bounds.
  *)
 and flex_lower_bound =
-  { ctor: (flexvar, flex_lower_bound) ctor_ty; flexvars: flexvar list }
+  | Lower of flexvar UniqList.t * (flexvar, flex_lower_bound) ctor_ty
+  | Ltop of Location.t option
 
+module Fvset = UniqList.Make(struct type t = flexvar let equal = (==) end)
 
 type typ_var =
   | Vbound of {index: int; var:int}
   | Vflex of flexvar
   | Vrigid of rigvar
 
+(* FIXME: enforce tjoin invariants, especially in neg types *)
 type (+'neg, +'pos) typ =
   | Tsimple of 'pos
-  | Tcons of cons_locs * ('neg, 'pos) cons_typ
+  | Ttop of Location.t option
+  (* Bottom is represented as an empty Tcons *)
+  | Tcons of ('neg, 'pos) cons_typ
   | Tvar of Location.set * typ_var
-  | Tvjoin of ('neg, 'pos) typ * Location.set * typ_var
-     (* Tvjoin(t,v): t must be well-scoped at level of var *)
-  | Tpoly of {
-     (* names must be distinct *)
-     (* bound must be a constructed type, possibly joined with some rigid/bound vars *)
-     vars : (string * ('pos, 'neg) typ) iarray;
-     body : ('neg, 'pos) typ }
-and (+'neg, +'pos) cons_typ = (('pos, 'neg) typ, ('neg, 'pos) typ) Cons.t
+  | Tjoin of ('neg, 'pos) typ * ('neg, 'pos) typ
+     (* No Tpoly allowed under a Tjoin *)
+  | Tpoly of ('neg, 'pos) poly_typ
+and (+'neg, +'pos) cons_typ = (('pos, 'neg) typ, ('neg, 'pos) typ) Cons.conses
+and (+'neg, +'pos) poly_typ =
+  { (* names must be distinct *)
+    (* bound must be a constructed type, possibly joined with some rigid/bound vars *)
+    vars : (string Location.loc * ('pos, 'neg) typ option) iarray;
+    body : ('neg, 'pos) typ }
 
 type ptyp = (flexvar, flex_lower_bound) typ
 type ntyp = (flex_lower_bound, flexvar) typ
 
+type value_binding =
+  { typ: ptyp;
+    closed: bool }
+
 type env =
-  | Env_vals of { vals : ptyp SymMap.t; rest : env }
+  | Env_vals of { vals : value_binding SymMap.t; rest : env }
   | Env_types of {
      level : env_level;
      rig_names : int SymMap.t;
@@ -336,9 +519,8 @@ type env =
 and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
-  name : string;
-  upper_locs : cons_locs;
-  upper : (flexvar, flex_lower_bound) Cons.t;
+  name : string Location.loc;
+  upper : (flexvar, flex_lower_bound) Cons.conses option;
 }
 
 (*
@@ -348,9 +530,13 @@ and rigvar_defn = {
 let equal_flexvar (p : flexvar) (q : flexvar) =
   p == q
 let rec equal_flex_lower_bound (p : flex_lower_bound) (q : flex_lower_bound) =
-  equal_lists equal_flexvar p.flexvars q.flexvars &&
-  Rvset.equal p.ctor.rigvars q.ctor.rigvars &&
-  Cons.equal ~neg:equal_flexvar ~pos:equal_flex_lower_bound p.ctor.cons q.ctor.cons
+  match p, q with
+  | Ltop _, Ltop _ -> true
+  | Lower (pflex, pctor), Lower (qflex, qctor) ->
+     Fvset.equal pflex qflex &&
+     Rvset.equal pctor.rigvars qctor.rigvars &&
+     Cons.equal ~neg:equal_flexvar ~pos:equal_flex_lower_bound pctor.cons qctor.cons
+  | _, _ -> false
 let equal_styp_neg (p : styp_neg) (q : styp_neg) =
   match p, q with
   | UBvar pv, UBvar qv -> equal_flexvar pv qv
@@ -359,7 +545,10 @@ let equal_styp_neg (p : styp_neg) (q : styp_neg) =
      Cons.equal ~neg:equal_flex_lower_bound ~pos:equal_flexvar cp.cons cq.cons
   | (UBvar _|UBcons _), _ -> false
 
-let bottom = {ctor={cons=Bot;rigvars=Rvset.empty;cons_locs=[]};flexvars=[]}
+let bottom = Lower(Fvset.empty, {cons=Cons.bottom;rigvars=Rvset.empty})
+let of_flexvar fv = Lower(Fvset.single fv, {cons=Cons.bottom;rigvars=Rvset.empty})
+let of_rigvars rigvars = Lower(Fvset.empty, {cons=Cons.bottom;rigvars})
+let of_rigvar loc rv = of_rigvars (Rvset.singleton rv loc)
 let is_bottom t = equal_flex_lower_bound bottom t
 
 (*
@@ -386,7 +575,7 @@ let fv_set_upper ~changes fv upper =
   fv.upper <- upper
 
 let fv_set_lower ~changes fv lower =
-  List.iter (fun fv' -> assert (fv != fv')) lower.flexvars;
+  begin match lower with Lower (fvs, _) -> assert (not (Fvset.mem fv fvs)) | Ltop _ -> () end;
   changes := Change_lower (fv, fv.lower) :: !changes;
   fv.lower <- lower
 
@@ -434,7 +623,7 @@ let env_rigid_var env (rv : rigvar) =
 
 let env_rigid_bound env (rv : rigvar) =
   let r = env_rigid_var env rv in
-  (r.upper_locs, r.upper)
+  r.upper
 
 let rec env_level env =
   match env with
@@ -495,49 +684,43 @@ let assert_locally_closed_var ix = function
 let rec assert_locally_closed :
   'a 'b . int -> ('a, 'b) typ -> unit =
   fun ix ty -> match ty with
-  | Tsimple _ -> ()
-  | Tcons (_,c) -> ignore (Cons.map ~neg:(assert_locally_closed ix) ~pos:(assert_locally_closed ix) c)
+  | Tsimple _ | Ttop _ -> ()
+  | Tcons c -> ignore (Cons.map ~neg:(assert_locally_closed ix) ~pos:(assert_locally_closed ix) c)
   | Tvar (_, v) -> assert_locally_closed_var ix v
-  | Tvjoin (t, _, v) -> assert_locally_closed ix t; assert_locally_closed_var ix v
+  | Tjoin (a, b) -> assert_locally_closed ix a; assert_locally_closed ix b
   | Tpoly {vars; body} ->
      let ix = ix + 1 in
-     vars |> IArray.iter (fun (_, b) -> assert_locally_closed ix b);
+     vars |> IArray.iter (fun (_, b) -> Option.iter (assert_locally_closed ix) b);
      assert_locally_closed ix body
 
-let tvjoin_opt t l v =
-  match t with
-  | None -> Tvar (l, v)
-  | Some t -> Tvjoin (t, l, v)
-
-let open_typ_var f rest loc ix = function
+let open_typ_var f loc ix = function
   | Vbound {index; var} when index >= ix ->
      assert (index = ix);
-     Option.iter (assert_locally_closed ix) rest;
-     let res = f rest loc var in
+     let res = f loc var in
      assert_locally_closed ix res;
      res
-  | v -> tvjoin_opt rest loc v
+  | v -> Tvar (loc, v)
 
 let rec open_typ :
   'neg 'pos . 
-    neg:(('pos, 'neg) typ option -> Location.set -> int -> ('pos, 'neg) typ) ->
-    pos:(('neg, 'pos) typ option -> Location.set -> int -> ('neg, 'pos) typ) ->
+    neg:(Location.set -> int -> ('pos, 'neg) typ) ->
+    pos:(Location.set -> int -> ('neg, 'pos) typ) ->
     int -> ('neg, 'pos) typ -> ('neg, 'pos) typ =
   fun ~neg ~pos ix t -> match t with
-  | Tsimple _ as s -> s
-  | Tcons (l,c) -> Tcons (l, Cons.map ~neg:(open_typ ~neg:pos ~pos:neg ix) ~pos:(open_typ ~neg ~pos ix) c)
-  | Tvar (l,v) -> open_typ_var pos None l ix v
-  | Tvjoin (t, l, v) -> open_typ_var pos (Some (open_typ ~neg ~pos ix t)) l ix v
+  | (Tsimple _ | Ttop _) as s -> s
+  | Tcons c -> Tcons (Cons.map ~neg:(open_typ ~neg:pos ~pos:neg ix) ~pos:(open_typ ~neg ~pos ix) c)
+  | Tvar (l,v) -> open_typ_var pos l ix v
+  | Tjoin (a,b) -> Tjoin (open_typ ~neg ~pos ix a, open_typ ~neg ~pos ix b)
   | Tpoly {vars; body} ->
      let ix = ix + 1 in
-     Tpoly {vars = IArray.map (fun (n, b) -> n, open_typ ~neg:pos ~pos:neg ix b) vars;
+     Tpoly {vars = IArray.map (fun (n, b) -> n, Option.map (open_typ ~neg:pos ~pos:neg ix) b) vars;
             body = open_typ ~neg ~pos ix body}
 
 let open_typ_rigid vars t =
-  let mkv rest loc i = tvjoin_opt rest loc (Vrigid (IArray.get vars i)) in
+  let mkv loc i = Tvar (loc, (Vrigid (IArray.get vars i))) in
   open_typ ~neg:mkv ~pos:mkv 0 t
 let open_typ_flex vars t =
-  let mkv rest loc i = tvjoin_opt rest loc (Vflex (IArray.get vars i)) in
+  let mkv loc i = Tvar (loc, (Vflex (IArray.get vars i))) in
   open_typ ~neg:mkv ~pos:mkv 0 t
 
 
@@ -551,18 +734,19 @@ let close_typ_var lvl f ~ispos ~isjoin index = function
 (* Can only be used on typs without Tsimple nodes.
    (This limits it to use during parsing, which does not generate Tsimple) *)
 let rec close_typ :
-  'a 'b . env_level -> (typ_var -> ispos:bool -> isjoin:bool -> int) -> simple:('a -> 'b)  -> ispos:bool -> int -> ('a, 'a) typ -> ('b, 'b) typ
-  = fun lvl var ~simple ~ispos ix ty -> match ty with
+  'a 'b . env_level -> (typ_var -> ispos:bool -> isjoin:bool -> int) -> simple:('a -> 'b)  -> ispos:bool -> isjoin:bool -> int -> ('a, 'a) typ -> ('b, 'b) typ
+  = fun lvl var ~simple ~ispos ~isjoin ix ty -> match ty with
   | Tsimple z -> Tsimple (simple z)
-  | Tcons (l, c) -> Tcons (l, Cons.map ~neg:(close_typ lvl var ~simple ~ispos:(not ispos) ix) ~pos:(close_typ lvl var ~simple ~ispos ix) c)
-  | Tvar (l, v) -> Tvar (l, close_typ_var lvl var ~ispos ~isjoin:false ix v)
-  | Tvjoin (t, l, v) -> 
-     Tvjoin(close_typ lvl var ~simple ~ispos ix t,
-            l, close_typ_var lvl var ~ispos ~isjoin:true ix v)
+  | Ttop _ as z -> z
+  | Tcons c -> Tcons (Cons.map ~neg:(close_typ lvl var ~simple ~ispos:(not ispos) ~isjoin:false ix) ~pos:(close_typ lvl var ~simple ~ispos ~isjoin:false ix) c)
+  | Tvar (l, v) -> Tvar (l, close_typ_var lvl var ~ispos ~isjoin ix v)
+  | Tjoin (a, b) -> Tjoin(close_typ lvl var ~simple ~ispos ~isjoin:true ix a,
+                          close_typ lvl var ~simple ~ispos ~isjoin:true ix b)
   | Tpoly {vars; body} ->
+     assert (not isjoin);
      let ix = ix + 1 in
-     Tpoly {vars = IArray.map (fun (n, b) -> n, close_typ lvl var ~simple ~ispos:(not ispos) ix b) vars;
-            body = close_typ lvl var ~simple ~ispos ix body}
+     Tpoly {vars = IArray.map (fun (n, b) -> n, Option.map (close_typ lvl var ~simple ~ispos:(not ispos) ~isjoin:false ix) b) vars;
+            body = close_typ lvl var ~simple ~ispos ~isjoin:false ix body}
 
 let diag x = (x, x)
 let xs = diag []
@@ -572,37 +756,20 @@ let gen_zero : (zero, zero) typ -> ('a, 'b) typ = Obj.magic
 
 let close_typ_rigid ~ispos level ty =
   let close_var v ~ispos ~isjoin =
-    (* FIXME report this better *)
     if isjoin && not ispos then failwith "contravariant join";
     match v with
     | Vrigid v when Env_level.equal v.level level -> v.var
     | _ -> intfail "close_typ_rigid: not a rigid variable" in
-  close_typ level close_var ~simple:never ~ispos 0 ty |> gen_zero
+  close_typ level close_var ~simple:never ~ispos ~isjoin:false 0 ty |> gen_zero
 
 
 let next_flexvar_id = ref 0
 let fresh_flexvar level : flexvar =
   let id = !next_flexvar_id in
   incr next_flexvar_id;
-  { level; upper = []; lower = bottom; id; gen = Not_generalising }
+  { level; upper = []; lower = bottom; id; gen = Not_generalising; rotated = false }
 
 
-(*
-FIXME: this is needed for parsing. Even flexible variables can be looked up!
-
-let rec env_lookup_type_var env name : (styp * styp) option =
-  match env with
-  | Env_cons { level; entry = (Erigid { names; _ } | Eflexible { names; _ }); _ }
-       when SymMap.mem name names ->
-     (* FIXME shifting? *)
-     let i = SymMap.find name names in
-     Some (styp_var Neg level i,
-           styp_var Pos level i)
-  | Env_cons { rest; _ } -> env_lookup_type_var rest name
-  | Env_nil -> None
-*)
-
- 
 let rec env_lookup_type_var env name : rigvar option =
   match env with
   | Env_vals vs -> env_lookup_type_var vs.rest name
@@ -613,12 +780,12 @@ let rec env_lookup_type_var env name : rigvar option =
      end
   | Env_nil -> None
 
-let lookup_named_type = let open Cons in function
-  | "any" -> Some Top
-  | "nothing" -> Some Bot
-  | "bool" -> Some Bool
-  | "int" -> Some Int
-  | "string" -> Some String
+let lookup_named_type loc = let open Cons in function
+  | "any" -> Some (Ttop (Some loc))
+  | "nothing" -> Some (Tcons (Cons.bottom_loc loc))
+  | "bool" -> Some (Tcons (Cons.make ~loc Bool))
+  | "int" -> Some (Tcons (Cons.make ~loc Int))
+  | "string" -> Some (Tcons (Cons.make ~loc String))
   | _ -> None
 
 let flexvar_name fv =
@@ -642,7 +809,7 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   if not (Env_level.equal fv.level Env_level.initial) then
     ignore (env_rigid_vars env fv.level);
   (* FIXME rectypes *)
-  List.iter (fun fv' -> assert (fv != fv')) fv.lower.flexvars;
+  begin match fv.lower with Lower (fvs, _) -> assert (not (Fvset.mem fv fvs)) | Ltop _ -> () end;
   wf_flex_lower_bound ~seen env fv.level fv.lower;
   (* Rigvar sets must be distinct *)
   let rvsets = List.filter_map (function UBvar _ -> None | UBcons c -> Some c.rigvars) fv.upper in
@@ -650,9 +817,13 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   fv.upper |> List.iter (function
   | UBvar v ->
      wf_flexvar ~seen env fv.level v
-  | UBcons {cons;rigvars;cons_locs=_} ->
+  | UBcons {cons;rigvars} ->
      (* Each rigvar set must contain all of the rigvars in the lower bound *)
-     let rvlow = Rvset.to_list fv.lower.ctor.rigvars in
+     let rvlow =
+       match fv.lower with
+       | Lower (_, ctor) -> Rvset.to_list ctor.rigvars
+       | Ltop _ -> []
+     in
      (* Well-formedness of bounds *)
      rvlow |> List.iter (fun rv -> assert (Rvset.contains rigvars rv));
      Cons.map ~neg:(wf_flex_lower_bound ~seen env fv.level) ~pos:(wf_flexvar ~seen env fv.level) cons |> ignore)
@@ -663,11 +834,15 @@ and wf_rigvar env lvl (rv : rigvar) =
   let rvs = env_rigid_vars env rv.level in
   assert (0 <= rv.var && rv.var < IArray.length rvs)
 
-and wf_flex_lower_bound ~seen env lvl ({ctor={cons;rigvars;cons_locs=_}; flexvars} : flex_lower_bound) =
-  (* FIXME check for duplicate vars? (Not really a problem, but annoying) *)
-  List.iter (wf_flexvar ~seen env lvl) flexvars;
-  List.iter (wf_rigvar env lvl) (Rvset.to_list rigvars);
-  Cons.map ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_flex_lower_bound ~seen env lvl) cons |> ignore
+and wf_flex_lower_bound ~seen env lvl l =
+  match l with
+  | Ltop _ -> ()
+  | Lower (flexvars, {cons;rigvars}) ->
+     (* FIXME check for duplicate vars? (Not really a problem, but annoying) *)
+     Fvset.iter ~f:(wf_flexvar ~seen env lvl) flexvars;
+     List.iter (wf_rigvar env lvl) (Rvset.to_list rigvars);
+     (* FIXME check distinctness of conses joined *)
+     Cons.map ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_flex_lower_bound ~seen env lvl) cons |> ignore
 
 
 
@@ -686,31 +861,22 @@ let rec wf_typ : 'pos 'neg .
   fun ~seen ~neg ~pos ~ispos env ext ty ->
   match ty with
   | Tsimple s -> pos s
-  | Tcons (_, c) ->
+  | Ttop _ -> ()
+  | Tcons c ->
      Cons.map ~neg:(wf_typ ~seen ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) ~pos:(wf_typ ~seen ~neg ~pos ~ispos env ext) c |> ignore
   | Tvar (_, v) -> wf_var ~seen env ext v
-  | Tvjoin (t, _, v) ->
-     wf_var ~seen env ext v;
-     begin match v with
-     | Vbound v ->
-        assert (fst (List.nth ext v.index) = ispos); (* covariant *)
-        (* Tvjoin restriction: in T | b, where b is a bound var, T must not mention deeper bindings *)
-        let ext = List.mapi (fun ix (pol, len) -> if ix < v.index then (pol, 0) else (pol, len)) ext in
-        wf_typ ~seen ~neg ~pos ~ispos env ext t
-     | Vflex _ ->
-        assert ispos; (* positive *)
-        wf_typ ~seen ~neg ~pos ~ispos env [] t
-     | Vrigid _ ->
-        wf_typ ~seen ~neg ~pos ~ispos env [] t
-     end
+  | Tjoin (a, b) ->
+     (* FIXME additional check: no Vflex in negative joins *)
+     wf_typ ~seen ~neg ~pos ~ispos env ext a;
+     wf_typ ~seen ~neg ~pos ~ispos env ext b
   | Tpoly {vars; body} ->
-     let n_unique_vars = IArray.to_list vars |> List.map fst |> List.sort_uniq String.compare |> List.length in
+     let n_unique_vars = IArray.to_list vars |> List.map fst |> List.map fst |> List.sort_uniq String.compare |> List.length in
      assert (n_unique_vars = IArray.length vars);
      let ext = (ispos, IArray.length vars) :: ext in
      IArray.iter (fun (_, c) ->
        (* FIXME: constraints on c. Can it be e.g. Tsimple?
           Not Vflex, at least. Prob not same binder either. *)
-       wf_typ ~seen ~neg:pos ~pos:neg ~ispos:(not ispos) env ext c) vars;
+       Option.iter (wf_typ ~seen ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) c) vars;
      wf_typ ~seen ~neg ~pos ~ispos env ext body
 
 
@@ -731,8 +897,6 @@ let named_type s : Exp.tyexp' =
 let unparse_cons ~neg ~pos ty =
   let open Cons in
   let ty = match ty with
-    | Top -> named_type "any"
-    | Bot -> named_type "nothing"
     | Bool -> named_type "bool"
     | Int -> named_type "int"
     | String -> named_type "string"
@@ -768,69 +932,78 @@ let unparse_var ~flexvar ~ext = function
   | Vflex fv -> unparse_flexvar ~flexvar fv
   | Vrigid rv -> unparse_rigid_var rv
 
-let unparse_join ty (rigvars : Rvset.t) =
-  List.fold_left (fun c r -> mktyexp (Exp.Tjoin (c, unparse_rigid_var r))) ty (Rvset.to_list rigvars)
+let unparse_joins = function
+  | [] -> mktyexp (named_type "nothing")
+  | [x] -> x
+  | x :: xs -> List.fold_left (fun a b -> mktyexp (Exp.Tjoin (a, b))) x xs
 
 let rec unparse_gen_typ :
   'neg 'pos . flexvar:_ -> ext:_ -> neg:('neg -> Exp.tyexp) -> pos:('pos -> Exp.tyexp) ->
              ('neg,'pos) typ -> Exp.tyexp =
   fun ~flexvar ~ext ~neg ~pos ty -> match ty with
   | Tsimple t -> pos t
-  | Tcons (_, c) -> unparse_cons ~neg:(unparse_gen_typ ~flexvar ~ext ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~flexvar ~ext ~neg ~pos) c
-  | Tvar (_, var)
-  | Tvjoin (Tcons (_, Bot), _, var) ->
+  | Ttop _ -> mktyexp (named_type "any")
+  | Tcons c ->
+     unparse_joins
+       (List.map
+         (unparse_cons ~neg:(unparse_gen_typ ~flexvar ~ext ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~flexvar ~ext ~neg ~pos)) c.conses)
+  | Tvar (_, var) ->
      unparse_var ~flexvar ~ext var
-  | Tvjoin (rest, _, var) ->
-     mktyexp (Exp.Tjoin (unparse_gen_typ ~flexvar ~ext ~neg ~pos rest, unparse_var ~flexvar ~ext var))
+  | Tjoin (a, b) ->
+     mktyexp (Exp.Tjoin (unparse_gen_typ ~flexvar ~ext ~neg ~pos a,
+                         unparse_gen_typ ~flexvar ~ext ~neg ~pos b))
   | Tpoly { vars; body } ->
      let ext, bounds = unparse_bounds ~flexvar ~ext ~neg ~pos vars in
      mktyexp (Exp.Tforall(bounds, unparse_gen_typ ~flexvar ~ext ~neg ~pos body))
 
 and unparse_bounds :
   'neg 'pos . flexvar:_ -> ext:_ -> neg:('neg -> Exp.tyexp) -> pos:('pos -> Exp.tyexp) ->
-             (string * ('pos,'neg) typ) iarray -> _ * Exp.typolybounds =
+             (string Location.loc * ('pos,'neg) typ option) iarray -> _ * Exp.typolybounds =
   fun ~flexvar ~ext ~neg ~pos vars ->
   (* FIXME: this sort of freshening or shifts? *)
   (* FIXME: if freshening, use levels somehow to determine when not needed *)
   let taken name =
-    lookup_named_type name <> None || List.exists (fun names -> IArray.exists (String.equal name) names) ext in
+    lookup_named_type Location.noloc name <> None || List.exists (fun names -> IArray.exists (String.equal name) names) ext in
   let rec freshen name i =
     let p = Printf.sprintf "%s_%d" name i in
     if not (taken p) then p else freshen name (i + 1) in
   let freshen name =
     if not (taken name) then name else freshen name 2 in
-  let vars = IArray.map (fun (s, b) -> freshen s, b) vars in
-  let ext = IArray.map fst vars :: ext in
-  ext, IArray.map (fun (s, bound) ->
+  let vars = IArray.map (fun ((s,l), b) -> (freshen s,l), b) vars in
+  let ext = IArray.map (fun ((s,_),_) -> s) vars :: ext in
+  ext, IArray.map (fun ((s,_), bound) ->
        let s = (s, noloc) in
        match bound with
-       | Tcons (_, Top) ->
+       | None | Some (Ttop _) ->
           s, None
-       | t ->
+       | Some t ->
           s, Some (unparse_gen_typ ~flexvar ~ext ~pos:neg ~neg:pos t)) vars |> IArray.to_list
 
-let rec unparse_flex_lower_bound ~flexvar { ctor; flexvars } =
-  let t =
-    match ctor with
-    | { cons = Bot; rigvars; cons_locs=_ } when Rvset.(equal rigvars empty) -> None
-    | { cons; rigvars; cons_locs=_ } ->
-       let cons = unparse_cons ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) cons in
-       Some (unparse_join cons rigvars) in
-  let tjoin a b =
-    match a with
-    | None -> Some b
-    | Some a -> Some (mktyexp (Exp.Tjoin (a, b))) in
-  match
-    List.fold_left (fun t fv -> tjoin t (unparse_flexvar ~flexvar fv)) t flexvars
-  with
-  | Some t -> t
-  | None -> unparse_cons ~neg:never ~pos:never Bot
+let unparse_join = function
+  | [] -> mktyexp (named_type "nothing")
+  | t :: ts ->
+     List.fold_left (fun a b -> mktyexp (Exp.Tjoin (a, b))) t ts
+
+let rec unparse_flex_lower_bound ~flexvar = function
+  | Ltop _ ->
+     mktyexp (named_type "any")
+  | Lower(flexvars, {cons; rigvars}) ->
+     let ts =
+       List.map (unparse_flexvar ~flexvar) (flexvars :> flexvar list)
+       @
+       List.map (unparse_cons ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar)) cons.conses
+       @
+       List.map unparse_rigid_var (Rvset.to_list rigvars)
+     in
+     unparse_join ts
 
 let unparse_styp_neg ~flexvar = function
   | UBvar v -> unparse_flexvar ~flexvar v
-  | UBcons {cons;rigvars;cons_locs=_} ->
-     let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) cons in
-     unparse_join cons rigvars
+  | UBcons {cons;rigvars} ->
+     unparse_join
+       (List.map (unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar)) cons.conses
+        @
+        List.map unparse_rigid_var (Rvset.to_list rigvars))
 
 let unparse_ptyp ~flexvar ?(ext=[]) (t : ptyp) =
   unparse_gen_typ ~flexvar ~ext ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) t
@@ -851,16 +1024,6 @@ let pp_tyexp ppf ty =
 
 let pp_exp ppf e =
   pp_doc ppf (Print.exp e)
-
-let pp_cons_pos ppf t =
-  let cons = unparse_cons ~neg:(unparse_flexvar ~flexvar:ignore) ~pos:(unparse_flex_lower_bound ~flexvar:ignore) t.cons in
-  let doc = unparse_join cons t.rigvars in
-  pp_tyexp ppf doc
-
-let pp_cons_neg ppf t =
-  let cons = unparse_cons ~neg:(unparse_flex_lower_bound ~flexvar:ignore) ~pos:(unparse_flexvar ~flexvar:ignore)  t.cons in
-  let doc = unparse_join cons t.rigvars in
-  pp_tyexp ppf doc
 
 let pp_flexlb ppf t =
   let doc = unparse_flex_lower_bound ~flexvar:ignore t in

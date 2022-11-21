@@ -1,4 +1,5 @@
 open Lang
+open Util
 open Typedefs
 open Types
 module SymMap = Tuple_fields.SymMap
@@ -15,7 +16,7 @@ let nope _ = assert false
 let dump env (t : ptyp) =
   dump t;
   flush stdout;
-  let fl = approx_ptyp env t in
+  let fl = ptyp_to_lower ~simple:false env t in
   let rec fixpoint visit fl =
     let changes = ref [] in
     let fl = expand visit ~changes env fl in
@@ -46,7 +47,7 @@ let match_as_fn env f =
               | _ -> assert false in
   arg, res
 
-let tcons cons = Tcons (Location.empty, cons)
+let tcons cons = Tcons (Cons.make ~loc:Location.noloc cons)
 
 let ok = function Ok () -> () | Error _ -> failwith "nope"
 
@@ -97,7 +98,7 @@ let match_bug () =
   subtype env ap bn |> ok;
   let b1, b2 = match_as_fn env bp in
   let a1, a2 = match_as_fn env ap in
-  subtype env a2 (tcons Bot) |> ok;
+  subtype env a2 (Tcons Cons.bottom) |> ok;
   dump env (tcons (func [a1; b1; an] (tcons (tuple [a2; b2; bp]))))
   
 
@@ -112,7 +113,7 @@ let chain () =
   subtype env p.(8) n.(9) |> ok;
   subtype env p.(5) n.(6) |> ok;
   subtype env p.(0) n.(1) |> ok;
-  subtype env p.(3) (tcons Top) |> ok;
+  subtype env p.(3) (Ttop None) |> ok;
   subtype env p.(2) n.(3) |> ok;
   subtype env p.(1) n.(2) |> ok;
   subtype env p.(7) n.(8) |> ok;
@@ -135,21 +136,21 @@ let poly () =
   let bvar ?(index=0) ?(rest) var =
     match rest with
     | None -> Tvar (Location.empty, Vbound {index; var})
-    | Some rest -> Tvjoin (rest, Location.empty, Vbound{index; var}) in
+    | Some rest -> Tjoin (rest, Tvar(Location.empty, Vbound{index; var})) in
   let t1 () =
-    Tpoly {vars = IArray.of_array [| "A", tcons Top; "B", tcons Top |];
+    Tpoly {vars = IArray.of_array [| ("A",noloc), None; ("B",noloc), None |];
            body= tcons (func
                    [bvar 0]
                    (tcons (func
                      [bvar 1]
                      (bvar 1 ~rest:(bvar 0))))) } in
   let t2 () =
-    Tpoly {vars = IArray.of_array [| "X", tcons Top |];
+    Tpoly {vars = IArray.of_array [| ("X",noloc), None |];
            body = tcons (func [bvar 0] (tcons (func [bvar 0] (bvar 0))))} in
   let t3 () =
-    Tpoly {vars = IArray.of_array [| "P", tcons Top |];
+    Tpoly {vars = IArray.of_array [| ("P",noloc), None |];
            body = tcons (func [bvar 0] (
-             Tpoly {vars=IArray.of_array [| "Q", tcons Top |];
+             Tpoly {vars=IArray.of_array [| ("Q",noloc), None |];
                     body = tcons (func [bvar 0] (bvar ~rest:(bvar ~index:1 0) 0))}))} in
   print_endline "t1 = t2";
   subtype env (t1 ()) (t2 ()) |> ok;

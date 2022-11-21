@@ -1,8 +1,6 @@
 open Tuple_fields
 open Location
 
-type 'a loc = 'a * location
-
 type 'a mayloc = 'a option loc
 
 type literal = Int of int | String of string | Bool of bool

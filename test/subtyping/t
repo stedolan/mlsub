@@ -19,10 +19,10 @@
 >   
 > The type (int) -> _ from test:1:
 >   : (int) -> int <: [A] (A) -> A
->      ^^^
+>                          ^
 > does not match type (1.0) -> _ from test:1:
 >   : (int) -> int <: [A] (A) -> A
->                          ^
+>      ^^^
 
 : [A, B] (A, B) -> (A|B) <: [X] (X, X) -> X
 > ok
@@ -41,20 +41,20 @@
 >   
 > The type () -> {foo: (string) -> _, bar: _} from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
->                                                                                            ^^^^^^
+>                                                              ^^^
 > does not match type () -> {foo: (int) -> _, bar: _} from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
->                                                              ^^^
+>                                                                                            ^^^^^^
 
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 > _:0: Type error
 >   
 > The type () -> {foo: (1.1) -> _, bar: _} from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
->                                                                                          ^
+>                                                                     ^
 > does not match type () -> {foo: (1.0) -> _, bar: _} from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
->                                                                     ^
+>                                                                                          ^
 
 : [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y} <: [X] () -> {foo: (X) -> X, bar: (X) -> X}
 > ok
@@ -85,10 +85,10 @@
 >   
 > The type (int) -> _ from test:1:
 >   : (int) -> int <: [X] (X) -> (X|int)
->      ^^^
+>                          ^
 > does not match type (1.0) -> _ from test:1:
 >   : (int) -> int <: [X] (X) -> (X|int)
->                          ^
+>      ^^^
 
 : [X] (X) -> (X) <: (int) -> int
 > ok
@@ -97,10 +97,10 @@
 >   
 > The type (int) -> _ from test:1:
 >   : (int) -> int <: [X] (X) -> (X)
->      ^^^
+>                          ^
 > does not match type (1.0) -> _ from test:1:
 >   : (int) -> int <: [X] (X) -> (X)
->                          ^
+>      ^^^
 
 
 
@@ -211,4 +211,4 @@
 > ok
 : [C] (C | {bar: C}) <: [C <: {bar: bool}] {bar: C}
 > ok
-> STATS: fix: 0, flex: 115
+> STATS: fix: 0, flex: 79

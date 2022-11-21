@@ -3,15 +3,15 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let 
 >   let f = fn (a) { x(a) };
 >   wid(f)
 > }
->   fn [A <: {foo: int, bar: string}, B](
->     x: ({foo: int} | B) -> A,
+>   fn [A, B <: {foo: int, bar: string}](
+>     x: ({foo: int} | A) -> B,
 >     wid: ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) -> int
 >   ) -> int {
->     let f : ({foo: int} | B) -> A = fn (a: {foo: int} | B) -> A { x(a) };
+>     let f : ({foo: int} | A) -> B = fn (a: {foo: int} | A) -> B { x(a) };
 >     wid(f)
 >   }
-> [A <: {foo: int, bar: string}, B] (
->   ({foo: int} | B) -> A,
+> [A, B <: {foo: int, bar: string}] (
+>   ({foo: int} | A) -> B,
 >   ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) -> int
 > ) -> int
 
@@ -25,8 +25,8 @@ fn (x, wid : ((any) -> any) -> int) { let f = fn(a){x(a)}; wid(f) }
 
 fn (x) { (fn(a){x(a)})(6) }
 > fn (x) { (fn (a) { x(a) })(6) }
->   fn [A, B](x: (int | B) -> A) -> A { (fn (a: int | B) -> A { x(a) })(6) }
-> [A, B] ((int | B) -> A) -> A
+>   fn [A, B](x: (int | A) -> B) -> B { (fn (a: int | A) -> B { x(a) })(6) }
+> [A, B] ((int | A) -> B) -> B
 
 fn (x) { let y = x; 1 }
 > fn (x) { let y = x; 1 }
@@ -52,13 +52,13 @@ fn (x) -> (any) -> any { let f = fn(a){x(a)}; f }
 
 fn (f) { fn(g,x) { (g(x.foo), f(x)) } }
 > fn (f) { fn (g, x) { (g(x.foo), f(x)) } }
->   fn [A, B, C <: {foo: B, ...}](f: (C) -> A) ->
->     [A_2] ((B) -> A_2, C) -> (A_2, A) {
->     fn [A_2](g: (B) -> A_2, x: C) -> (A_2, A) {
+>   fn [A, B <: {foo: A, ...}, C](f: (B) -> C) ->
+>     [A_2] ((A) -> A_2, B) -> (A_2, C) {
+>     fn [A_2](g: (A) -> A_2, x: B) -> (A_2, C) {
 >       (g(x.foo), f(x))
 >     }
 >   }
-> [A, B, C <: {foo: B, ...}] ((C) -> A) -> [A_2] ((B) -> A_2, C) -> (A_2, A)
+> [A, B <: {foo: A, ...}, C] ((B) -> C) -> [A_2] ((A) -> A_2, B) -> (A_2, C)
 
 
 let twice = fn(f, x) {f(f(x)) };
@@ -69,11 +69,11 @@ fn() { twice(id, id)(id) }
 > fn () {
 >   twice(id, id)(id)
 > }
->   let twice : [A, B] ((A | B) -> A, B) -> A =
->   fn [A, B](f: (A | B) -> A, x: B) -> A { f(f(x)) };
+>   let twice : [A, B] ((A | B) -> B, A) -> B =
+>   fn [A, B](f: (A | B) -> B, x: A) -> B { f(f(x)) };
 >   let id : [A] (A) -> A = fn [A](a: A) -> A { a };
 >   fn [A]() -> (A) -> A {
 >     twice(id, id)(id)
 >   }
 > [A] () -> (A) -> A
-> STATS: fix: 20, flex: 447
+> STATS: fix: 21, flex: 271

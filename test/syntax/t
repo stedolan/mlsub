@@ -22,10 +22,10 @@ fn (x)
 # paren insertion
 fn(a) { { foo: if true { fn(x) { x } } else { a } } }
 > fn (a) { {foo: if true { fn (x) { x } } else { a }} }
->   fn [A, B](a: B) -> {foo: ((A) -> A) | B} {
+>   fn [A, B](a: A) -> {foo: ((B) -> B) | A} {
 >     {foo: if true { fn [A_2](x: A_2) -> A_2 { x } } else { a }}
 >   }
-> [A, B] (B) -> {foo: ((A) -> A) | B}
+> [A, B] (A) -> {foo: ((B) -> B) | A}
 
 fn[A,B](x:A) -> A | (A) -> B { x }
 > fn [A, B](x: A) -> A | (A) -> B { x }
@@ -34,4 +34,4 @@ fn[A,B](x:A) -> A | (A) -> B { x }
 
 : [A <: ([] int) -> int ] A <: int
 > test:1: Bounds must be simple types
-> STATS: fix: 0, flex: 103
+> STATS: fix: 0, flex: 63

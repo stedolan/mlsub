@@ -1,3 +1,4 @@
+open Util
 open Tuple_fields
 open Exp
 open Typedefs
@@ -74,34 +75,38 @@ let pp_err input loc err : PPrint.document =
        break 1 ^^ pp "%s" postmsg ^^
        nest 4 (break 1 ^^ pp_ty err.rhs) in
      let conflict =
-       match err.conflict with
+       match err.err.conflict with
         | Incompatible ->
            pp "Type error"
         (* FIXME improve tuple field names *)
-        | Field (`Missing name) ->
+        | Fields (`Missing name) ->
            pp "The field '%s' is missing." (Tuple_fields.string_of_field_name name)
-        | Field (`Extra (Some name)) ->
+        | Fields (`Extra (Some name)) ->
            pp "A surplus field '%s' is present." (Tuple_fields.string_of_field_name name)
-        | Field (`Extra None) ->
-           pp "Surplus fields are present." in
+        | Fields (`Extra None) ->
+           pp "Surplus fields are present."
+        | Args (`Missing name) ->
+           pp "The argument '%s' is missing." (Tuple_fields.string_of_field_name name)
+        | Args (`Extra (Some name)) ->
+           pp "A surplus argument '%s' is present." (Tuple_fields.string_of_field_name name)
+        | Args (`Extra None) ->
+           pp "Surplus arguments are present."
+     in
      let explanation =
-       let interesting_loc ls =
-         if List.exists (fun l -> Location.subset l loc) ls then None
-         else match ls with [] -> None | l::_ -> Some l in
        let lty = nest 4 (break 1 ^^ pp_ty err.lhs) ^^ break 1 in
        let rty = nest 4 (break 1 ^^ pp_ty err.rhs) ^^ break 1 in
        hardline ^^
        group (
-       (match interesting_loc err.lhs_loc with
-        | None -> group (pp "The type" ^^ lty)
-        | Some l ->
+       (match err.err.located with
+        | Some ((_,l),_) when not (Location.subset l loc) ->
           group (pp "The type" ^^ lty ^^ pp "from " ^^ pp_loc l ^^ pp ":")
-            ^^ nest 2 (hardline ^^ pp_context l) ^^ hardline) ^^
-       (match interesting_loc err.rhs_loc with
-        | None -> group (pp "does not match type" ^^ rty)
-        | Some r ->
+            ^^ nest 2 (hardline ^^ pp_context l) ^^ hardline
+        | _ -> group (pp "The type" ^^ lty)) ^^
+       (match err.err.located with
+        | Some (_,(_,r)) when not (Location.subset r loc) ->
           group (pp "does not match type" ^^ rty ^^ pp "from " ^^ pp_loc r ^^ pp ":")
-             ^^ nest 2 (hardline ^^ pp_context r)))
+             ^^ nest 2 (hardline ^^ pp_context r)
+        | _ -> group (pp "does not match type" ^^ rty)))
      in
      conflict ^^ nest 2 (hardline ^^ pp_context loc) ^^ (*hardline ^^ msg ^^*) explanation
 
@@ -129,7 +134,7 @@ let rec split_tjoin env lvl cons vars rest =
   | [] -> cons, List.rev vars
   | (None, loc) :: _ -> fail loc Syntax
   | (Some ty, loc) as ty' :: rest ->
-     match ty with
+     match (ty : Exp.tyexp') with
      | Tjoin (a, b) ->
         split_tjoin env lvl cons vars (a :: b :: rest)
      | Tparen a ->
@@ -153,8 +158,40 @@ let rec split_tjoin env lvl cons vars rest =
            | None -> split_tjoin env lvl (Some ty') vars rest
            | Some _ -> fail loc (Illformed_type `Join_multi_cons)
 
-let tcons loc cons = Tcons (mk_cons_locs loc cons, cons)
-     
+let syn_tjoin loc (a : (_, _) typ) (b : (_, _) typ) =
+  let rec join conses keep = function
+    | Ttop l :: _ -> Ttop l
+    | Tjoin (a, b) :: rest -> join conses keep (a :: b :: rest)
+    | (Tsimple _ | Tvar _) as k :: rest -> join conses (k :: keep) rest
+    | Tcons c :: rest when Cons.is_bottom c -> join conses keep rest
+    | Tcons c :: rest -> join (c :: conses) keep rest
+    | Tpoly _ :: _ -> fail loc (Illformed_type `Join_poly)
+    | [] ->
+       let conses = List.rev conses in
+       let keep = List.rev keep in
+       let joinands =
+         match conses with
+         | [] -> keep
+         | [c] -> Tcons c :: keep
+         | c :: cs ->
+            let c =
+              List.fold_left (fun c1 c2 ->
+                let c = Cons.join c1 c2 in
+                let either : _ Cons.One_or_two.t -> _ = function
+                  | L x | R x -> x
+                  | LR _ ->
+                     fail loc (Illformed_type `Join_multi_cons)
+                in
+                Cons.map ~pos:either ~neg:either c) c cs
+            in
+            Tcons c :: keep
+       in
+       List.fold_left tjoin (List.hd joinands) (List.tl joinands)
+  in
+  join [] [] [a;b]
+
+let tcons loc cons = Tcons (Cons.make ~loc cons)
+
 let rec typ_of_tyexp : 'a 'b . env -> Env_level.t -> tyexp -> ('a, 'b) typ =
   fun env lvl ty -> match ty with
   | None, loc -> fail loc Syntax
@@ -164,8 +201,8 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
   | Tnamed (name, _) ->
      (* FIXME shifting? *)
      let name = name.label in
-     begin match lookup_named_type name with
-     | Some cons -> tcons loc cons
+     begin match lookup_named_type loc name with
+     | Some t -> t
      | None ->
         match env_lookup_type_var env lvl name with
         | Ok v -> Tvar (Location.single loc, Vrigid v)
@@ -178,22 +215,7 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
   | Tparen t ->
      typ_of_tyexp env lvl t
   | Tjoin (a, b) ->
-     let cons, rigvars = split_tjoin env lvl None [] [a;b] in
-     let rigvars = List.stable_sort (fun ((v : rigvar),_) ((v' : rigvar),_) -> Env_level.compare v.level v'.level) rigvars in
-     let join_lvl =
-       match rigvars with
-       | [] -> lvl
-       | (rv,_) :: _ -> rv.level in
-     let cloc, cons =
-       match cons with
-       | None -> Location.empty, Cons.Bot
-       | Some c ->
-          match typ_of_tyexp env join_lvl c with
-          | Tcons (l, c) -> l, c
-          | _ -> fail (snd c) (Illformed_type `Join_not_cons_or_var) in
-     if rigvars <> [] && not (check_simple (Tcons (cloc, cons))) then
-       fail loc (Illformed_type `Join_poly);
-     List.fold_left (fun c (r,l) -> Tvjoin (c, Location.single l, Vrigid r)) (Tcons (cloc, cons)) rigvars
+     syn_tjoin loc (typ_of_tyexp env lvl a) (typ_of_tyexp env lvl b)
   | Tforall (vars, body) ->
      let vars, name_ix = enter_polybounds env vars in
      let env, _rigvars = enter_rigid env vars name_ix in
@@ -203,7 +225,7 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
 and typs_of_tuple_tyexp : 'a 'b . env -> Env_level.t -> tyexp tuple_fields -> ('a, 'b) typ tuple_fields =
   fun env lvl ts -> map_fields (fun _fn t -> typ_of_tyexp env lvl t) ts
 
-and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iarray * int SymMap.t =
+and enter_polybounds : 'a 'b . env -> typolybounds -> (string Location.loc * ('a,'b) typ option) iarray * int SymMap.t =
   fun env vars ->
   let name_ix =
     vars
@@ -214,20 +236,20 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string * ('a,'b) typ) iar
   let level = Env_level.extend (env_level env) in
   let stubs =
     vars
-    |> List.map (fun ((name,_),_) -> {name; upper=Top; upper_locs=Location.empty})
+    |> List.map (fun (name,_) -> {name; upper=None})
     |> IArray.of_list in
-  let mkbound rig_names loc bound =
+  let mkbound rig_names _loc bound =
     match bound with
-    | None -> Tcons ([Top, [loc]], Top)
+    | None -> None
     | Some b ->
        let temp_env = Env_types { level; rig_names; rig_defns = stubs; rest = env } in
        let bound = close_typ_rigid ~ispos:false level (typ_of_tyexp temp_env (env_level temp_env) b) in
        begin match bound with Tcons _ -> () | _ -> fail (snd b) (Illformed_type `Bound_not_cons) end;
        if not (check_simple bound) then fail (snd b) (Illformed_type `Bound_not_simple);
-       bound
+       Some bound
   in
-  let name_ix, vars = IArray.map_fold_left (fun names ((name,loc), bound) ->
-    let names' = SymMap.add name (SymMap.find name name_ix) names in
+  let name_ix, vars = IArray.map_fold_left (fun names ((name',loc) as name, bound) ->
+    let names' = SymMap.add name' (SymMap.find name' name_ix) names in
     names', (name, mkbound names loc bound)) SymMap.empty (IArray.of_list vars) in
   vars, name_ix
 
@@ -251,7 +273,7 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
   wf_ptyp env' orig_ty;
   let rec fixpoint visit erq prev_ty =
     if verbose_types then Format.printf "FIX: %a" dump_ptyp orig_ty;
-    if visit > 10 then intfail "looping?";
+    if visit > 99 then intfail "looping?";
     let changes = ref [] in
     let ty = expand_ptyp visit ~changes env' prev_ty in
     wf_ptyp env' ty;
@@ -287,23 +309,40 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
         | n -> Printf.sprintf "T_%d" (n-26) in
       (* NB: look up env', to ensure no collisions with rigvars *)
       match env_lookup_type_var env' (env_level env') name with
-      | Error _ -> name
+      | Error _ -> name, Location.noloc
       | Ok _ -> mkname () in
-    let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex (_,r) -> mkname (), r) |> IArray.of_array in
+    let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex (_,r) -> mkname (), Some r) |> IArray.of_array in
     let tpoly = Tpoly { vars = bounds; body = ty } in
     wf_ptyp env tpoly;
     tpoly,
     Elab (Gen{bounds; body=Pair(Ptyp ty, erq)}, fun (poly, (t,e)) -> Some poly, t, ek e)
 
 let elab_ptyp = function
-  | Tsimple {ctor; flexvars=[fv]} when is_bottom {ctor;flexvars=[]} ->
-     Elab (Ntyp (Tsimple fv), fun x -> x)
+  | Tsimple (Lower(fv, ctor)) as ty when is_bottom (Lower(Fvset.empty,ctor)) ->
+     (match (fv :> flexvar list) with
+      | [fv] -> Elab (Ntyp (Tsimple fv), fun x -> x)
+      | _ -> Elab (Ptyp ty, fun x -> x))
   | ty ->
      Elab (Ptyp ty, fun x -> x)
   
 let fresh_flow env =
   let fv = fresh_flexvar (env_level env) in
   Tvar (Location.empty, Vflex fv)
+
+type inspect_result =
+  | Ipoly of (flex_lower_bound, flexvar) poly_typ
+  | Icons of (ptyp, ntyp) Cons.t
+  | Iother
+
+let inspect = function
+  | Tsimple _ ->
+     (* bidirectional checking does not look inside Tsimple *)
+     Iother
+  | Tpoly p ->
+     Ipoly p
+  | Tcons c ->
+     (match Cons.get_single c with Some c -> Icons c | _ -> Iother)
+  | Ttop _ | Tvar _ | Tjoin _ -> Iother
 
 let rec check env e (ty : ntyp) : exp elab =
   wf_ntyp env ty;
@@ -313,7 +352,7 @@ let rec check env e (ty : ntyp) : exp elab =
      let* e = check' env loc e ty in
      Some e, loc
 and check' env eloc e ty =
-  match e, ty with
+  match e, inspect ty with
   | If (e, ifso, ifnot), _ ->
      let* e = check env e (tcons (snd e) Bool)
      and* ifso = check env ifso ty
@@ -322,7 +361,7 @@ and check' env eloc e ty =
   | Parens e, _ ->
      let* e = check env e ty in
      Parens e
-  | Tuple ef, Tcons (_tloc, Record tf) ->
+  | Tuple ef, Icons (Record tf) ->
      let infer_typed env ((_,loc) as e) =
        let ty, e = infer env e in
        let* e = e and* ty = elab_ptyp ty in
@@ -352,18 +391,18 @@ and check' env eloc e ty =
      let env = Env_vals { vals = vs; rest = env } in
      let* e = e and* pty = elab_ptyp pty and* body = check env body ty in
      Let(p, Some pty, e, body)
-  | Seq (e1, e2), ty ->
+  | Seq (e1, e2), _ ->
      let e1 = check env e1 (unit eloc) in
      let e2 = check env e2 ty in
      let* e1 = e1 and* e2 = e2 in Seq (e1, e2)
   (* FIXME should I combine Tpoly and Func? *)
-  | Fn _ as f, Tpoly { vars; body } ->
+  | Fn _ as f, Ipoly { vars; body } ->
      (* rigvars not in scope in body, so no rig_names *)
      let env', rigvars = enter_rigid env vars SymMap.empty in
      let body = open_typ_rigid rigvars body in
      check' env' eloc f body
      (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
-  | Fn (None, params, ret, body), Tcons (_tloc, Func (ptypes, rtype)) ->
+  | Fn (None, params, ret, body), Icons (Func (ptypes, rtype)) ->
      (* If poly <> None, then we should infer & subtype *)
      (* FIXME: do we need another level here? Does hoisting break things? *)
      let _, vals = check_parameters env params ptypes in
@@ -371,8 +410,8 @@ and check' env eloc e ty =
      let* body = check env' body (check_annot env' ret rtype) in
      (* No elaboration. Arguably we could *delete* annotations here! *)
      Fn (None, params, ret, body)
-  | Pragma "true", Tcons (_,Bool) -> elab_pure e
-  | Pragma "false", Tcons (_,Bool) -> elab_pure e
+  | Pragma "true", Icons Bool -> elab_pure e
+  | Pragma "false", Icons Bool -> elab_pure e
   | e, _ ->
      (* Default case: infer and subtype. *)
      (* FIXME: we probably shouldn't even attempt this on intro forms
@@ -392,7 +431,7 @@ and infer' env eloc : exp' -> ptyp * exp' elab = function
   | Lit l -> infer_lit l
   | Var (id,loc) as e ->
      begin match env_lookup_var env id with
-     | Ok v -> v, elab_pure e
+     | Ok v -> v.typ, elab_pure e
      | Error e -> fail loc e
      end
   | Typed (e, ty) ->
@@ -427,7 +466,7 @@ and infer' env eloc : exp' -> ptyp * exp' elab = function
      tcons eloc (Record (map_fields (fun _ (ty, _e) -> ty) fields)),
      let* fields = elab_fields (map_fields (fun _fn (_ty, e) -> e) fields) in
      Tuple fields
-  | Pragma "bot" as e -> tcons eloc Bot, elab_pure e
+  | Pragma "bot" as e -> Tcons (Cons.bottom_loc eloc), elab_pure e
   | Pragma s -> failwith ("pragma: " ^ s)
   | Let (p, pty, e, body) ->
      let pty, e = check_or_infer env pty e in
@@ -509,7 +548,7 @@ and check_pat env ty = function
   | None, _ -> failwith "bad pat"
   | Some p, loc -> check_pat' env ty loc p
 and check_pat' env ty ploc = function
-  | Pvar (s,_) -> ty, SymMap.singleton s ty
+  | Pvar (s,_) -> ty, SymMap.singleton s {typ = ty; closed = false }
   | Pparens p -> check_pat env ty p
   | Ptuple fs ->
      let fs =

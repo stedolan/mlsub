@@ -11,8 +11,8 @@ fn[A,B](id : [A](A) -> A, (x,y):(A, B)) { (id(y),id(x)) }
 
 fn(id : [A](A) -> A, (x,y)) { (id(y),id(x)) }
 > fn (id: [A] (A) -> A, (x, y)) { (id(y), id(x)) }
->   fn [A, B](id: [A_2] (A_2) -> A_2, (x, y): (B, A)) -> (A, B) { (id(y), id(x)) }
-> [A, B] ([A_2] (A_2) -> A_2, (B, A)) -> (A, B)
+>   fn [A, B](id: [A_2] (A_2) -> A_2, (x, y): (A, B)) -> (B, A) { (id(y), id(x)) }
+> [A, B] ([A_2] (A_2) -> A_2, (A, B)) -> (B, A)
 
 fn[A](x : A) { if x.cond {x} else {x} }
 > fn [A](x: A) { if x.cond { x } else { x } }
@@ -51,8 +51,13 @@ fn[A,B](x : A|B) -> A|B {x}
 
 fn[A,B](x : (A|B) -> A) { fn(a){x(a)} }
 > fn [A, B](x: (A | B) -> A) { fn (a) { x(a) } }
->   fn [A, B](x: (A | B) -> A) -> (nothing) -> A { fn (a: A | B) -> A { x(a) } }
-> [A, B] ((A | B) -> A) -> (nothing) -> A
+>   fn [A, B](x: (A | B) -> A) -> (A | B) -> A { fn (a: A | B) -> A { x(a) } }
+> [A, B] ((A | B) -> A) -> (A | B) -> A
+> RECHECK: Failure("contravariant join")
+> 
+> ELAB: Failure("contravariant join")
+> 
+> ELABINF: Failure("contravariant join")
 
 fn[A,B](x) -> (A|B) -> A {x}
 > fn [A, B](x) -> (A | B) -> A { x }
@@ -86,14 +91,14 @@ fn (f,x) { (fn(f, x) { let y = f(f(x)); (fn(p){f(p)}, x) })(f,x) }
 
 
 > fn (f, x) { (fn (f, x) { let y = f(f(x)); (fn (p) { f(p) }, x) })(f, x) }
->   fn [A, B, C](f: (A | B | C) -> A, x: C) -> ((B) -> A, C) {
->     (fn [A_2, B_2, C_2](f: (A_2 | B_2 | C_2) -> A_2, x: C_2) ->
->       ((B_2) -> A_2, C_2) {
->       let y : A_2 = f(f(x));
->       (fn (p: B_2) -> A_2 { f(p) }, x)
+>   fn [A, B, C](f: (A | B | C) -> B, x: C) -> ((A) -> B, C) {
+>     (fn [A_2, B_2, C_2](f: (A_2 | B_2 | C_2) -> B_2, x: C_2) ->
+>       ((A_2) -> B_2, C_2) {
+>       let y : B_2 = f(f(x));
+>       (fn (p: A_2) -> B_2 { f(p) }, x)
 >     })(f, x)
 >   }
-> [A, B, C] ((A | B | C) -> A, C) -> ((B) -> A, C)
+> [A, B, C] ((A | B | C) -> B, C) -> ((A) -> B, C)
 # partial poly
 fn[A,C](a : A, b, c : C, d) { (a, b, c, d) }
 > fn [A, C](a: A, b, c: C, d) { (a, b, c, d) }
@@ -170,8 +175,8 @@ fn[B <: {foo:int}] (x) { (x : B) }
 
 fn(id, x) { (id(x), id(5)) }
 > fn (id, x) { (id(x), id(5)) }
->   fn [A, B](id: (int | B) -> A, x: B) -> (A, A) { (id(x), id(5)) }
-> [A, B] ((int | B) -> A, B) -> (A, A)
+>   fn [A, B](id: (int | A) -> B, x: A) -> (B, B) { (id(x), id(5)) }
+> [A, B] ((int | A) -> B, A) -> (B, B)
 
 (fn(id, x) { (id(x), id(5)) } : [A]([B](B) -> B, A) -> (A,int))
 > (fn (id, x) { (id(x), id(5)) } : [A] ([B] (B) -> B, A) -> (A, int))
@@ -249,7 +254,7 @@ let ch = fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }; fn (a,b) { c
 
 (fn[A,B,R](x : A, y : B) -> R|A { x } : [A] (A, A) -> A)
 > (fn [A, B, R](x: A, y: B) -> R | A { x } : [A] (A, A) -> A)
->   (fn [A, B, R](x: A, y: B) -> A | R { x } : [A] (A, A) -> A)
+>   (fn [A, B, R](x: A, y: B) -> R | A { x } : [A] (A, A) -> A)
 > [A] (A, A) -> A
 
 # debugging
@@ -411,17 +416,24 @@ fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
 
 
 # some invalid types that should be rejected because of bad joins
+# FIXME: delete these tests? it's fine now
 (@bot : [A] [B] ({foo: B} | A))
 > (@bot : [A] [B] ({foo: B} | A))
-> test:1: Rigid variable B not allowed in join with variable bound earlier
+>   (@bot : [A] [B] ({foo: B} | A))
+> [A] [B] {foo: B} | A
 
 (@bot : [A, B] (int, [C] ({foo: int | C} | B)))
 > (@bot : [A, B] (int, [C] ({foo: int | C} | B)))
-> test:1: Rigid variable C not allowed in join with variable bound earlier
+>   (@bot : [A, B] (int, [C] ({foo: int | C} | B)))
+> [A, B] (int, [C] {foo: int | C} | B)
 
 (@bot : [A <: [B]int]int)
 > (@bot : [A <: [B] int] int)
 > test:1: Bounds must be constructed types
+
+(@bot : [A, B] ({foo : A} | {foo : B}))
+> (@bot : [A, B] ({foo: A} | {foo: B}))
+> test:1: Joins may only contain one non-variable type
 
 # bug in substn_ntyp
 fn[A](id: [B](A) -> int) { id }
@@ -518,34 +530,34 @@ let f = fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }; fn() {
 > fn () {
 >   (fn (x) { x })(f)
 > }
->   let f : [A, B <: {foo: int, ...}, C <: {bar: B}] (
+>   let f : [A <: {foo: int, ...}, B <: {bar: A}, C] (
 >     [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
->     ((C) -> B | C) -> A
->   ) -> A =
->   fn [A, B <: {foo: int, ...}, C <: {bar: B}](
+>     ((B) -> A | B) -> C
+>   ) -> C =
+>   fn [A <: {foo: int, ...}, B <: {bar: A}, C](
 >     f: [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
->     g: ((C) -> B | C) -> A
->   ) -> A {
+>     g: ((B) -> A | B) -> C
+>   ) -> C {
 >     g(f)
 >   };
->   fn [A, B <: {foo: int, ...}, C <: {bar: B}]() ->
->     (({bar: {foo: int, ...}}) -> nothing, ((C) -> B | C) -> A) -> A {
+>   fn [A <: {foo: int, ...}, B <: {bar: A}, C]() ->
+>     (({bar: {foo: int, ...}}) -> nothing, ((B) -> A | B) -> C) -> C {
 >     (fn [A_2](x: A_2) -> A_2 { x })(f)
 >   }
-> [A, B <: {foo: int, ...}, C <: {bar: B}] () -> (({bar: {foo: int, ...}}) -> nothing, ((C) -> B | C) -> A) -> A
+> [A <: {foo: int, ...}, B <: {bar: A}, C] () -> (({bar: {foo: int, ...}}) -> nothing, ((B) -> A | B) -> C) -> C
 
 fn (f: [B <: {foo:int,...}, A <: {bar:B}](A) -> A|B, g) { g(f) }
 > fn (f: [B <: {foo: int, ...}, A <: {bar: B}] (A) -> A | B, g) { g(f) }
->   fn [A, B <: {foo: int, ...}, C <: {bar: B}](
+>   fn [A <: {foo: int, ...}, B <: {bar: A}, C](
 >     f: [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
->     g: ((C) -> B | C) -> A
->   ) -> A {
+>     g: ((B) -> A | B) -> C
+>   ) -> C {
 >     g(f)
 >   }
-> [A, B <: {foo: int, ...}, C <: {bar: B}] (
+> [A <: {foo: int, ...}, B <: {bar: A}, C] (
 >   [B_2 <: {foo: int, ...}, A_2 <: {bar: B_2}] (A_2) -> A_2 | B_2,
->   ((C) -> B | C) -> A
-> ) -> A
+>   ((B) -> A | B) -> C
+> ) -> C
 
 # wfrig check in ensure_upper_matches
 fn[A <: {foo:int}](a: A) { let id = fn(x) { x }; id(a).foo }
@@ -601,7 +613,7 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:any}
 > [A <: {foo: int}, B <: {bar: bool}] (nothing) -> {a: {bar: bool} | A, b: {foo: int} | B, c: any}
 
 
-# why doesn't this work?
+# FIXME: spec_sub_rigid_pos should remove one of the variables here
 fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|A|B, c:any} {
   {a:x, b:x, c:x}
 }
@@ -610,10 +622,10 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|A|B, c:an
 >   {a: x, b: x, c: x}
 > }
 >   fn [A <: {foo: int}, B <: {bar: bool}](x: A) ->
->     {a: {bar: bool} | A, b: {foo: int} | B, c: any} {
+>     {a: {bar: bool} | A, b: {foo: int} | A | B, c: any} {
 >     {a: x, b: x, c: x}
 >   }
-> [A <: {foo: int}, B <: {bar: bool}] (A) -> {a: {bar: bool} | A, b: {foo: int} | B, c: any}
+> [A <: {foo: int}, B <: {bar: bool}] (A) -> {a: {bar: bool} | A, b: {foo: int} | A | B, c: any}
 
 fn[A](x: any, y:A) { if true {x} else {y} }
 > fn [A](x: any, y: A) { if true { x } else { y } }
@@ -632,18 +644,18 @@ fn(x, y, k1, k2, k3) {
 >   (x(k2), y(k3))
 > }
 >   fn [A, B, C, D, E, F](
->     x: (((D) -> C) | E) -> A,
->     y: (((D) -> C) | F) -> B,
->     k1: (D) -> C,
->     k2: E,
->     k3: F
->   ) -> (A, B) {
+>     x: (((A) -> B) | C) -> D,
+>     y: (((A) -> B) | E) -> F,
+>     k1: (A) -> B,
+>     k2: C,
+>     k3: E
+>   ) -> (D, F) {
 >     let ch : [X] (X, X) -> X =
 >     fn [X](a: X, b: X) -> X { if true { a } else { b } };
->     let z : any = ch(x, y)(fn (x: D) -> C { k1(x) });
+>     let z : any = ch(x, y)(fn (x: A) -> B { k1(x) });
 >     (x(k2), y(k3))
 >   }
-> [A, B, C, D, E, F] ((((D) -> C) | E) -> A, (((D) -> C) | F) -> B, (D) -> C, E, F) -> (A, B)
+> [A, B, C, D, E, F] ((((A) -> B) | C) -> D, (((A) -> B) | E) -> F, (A) -> B, C, E) -> (D, F)
 
 
 # flex_cons_upper freshening matchability bug
@@ -726,16 +738,16 @@ fn (x, y, k) {
 >   (x(fn (x) { x }), y(fn (x) { x }))
 > }
 >   fn [A, B, C, D, E, F, G](
->     x: ((D) -> int | C | D) -> A,
->     y: ((F) -> int | E | F) -> B,
->     k: (D | F | G) -> int
->   ) -> (A, B) {
+>     x: ((A) -> int | A | B) -> C,
+>     y: ((D) -> int | D | E) -> F,
+>     k: (A | D | G) -> int
+>   ) -> (C, F) {
 >     let ch : [X] (X, X) -> X =
 >     fn [X](a: X, b: X) -> X { if true { a } else { b } };
->     let z : any = ch(x, y)(fn (a: D | F | G) -> int { let z : int = k(a); 1 });
+>     let z : any = ch(x, y)(fn (a: A | D | G) -> int { let z : int = k(a); 1 });
 >     (x(fn [A_2](x: A_2) -> A_2 { x }), y(fn [A_2](x: A_2) -> A_2 { x }))
 >   }
-> [A, B, C, D, E, F, G] (((D) -> int | C | D) -> A, ((F) -> int | E | F) -> B, (D | F | G) -> int) -> (A, B)
+> [A, B, C, D, E, F, G] (((A) -> int | A | B) -> C, ((D) -> int | D | E) -> F, (A | D | G) -> int) -> (C, F)
 
 fn  [A](a) -> A { let x = a; x }
 > fn [A](a) -> A { let x = a; x }
@@ -747,4 +759,4 @@ fn [A](x:A, f:[B <: A](B) -> B) { x }
 
 > fn [A](x: A, f: [B <: A] (B) -> B) { x }
 > test:1: Bounds must be constructed types
-> STATS: fix: 76, flex: 3009
+> STATS: fix: 72, flex: 2141

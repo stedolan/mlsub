@@ -41,7 +41,7 @@ let run_cmd s =
   let pprintln ?(width=120) d =
     PPrint.ToBuffer.pretty 1. width outbuf PPrint.(PPrint.group d ^^ hardline) in
   let pexn = function
-    | ((Assert_failure _ | Typedefs.Internal _ | Out_of_memory | Invalid_argument _) as e) ->
+    | ((Assert_failure _ | Util.Internal _ | Out_of_memory | Invalid_argument _) as e) ->
        println "%s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
     | Check.Fail (loc, err) ->
        pprintln (Check.pp_err s loc err)
@@ -122,7 +122,7 @@ let run_cmd s =
   Buffer.to_bytes outbuf |> Bytes.to_string
 
 let () =
-  Printexc.record_backtrace true;
+  Printexc.record_backtrace false;
   let lines = rawlines [] in
   let cmds = parse_cmds [] [] lines in
   Lang.Check.fixpoint_iters := 0;

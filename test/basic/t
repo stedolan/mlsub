@@ -58,7 +58,7 @@ if (true) { 1 } else { 2 }
 if (false) { 1 } else { false }
 > if (false) { 1 } else { false }
 >   if (false) { 1 } else { false }
-> any
+> int | bool
 
 #
 # Tuples
@@ -139,7 +139,7 @@ let (x) = (1,); {x}
 if (true) { (1, 2) } else { (1, true, 3) }
 > if (true) { (1, 2) } else { (1, true, 3) }
 >   if (true) { (1, 2) } else { (1, true, 3) }
-> (int, any, ...)
+> (int, int | bool, ...)
 
 if (false) { {foo:1,bar:2} } else { {foo:1,baz:()} }
 > if (false) { {foo: 1, bar: 2} } else { {foo: 1, baz: ()} }
@@ -460,8 +460,8 @@ fn () { (fn (~x, ~y) { {x,y} }) (~y:1, ~x:()) }
 
 fn (a, b) { (b, a.foo) }
 > fn (a, b) { (b, a.foo) }
->   fn [A, B](a: {foo: B, ...}, b: A) -> (A, B) { (b, a.foo) }
-> [A, B] ({foo: B, ...}, A) -> (A, B)
+>   fn [A, B](a: {foo: A, ...}, b: B) -> (B, A) { (b, a.foo) }
+> [A, B] ({foo: A, ...}, B) -> (B, A)
 
 fn (a, b) -> int { b }
 > fn (a, b) -> int { b }
@@ -623,19 +623,19 @@ fn(b) { if (b.cond) { b } else { {foo: 1, cond: 4} } }
 
 fn (x) { (x.foo, x.bar, x.foo) }
 > fn (x) { (x.foo, x.bar, x.foo) }
->   fn [A, B](x: {foo: A, bar: B, ...}) -> (A, B, A) { (x.foo, x.bar, x.foo) }
-> [A, B] ({foo: A, bar: B, ...}) -> (A, B, A)
+>   fn [A, B](x: {foo: B, bar: A, ...}) -> (B, A, B) { (x.foo, x.bar, x.foo) }
+> [A, B] ({foo: B, bar: A, ...}) -> (B, A, B)
 
 fn (x) { if (x.cond) { (x.foo, x.bar) } else { (x.foo, x.foo) } }
 > fn (x) { if (x.cond) { (x.foo, x.bar) } else { (x.foo, x.foo) } }
->   fn [A, B](x: {cond: bool, foo: A, bar: B, ...}) -> (A, A | B) {
+>   fn [A, B](x: {cond: bool, foo: B, bar: A, ...}) -> (B, A | B) {
 >     if (x.cond) {
 >       (x.foo, x.bar)
 >     } else {
 >       (x.foo, x.foo)
 >     }
 >   }
-> [A, B] ({cond: bool, foo: A, bar: B, ...}) -> (A, A | B)
+> [A, B] ({cond: bool, foo: B, bar: A, ...}) -> (B, A | B)
 
 fn (x) { ((fn(x){x.foo})(x), (fn(x){x.foo})(x))  }
 > fn (x) { ((fn (x) { x.foo })(x), (fn (x) { x.foo })(x)) }
@@ -660,16 +660,16 @@ fn (x) { (fn(y) { y.foo.bar })({foo:{bar:x}}) }
 # Trying to make an example with meets/joins under ctors in bounds
 fn (x, f, g) { ( f(x.foo), g(x.foo) ) }
 > fn (x, f, g) { (f(x.foo), g(x.foo)) }
->   fn [A, B, C](x: {foo: C, ...}, f: (C) -> A, g: (C) -> B) -> (A, B) {
+>   fn [A, B, C](x: {foo: A, ...}, f: (A) -> B, g: (A) -> C) -> (B, C) {
 >     (f(x.foo), g(x.foo))
 >   }
-> [A, B, C] ({foo: C, ...}, (C) -> A, (C) -> B) -> (A, B)
+> [A, B, C] ({foo: A, ...}, (A) -> B, (A) -> C) -> (B, C)
 
 # same example in garbage position
 (fn(x) { 5 }) (fn (x, f, g) { ( f(x.foo), g(x.foo) ) })
 > (fn (x) { 5 })(fn (x, f, g) { (f(x.foo), g(x.foo)) })
 >   (fn (x: any) -> int { 5 })(
->     fn [A, B, C](x: {foo: C, ...}, f: (C) -> A, g: (C) -> B) -> (A, B) {
+>     fn [A, B, C](x: {foo: A, ...}, f: (A) -> B, g: (A) -> C) -> (B, C) {
 >       (f(x.foo), g(x.foo))
 >     }
 >   )
@@ -720,27 +720,27 @@ fn (x) { if (x.cond) { (x, 5) } else { (x, x.n) } }
 # once
 fn (f, x) { f(x) }
 > fn (f, x) { f(x) }
->   fn [A, B](f: (B) -> A, x: B) -> A { f(x) }
-> [A, B] ((B) -> A, B) -> A
+>   fn [A, B](f: (A) -> B, x: A) -> B { f(x) }
+> [A, B] ((A) -> B, A) -> B
 
 # twice!
 fn (f, x) { f(f(x)) }
 > fn (f, x) { f(f(x)) }
->   fn [A, B](f: (A | B) -> A, x: B) -> A { f(f(x)) }
-> [A, B] ((A | B) -> A, B) -> A
+>   fn [A, B](f: (A | B) -> B, x: A) -> B { f(f(x)) }
+> [A, B] ((A | B) -> B, A) -> B
 
 # can I hit approx with nested lambda-generalisations? trickier than I thought.
 fn (f) { fn(x) { (f(x), x) } }
 > fn (f) { fn (x) { (f(x), x) } }
->   fn [A, B](f: (B) -> A) -> (B) -> (A, B) { fn (x: B) -> (A, B) { (f(x), x) } }
-> [A, B] ((B) -> A) -> (B) -> (A, B)
+>   fn [A, B](f: (A) -> B) -> (A) -> (B, A) { fn (x: A) -> (B, A) { (f(x), x) } }
+> [A, B] ((A) -> B) -> (A) -> (B, A)
 
 
 # poly id as an argument!
 fn (f) { (f(1), f(true)) }
 > fn (f) { (f(1), f(true)) }
->   fn [A](f: (any) -> A) -> (A, A) { (f(1), f(true)) }
-> [A] ((any) -> A) -> (A, A)
+>   fn [A](f: (int | bool) -> A) -> (A, A) { (f(1), f(true)) }
+> [A] ((int | bool) -> A) -> (A, A)
 
 fn (f : [A] (A) -> A) { (f(1), f(true)) }
 > fn (f: [A] (A) -> A) { (f(1), f(true)) }
@@ -787,15 +787,15 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let 
 >   let f = fn (a) { x(a) };
 >   wid(f)
 > }
->   fn [A <: {foo: int, bar: string}, B](
->     x: ({foo: int} | B) -> A,
+>   fn [A, B <: {foo: int, bar: string}](
+>     x: ({foo: int} | A) -> B,
 >     wid: ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) -> int
 >   ) -> int {
->     let f : ({foo: int} | B) -> A = fn (a: {foo: int} | B) -> A { x(a) };
+>     let f : ({foo: int} | A) -> B = fn (a: {foo: int} | A) -> B { x(a) };
 >     wid(f)
 >   }
-> [A <: {foo: int, bar: string}, B] (
->   ({foo: int} | B) -> A,
+> [A, B <: {foo: int, bar: string}] (
+>   ({foo: int} | A) -> B,
 >   ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) -> int
 > ) -> int
 
@@ -866,8 +866,8 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:b} } else { a } } }
 # hoists a to avoid an invalid Tvjoin
 fn(f) { fn(a,b) { let z = f(b); if true { {foo:a} } else { b } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { {foo: a} } else { b } } }
->   fn [A, B](f: (B) -> any) -> (A, B) -> {foo: A} | B {
->     fn (a: A, b: B) -> {foo: A} | B {
+>   fn [A, B](f: (A) -> any) -> (B, A) -> {foo: B} | A {
+>     fn (a: B, b: A) -> {foo: B} | A {
 >       let z : any = f(b);
 >       if true {
 >         {foo: a}
@@ -876,7 +876,7 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:a} } else { b } } }
 >       }
 >     }
 >   }
-> [A, B] ((B) -> any) -> (A, B) -> {foo: A} | B
+> [A, B] ((A) -> any) -> (B, A) -> {foo: B} | A
 
 # no need to hoist in these cases, with no cons (because join commutes)
 fn(f) { fn(a,b) { let z = f(b); if true { b } else { a } } }
@@ -916,7 +916,7 @@ fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
 (@bot : [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A_2 | A)
 > (@bot : [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A_2 | A)
 >   (@bot : [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A_2 | A)
-> [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A | A_2
+> [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A_2 | A
 
 # curried choose variants. Note hoisting in last case.
 fn (a) { fn(b) { if true { a } else { b } } }
@@ -945,8 +945,8 @@ fn (a) { fn(b) { if true { {foo:a} } else { b } } }
 > [A] (A) -> [A_2] (A_2) -> {foo: A} | A_2
 fn (a) { fn(b) { if true { a } else { {bar:b} } } }
 > fn (a) { fn (b) { if true { a } else { {bar: b} } } }
->   fn [A, B](a: B) -> (A) -> {bar: A} | B {
->     fn (b: A) -> {bar: A} | B {
+>   fn [A, B](a: A) -> (B) -> {bar: B} | A {
+>     fn (b: B) -> {bar: B} | A {
 >       if true {
 >         a
 >       } else {
@@ -954,7 +954,7 @@ fn (a) { fn(b) { if true { a } else { {bar:b} } } }
 >       }
 >     }
 >   }
-> [A, B] (B) -> (A) -> {bar: A} | B
+> [A, B] (A) -> (B) -> {bar: B} | A
 
 # same, but CPS style
 fn (a) { fn(b) { fn (k) { k(if true { a } else { b }) } } }
@@ -979,14 +979,14 @@ fn (a) { fn(b) { fn (k) { k(if true { {foo:a} } else { b }) } } }
 > [A] (A) -> [A_2] (A_2) -> [A_3] (({foo: A} | A_2) -> A_3) -> A_3
 fn (a) { fn(b) { fn (k) { k(if true { a } else { {foo:b} }) } } }
 > fn (a) { fn (b) { fn (k) { k(if true { a } else { {foo: b} }) } } }
->   fn [A, B](a: B) -> (A) -> [A_2] (({foo: A} | B) -> A_2) -> A_2 {
->     fn (b: A) -> [A_2] (({foo: A} | B) -> A_2) -> A_2 {
->       fn [A_2](k: ({foo: A} | B) -> A_2) -> A_2 {
+>   fn [A, B](a: A) -> (B) -> [A_2] (({foo: B} | A) -> A_2) -> A_2 {
+>     fn (b: B) -> [A_2] (({foo: B} | A) -> A_2) -> A_2 {
+>       fn [A_2](k: ({foo: B} | A) -> A_2) -> A_2 {
 >         k(if true { a } else { {foo: b} })
 >       }
 >     }
 >   }
-> [A, B] (B) -> (A) -> [A_2] (({foo: A} | B) -> A_2) -> A_2
+> [A, B] (A) -> (B) -> [A_2] (({foo: B} | A) -> A_2) -> A_2
 
 # CPS again, applications inside if this time
 fn (a) { fn(b) { fn (k) { if true { k(a) } else { k(b) } } } }
@@ -1019,9 +1019,9 @@ fn (a) { fn(b) { fn (k) { if true { k({foo:a}) } else { k(b) } } } }
 > [A] (A) -> [A_2] (A_2) -> [A_3] (({foo: A} | A_2) -> A_3) -> A_3
 fn (a) { fn(b) { fn (k) { if true { k(a) } else { k({foo:b}) } } } }
 > fn (a) { fn (b) { fn (k) { if true { k(a) } else { k({foo: b}) } } } }
->   fn [A, B](a: B) -> (A) -> [A_2] (({foo: A} | B) -> A_2) -> A_2 {
->     fn (b: A) -> [A_2] (({foo: A} | B) -> A_2) -> A_2 {
->       fn [A_2](k: ({foo: A} | B) -> A_2) -> A_2 {
+>   fn [A, B](a: A) -> (B) -> [A_2] (({foo: B} | A) -> A_2) -> A_2 {
+>     fn (b: B) -> [A_2] (({foo: B} | A) -> A_2) -> A_2 {
+>       fn [A_2](k: ({foo: B} | A) -> A_2) -> A_2 {
 >         if true {
 >           k(a)
 >         } else {
@@ -1030,51 +1030,51 @@ fn (a) { fn(b) { fn (k) { if true { k(a) } else { k({foo:b}) } } } }
 >       }
 >     }
 >   }
-> [A, B] (B) -> (A) -> [A_2] (({foo: A} | B) -> A_2) -> A_2
+> [A, B] (A) -> (B) -> [A_2] (({foo: B} | A) -> A_2) -> A_2
 
 # sorta dual of curried choose
 fn (f) { fn(g) { fn(x) { (f(x), g(x)) } } }
 > fn (f) { fn (g) { fn (x) { (f(x), g(x)) } } }
->   fn [A, B](f: (B) -> A) -> [A_2] ((B) -> A_2) -> (B) -> (A, A_2) {
->     fn [A_2](g: (B) -> A_2) -> (B) -> (A, A_2) {
->       fn (x: B) -> (A, A_2) {
+>   fn [A, B](f: (A) -> B) -> [A_2] ((A) -> A_2) -> (A) -> (B, A_2) {
+>     fn [A_2](g: (A) -> A_2) -> (A) -> (B, A_2) {
+>       fn (x: A) -> (B, A_2) {
 >         (f(x), g(x))
 >       }
 >     }
 >   }
-> [A, B] ((B) -> A) -> [A_2] ((B) -> A_2) -> (B) -> (A, A_2)
+> [A, B] ((A) -> B) -> [A_2] ((A) -> A_2) -> (A) -> (B, A_2)
 fn (f) { fn(g) { fn(x) { (f(x.foo), g(x)) } } }
 > fn (f) { fn (g) { fn (x) { (f(x.foo), g(x)) } } }
 >   fn [A, B](f: (A) -> B) ->
->     [A_2, B_2 <: {foo: A, ...}] ((B_2) -> A_2) -> (B_2) -> (B, A_2) {
->     fn [A_2, B_2 <: {foo: A, ...}](g: (B_2) -> A_2) -> (B_2) -> (B, A_2) {
->       fn (x: B_2) -> (B, A_2) {
+>     [A_2 <: {foo: A, ...}, B_2] ((A_2) -> B_2) -> (A_2) -> (B, B_2) {
+>     fn [A_2 <: {foo: A, ...}, B_2](g: (A_2) -> B_2) -> (A_2) -> (B, B_2) {
+>       fn (x: A_2) -> (B, B_2) {
 >         (f(x.foo), g(x))
 >       }
 >     }
 >   }
-> [A, B] ((A) -> B) -> [A_2, B_2 <: {foo: A, ...}] ((B_2) -> A_2) -> (B_2) -> (B, A_2)
+> [A, B] ((A) -> B) -> [A_2 <: {foo: A, ...}, B_2] ((A_2) -> B_2) -> (A_2) -> (B, B_2)
 fn (f) { fn(g) { fn(x) { (f(x), g(x.foo)) } } }
 > fn (f) { fn (g) { fn (x) { (f(x), g(x.foo)) } } }
->   fn [A, B, C <: {foo: B, ...}](f: (C) -> A) ->
->     [A_2] ((B) -> A_2) -> (C) -> (A, A_2) {
->     fn [A_2](g: (B) -> A_2) -> (C) -> (A, A_2) {
->       fn (x: C) -> (A, A_2) {
+>   fn [A, B <: {foo: A, ...}, C](f: (B) -> C) ->
+>     [A_2] ((A) -> A_2) -> (B) -> (C, A_2) {
+>     fn [A_2](g: (A) -> A_2) -> (B) -> (C, A_2) {
+>       fn (x: B) -> (C, A_2) {
 >         (f(x), g(x.foo))
 >       }
 >     }
 >   }
-> [A, B, C <: {foo: B, ...}] ((C) -> A) -> [A_2] ((B) -> A_2) -> (C) -> (A, A_2)
+> [A, B <: {foo: A, ...}, C] ((B) -> C) -> [A_2] ((A) -> A_2) -> (B) -> (C, A_2)
 fn (f) { fn(g) { fn(x) { (f(x.foo), g(x.foo)) } } }
 > fn (f) { fn (g) { fn (x) { (f(x.foo), g(x.foo)) } } }
->   fn [A, B](f: (B) -> A) -> [A_2] ((B) -> A_2) -> ({foo: B, ...}) -> (A, A_2) {
->     fn [A_2](g: (B) -> A_2) -> ({foo: B, ...}) -> (A, A_2) {
->       fn (x: {foo: B, ...}) -> (A, A_2) {
+>   fn [A, B](f: (A) -> B) -> [A_2] ((A) -> A_2) -> ({foo: A, ...}) -> (B, A_2) {
+>     fn [A_2](g: (A) -> A_2) -> ({foo: A, ...}) -> (B, A_2) {
+>       fn (x: {foo: A, ...}) -> (B, A_2) {
 >         (f(x.foo), g(x.foo))
 >       }
 >     }
 >   }
-> [A, B] ((B) -> A) -> [A_2] ((B) -> A_2) -> ({foo: B, ...}) -> (A, A_2)
+> [A, B] ((A) -> B) -> [A_2] ((A) -> A_2) -> ({foo: A, ...}) -> (B, A_2)
 
 
 
@@ -1149,4 +1149,4 @@ fn(x) {
 > [A <: {foo: any, ...}] (A) -> {foo: int} | A
 
 
-> STATS: fix: 63, flex: 2701
+> STATS: fix: 69, flex: 1657
