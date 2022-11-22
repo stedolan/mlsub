@@ -19,10 +19,12 @@ fn[A](x : A) { if x.cond {x} else {x} }
 > test:1: Type error
 >   fn[A](x : A) { if x.cond {x} else {x} }
 >                     ^
-> The type A from test:1:
+>      found: A
+>   expected: {cond: _, ...}
+> This A comes from test:1:
 >   fn[A](x : A) { if x.cond {x} else {x} }
 >             ^
-> does not match type {cond: _, ...} from test:1:
+> but is used as {cond: _, ...} at test:1:
 >   fn[A](x : A) { if x.cond {x} else {x} }
 >                     ^^^^^^
 
@@ -126,20 +128,24 @@ fn (a) { (fn(x) { (x, fn(x) { x }) })(a) }
 > test:1: Type error
 >   (fn (x: bool) { x } : [A] (A) -> A)
 >           ^^^^
-> The type A from test:1:
+>      found: A
+>   expected: bool
+> This A comes from test:1:
 >   (fn (x: bool) { x } : [A] (A) -> A)
 >                              ^
-> does not match type bool
+> but is used as bool
 
 (fn (x: any) { x } : [A] (A) -> A)
 > (fn (x: any) { x } : [A] (A) -> A)
 > test:1: Type error
 >   (fn (x: any) { x } : [A] (A) -> A)
 >                  ^
-> The type any from test:1:
+>      found: any
+>   expected: A
+> This any comes from test:1:
 >   (fn (x: any) { x } : [A] (A) -> A)
 >           ^^^
-> does not match type A from test:1:
+> but is used as A at test:1:
 >   (fn (x: any) { x } : [A] (A) -> A)
 >                                   ^
 
@@ -245,10 +251,12 @@ let ch = fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }; fn (a,b) { c
 > test:1: Type error
 >   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
 >                                                          ^
-> The type B from test:1:
+>      found: B
+>   expected: A | R
+> This B comes from test:1:
 >   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
 >                         ^
-> does not match type A | R from test:1:
+> but is used as A | R at test:1:
 >   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
 >                                 ^
 
@@ -274,6 +282,7 @@ let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){f(5); x.
 
 # making this work requires an annotation on f, due to hoisting
 # (by design, but a bit weird)
+# FIXME: the error message is awful
 let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
 > let wid = fn (id: [B] ({foo: B}) -> B) { id({foo: 5}) };
 > fn (f) {
@@ -283,10 +292,12 @@ let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x
 > test:1: Type error
 >   let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
 >                                                                                                   ^
-> The type (_) -> any from test:1:
+>      found: (_) -> any
+>   expected: (_) -> nothing
+> This any comes from test:1:
 >   let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
 >                              ^
-> does not match type (_) -> nothing from test:1:
+> but is used as nothing at test:1:
 >   let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
 >                                     ^
 
@@ -325,10 +336,12 @@ let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn
 > test:1: Type error
 >   let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
 >                                                                                                                        ^
-> The type (_) -> any from test:1:
+>      found: (_) -> any
+>   expected: (_) -> nothing
+> This any comes from test:1:
 >   let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
 >                                  ^
-> does not match type (_) -> nothing from test:1:
+> but is used as nothing at test:1:
 >   let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
 >                                            ^
 
@@ -506,7 +519,9 @@ let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(3, 1) }
 > test:1: Type error
 >   let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(3, 1) }
 >                                                                          ^
-> The type int does not match type (_) -> _ from test:1:
+>      found: int
+>   expected: (_) -> _
+> This int is used as (_) -> _ at test:1:
 >   let appf = fn[B, C, A <: (B) -> C](f : A, x : B) { f(x) }; fn() { appf(3, 1) }
 >                            ^^^^^^^^
 

@@ -4,17 +4,22 @@ open Typedefs
 (* FIXME: too much poly compare in this file *)
 (* let (=) (x : int) (y : int) = x = y *)
 
-
-type mismatch = (unit, unit) typ * (unit, unit) typ
+type err_typ = (unit, unit) typ
 type subtyping_error = {
-  lhs : (unit, unit) typ;
-  rhs : (unit, unit) typ;
-  err : Cons.subtype_error;
+  lhs : err_typ;
+  rhs : err_typ;
+  err : Cons.conflict;
+  located : (err_typ Location.loc * err_typ Location.loc) option;
   env : env * string iarray list;
 }
+let err_typ_cons conses =
+  let c = Cons.{ conses; locs = Cons.Locs.empty } in
+  (* FIXME: keep some parts? *)
+  Tcons (Cons.map ~pos:(fun _ -> Tsimple ()) ~neg:(fun _ -> Tsimple ()) c)
+
 exception SubtypeError of subtyping_error
 
-let close_err_rigid ~orig_env ~env vars {lhs; rhs; err; env = (_env', ext)} =
+let close_err_rigid ~orig_env ~env vars {lhs; rhs; err; located; env = (_env', ext)} =
   (* Type errors should never involve flexible variables *)
   let close_var v ~ispos:_ ~isjoin:_ =
     match v with
@@ -26,8 +31,12 @@ let close_err_rigid ~orig_env ~env vars {lhs; rhs; err; env = (_env', ext)} =
   in
   let lhs = close ~ispos:true lhs in
   let rhs = close ~ispos:false rhs in
+  let located =
+    located |> Option.map (fun ((a,al),(b,bl)) ->
+       ((close ~ispos:true a,al), (close ~ispos:false b,bl)))
+  in
   let ext = IArray.map (fun ((s,_),_) -> s) vars :: ext in
-  { lhs; rhs; err; env = (orig_env, ext) }
+  { lhs; rhs; err; located; env = (orig_env, ext) }
 
 (* FIXME most uses are making fresh vars above/below something. Refactor? *)
 let[@inline] noerror f = try f () with SubtypeError _ -> intfail "subtyping error should not be possible here!"
@@ -67,19 +76,21 @@ let ctor_pick_loc {cons;rigvars} =
 
 let subtype_conses env ~neg ~pos cp cn =
   match Cons.subtype cp cn.cons with
-  | Error err ->
-     let err =
-       match err.located, Rvset.to_list_loc cn.rigvars with
-       | None, (_, r :: _) :: _ ->
-          (* FIXME [] *)
-          {err with located = Some (([], Option.get (ctor_pick_loc {cons=cp;rigvars=Rvset.empty})), ([], r)) }
-       | _ -> err
+  | Error {conflict=err; located} ->
+     let located =
+       match located, Rvset.to_list_loc cn.rigvars with
+       | None, (rv, rl :: _) :: _ ->
+          Some ((err_typ_cons cp.conses, Option.get (ctor_pick_loc {cons=cp;rigvars=Rvset.empty})), (Tvar ([rl], Vrigid rv), rl))
+       | Some ((cp,lp),(cn,ln)), _ ->
+          Some ((err_typ_cons cp,lp),(err_typ_cons cn,ln))
+       | None, _ ->
+          None
      in
-     raise (SubtypeError {lhs=cons_head cp; rhs=ctor_head cn; err; env=(env,[])})
+     raise (SubtypeError {lhs=cons_head cp; rhs=ctor_head cn; err; located; env=(env,[])})
   | Ok subs ->
      let sub fn field a b =
        try fn a b
-       with SubtypeError {lhs; rhs; err; env} ->
+       with SubtypeError {lhs; rhs; err; located; env} ->
          let wrap outer inner =
            let neg k _x = if Cons.equal_field (F_neg k) field then inner else Tsimple () in
            let pos k _x = if Cons.equal_field (F_pos k) field then inner else Tsimple () in
@@ -87,8 +98,8 @@ let subtype_conses env ~neg ~pos cp cn =
          in
          let err =
            match field with
-           | F_pos _ -> {lhs = wrap cp lhs; rhs = wrap cn.cons rhs; err; env}
-           | F_neg _ -> {lhs = wrap cp rhs; rhs = wrap cn.cons lhs; err; env}
+           | F_pos _ -> {lhs = wrap cp lhs; rhs = wrap cn.cons rhs; err; located; env}
+           | F_neg _ -> {lhs = wrap cp rhs; rhs = wrap cn.cons lhs; err; located; env}
          in
          raise (SubtypeError err)
      in
@@ -125,11 +136,10 @@ let rec match_sub ~changes env (p : flex_lower_bound) (cn : (flex_lower_bound, f
      let located =
        match loc, ctor_pick_loc cn with
        | Some l, Some r ->
-          (* FIXME [] *)
-          Some (([], l), ([], r))
+          Some ((Ttop (Some l), l), (ctor_head cn, r))
        | _ -> None
      in
-     raise (SubtypeError {lhs=Ttop loc; rhs=ctor_head cn; err={conflict=Incompatible; located}; env=(env,[])})
+     raise (SubtypeError {lhs=Ttop loc; rhs=ctor_head cn; err=Incompatible; located; env=(env,[])})
   | Lower(pflex, {cons; rigvars}) ->
      (* constructed type *)
      subtype_conses env cons cn
@@ -142,8 +152,13 @@ let rec match_sub ~changes env (p : flex_lower_bound) (cn : (flex_lower_bound, f
        try match_sub ~changes env (lower_of_rigid_bound env (rv, rvloc)) cn
        with SubtypeError err ->
          let lhs = Tvar (rvloc, Vrigid rv) in
-         (* FIXME: update err.err as well? *)
-         raise (SubtypeError {err with lhs}));
+         let located =
+           (* In the case where the rv has a nontrivial bound,
+              maybe we should report that location instead? Or as well? *)
+           err.located |> Option.map (fun ((_l,lloc),(r,rloc)) ->
+              ((lhs,match rvloc with l::_ -> l | _ -> lloc),(r,rloc)))
+         in
+         raise (SubtypeError {err with lhs; located}));
      (* flexible variables *)
      Fvset.iter pflex ~f:(fun pv ->
        let cn =
@@ -258,7 +273,7 @@ and rotate_flex ~changes env (pv : flexvar) =
        fv_set_upper ~changes pv keep;
        rotate |> List.iter (fun v' -> noerror (fun () -> subtype_flex_flex ~changes env pv v'))
   end
-        
+
 and subtype_flex_flex ~changes env pv nv =
   (* We can record pv <= nv either as an upper bound on pv or a lower bound on nv.
      If they are not at the same level, our choice is forced.
@@ -677,7 +692,7 @@ and expand' visit ~changes ?(vexpand=[]) env pflexvars pctor =
   let p =
     (* FIXME: noerror? *)
     if Env_level.equal level keep_level then p
-    else noerror (fun () -> 
+    else noerror (fun () ->
           hoist_lower ~changes env keep_level p;
           join_lower ~changes env keep_level bottom p) in
 
@@ -792,7 +807,7 @@ type genvar =
   | Gen_flex of flexvar * ntyp
   | Gen_rigid of rigvar
 
-(* 
+(*
 
 design:
   switch to a different mode for subst'ing in elaborations
@@ -854,7 +869,7 @@ let rec substn : 'a 'b . subst_info -> flex_lower_bound -> ('a, 'b) typ =
 
   let cons = tcons cons in
   tvjoin ~base:cons tvars
-    
+
 
 and substn_fv_neg : 'a 'b . subst_info -> flexvar -> ('a, 'b) typ =
   fun s nv ->

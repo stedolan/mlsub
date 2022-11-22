@@ -63,20 +63,10 @@ let pp_err input loc err : PPrint.document =
      pp "Bounds must be constructed types"
   | Illformed_type (`Bound_crosses_levels n) ->
      pp "Rigid variable %s not allowed in join with variable bound earlier" n
-  | Conflict (kind, err) ->
+  | Conflict (_kind, err) ->
      let env = err.env in
-     let premsg, postmsg =
-       match kind with
-       | `Expr -> "This expression has type", "but the expected type was"
-       | `Subtype -> "The type", "is not a subtype of"
-       | _ -> "??FIXME", "??FIXME"
-     in
-     let _msg = pp "%s" premsg ^^
-       nest 4 (break 1 ^^ pp_ty ~env err.lhs) ^^
-       break 1 ^^ pp "%s" postmsg ^^
-       nest 4 (break 1 ^^ pp_ty ~env err.rhs) in
      let conflict =
-       match err.err.conflict with
+       match err.err with
         | Incompatible ->
            pp "Type error"
         (* FIXME improve tuple field names *)
@@ -93,23 +83,37 @@ let pp_err input loc err : PPrint.document =
         | Args (`Extra None) ->
            pp "Surplus arguments are present."
      in
-     let explanation =
-       let lty = nest 4 (break 1 ^^ pp_ty ~env err.lhs) ^^ break 1 in
-       let rty = nest 4 (break 1 ^^ pp_ty ~env err.rhs) ^^ break 1 in
-       hardline ^^
-       group (
-       (match err.err.located with
-        | Some ((_,l),_) when not (Location.subset l loc) ->
-          group (pp "The type" ^^ lty ^^ pp "from " ^^ pp_loc l ^^ pp ":")
-            ^^ nest 2 (hardline ^^ pp_context l) ^^ hardline
-        | _ -> group (pp "The type" ^^ lty)) ^^
-       (match err.err.located with
-        | Some (_,(_,r)) when not (Location.subset r loc) ->
-          group (pp "does not match type" ^^ rty ^^ pp "from " ^^ pp_loc r ^^ pp ":")
-             ^^ nest 2 (hardline ^^ pp_context r)
-        | _ -> group (pp "does not match type" ^^ rty)))
-     in
-     conflict ^^ nest 2 (hardline ^^ pp_context loc) ^^ (*hardline ^^ msg ^^*) explanation
+     conflict ^^
+     nest 2 (hardline ^^ pp_context loc) ^^
+     nest 2 (hardline ^^ pp "   found:" ^^ group (nest 3 (break 1 ^^ pp_ty ~env err.lhs))) ^^
+     nest 2 (hardline ^^ pp "expected:" ^^ group (nest 3 (break 1 ^^ pp_ty ~env err.rhs))) ^^
+     (match err.located with
+      | None -> empty
+      | Some ((lty,lloc),(rty,rloc)) ->
+         let lty = nest 4 (break 1 ^^ pp_ty ~env lty) ^^ break 1 in
+         let rty = nest 4 (break 1 ^^ pp_ty ~env rty) ^^ break 1 in
+         let l_interest = not (Location.subset lloc loc) in
+         let r_interest = not (Location.subset rloc loc) in
+         match l_interest, r_interest with
+         | true, true ->
+           hardline ^^
+           group (pp "This" ^^ lty ^^ pp "comes from " ^^ pp_loc lloc ^^ pp ":") ^^
+             nest 2 (hardline ^^ pp_context lloc) ^^
+           hardline ^^
+           group (pp "but is used as" ^^ rty ^^ pp "at " ^^ pp_loc rloc ^^ pp ":") ^^
+             nest 2 (hardline ^^ pp_context rloc)
+         | true, false ->
+           hardline ^^
+           group (pp "This" ^^ lty ^^ pp "comes from " ^^ pp_loc lloc ^^ pp ":") ^^
+             nest 2 (hardline ^^ pp_context lloc) ^^
+           hardline ^^
+           group (pp "but is used as" ^^ rty)
+         | false, true ->
+           hardline ^^
+           group (pp "This" ^^ lty ^^ pp "is used as" ^^ rty ^^ pp "at " ^^ pp_loc rloc ^^ pp ":") ^^
+             nest 2 (hardline ^^ pp_context rloc)
+         | false, false -> empty
+     )
 
 let rec env_lookup_var env v =
   match env with

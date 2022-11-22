@@ -4,10 +4,12 @@
 : int <: bool
 > _:0: Type error
 >   
-> The type int from test:1:
+>      found: int
+>   expected: bool
+> This int comes from test:1:
 >   : int <: bool
 >     ^^^
-> does not match type bool from test:1:
+> but is used as bool at test:1:
 >   : int <: bool
 >            ^^^^
 
@@ -17,10 +19,12 @@
 : (int) -> int <: [A] (A) -> A
 > _:0: Type error
 >   
-> The type (int) -> _ from test:1:
+>      found: (int) -> _
+>   expected: (A) -> _
+> This A comes from test:1:
 >   : (int) -> int <: [A] (A) -> A
 >                          ^
-> does not match type (A) -> _ from test:1:
+> but is used as int at test:1:
 >   : (int) -> int <: [A] (A) -> A
 >      ^^^
 
@@ -39,20 +43,24 @@
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
 > _:0: Type error
 >   
-> The type () -> {foo: (string) -> _, bar: _} from test:1:
+>      found: () -> {foo: (string) -> _, bar: _}
+>   expected: () -> {foo: (int) -> _, bar: _}
+> This int comes from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
 >                                                              ^^^
-> does not match type () -> {foo: (int) -> _, bar: _} from test:1:
+> but is used as string at test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
 >                                                                                            ^^^^^^
 
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 > _:0: Type error
 >   
-> The type () -> {foo: (Y) -> _, bar: _} from test:1:
+>      found: () -> {foo: (Y) -> _, bar: _}
+>   expected: () -> {foo: (X) -> _, bar: _}
+> This X comes from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 >                                                                     ^
-> does not match type () -> {foo: (X) -> _, bar: _} from test:1:
+> but is used as Y at test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 >                                                                                          ^
 
@@ -71,10 +79,12 @@
 : (int) -> int <: [X <: int] (X) -> X
 > _:0: Type error
 >   
-> The type (_) -> int from test:1:
+>      found: (_) -> int
+>   expected: (_) -> X
+> This int comes from test:1:
 >   : (int) -> int <: [X <: int] (X) -> X
 >              ^^^
-> does not match type (_) -> X from test:1:
+> but is used as X at test:1:
 >   : (int) -> int <: [X <: int] (X) -> X
 >                                       ^
 
@@ -83,10 +93,12 @@
 : (int) -> int <: [X] (X) -> (X|int)
 > _:0: Type error
 >   
-> The type (int) -> _ from test:1:
+>      found: (int) -> _
+>   expected: (X) -> _
+> This X comes from test:1:
 >   : (int) -> int <: [X] (X) -> (X|int)
 >                          ^
-> does not match type (X) -> _ from test:1:
+> but is used as int at test:1:
 >   : (int) -> int <: [X] (X) -> (X|int)
 >      ^^^
 
@@ -95,10 +107,12 @@
 : (int) -> int <: [X] (X) -> (X)
 > _:0: Type error
 >   
-> The type (int) -> _ from test:1:
+>      found: (int) -> _
+>   expected: (X) -> _
+> This X comes from test:1:
 >   : (int) -> int <: [X] (X) -> (X)
 >                          ^
-> does not match type (X) -> _ from test:1:
+> but is used as int at test:1:
 >   : (int) -> int <: [X] (X) -> (X)
 >      ^^^
 
@@ -107,10 +121,12 @@
 : [X <: int] (X) -> (X|bool) <: (int) -> bool
 > _:0: Type error
 >   
-> The type (_) -> int from test:1:
+>      found: (_) -> int
+>   expected: (_) -> nothing
+> This int comes from test:1:
 >   : [X <: int] (X) -> (X|bool) <: (int) -> bool
 >                                    ^^^
-> does not match type (_) -> nothing from test:1:
+> but is used as bool at test:1:
 >   : [X <: int] (X) -> (X|bool) <: (int) -> bool
 >                                            ^^^^
 : (int) -> bool <: [X <: int] (X) -> (X|bool)
@@ -131,10 +147,12 @@
 : [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
 > _:0: Type error
 >   
-> The type (_) -> (_, (_) -> int) from test:1:
+>      found: (_) -> (_, (_) -> int)
+>   expected: (_) -> (_, (_) -> nothing)
+> This int comes from test:1:
 >   : [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
 >                                                 ^^^
-> does not match type (_) -> (_, (_) -> nothing) from test:1:
+> but is used as nothing at test:1:
 >   : [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
 >                                                                                 ^
 
@@ -151,13 +169,17 @@
 # (Original is not true here, because we don't hoist foralls out of function results)
 : [A] ((A) -> A) -> ((A) -> A) <: [C] ([B] (B) -> B) -> ((C) -> C)
 > ok
+
+# FIXME: error message isn't good here
 : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
 > _:0: Type error
 >   
-> The type ((A) -> _) -> _ from test:1:
+>      found: ((A) -> _) -> _
+>   expected: ((A) -> _) -> _
+> This A comes from test:1:
 >   : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
 >               ^
-> does not match type ((A) -> _) -> _ from test:1:
+> but is used as A at test:1:
 >   : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
 >                                               ^
 
@@ -167,10 +189,12 @@
 : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
 > _:0: Type error
 >   
-> The type (_) -> (_) -> any from test:1:
+>      found: (_) -> (_) -> any
+>   expected: (_) -> (_) -> nothing
+> This any comes from test:1:
 >   : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
 >                                                           ^
-> does not match type (_) -> (_) -> nothing from test:1:
+> but is used as nothing at test:1:
 >   : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
 >                                                                 ^
 
