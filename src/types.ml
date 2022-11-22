@@ -9,9 +9,25 @@ type mismatch = (unit, unit) typ * (unit, unit) typ
 type subtyping_error = {
   lhs : (unit, unit) typ;
   rhs : (unit, unit) typ;
-  err : Cons.subtype_error
+  err : Cons.subtype_error;
+  env : env * string iarray list;
 }
 exception SubtypeError of subtyping_error
+
+let close_err_rigid ~orig_env ~env vars {lhs; rhs; err; env = (_env', ext)} =
+  (* Type errors should never involve flexible variables *)
+  let close_var v ~ispos:_ ~isjoin:_ =
+    match v with
+    | Vrigid v -> v.var
+    | _ -> intfail "expected rigid var"
+  in
+  let close ~ispos t =
+    close_typ (env_level env) close_var ~simple:id ~ispos ~isjoin:false 0 t
+  in
+  let lhs = close ~ispos:true lhs in
+  let rhs = close ~ispos:false rhs in
+  let ext = IArray.map (fun ((s,_),_) -> s) vars :: ext in
+  { lhs; rhs; err; env = (orig_env, ext) }
 
 (* FIXME most uses are making fresh vars above/below something. Refactor? *)
 let[@inline] noerror f = try f () with SubtypeError _ -> intfail "subtyping error should not be possible here!"
@@ -49,7 +65,7 @@ let ctor_pick_loc {cons;rigvars} =
   | None, (_, l :: _) :: _ -> Some l
   | _ -> None
 
-let subtype_conses ~neg ~pos cp cn =
+let subtype_conses env ~neg ~pos cp cn =
   match Cons.subtype cp cn.cons with
   | Error err ->
      let err =
@@ -59,11 +75,11 @@ let subtype_conses ~neg ~pos cp cn =
           {err with located = Some (([], Option.get (ctor_pick_loc {cons=cp;rigvars=Rvset.empty})), ([], r)) }
        | _ -> err
      in
-     raise (SubtypeError {lhs=cons_head cp; rhs=ctor_head cn; err})
+     raise (SubtypeError {lhs=cons_head cp; rhs=ctor_head cn; err; env=(env,[])})
   | Ok subs ->
      let sub fn field a b =
        try fn a b
-       with SubtypeError {lhs; rhs; err} ->
+       with SubtypeError {lhs; rhs; err; env} ->
          let wrap outer inner =
            let neg k _x = if Cons.equal_field (F_neg k) field then inner else Tsimple () in
            let pos k _x = if Cons.equal_field (F_pos k) field then inner else Tsimple () in
@@ -71,8 +87,8 @@ let subtype_conses ~neg ~pos cp cn =
          in
          let err =
            match field with
-           | F_pos _ -> {lhs = wrap cp lhs; rhs = wrap cn.cons rhs; err}
-           | F_neg _ -> {lhs = wrap cp rhs; rhs = wrap cn.cons lhs; err}
+           | F_pos _ -> {lhs = wrap cp lhs; rhs = wrap cn.cons rhs; err; env}
+           | F_neg _ -> {lhs = wrap cp rhs; rhs = wrap cn.cons lhs; err; env}
          in
          raise (SubtypeError err)
      in
@@ -113,10 +129,10 @@ let rec match_sub ~changes env (p : flex_lower_bound) (cn : (flex_lower_bound, f
           Some (([], l), ([], r))
        | _ -> None
      in
-     raise (SubtypeError {lhs=Ttop loc; rhs=ctor_head cn; err={conflict=Incompatible; located}})
+     raise (SubtypeError {lhs=Ttop loc; rhs=ctor_head cn; err={conflict=Incompatible; located}; env=(env,[])})
   | Lower(pflex, {cons; rigvars}) ->
      (* constructed type *)
-     subtype_conses cons cn
+     subtype_conses env cons cn
        ~neg:(fun p n -> subtype_lu ~changes env p (UBvar n))
        ~pos:(fun p r -> r := join_lower ~changes env (env_level env) !r p);
      (* rigid variables *)
@@ -124,10 +140,10 @@ let rec match_sub ~changes env (p : flex_lower_bound) (cn : (flex_lower_bound, f
      |> List.filter (fun (rv, _loc) -> not (Rvset.contains cn.rigvars rv))
      |> List.iter (fun (rv, rvloc) ->
        try match_sub ~changes env (lower_of_rigid_bound env (rv, rvloc)) cn
-       with SubtypeError {lhs=_; rhs; err} ->
+       with SubtypeError err ->
          let lhs = Tvar (rvloc, Vrigid rv) in
-         (* FIXME: update err as well? *)
-         raise (SubtypeError {lhs; rhs; err}));
+         (* FIXME: update err.err as well? *)
+         raise (SubtypeError {err with lhs}));
      (* flexible variables *)
      Fvset.iter pflex ~f:(fun pv ->
        let cn =
@@ -176,7 +192,7 @@ let rec match_sub ~changes env (p : flex_lower_bound) (cn : (flex_lower_bound, f
          subtype_lu ~changes env pv.lower newbound;
          if new_rvset then ensure_rigvars_present ~changes env pv;
        end;
-       subtype_conses cbnew cn
+       subtype_conses env cbnew cn
          ~neg:(fun _ _ -> (* already done above *) ())
          ~pos:(fun p r -> r := join_lower ~changes env (env_level env) !r (of_flexvar p))
      )
@@ -186,7 +202,7 @@ and subtype_lu ~changes env (p : flex_lower_bound) (n : styp_neg) =
   | UBcons cn ->
      let cntempl = Cons.map ~neg:id ~pos:(fun _ -> ref bottom) cn.cons in
      match_sub ~changes env p {cn with cons = cntempl};
-     subtype_conses cntempl cn
+     subtype_conses env cntempl cn
        ~neg:(fun _ _ -> ())
        ~pos:(fun p nv -> subtype_lu ~changes env !p (UBvar nv))
 
@@ -472,16 +488,15 @@ let rec subtype env (p : ptyp) (n : ntyp) =
   | _, Ttop _ -> ()
   | Tcons cp, _ when Cons.is_bottom cp -> ()
   | Tcons cp, Tcons cn ->
-     subtype_conses ~neg:(subtype env) ~pos:(subtype env) cp {cons=cn;rigvars=Rvset.empty}
+     subtype_conses env ~neg:(subtype env) ~pos:(subtype env) cp {cons=cn;rigvars=Rvset.empty}
   | p, Tpoly {vars; body} ->
-     (* FIXME: scoping in errors *)
+     let orig_env = env in
      let env, rvars = enter_rigid env vars SymMap.empty in
      let body = open_typ_rigid rvars body in
-     subtype env p body; ()
+     (try subtype env p body
+      with SubtypeError err ->
+        raise (SubtypeError (close_err_rigid ~orig_env ~env vars err)))
   | Tpoly {vars; body}, n ->
-     (* FIXME: scoping in errors *)
-     let level = Env_level.extend (env_level env) in
-     let env = Env_types { level; rig_names = SymMap.empty; rig_defns = IArray.empty; rest = env } in
      let body = instantiate_flex env vars body in
      subtype env body n; ()
   | p, ((Tsimple _ | Tvar _ | Tjoin _ | Tcons _) as n) ->
@@ -493,13 +508,15 @@ let rec subtype env (p : ptyp) (n : ntyp) =
 let subtype env p n =
   (* FIXME: revert changes on failure? *)
   match subtype env p n with
-  | exception SubtypeError e -> Error e
+  | exception SubtypeError e ->
+     assert (fst e.env == env);
+     Error e
   | () -> Ok ()
 
 let rec match_typ env (p : ptyp) loc head =
   match p with
   | Tcons c ->
-     subtype_conses c {cons=head;rigvars=Rvset.empty}
+     subtype_conses env c {cons=head;rigvars=Rvset.empty}
        ~neg:(fun (_,v) t -> assert (!v = Ttop None); v := t)
        ~pos:(fun t (_,v) -> assert (!v = Tcons Cons.bottom); v := t);
   | Tpoly {vars; body} ->
@@ -514,7 +531,7 @@ let rec match_typ env (p : ptyp) loc head =
      match_sub ~changes:(ref []) env
        (ptyp_to_lower ~simple:false env t)
        {cons=shead; rigvars=Rvset.empty};
-     noerror (fun () -> subtype_conses shead {cons=head; rigvars=Rvset.empty}
+     noerror (fun () -> subtype_conses env shead {cons=head; rigvars=Rvset.empty}
        ~neg:(fun _ _ -> () (*already inserted by instneg*))
        ~pos:(fun t (_,v) -> v := Tsimple !t))
 
@@ -522,7 +539,9 @@ let match_typ env ty loc head =
   let head = Cons.map ~neg:(fun x -> x, ref (Ttop None)) ~pos:(fun x -> x, ref (Tcons Cons.bottom)) (Cons.make ~loc head) in
   wf_ptyp env ty;
   match match_typ env ty loc head with
-  | exception SubtypeError e -> Error e
+  | exception SubtypeError e ->
+     assert (fst e.env == env);
+     Error e
   | () ->
      wf_ptyp env ty;
      Ok (Option.get (Cons.get_single (Cons.map ~neg:(fun (x, r) -> x, !r) ~pos:(fun (x, r) -> x, !r) head)))
@@ -566,21 +585,21 @@ let spec_sub_rigid_pos env (rv : rigvar) p =
    Not complete, never changes anything.
    Used only for optimisations, to avoid generalising a when x <= a <= x.
    Not a bug if it spuriously returns false sometimes (but leads to uglier types) *)
-let rec clearly_subtype (a :  flexvar) b : bool =
+let rec clearly_subtype env (a :  flexvar) b : bool =
   match b with
   | Ltop _ -> true
   | Lower(flexvars, ctor) ->
   Fvset.mem a flexvars ||
   a.upper |> List.exists (function
-  | UBvar a -> clearly_subtype a b
+  | UBvar a -> clearly_subtype env a b
   | UBcons cn ->
     Rvset.to_list cn.rigvars |> List.for_all (fun rv ->
       Rvset.contains ctor.rigvars rv) &&
     match
       (* FIXME: raise Exit? Is this actually used? *)
-      subtype_conses cn.cons ctor
-        ~neg:(fun a b -> if not (clearly_subtype a b) then raise Exit)
-        ~pos:(fun a b -> if not (clearly_subtype a b) then raise Exit)
+      subtype_conses env cn.cons ctor
+        ~neg:(fun a b -> if not (clearly_subtype env a b) then raise Exit)
+        ~pos:(fun a b -> if not (clearly_subtype env a b) then raise Exit)
     with
     | exception SubtypeError _ -> false
     | () -> true)
@@ -686,7 +705,7 @@ and expand' visit ~changes ?(vexpand=[]) env pflexvars pctor =
   (* C|a = C, if a <= C, so we might be able to drop some flexvars *)
   let flexvars_gen =
     Fvset.append flexvars_gen flexvars_exp_gen ~merge:(fun a _ -> a)
-    |> Fvset.filter ~f:(fun fv -> not (clearly_subtype fv (Lower(flexvars_keep, ctor)))) in
+    |> Fvset.filter ~f:(fun fv -> not (clearly_subtype env fv (Lower(flexvars_keep, ctor)))) in
   Lower(Fvset.append flexvars_keep flexvars_gen ~merge:(fun a _ -> a), ctor)
 
 

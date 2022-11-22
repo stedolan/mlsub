@@ -20,12 +20,12 @@ let or_raise kind loc = function
 let pp_err input loc err : PPrint.document =
   let open PPrint in
   let pp fmt = Format.ksprintf PPrint.utf8string fmt in
-  let pp_ty t =
+  let pp_ty ~env t =
     Typedefs.unparse_gen_typ t
       ~flexvar:ignore
-      ~ext:[]
-      ~neg:(fun () -> Typedefs.(mktyexp (named_type "_")))
-      ~pos:(fun () -> Typedefs.(mktyexp (named_type "_")))
+      ~env
+      ~neg:(fun ~env:_ () -> Typedefs.(mktyexp (named_type "_")))
+      ~pos:(fun ~env:_ () -> Typedefs.(mktyexp (named_type "_")))
     |> Print.tyexp
   in
   let pp_loc (loc : Location.t) =
@@ -64,6 +64,7 @@ let pp_err input loc err : PPrint.document =
   | Illformed_type (`Bound_crosses_levels n) ->
      pp "Rigid variable %s not allowed in join with variable bound earlier" n
   | Conflict (kind, err) ->
+     let env = err.env in
      let premsg, postmsg =
        match kind with
        | `Expr -> "This expression has type", "but the expected type was"
@@ -71,9 +72,9 @@ let pp_err input loc err : PPrint.document =
        | _ -> "??FIXME", "??FIXME"
      in
      let _msg = pp "%s" premsg ^^
-       nest 4 (break 1 ^^ pp_ty err.lhs) ^^
+       nest 4 (break 1 ^^ pp_ty ~env err.lhs) ^^
        break 1 ^^ pp "%s" postmsg ^^
-       nest 4 (break 1 ^^ pp_ty err.rhs) in
+       nest 4 (break 1 ^^ pp_ty ~env err.rhs) in
      let conflict =
        match err.err.conflict with
         | Incompatible ->
@@ -93,8 +94,8 @@ let pp_err input loc err : PPrint.document =
            pp "Surplus arguments are present."
      in
      let explanation =
-       let lty = nest 4 (break 1 ^^ pp_ty err.lhs) ^^ break 1 in
-       let rty = nest 4 (break 1 ^^ pp_ty err.rhs) ^^ break 1 in
+       let lty = nest 4 (break 1 ^^ pp_ty ~env err.lhs) ^^ break 1 in
+       let rty = nest 4 (break 1 ^^ pp_ty ~env err.rhs) ^^ break 1 in
        hardline ^^
        group (
        (match err.err.located with

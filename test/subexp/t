@@ -19,7 +19,7 @@ fn[A](x : A) { if x.cond {x} else {x} }
 > test:1: Type error
 >   fn[A](x : A) { if x.cond {x} else {x} }
 >                     ^
-> The type 2.0 from test:1:
+> The type A from test:1:
 >   fn[A](x : A) { if x.cond {x} else {x} }
 >             ^
 > does not match type {cond: _, ...} from test:1:
@@ -126,7 +126,7 @@ fn (a) { (fn(x) { (x, fn(x) { x }) })(a) }
 > test:1: Type error
 >   (fn (x: bool) { x } : [A] (A) -> A)
 >           ^^^^
-> The type 2.0 from test:1:
+> The type A from test:1:
 >   (fn (x: bool) { x } : [A] (A) -> A)
 >                              ^
 > does not match type bool
@@ -139,7 +139,7 @@ fn (a) { (fn(x) { (x, fn(x) { x }) })(a) }
 > The type any from test:1:
 >   (fn (x: any) { x } : [A] (A) -> A)
 >           ^^^
-> does not match type 2.0 from test:1:
+> does not match type A from test:1:
 >   (fn (x: any) { x } : [A] (A) -> A)
 >                                   ^
 
@@ -245,10 +245,10 @@ let ch = fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }; fn (a,b) { c
 > test:1: Type error
 >   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
 >                                                          ^
-> The type 3.1 from test:1:
+> The type B from test:1:
 >   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
 >                         ^
-> does not match type 3.0 | 3.2 from test:1:
+> does not match type A | R from test:1:
 >   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
 >                                 ^
 
@@ -759,4 +759,4 @@ fn [A](x:A, f:[B <: A](B) -> B) { x }
 
 > fn [A](x: A, f: [B <: A] (B) -> B) { x }
 > test:1: Bounds must be constructed types
-> STATS: fix: 72, flex: 2141
+> STATS: fix: 72, flex: 2092

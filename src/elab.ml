@@ -35,17 +35,15 @@ let elab_fields (f : 'a elab tuple_fields) : 'a tuple_fields elab =
   { f with fields }
 
 
-(* FIXME is env needed? *)
-let rec elaborate : type a . env -> ext:_ -> a elab_req -> a =
-  fun env ~ext rq -> match rq with
+let rec elaborate : type a . env:_ -> a elab_req -> a =
+  fun ~env rq -> match rq with
   | Unit -> ()
-  | Pair (s, t) -> (elaborate env ~ext s, elaborate env ~ext t)
-  | Ptyp t -> unparse_ptyp ~flexvar:ignore ~ext t
-  | Ntyp t -> unparse_ntyp ~flexvar:ignore ~ext t
+  | Pair (s, t) -> (elaborate ~env s, elaborate ~env t)
+  | Ptyp t -> unparse_ptyp ~flexvar:ignore ~env t
+  | Ntyp t -> unparse_ntyp ~flexvar:ignore ~env t
   | Gen { bounds; body } ->
-     (* FIXME bound var names in env *)
-     let ext, bounds = unparse_bounds ~flexvar:ignore ~ext ~pos:(unparse_flex_lower_bound ~flexvar:ignore) ~neg:(unparse_flexvar ~flexvar:ignore) bounds in
-     bounds, elaborate env ~ext body
+     let env, bounds = unparse_bounds ~flexvar:ignore ~env ~pos:(unparse_flex_lower_bound ~flexvar:ignore) ~neg:(unparse_flexvar ~flexvar:ignore) bounds in
+     bounds, elaborate ~env body
 
 let rec elabreq_map_typs :
   type a . neg:_ -> pos:_ -> index:int -> a elab_req -> a elab_req =
@@ -62,7 +60,7 @@ let rec elabreq_map_typs :
      Gen{bounds;body}
 
 
-let elaborate env (Elab (rq, k)) = k (elaborate env ~ext:[] rq)
+let elaborate env (Elab (rq, k)) = k (elaborate ~env:(env,[]) rq)
 
 
 (*

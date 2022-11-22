@@ -1149,4 +1149,4 @@ fn(x) {
 > [A <: {foo: any, ...}] (A) -> {foo: int} | A
 
 
-> STATS: fix: 69, flex: 1657
+> STATS: fix: 69, flex: 1653

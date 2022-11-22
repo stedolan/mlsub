@@ -20,7 +20,7 @@
 > The type (int) -> _ from test:1:
 >   : (int) -> int <: [A] (A) -> A
 >                          ^
-> does not match type (1.0) -> _ from test:1:
+> does not match type (A) -> _ from test:1:
 >   : (int) -> int <: [A] (A) -> A
 >      ^^^
 
@@ -49,10 +49,10 @@
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 > _:0: Type error
 >   
-> The type () -> {foo: (1.1) -> _, bar: _} from test:1:
+> The type () -> {foo: (Y) -> _, bar: _} from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 >                                                                     ^
-> does not match type () -> {foo: (1.0) -> _, bar: _} from test:1:
+> does not match type () -> {foo: (X) -> _, bar: _} from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 >                                                                                          ^
 
@@ -74,7 +74,7 @@
 > The type (_) -> int from test:1:
 >   : (int) -> int <: [X <: int] (X) -> X
 >              ^^^
-> does not match type (_) -> 1.0 from test:1:
+> does not match type (_) -> X from test:1:
 >   : (int) -> int <: [X <: int] (X) -> X
 >                                       ^
 
@@ -86,7 +86,7 @@
 > The type (int) -> _ from test:1:
 >   : (int) -> int <: [X] (X) -> (X|int)
 >                          ^
-> does not match type (1.0) -> _ from test:1:
+> does not match type (X) -> _ from test:1:
 >   : (int) -> int <: [X] (X) -> (X|int)
 >      ^^^
 
@@ -98,7 +98,7 @@
 > The type (int) -> _ from test:1:
 >   : (int) -> int <: [X] (X) -> (X)
 >                          ^
-> does not match type (1.0) -> _ from test:1:
+> does not match type (X) -> _ from test:1:
 >   : (int) -> int <: [X] (X) -> (X)
 >      ^^^
 
@@ -154,10 +154,10 @@
 : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
 > _:0: Type error
 >   
-> The type ((3.0) -> _) -> _ from test:1:
+> The type ((A) -> _) -> _ from test:1:
 >   : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
 >               ^
-> does not match type ((1.0) -> _) -> _ from test:1:
+> does not match type ((A) -> _) -> _ from test:1:
 >   : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
 >                                               ^
 

@@ -76,4 +76,4 @@ fn() { twice(id, id)(id) }
 >     twice(id, id)(id)
 >   }
 > [A] () -> (A) -> A
-> STATS: fix: 21, flex: 271
+> STATS: fix: 23, flex: 271
