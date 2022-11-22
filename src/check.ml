@@ -134,35 +134,6 @@ let env_lookup_type_var env lvl name =
        Ok v
   | None -> Error (Bad_name (`Unknown, `Type, name))
 
-let rec split_tjoin env lvl cons vars rest =
-  match rest with
-  | [] -> cons, List.rev vars
-  | (None, loc) :: _ -> fail loc Syntax
-  | (Some ty, loc) as ty' :: rest ->
-     match (ty : Exp.tyexp') with
-     | Tjoin (a, b) ->
-        split_tjoin env lvl cons vars (a :: b :: rest)
-     | Tparen a ->
-        split_tjoin env lvl cons vars (a :: rest)
-     | Tforall _ -> fail loc (Illformed_type `Join_poly)
-     | ty ->
-        let as_var =
-          match ty with
-          | Tnamed (name, _) ->
-             (* FIXME shifting? *)
-             begin match env_lookup_type_var env lvl name.label with
-             | Ok v -> Some (v, loc)
-             | Error (Bad_name (`Unknown, `Type, _)) -> None
-             | Error e -> fail loc e
-             end
-          | _ -> None in
-        match as_var with
-        | Some v -> split_tjoin env lvl cons (v :: vars) rest
-        | None ->
-           match cons with
-           | None -> split_tjoin env lvl (Some ty') vars rest
-           | Some _ -> fail loc (Illformed_type `Join_multi_cons)
-
 let syn_tjoin loc (a : (_, _) typ) (b : (_, _) typ) =
   let rec join conses keep = function
     | Ttop l :: _ -> Ttop l
