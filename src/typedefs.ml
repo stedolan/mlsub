@@ -359,75 +359,15 @@ let compare_rigvar (p : rigvar) (q : rigvar) =
     (assert (Env_level.equal p.level q.level); compare p.var q.var)
 
 (* Sets of rigid variables *)
-module Rvset : sig
-  type t
-  val empty : t
-  val singleton : rigvar -> Location.set -> t
-  val add : t -> rigvar -> Location.set -> t
-  val join : t -> t -> t
-
-  val to_list : t -> rigvar list
-  val to_list_loc : t -> (rigvar * Location.set) list
-
-  val contains : t -> rigvar -> bool
-
-  val is_empty : t -> bool
-
-  val equal : t -> t -> bool
-  val compare : t -> t -> int
-
-  val peel_level : Env_level.t -> t -> ((rigvar * Location.set) list * t)
-
-  val filter : (rigvar -> bool) -> t -> t
-
-  val fold : ('s -> rigvar * Location.set -> 's) -> 's -> t -> 's
-end = struct
-  type t = (rigvar * Location.set) list
-  let empty = []
-  let singleton x l = [x, l]
-
-  let cmprv (r, _) (s, _) = compare_rigvar r s
-
-  let add t rv l =
-    (* FIXME hilarious *)
-    List.sort_uniq cmprv ((rv, l) :: t)
-
-  let to_list t = List.map fst t
-  let to_list_loc t = t
-
-  let contains t rv =
-    List.exists (fun (r, _) -> equal_rigvar r rv) t
-
-  let join t vs =
-    (* FIXME *)
-    List.sort_uniq cmprv (t @ vs)
-
-  let is_empty = function [] -> true | _ -> false
-
-  let equal a b = equal_lists (fun (r, _) (s, _) -> equal_rigvar r s) a b
-  let compare a b = compare_lists cmprv a b
-
-  let peel_level lvl xs =
-    (* FIXME: since lvl is always at the start, this could be faster *)
-    List.partition (fun ((rv : rigvar), _) ->
-      assert (Env_level.extends rv.level lvl);
-      Env_level.equal rv.level lvl) xs
-
-  let filter p t = List.filter (fun (r, _) -> p r) t
-
-  let fold = List.fold_left
-end
+module Rvset = UniqList.Make (struct
+  type t = rigvar * Location.t
+  let equal (rv, _) (rv', _) = equal_rigvar rv rv'
+end)
 
 (* A ctor_ty is a join of a constructed type and some rigid variables *)
 type (+'neg,+'pos) ctor_ty =
   { cons: ('neg,'pos) Cons.conses;
     rigvars: Rvset.t }
-
-(* FIXME: most uses of this function are probably bugs: rigvars need attention *)
-let map_ctor_rig neg pos { cons; rigvars } =
-  { cons = Cons.map ~neg ~pos cons; rigvars }
-
-
 
 (* Flexvars are mutable but only in one direction.
      - level may decrease
@@ -471,7 +411,7 @@ and flexvar_gen_status =
   | Computing_bound
   | Generalised of int
   | Kept of flexvar
-  | Replace_with_rigid of (rigvar * Location.set) list
+  | Replace_with_rigid of rigvar * Location.t
 
 and flexvar_gen =
   | Not_generalising
@@ -490,7 +430,7 @@ type (+'neg, +'pos) typ =
   | Ttop of Location.t option
   (* Bottom is represented as an empty Tcons *)
   | Tcons of ('neg, 'pos) cons_typ
-  | Tvar of Location.set * typ_var
+  | Tvar of Location.t option * typ_var
   | Tjoin of ('neg, 'pos) typ * ('neg, 'pos) typ
      (* No Tpoly allowed under a Tjoin *)
   | Tpoly of ('neg, 'pos) poly_typ
@@ -553,7 +493,7 @@ let equal_styp_neg (p : styp_neg) (q : styp_neg) =
 let bottom = Lower(Fvset.empty, {cons=Cons.bottom;rigvars=Rvset.empty})
 let of_flexvar fv = Lower(Fvset.single fv, {cons=Cons.bottom;rigvars=Rvset.empty})
 let of_rigvars rigvars = Lower(Fvset.empty, {cons=Cons.bottom;rigvars})
-let of_rigvar loc rv = of_rigvars (Rvset.singleton rv loc)
+let of_rigvar loc rv = of_rigvars (Rvset.single (rv, loc))
 let is_bottom t = equal_flex_lower_bound bottom t
 
 (*
@@ -710,8 +650,8 @@ let open_typ_var f loc ix = function
 
 let rec open_typ :
   'neg 'pos . 
-    neg:(Location.set -> int -> ('pos, 'neg) typ) ->
-    pos:(Location.set -> int -> ('neg, 'pos) typ) ->
+    neg:(Location.t option -> int -> ('pos, 'neg) typ) ->
+    pos:(Location.t option -> int -> ('neg, 'pos) typ) ->
     int -> ('neg, 'pos) typ -> ('neg, 'pos) typ =
   fun ~neg ~pos ix t -> match t with
   | (Tsimple _ | Ttop _) as s -> s
@@ -820,7 +760,8 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   wf_flex_lower_bound ~seen env fv.level fv.lower;
   (* Rigvar sets must be distinct *)
   let rvsets = List.filter_map (function UBvar _ -> None | UBcons c -> Some c.rigvars) fv.upper in
-  assert (List.length rvsets = List.length (List.sort_uniq Rvset.compare rvsets));
+  assert (List.length rvsets =
+         List.length (rvsets |> List.concat_map (fun rv1 -> rvsets |> List.filter (Rvset.equal rv1))));
   fv.upper |> List.iter (function
   | UBvar v ->
      if fv.rotated then assert (not (Env_level.equal fv.level v.level));
@@ -833,7 +774,7 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
        | Ltop _ -> []
      in
      (* Well-formedness of bounds *)
-     rvlow |> List.iter (fun rv -> assert (Rvset.contains rigvars rv));
+     rvlow |> List.iter (fun rv -> assert (Rvset.mem rv rigvars));
      Cons.map ~neg:(wf_flex_lower_bound ~seen env fv.level) ~pos:(wf_flexvar ~seen env fv.level) cons |> ignore)
   end
 
@@ -846,9 +787,8 @@ and wf_flex_lower_bound ~seen env lvl l =
   match l with
   | Ltop _ -> ()
   | Lower (flexvars, {cons;rigvars}) ->
-     (* FIXME check for duplicate vars? (Not really a problem, but annoying) *)
      Fvset.iter ~f:(wf_flexvar ~seen env lvl) flexvars;
-     List.iter (wf_rigvar env lvl) (Rvset.to_list rigvars);
+     List.iter (wf_rigvar env lvl) (List.map fst (Rvset.to_list rigvars));
      (* FIXME check distinctness of conses joined *)
      Cons.map ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_flex_lower_bound ~seen env lvl) cons |> ignore
 
@@ -1010,7 +950,7 @@ let rec unparse_flex_lower_bound ~env ~flexvar = function
        @
        List.map (unparse_cons ~neg:(unparse_flexvar ~env ~flexvar) ~pos:(unparse_flex_lower_bound ~env ~flexvar)) cons.conses
        @
-       List.map (unparse_rigid_var ~env) (Rvset.to_list rigvars)
+       List.map (unparse_rigid_var ~env) (List.map fst (Rvset.to_list rigvars))
      in
      unparse_join ts
 
@@ -1020,7 +960,7 @@ let unparse_styp_neg ~env ~flexvar = function
      unparse_join
        (List.map (unparse_cons ~neg:(unparse_flex_lower_bound ~env ~flexvar) ~pos:(unparse_flexvar ~env ~flexvar)) cons.conses
         @
-        List.map (unparse_rigid_var ~env) (Rvset.to_list rigvars))
+        List.map (unparse_rigid_var ~env) (List.map fst (Rvset.to_list rigvars)))
 
 let unparse_ptyp ~flexvar ?(env=(Env_nil,[])) (t : ptyp) =
   unparse_gen_typ ~flexvar ~env ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) t
@@ -1112,7 +1052,6 @@ let pp_changes ppf changes =
     | Change_lower(v,_) -> pv v "+"
 (*    | Change_level(v,_) -> pv v "@"*));
   Format.fprintf ppf "]"
-
 
 
 let wf_ptyp env (t : ptyp) =

@@ -257,13 +257,13 @@ let ch = fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }; fn (a,b) { c
 >   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
 >                                                          ^
 >      found: B
->   expected: A | R
+>   expected: R | A
 > This B comes from test:1:
 >   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
 >                         ^
-> but is used as A | R at test:1:
+> but is used as R | A at test:1:
 >   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
->                                 ^
+>                               ^
 
 (fn[A,B,R](x : A, y : B) -> R|A { x } : [A] (A, A) -> A)
 > (fn [A, B, R](x: A, y: B) -> R | A { x } : [A] (A, A) -> A)
@@ -779,4 +779,4 @@ fn[A <: {foo:int}](x:A, y:{foo:int}) { if true {x} else {y} }
 >   }
 > [A <: {foo: int}] (A, {foo: int}) -> {foo: int}
 
-> STATS: fix: 57, flex: 1962
+> STATS: fix: 57, flex: 1937

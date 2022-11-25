@@ -91,6 +91,7 @@ module UniqList : sig
     val equal : ?eq:(el -> el -> bool) -> t -> t -> bool
 
     val iter : t -> f:(el -> unit) -> unit
+    val to_list : t -> el list
   end
 end = struct
   type 'a t = 'a list
@@ -133,5 +134,7 @@ end = struct
       with Invalid_argument _ -> false
 
     let iter xs ~f = List.iter f xs
+
+    let to_list x = x
   end
 end

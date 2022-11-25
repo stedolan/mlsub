@@ -39,7 +39,7 @@ let dump env (t : ptyp) =
 
 let fresh_flow lvl =
   let fv = fresh_flexvar lvl in
-  Tvar (Location.empty, Vflex fv), Tvar (Location.empty, Vflex fv)
+  Tvar (None, Vflex fv), Tvar (None, Vflex fv)
 
 
 let match_as_fn env f =
@@ -137,8 +137,8 @@ let poly () =
   let env = Env_nil and _lvl = Env_level.initial in
   let bvar ?(index=0) ?(rest) var =
     match rest with
-    | None -> Tvar (Location.empty, Vbound {index; var})
-    | Some rest -> Tjoin (rest, Tvar(Location.empty, Vbound{index; var})) in
+    | None -> Tvar (Some Location.noloc, Vbound {index; var})
+    | Some rest -> Tjoin (rest, Tvar(Some Location.noloc, Vbound{index; var})) in
   let t1 () =
     Tpoly {vars = IArray.of_array [| ("A",noloc), None; ("B",noloc), None |];
            body= tcons (func

@@ -18,11 +18,3 @@ let noloc =
 let mark =
   let loc : Lexing.position = {pos_fname="MARK";pos_lnum=1;pos_cnum=0;pos_bol=0} in
   { loc_start = loc; loc_end = loc}
-
-type set = location list
-
-let single l = [l]
-
-let union = (@)
-
-let empty = []

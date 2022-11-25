@@ -181,7 +181,7 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
      | Some t -> t
      | None ->
         match env_lookup_type_var env lvl name with
-        | Ok v -> Tvar (Location.single loc, Vrigid v)
+        | Ok v -> Tvar (Some loc, Vrigid v)
         | Error e -> fail loc e
      end
   | Trecord fields ->
@@ -330,7 +330,7 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _) : ptyp * (typ
   
 let fresh_flow env =
   let fv = fresh_flexvar (env_level env) in
-  Tvar (Location.empty, Vflex fv)
+  Tvar (None, Vflex fv)
 
 type inspect_result =
   | Ipoly of (flex_lower_bound, flexvar) poly_typ
