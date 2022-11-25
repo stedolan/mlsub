@@ -94,3 +94,11 @@ let rec pr_elab_req : type a . a elab_req -> document = function
      utf8string "∀" ^^ (match pol with Pos -> utf8string "⁺" | Neg -> utf8string "⁻") ^^ nest 2 (hardline ^^ pr_elab_req body)
 
 *)
+
+let rec pp_elab_req : type a . _ -> a elab_req -> _ =
+  fun ppf rq -> match rq with
+  | Unit -> ()
+  | Pair (p, q) -> pp_elab_req ppf p; pp_elab_req ppf q
+  | Ptyp p -> Format.fprintf ppf "PTYP: %a\n" dump_ptyp p
+  | Ntyp q -> Format.fprintf ppf "NTYP: %a\n" pp_ntyp q
+  | Gen g -> Format.fprintf ppf "GEN\n"; pp_elab_req ppf g.body

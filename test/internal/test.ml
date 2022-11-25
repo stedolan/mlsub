@@ -4,6 +4,8 @@ open Typedefs
 open Types
 module SymMap = Tuple_fields.SymMap
 
+let () = Printexc.record_backtrace true
+
 let dump (t : ptyp) =
   Format.printf "%a%!" dump_ptyp t
 
@@ -19,7 +21,7 @@ let dump env (t : ptyp) =
   let fl = ptyp_to_lower ~simple:false env t in
   let rec fixpoint visit fl =
     let changes = ref [] in
-    let fl = expand visit ~changes env fl in
+    let fl = expand_lower visit ~changes env fl in
     Format.printf "changed: %a\n" pp_changes !changes;
     dump (Tsimple fl);
     if !changes = [] then visit, fl
@@ -27,7 +29,7 @@ let dump env (t : ptyp) =
   let visit, fl = fixpoint 2 fl in
 
   let bvars = Vector.create () in
-  let fl = substn {mode=`Poly;visit; bvars; env; level=env_level env; index=0} fl in
+  let fl = promote_lower {mode=`Poly;visit; can_generalise=true; bvars; env; level=env_level env; index=0; hoist_env = env} fl in
   dump fl;
   Vector.iteri bvars (fun ix v -> match v with
   | Gen_rigid _ -> assert false

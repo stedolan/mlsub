@@ -67,8 +67,13 @@ fn[A,B](x) -> (A|B) -> A {x}
 
 fn[A,B](x) -> A|B {x}
 > fn [A, B](x) -> A | B { x }
->   fn [A, B](x: nothing) -> A | B { x }
-> [A, B] (nothing) -> A | B
+>   fn [A, B](x: A | B) -> A | B { x }
+> [A, B] (A | B) -> A | B
+> RECHECK: Failure("contravariant join")
+> 
+> ELAB: Failure("contravariant join")
+> 
+> ELABINF: Failure("contravariant join")
 
 fn[A,B](f : (A|B) -> A, x: B) -> ((A|B) -> A, B) { (f,x) }
 > fn [A, B](f: (A | B) -> A, x: B) -> ((A | B) -> A, B) { (f, x) }
@@ -352,10 +357,10 @@ let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){l
 > }
 >   let wid : ([B, A <: {foo: B}] (A) -> B) -> int =
 >   fn (id: [B, A <: {foo: B}] (A) -> B) -> int { id({foo: 5}) };
->   fn (f: ({bar: {foo: any}}) -> any) -> int {
->     wid(fn (x) { let z : any = f({bar: x}); x.foo })
+>   fn [A](f: ({bar: {foo: any}}) -> A) -> int {
+>     wid(fn (x) { let z : A = f({bar: x}); x.foo })
 >   }
-> (({bar: {foo: any}}) -> any) -> int
+> [A] (({bar: {foo: any}}) -> A) -> int
 
 let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f : (any) -> string) { wid(fn(x){let z = f({bar:x}); x.foo}) }
 > let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) };
@@ -380,22 +385,22 @@ let id = fn(x) { x }; fn () { (id (id), id) }
 
 fn(f) { fn(id: [A] (A) -> A) { let x = f(id); id(1) } }
 > fn (f) { fn (id: [A] (A) -> A) { let x = f(id); id(1) } }
->   fn [A](f: ((A) -> A) -> any) -> ([A_2] (A_2) -> A_2) -> int {
+>   fn [A, B](f: ((A) -> A) -> B) -> ([A_2] (A_2) -> A_2) -> int {
 >     fn (id: [A_2] (A_2) -> A_2) -> int {
->       let x : any = f(id);
+>       let x : B = f(id);
 >       id(1)
 >     }
 >   }
-> [A] (((A) -> A) -> any) -> ([A_2] (A_2) -> A_2) -> int
+> [A, B] (((A) -> A) -> B) -> ([A_2] (A_2) -> A_2) -> int
 
 fn(f) { fn(id: [A] (A) -> A) { id(fn(y) { let x = f(y); y }) } }
 > fn (f) { fn (id: [A] (A) -> A) { id(fn (y) { let x = f(y); y }) } }
->   fn [A](f: (A) -> any) -> ([A_2] (A_2) -> A_2) -> (A) -> A {
+>   fn [A, B](f: (A) -> B) -> ([A_2] (A_2) -> A_2) -> (A) -> A {
 >     fn (id: [A_2] (A_2) -> A_2) -> (A) -> A {
->       id(fn (y: A) -> A { let x : any = f(y); y })
+>       id(fn (y: A) -> A { let x : B = f(y); y })
 >     }
 >   }
-> [A] ((A) -> any) -> ([A_2] (A_2) -> A_2) -> (A) -> A
+> [A, B] ((A) -> B) -> ([A_2] (A_2) -> A_2) -> (A) -> A
 
 
 (fn(x) {(fn(y){y})(x)} : [A] (A) -> A)
@@ -591,12 +596,7 @@ fn[A <: {foo:int}, B <: {bar:int}](x) -> {a:A, b:{foo:int}|B} {
 >   let splat = fn (x) { {a: x, b: x} };
 >   splat(x)
 > }
->   fn [A <: {foo: int}, B <: {bar: int}](x: nothing) -> {a: A, b: {foo: int} | B} {
->     let splat : [C] (C) -> {a: C, b: C} =
->     fn [C](x: C) -> {a: C, b: C} { {a: x, b: x} };
->     splat(x)
->   }
-> [A <: {foo: int}, B <: {bar: int}] (nothing) -> {a: A, b: {foo: int} | B}
+> typechecking error: unimplemented: multi RV upper bounds
 
 
 # weirdness: non-monotonicity wrt annotations
@@ -608,11 +608,7 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:{foo
 >   {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}} {
 >   {a: x, b: x, c: x}
 > }
->   fn [A <: {foo: int}, B <: {bar: bool}](x: nothing) ->
->     {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}} {
->     {a: x, b: x, c: x}
->   }
-> [A <: {foo: int}, B <: {bar: bool}] (nothing) -> {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}}
+> typechecking error: unimplemented: multi RV upper bounds
 
 fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:any} {
   {a:x, b:x, c:x}
@@ -621,11 +617,7 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:any}
 >   {a: {bar: bool} | A, b: {foo: int} | B, c: any} {
 >   {a: x, b: x, c: x}
 > }
->   fn [A <: {foo: int}, B <: {bar: bool}](x: nothing) ->
->     {a: {bar: bool} | A, b: {foo: int} | B, c: any} {
->     {a: x, b: x, c: x}
->   }
-> [A <: {foo: int}, B <: {bar: bool}] (nothing) -> {a: {bar: bool} | A, b: {foo: int} | B, c: any}
+> typechecking error: unimplemented: multi RV upper bounds
 
 
 # FIXME: spec_sub_rigid_pos should remove one of the variables here
@@ -636,11 +628,7 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|A|B, c:an
 >   {a: {bar: bool} | A, b: {foo: int} | A | B, c: any} {
 >   {a: x, b: x, c: x}
 > }
->   fn [A <: {foo: int}, B <: {bar: bool}](x: A) ->
->     {a: {bar: bool} | A, b: {foo: int} | A | B, c: any} {
->     {a: x, b: x, c: x}
->   }
-> [A <: {foo: int}, B <: {bar: bool}] (A) -> {a: {bar: bool} | A, b: {foo: int} | A | B, c: any}
+> typechecking error: unimplemented: multi RV upper bounds
 
 fn[A](x: any, y:A) { if true {x} else {y} }
 > fn [A](x: any, y: A) { if true { x } else { y } }
@@ -667,7 +655,7 @@ fn(x, y, k1, k2, k3) {
 >   ) -> (D, F) {
 >     let ch : [X] (X, X) -> X =
 >     fn [X](a: X, b: X) -> X { if true { a } else { b } };
->     let z : any = ch(x, y)(fn (x: A) -> B { k1(x) });
+>     let z : D | F = ch(x, y)(fn (x: A) -> B { k1(x) });
 >     (x(k2), y(k3))
 >   }
 > [A, B, C, D, E, F] ((((A) -> B) | C) -> D, (((A) -> B) | E) -> F, (A) -> B, C, E) -> (D, F)
@@ -687,7 +675,7 @@ fn(x, y) {
 >   fn [A, B](x: {bar: A, ...}, y: {bar: B, ...}) -> (A, B) {
 >     let ch : [X] (X, X) -> X =
 >     fn [X](a: X, b: X) -> X { if true { a } else { b } };
->     let z : any = ch(x, y).bar;
+>     let z : A | B = ch(x, y).bar;
 >     (x.bar, y.bar)
 >   }
 > [A, B] ({bar: A, ...}, {bar: B, ...}) -> (A, B)
@@ -703,13 +691,13 @@ fn(y) {
 >   let z = ch({bar: true}, y).bar;
 >   (y.bar : int)
 > }
->   fn (y: {bar: int, ...}) -> int {
+>   fn [A <: int](y: {bar: A, ...}) -> int {
 >     let ch : [X] (X, X) -> X =
 >     fn [X](a: X, b: X) -> X { if true { a } else { b } };
->     let z : any = ch({bar: true}, y).bar;
+>     let z : bool | A = ch({bar: true}, y).bar;
 >     (y.bar : int)
 >   }
-> ({bar: int, ...}) -> int
+> [A <: int] ({bar: A, ...}) -> int
 
 # same bug, in CPSish style (for nonstrictly positive vars)
 # tricky case requiring duplication of non-strictly-covariant vars in flex_cons_upper
@@ -759,19 +747,36 @@ fn (x, y, k) {
 >   ) -> (C, F) {
 >     let ch : [X] (X, X) -> X =
 >     fn [X](a: X, b: X) -> X { if true { a } else { b } };
->     let z : any = ch(x, y)(fn (a: A | D | G) -> int { let z : int = k(a); 1 });
+>     let z : C | F =
+>     ch(x, y)(fn (a: A | D | G) -> int { let z : int = k(a); 1 });
 >     (x(fn [A_2](x: A_2) -> A_2 { x }), y(fn [A_2](x: A_2) -> A_2 { x }))
 >   }
 > [A, B, C, D, E, F, G] (((A) -> int | A | B) -> C, ((D) -> int | D | E) -> F, (A | D | G) -> int) -> (C, F)
 
 fn  [A](a) -> A { let x = a; x }
 > fn [A](a) -> A { let x = a; x }
->   fn [A](a: A) -> A { let x : A = a; x }
-> [A] (A) -> A
+>   fn [A, B <: A](a: B) -> A { let x : B = a; x }
+> [A, B <: A] (B) -> A
+> RECHECK: Lang.Check.Fail(_, _)
+> 
+> ELAB: Lang.Check.Fail(_, _)
+> 
+> ELABINF: Lang.Check.Fail(_, _)
 
 fn [A](x:A, f:[B <: A](B) -> B) { x }
-
-
 > fn [A](x: A, f: [B <: A] (B) -> B) { x }
 > test:1: Bounds must be constructed types
-> STATS: fix: 72, flex: 2092
+
+# note RHS is {foo:int}, not {foo:int}|A
+fn[A <: {foo:int}](x:A, y:{foo:int}) { if true {x} else {y} }
+> fn [A <: {foo: int}](x: A, y: {foo: int}) { if true { x } else { y } }
+>   fn [A <: {foo: int}](x: A, y: {foo: int}) -> {foo: int} {
+>     if true {
+>       x
+>     } else {
+>       y
+>     }
+>   }
+> [A <: {foo: int}] (A, {foo: int}) -> {foo: int}
+
+> STATS: fix: 57, flex: 1962

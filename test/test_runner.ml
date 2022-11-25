@@ -58,8 +58,8 @@ let run_cmd s =
       | _ -> println "MISMATCH"
      end;
      let open Typedefs in
-     begin match Check.elab_gen Env_nil None (fun env -> Check.infer env e) with
-     | t, elab ->
+     begin match Check.elab_gen Env_nil ~mode:(Check.fresh_gen_mode ()) None (fun env -> let a, b = Check.infer env ~mode:(Check.fresh_gen_mode ()) e in a, b, None) with
+     | t, elab, _ ->
         begin
         let poly, _ty, elab = Elab.elaborate Env_nil elab in
         let elab = Exp.(map_exp normalise elab) in
@@ -82,7 +82,7 @@ let run_cmd s =
           wf_ptyp env0 t;
           let t = Check.typ_of_tyexp env0 te in
           let env0 = env0 in
-          Check.check env0 e t |> ignore
+          Check.check env0 ~mode:(Check.fresh_gen_mode ()) e t |> ignore
         with e ->
             println "RECHECK: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
         end;
@@ -90,12 +90,12 @@ let run_cmd s =
           wf_ptyp env0 t;
           let t = Check.typ_of_tyexp env0 te in
           let env0 = env0 in
-          Check.check env0 elab t |> ignore
+          Check.check env0 ~mode:(Check.fresh_gen_mode ()) elab t |> ignore
         with e ->
             println "ELAB: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
         end;
         begin try
-          let t', _elab2 = Check.elab_gen Env_nil None (fun env -> Check.infer env elab) in
+          let t', _elab2, _gen = Check.elab_gen Env_nil ~mode:(Check.fresh_gen_mode ()) None (fun env -> let a, b = Check.infer env ~mode:(Check.fresh_gen_mode ()) elab in a, b, None) in
           let te' = Typedefs.unparse_ptyp ~flexvar:ignore t' in
           Types.subtype Env_nil t' (Check.typ_of_tyexp Env_nil te) |> Check.or_raise `Subtype noloc;
           Types.subtype Env_nil t (Check.typ_of_tyexp Env_nil te') |> Check.or_raise `Subtype noloc;

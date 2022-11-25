@@ -429,29 +429,11 @@ let map_ctor_rig neg pos { cons; rigvars } =
 
 
 
-(* Temporary structure used during generalisation *)
-type flexvar_gen_visit_counts = { mutable pos : int; mutable neg : int }
-
-type flexvar_gen_status =
-  | No_var_chosen
-  | Computing_bound
-  | Generalised of int
-  | Replace_with_rigid of (rigvar * Location.set) list
-
-type flexvar_gen =
-  | Not_generalising
-  | Generalising of {
-      level: env_level;
-      visit : flexvar_gen_visit_counts;
-      mutable bound_var : flexvar_gen_status
-    }
-
-
 (* Flexvars are mutable but only in one direction.
      - level may decrease
      - bounds may become tighter (upper decreases, lower increases) *)
 type flexvar =
-  { mutable level: env_level;
+  { level: env_level;
     mutable upper: styp_neg list; (* strictly covariant parts are matchable *)
     mutable lower: flex_lower_bound;
     id: int;    (* for printing/sorting *)
@@ -475,12 +457,32 @@ and flex_lower_bound =
   | Lower of flexvar UniqList.t * (flexvar, flex_lower_bound) ctor_ty
   | Ltop of Location.t option
 
-module Fvset = UniqList.Make(struct type t = flexvar let equal = (==) end)
-
-type typ_var =
+(* Variables in typs *)
+and typ_var =
   | Vbound of {index: int; var:int}
   | Vflex of flexvar
   | Vrigid of rigvar
+
+(* Temporary structure used during generalisation *)
+and flexvar_gen_visit_counts = { mutable pos : int; mutable neg : int }
+
+and flexvar_gen_status =
+  | No_var_chosen
+  | Computing_bound
+  | Generalised of int
+  | Kept of flexvar
+  | Replace_with_rigid of (rigvar * Location.set) list
+
+and flexvar_gen =
+  | Not_generalising
+  | Generalising of {
+      level: env_level;
+      visit : flexvar_gen_visit_counts;
+      mutable bound_var : flexvar_gen_status
+    }
+
+
+module Fvset = UniqList.Make(struct type t = flexvar let equal = (==) end)
 
 (* FIXME: enforce tjoin invariants, especially in neg types *)
 type (+'neg, +'pos) typ =
@@ -504,7 +506,10 @@ type ntyp = (flex_lower_bound, flexvar) typ
 
 type value_binding =
   { typ: ptyp;
-    closed: bool }
+    (* The level of the outermost unannotated lambda-bound parameter
+       reachable from this binding by expanding untyped let definitions.
+       (cf. Haskell's MonoLocalBinds) *)
+    gen_level: env_level option; }
 
 type env =
   | Env_vals of { vals : value_binding SymMap.t; rest : env }
@@ -557,10 +562,11 @@ let is_bottom t = equal_flex_lower_bound bottom t
 
 type flexvar_change =
   | Change_expanded_mark (* hack for logging expand changes *)
-  | Change_level of flexvar * env_level
+  (* | Change_level of flexvar * env_level *)
   | Change_upper of flexvar * styp_neg list
   | Change_lower of flexvar * flex_lower_bound
 
+(*
 let fv_set_level ~changes fv level =
   assert (Env_level.extends level fv.level);
   if not (Env_level.equal level fv.level) then begin
@@ -569,6 +575,7 @@ let fv_set_level ~changes fv level =
     (* Cancel any generalisation in progress (see expand) *)
     if fv.gen <> Not_generalising then fv.gen <- Not_generalising;
   end
+*)
 
 let fv_set_upper ~changes fv upper =
   changes := Change_upper (fv, fv.upper) :: !changes;
@@ -592,7 +599,7 @@ let fv_maybe_set_upper ~changes (fv : flexvar) upper =
 let revert changes =
   changes |> List.iter (function
   | Change_expanded_mark -> ()
-  | Change_level (fv, level) -> fv.level <- level
+  (* | Change_level (fv, level) -> fv.level <- level *)
   | Change_upper (fv, upper) -> fv.upper <- upper
   | Change_lower (fv, lower) -> fv.lower <- lower)
 
@@ -816,6 +823,7 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   assert (List.length rvsets = List.length (List.sort_uniq Rvset.compare rvsets));
   fv.upper |> List.iter (function
   | UBvar v ->
+     if fv.rotated then assert (not (Env_level.equal fv.level v.level));
      wf_flexvar ~seen env fv.level v
   | UBcons {cons;rigvars} ->
      (* Each rigvar set must contain all of the rigvars in the lower bound *)
@@ -931,7 +939,7 @@ let unparse_rigid_var ~env:(env,_) rv =
 let unparse_flexvar ~env:_ ~flexvar fv =
   flexvar fv;
   let name = flexvar_name fv in
-(*  let name = Printf.sprintf "%s@%d" name (Env_level.to_int fv.level) in*)
+  (* let name = Printf.sprintf "%s@%d" name (Env_level.to_int fv.level) in *)
   mktyexp (named_type name)
 
 let unparse_var ~flexvar ~env = function
@@ -1102,7 +1110,7 @@ let pp_changes ppf changes =
     | Change_expanded_mark -> Format.fprintf ppf "%s!" sp
     | Change_upper(v,_) -> pv v "-"
     | Change_lower(v,_) -> pv v "+"
-    | Change_level(v,_) -> pv v "@");
+(*    | Change_level(v,_) -> pv v "@"*));
   Format.fprintf ppf "]"
 
 

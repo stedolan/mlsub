@@ -52,13 +52,12 @@ fn (x) -> (any) -> any { let f = fn(a){x(a)}; f }
 
 fn (f) { fn(g,x) { (g(x.foo), f(x)) } }
 > fn (f) { fn (g, x) { (g(x.foo), f(x)) } }
->   fn [A, B <: {foo: A, ...}, C](f: (B) -> C) ->
->     [A_2] ((A) -> A_2, B) -> (A_2, C) {
->     fn [A_2](g: (A) -> A_2, x: B) -> (A_2, C) {
+>   fn [A, B <: {foo: A, ...}, C, D](f: (B) -> C) -> ((A) -> D, B) -> (D, C) {
+>     fn (g: (A) -> D, x: B) -> (D, C) {
 >       (g(x.foo), f(x))
 >     }
 >   }
-> [A, B <: {foo: A, ...}, C] ((B) -> C) -> [A_2] ((A) -> A_2, B) -> (A_2, C)
+> [A, B <: {foo: A, ...}, C, D] ((B) -> C) -> ((A) -> D, B) -> (D, C)
 
 
 let twice = fn(f, x) {f(f(x)) };
@@ -76,4 +75,4 @@ fn() { twice(id, id)(id) }
 >     twice(id, id)(id)
 >   }
 > [A] () -> (A) -> A
-> STATS: fix: 23, flex: 271
+> STATS: fix: 14, flex: 272

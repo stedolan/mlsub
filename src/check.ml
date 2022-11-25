@@ -235,18 +235,41 @@ let unit loc = tcons loc (Record (Tuple_fields.collect_fields []))
 
 open Elab
 
+type generalisation_mode = {
+  mutable gen_level_acc: env_level option;
+}
+
+let fresh_gen_mode () : generalisation_mode =
+  { gen_level_acc = None }
+
+let mark_var_use_at_level ~(mode : generalisation_mode) lvl =
+  mode.gen_level_acc <-
+    match mode.gen_level_acc, lvl with
+    | None, x | x, None -> x
+    | Some l1, Some l2 ->
+       Some (Env_level.min l1 l2)
+
 let fixpoint_iters = ref 0
 let verbose_types = match Sys.getenv "VERBOSE_TYPES" with _ -> true | exception Not_found -> false
 
-let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds option * tyexp * 'a) elab =
+let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _) : ptyp * (typolybounds option * tyexp * 'a) elab * bool =
   let rigvars', rig_names =
     match poly with
     | None -> IArray.empty, SymMap.empty
     | Some poly -> enter_polybounds env poly in
 
   let env', rigvars = enter_rigid env rigvars' rig_names in
-  let orig_ty, Elab (erq, ek) = fn env' in
+  let orig_ty, Elab (erq, ek), gen_level = fn env' in
   wf_ptyp env' orig_ty;
+  (* Format.printf "ELAB %a{\n%a}@." dump_ptyp orig_ty pp_elab_req erq; *)
+  let can_generalise =
+    match gen_level with
+    | None -> true
+    | Some lvl when Env_level.equal lvl (env_level env') -> true
+    | lvl ->
+       mark_var_use_at_level ~mode lvl;
+       false
+  in
   let rec fixpoint visit erq prev_ty =
     if verbose_types then Format.printf "FIX: %a" dump_ptyp orig_ty;
     if visit > 99 then intfail "looping?";
@@ -266,15 +289,16 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
 
   let bvars = Vector.create () in
   rigvars |> IArray.iter (fun rv -> ignore (Vector.push bvars (Gen_rigid rv)));
-
-  let subst = { mode = `Poly; visit; bvars; env = env'; level=env_level env'; index = 0 } in
+  (* Format.printf "ELAB2 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
+  let subst = { mode = `Poly; can_generalise; visit; bvars; env = env'; level=env_level env'; index = 0; hoist_env = env } in
   let ty = substn_ptyp subst ty in
   (* Format.printf "GEN: %a\n --> %a\n%!" dump_ptyp orig_ty pp_ptyp ty; *)
   let erq = elabreq_map_typs erq ~index:0
               ~neg:(fun ~index t -> substn_ntyp {subst with index; mode=`Elab} t)
               ~pos:(fun ~index t -> substn_ptyp {subst with index; mode=`Elab} t) in
+  (* Format.printf "ELAB3 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
   if Vector.length bvars = 0 then
-    ty, Elab (Pair(Ptyp ty, erq), fun (t,e) -> None, t, ek e)
+    ty, Elab (Pair(Ptyp ty, erq), fun (t,e) -> None, t, ek e), can_generalise
   else
     let next_name = ref 0 in
     let rec mkname () =
@@ -291,15 +315,18 @@ let elab_gen (env:env) poly (fn : env -> ptyp * 'a elab) : ptyp * (typolybounds 
     let tpoly = Tpoly { vars = bounds; body = ty } in
     wf_ptyp env tpoly;
     tpoly,
-    Elab (Gen{bounds; body=Pair(Ptyp ty, erq)}, fun (poly, (t,e)) -> Some poly, t, ek e)
+    Elab (Gen{bounds; body=Pair(Ptyp ty, erq)}, fun (poly, (t,e)) -> Some poly, t, ek e),
+    can_generalise
 
-let elab_ptyp = function
+(* FIXME:
+   Can't decide whether this makes types better or worse! *)
+(*let elab_ptyp = function
   | Tsimple (Lower(fv, ctor)) as ty when is_bottom (Lower(Fvset.empty,ctor)) ->
      (match (fv :> flexvar list) with
       | [fv] -> Elab (Ntyp (Tsimple fv), fun x -> x)
       | _ -> Elab (Ptyp ty, fun x -> x))
   | ty ->
-     Elab (Ptyp ty, fun x -> x)
+     Elab (Ptyp ty, fun x -> x)*)
   
 let fresh_flow env =
   let fv = fresh_flexvar (env_level env) in
@@ -320,31 +347,31 @@ let inspect = function
      (match Cons.get_single c with Some c -> Icons c | _ -> Iother)
   | Ttop _ | Tvar _ | Tjoin _ -> Iother
 
-let rec check env e (ty : ntyp) : exp elab =
+let rec check env ~(mode : generalisation_mode) e (ty : ntyp) : exp elab =
   wf_ntyp env ty;
   match e with
   | None, loc -> fail loc Syntax
   | Some e, loc ->
-     let* e = check' env loc e ty in
+     let* e = check' env ~mode loc e ty in
      Some e, loc
-and check' env eloc e ty =
+and check' env ~mode eloc e ty =
   match e, inspect ty with
   | If (e, ifso, ifnot), _ ->
-     let* e = check env e (tcons (snd e) Bool)
-     and* ifso = check env ifso ty
-     and* ifnot = check env ifnot ty in
+     let* e = check env ~mode e (tcons (snd e) Bool)
+     and* ifso = check env ~mode ifso ty
+     and* ifnot = check env ~mode ifnot ty in
      If (e, ifso, ifnot)
   | Parens e, _ ->
-     let* e = check env e ty in
+     let* e = check env ~mode e ty in
      Parens e
   | Tuple ef, Icons (Record tf) ->
      let infer_typed env ((_,loc) as e) =
-       let ty, e = infer env e in
+       let ty, e = infer env ~mode e in
        let* e = e and* ty = elab_ptyp ty in
        Some (Typed (e, ty)), loc in
      let merged =
        merge_fields ef tf
-         ~both:(fun _fn e ty -> Some (check env e ty))
+         ~both:(fun _fn e ty -> Some (check env ~mode e ty))
          ~left:(fun _fn e -> Some (infer_typed env e))
          ~right:(fun fn _ty -> failwith ("missing " ^ string_of_field_name fn) )
          ~extra:(function
@@ -359,31 +386,29 @@ and check' env eloc e ty =
      let r = { fields = FieldMap.singleton (Field_named field) ty;
                fnames = [Field_named field];
                fopen = `Open } in
-     let* e = check env e (tcons eloc (Record r)) in
+     let* e = check env ~mode e (tcons eloc (Record r)) in
      Proj (e, (field, loc))
   | Let (p, pty, e, body), _ ->
-     let pty, e = check_or_infer env pty e in
-     let pty, vs = check_pat env pty p in
-     let env = Env_vals { vals = vs; rest = env } in
-     let* e = e and* pty = elab_ptyp pty and* body = check env body ty in
+     let env, pty, e = check_binding env ~mode p pty e in
+     let* e = e and* pty = elab_ptyp pty and* body = check env ~mode body ty in
      Let(p, Some pty, e, body)
   | Seq (e1, e2), _ ->
-     let e1 = check env e1 (unit eloc) in
-     let e2 = check env e2 ty in
+     let e1 = check env ~mode e1 (unit eloc) in
+     let e2 = check env ~mode e2 ty in
      let* e1 = e1 and* e2 = e2 in Seq (e1, e2)
   (* FIXME should I combine Tpoly and Func? *)
   | Fn _ as f, Ipoly { vars; body } ->
      (* rigvars not in scope in body, so no rig_names *)
      let env', rigvars = enter_rigid env vars SymMap.empty in
      let body = open_typ_rigid rigvars body in
-     check' env' eloc f body
+     check' env' ~mode eloc f body
      (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
   | Fn (None, params, ret, body), Icons (Func (ptypes, rtype)) ->
      (* If poly <> None, then we should infer & subtype *)
      (* FIXME: do we need another level here? Does hoisting break things? *)
      let _, vals = check_parameters env params ptypes in
      let env' = Env_vals { vals; rest = env } in
-     let* body = check env' body (check_annot env' ret rtype) in
+     let* body = check env' ~mode body (check_annot env' ret rtype) in
      (* No elaboration. Arguably we could *delete* annotations here! *)
      Fn (None, params, ret, body)
   | Pragma "true", Icons Bool -> elab_pure e
@@ -392,39 +417,41 @@ and check' env eloc e ty =
      (* Default case: infer and subtype. *)
      (* FIXME: we probably shouldn't even attempt this on intro forms
         at the wrong type. e.g. checking (1,2) against int *)
-     let ty', e = infer' env eloc e in
+     let ty', e = infer' ~mode env eloc e in
      subtype env ty' ty |> or_raise `Expr eloc;
      wf_ntyp env ty;
      let* e = e in e
 
-and infer env : exp -> ptyp * exp elab = function
+and infer env ~(mode : generalisation_mode) : exp -> ptyp * exp elab = function
   | None, loc -> fail loc Syntax
   | Some e, loc ->
-     let ty, e = infer' env loc e in
+     let ty, e = infer' env ~mode loc e in
      wf_ptyp env ty;
      ty, (let* e = e in Some e, loc)
-and infer' env eloc : exp' -> ptyp * exp' elab = function
+and infer' env ~mode eloc : exp' -> ptyp * exp' elab = function
   | Lit l -> infer_lit l
   | Var (id,loc) as e ->
      begin match env_lookup_var env id with
-     | Ok v -> v.typ, elab_pure e
+     | Ok v ->
+        mark_var_use_at_level ~mode v.gen_level;
+        v.typ, elab_pure e
      | Error e -> fail loc e
      end
   | Typed (e, ty) ->
      let t = typ_of_tyexp env ty in
-     t, let* e = check env e t in Typed (e, ty)
+     t, let* e = check env ~mode e t in Typed (e, ty)
   | Parens e ->
-     let ty, e = infer env e in
+     let ty, e = infer env ~mode e in
      ty, let* e = e in Parens e
   | If (e, ifso, ifnot) ->
-     let e = check env e (tcons (snd e) Bool)
-     and tyso, ifso = infer env ifso
-     and tynot, ifnot = infer env ifnot in
+     let e = check env ~mode e (tcons (snd e) Bool)
+     and tyso, ifso = infer env ~mode ifso
+     and tynot, ifnot = infer env ~mode ifnot in
      join_ptyp env tyso tynot,
      let* e = e and* ifso = ifso and* ifnot = ifnot in
      If (e, ifso, ifnot)
   | Proj (e, (field, loc)) ->
-     let ty, e = infer env e in
+     let ty, e = infer env ~mode e in
      let f = Field_named field in
      let (), tyf =
        match
@@ -438,51 +465,51 @@ and infer' env eloc : exp' -> ptyp * exp' elab = function
      tyf, let* e = e in Proj (e, (field, loc))
   | Tuple fields ->
      if fields.fopen = `Open then failwith "invalid open tuple ctor";
-     let fields = map_fields (fun _fn e -> infer env e) fields in
+     let fields = map_fields (fun _fn e -> infer env ~mode e) fields in
      tcons eloc (Record (map_fields (fun _ (ty, _e) -> ty) fields)),
      let* fields = elab_fields (map_fields (fun _fn (_ty, e) -> e) fields) in
      Tuple fields
   | Pragma "bot" as e -> Tcons (Cons.bottom_loc eloc), elab_pure e
   | Pragma s -> failwith ("pragma: " ^ s)
   | Let (p, pty, e, body) ->
-     let pty, e = check_or_infer env pty e in
-     let pty, vals = check_pat env pty p in
-     let env = Env_vals { rest=env; vals } in
-     let res, body = infer env body in
+     let env, pty, e = check_binding env ~mode p pty e in
+     let res, body = infer env ~mode body in
      res,
      let* e = e and* pty = elab_ptyp pty and* body = body in
      Let(p, Some pty, e, body)
   | Seq (e1, e2) ->
-     let e1 = check env e1 (unit eloc) in
-     let ty, e2 = infer env e2 in
+     let e1 = check env ~mode e1 (unit eloc) in
+     let ty, e2 = infer env ~mode e2 in
      ty, let* e1 = e1 and* e2 = e2 in Seq(e1, e2)
   | Fn (poly, params, ret, body) ->
      if params.fopen = `Open then failwith "invalid ... in params";
-     let ty, elab =
-       elab_gen env poly (fun env ->
+     let ty, elab, _generalised =
+       elab_gen env ~mode poly (fun env ->
          let params = map_fields (fun _fn (p, ty) ->
            match ty with
            | Some ty ->
               let ty = typ_of_tyexp env ty in
               (* check for contravariant joins *)
               ignore (close_typ_rigid ~ispos:false (env_level env) ty);
-              ty, p
-           | None -> fresh_flow env, p) params in
-         let ptys = map_fields (fun _fn (t, p) -> check_pat env t p) params in
+              ty, p, None
+           | None ->
+              fresh_flow env, p, Some (env_level env)) params in
+         let ptys = map_fields (fun _fn (t, p, gen_level) -> check_pat env ~gen_level t p) params in
          let _, vs = merge_bindings ptys in
          let env' = Env_vals { vals = vs; rest = env } in
+         let bmode = fresh_gen_mode () in
          let res, body =
            match ret with
            | Some ty ->
               let ty = typ_of_tyexp env ty in
               ignore (close_typ_rigid ~ispos:true (env_level env) ty);
-              ty, check env' body ty
+              ty, check env' ~mode:bmode body ty
            | None ->
-              infer env' body in
-         let _ = map_fields (fun _fn (t,_) -> wf_ntyp env t) params in
+              infer env' ~mode:bmode body in
+         let _ = map_fields (fun _fn (t,_,_) -> wf_ntyp env t) params in
          (* FIXME params or ptys? What happens if they disagree? *)
-         tcons eloc (Func (map_fields (fun _fn (t,_) -> t) params, res)),
-         body) in
+         tcons eloc (Func (map_fields (fun _fn (t,_,_) -> t) params, res)),
+         body, bmode.gen_level_acc) in
      ty,
      let* poly, ty, body = elab in
      let tparams, tret =
@@ -495,9 +522,15 @@ and infer' env eloc : exp' -> ptyp * exp' elab = function
          ~right:(fun _ _-> assert false)
          ~both:(fun _fn (p, _) t -> Some (p, Some t))
          ~extra:(fun ((c, _),_) -> c) in
+(*     let poly =
+       let mark = if generalised then [] else [("NOPOLY", Location.mark), None] in
+       match poly with
+       | None -> if mark = [] then None else Some mark
+       | Some p -> Some (mark @ p)
+     in*)
      Fn (poly, params, Some tret, body)
   | App (f, args) ->
-     let fty, f = infer env f in
+     let fty, f = infer env ~mode f in
      let tyargs, ((), tyret) =
        match
         match_typ env fty eloc (Func (args, ()))
@@ -505,7 +538,7 @@ and infer' env eloc : exp' -> ptyp * exp' elab = function
        | Ok (Func (a, r)) -> a, r
        | Ok _ -> assert false
        | Error e -> fail eloc (Conflict (`Expr, e)) in
-     let args = map_fields (fun _fn (e, t) -> check env e t) tyargs in
+     let args = map_fields (fun _fn (e, t) -> check env ~mode e t) tyargs in
      tyret,
      let* f = f and* args = elab_fields args in
      App(f, args)
@@ -520,21 +553,22 @@ and merge_bindings bs =
   fold_fields (fun acc _fn (_, b) ->
       SymMap.merge merge acc b) SymMap.empty bs
 
-and check_pat env ty = function
+and check_pat env ~gen_level ty = function
   | None, _ -> failwith "bad pat"
-  | Some p, loc -> check_pat' env ty loc p
-and check_pat' env ty ploc = function
-  | Pvar (s,_) -> ty, SymMap.singleton s {typ = ty; closed = false }
-  | Pparens p -> check_pat env ty p
+  | Some p, loc -> check_pat' env ~gen_level ty loc p
+and check_pat' env ~gen_level ty ploc = function
+  | Pvar (s,_) -> ty, SymMap.singleton s {typ = ty; gen_level }
+  | Pparens p -> check_pat env ~gen_level ty p
   | Ptuple fs ->
      let fs =
+       (* FIXME: fvinst? *)
        match
         match_typ env ty ploc (Record fs)
        with
        | Ok (Record fs) -> fs
        | Ok _ -> assert false
        | Error e -> fail ploc (Conflict (`Pat, e)) in
-     let fs = map_fields (fun _fn (p, t) -> check_pat env t p) fs in
+     let fs = map_fields (fun _fn (p, t) -> check_pat env ~gen_level t p) fs in
      let fs, bindings = merge_bindings fs in
      tcons ploc (Record fs), bindings
 
@@ -542,14 +576,15 @@ and check_parameters env params ptypes =
   let merged =
     merge_fields params ptypes
       ~both:(fun _fn (p,aty) typ ->
-        let ty =
+        let ty, gen_level =
           match aty with
-          | None -> typ
+          | None ->
+             typ, Some (env_level env)
           | Some ty ->
              let t = typ_of_tyexp env ty in
              subtype env typ t |> or_raise `Pat (snd ty);
-             t in
-        Some (check_pat env ty p))
+             t, None in
+        Some (check_pat env ~gen_level ty p))
       ~left:(fun _fn (_p, _aty) -> failwith "extra param")
       ~right:(fun _fn _typ -> failwith "missing param")
       ~extra:(fun _ -> `Closed) in
@@ -562,13 +597,21 @@ and infer_lit' loc = function
   | Int _ -> tcons loc Int
   | String _ -> tcons loc String
 
-and check_or_infer env ty e : ptyp * exp elab =
-  match ty with
-  | None ->
-     infer env e
-  | Some ty ->
-     let t = typ_of_tyexp env ty in
-     t, check env e t
+and check_binding env ~mode p pty e =
+  let pty, e, gen_level =
+    match pty with
+    | None ->
+       let bmode = fresh_gen_mode () in
+       let pty, e = infer env ~mode:bmode e in
+       mark_var_use_at_level ~mode bmode.gen_level_acc;
+       pty, e, bmode.gen_level_acc
+    | Some ty ->
+       let t = typ_of_tyexp env ty in
+       t, check env ~mode e t, None
+  in
+  let pty, vs = check_pat env ~gen_level pty p in
+  let env = Env_vals { vals = vs; rest = env } in
+  env, pty, e
 
 and check_annot env annot ty =
   wf_ntyp env ty;
