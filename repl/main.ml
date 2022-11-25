@@ -2,10 +2,9 @@ open Lang
 open Typedefs
 open Types
   
-(*
 open Parse
 let app_name = "polytope"
-
+(*
 let rec run_repl ~histfile () =
   Printf.printf "%!";
   match LNoise.linenoise "> " with
@@ -14,13 +13,15 @@ let rec run_repl ~histfile () =
     LNoise.history_add line |> ignore;
     LNoise.history_save ~filename:histfile |> ignore;
     begin match Parse.parse_string line with
-    | Ok e ->
+    | Ok (`Exp e) ->
        PPrint.ToChannel.pretty 1. 80 stdout
-         (Print.print_exp e);
+         (Print.exp e);
        Printf.printf "\n: %!";
        PPrint.ToChannel.pretty 1. 80 stdout
          (Typedefs.pr_typ Pos (Check.infer Check.env0 e));
        Printf.printf "\n%!"
+    | Ok (`Sub _) ->
+       ()
     | Error _ -> raise (Fatal Unexpected_eof)
     end;
     run_repl ~histfile ()
