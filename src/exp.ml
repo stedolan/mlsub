@@ -16,9 +16,9 @@ type exp = exp' mayloc and exp' =
   (* x *)
   | Var of ident
   (* fn [...](a, b, c) { ... } *)
-  | Fn of typolybounds option * parameters * tyexp option * exp
+  | Fn of func_def
   (* fn f(a, b, c) { .... }; ... *)
-  (* | Def of symbol * typed_pats * exp * exp *)
+  | FnDef of symbol * func_def * exp
   (* f(...) *)
   | App of exp * exp tuple_fields
   (* (a, b, c) or {x: a, y, z: c}*)
@@ -37,6 +37,8 @@ type exp = exp' mayloc and exp' =
   | Parens of exp
   (* @foo *)
   | Pragma of string
+
+and func_def = typolybounds option * parameters * tyexp option * exp
 
 and parameters = (pat * tyexp option) tuple_fields
 
@@ -79,17 +81,23 @@ let mapper =
     | (None, l) -> (None, recr.loc recr l)
     | (Some x, l) -> (Some (f recr x), recr.loc recr l) in
 
+  let fndef r (poly, args, ret, body) =
+    let poly = Option.map (List.map (fun (s, t) -> (sym r s, Option.map (r.tyexp r) t))) poly in
+    let args = map_fields (fun _fn (p, t) -> (r.pat r p, Option.map (r.tyexp r) t)) args in
+    let ret = Option.map (r.tyexp r) ret in
+    let body = r.exp r body in
+    (poly, args, ret, body)
+  in
+
   let exp = mayloc @@ fun r e -> match e with
     | Lit (l, loc) ->
        Lit (l, r.loc r loc)
     | Var (n, loc) ->
        Var (n, r.loc r loc)
-    | Fn (poly, args, ret, body) ->
-       let poly = Option.map (List.map (fun (s, t) -> (sym r s, Option.map (r.tyexp r) t))) poly in
-       let args = map_fields (fun _fn (p, t) -> (r.pat r p, Option.map (r.tyexp r) t)) args in
-       let ret = Option.map (r.tyexp r) ret in
-       let body = r.exp r body in
-       Fn (poly, args, ret, body)
+    | Fn def ->
+       Fn (fndef r def)
+    | FnDef (s, def, body) ->
+       FnDef (sym r s, fndef r def, r.exp r body)
     | App (f, args) ->
        App (r.exp r f, map_fields (fun _fn e -> r.exp r e) args)
     | Tuple es ->

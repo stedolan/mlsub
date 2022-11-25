@@ -411,6 +411,15 @@ and check' env ~mode eloc e ty =
      let* body = check env' ~mode body (check_annot env' ret rtype) in
      (* No elaboration. Arguably we could *delete* annotations here! *)
      Fn (None, params, ret, body)
+  | FnDef ((s, sloc), fndef, body), _ ->
+     let fmode = fresh_gen_mode () in
+     let fty, fndef = infer_func_def env ~mode:fmode eloc fndef in
+     mark_var_use_at_level ~mode fmode.gen_level_acc;
+     let binding = {typ = fty; gen_level = fmode.gen_level_acc } in
+     let env = Env_vals { vals = SymMap.singleton s binding; rest = env } in
+     let body = check env ~mode body ty in
+     let* fndef = fndef and* body = body in
+     FnDef((s,sloc), fndef, body)
   | Pragma "true", Icons Bool -> elab_pure e
   | Pragma "false", Icons Bool -> elab_pure e
   | e, _ ->
@@ -481,54 +490,19 @@ and infer' env ~mode eloc : exp' -> ptyp * exp' elab = function
      let e1 = check env ~mode e1 (unit eloc) in
      let ty, e2 = infer env ~mode e2 in
      ty, let* e1 = e1 and* e2 = e2 in Seq(e1, e2)
-  | Fn (poly, params, ret, body) ->
-     if params.fopen = `Open then failwith "invalid ... in params";
-     let ty, elab, _generalised =
-       elab_gen env ~mode poly (fun env ->
-         let params = map_fields (fun _fn (p, ty) ->
-           match ty with
-           | Some ty ->
-              let ty = typ_of_tyexp env ty in
-              (* check for contravariant joins *)
-              ignore (close_typ_rigid ~ispos:false (env_level env) ty);
-              ty, p, None
-           | None ->
-              fresh_flow env, p, Some (env_level env)) params in
-         let ptys = map_fields (fun _fn (t, p, gen_level) -> check_pat env ~gen_level t p) params in
-         let _, vs = merge_bindings ptys in
-         let env' = Env_vals { vals = vs; rest = env } in
-         let bmode = fresh_gen_mode () in
-         let res, body =
-           match ret with
-           | Some ty ->
-              let ty = typ_of_tyexp env ty in
-              ignore (close_typ_rigid ~ispos:true (env_level env) ty);
-              ty, check env' ~mode:bmode body ty
-           | None ->
-              infer env' ~mode:bmode body in
-         let _ = map_fields (fun _fn (t,_,_) -> wf_ntyp env t) params in
-         (* FIXME params or ptys? What happens if they disagree? *)
-         tcons eloc (Func (map_fields (fun _fn (t,_,_) -> t) params, res)),
-         body, bmode.gen_level_acc) in
-     ty,
-     let* poly, ty, body = elab in
-     let tparams, tret =
-       match ty with
-       | Some (Tfunc (p,r)), _ -> p, r
-       | ty -> intfail "what? %a" pp_tyexp ty in
-     let params =
-       merge_fields params tparams
-         ~left:(fun _ _ -> assert false)
-         ~right:(fun _ _-> assert false)
-         ~both:(fun _fn (p, _) t -> Some (p, Some t))
-         ~extra:(fun ((c, _),_) -> c) in
-(*     let poly =
-       let mark = if generalised then [] else [("NOPOLY", Location.mark), None] in
-       match poly with
-       | None -> if mark = [] then None else Some mark
-       | Some p -> Some (mark @ p)
-     in*)
-     Fn (poly, params, Some tret, body)
+  | Fn fndef ->
+     let ty, fndef = infer_func_def env ~mode eloc fndef in
+     ty, let* fndef = fndef in Fn fndef
+  | FnDef ((s,sloc), fndef, body) ->
+     let fmode = fresh_gen_mode () in
+     let fty, fndef = infer_func_def env ~mode:fmode eloc fndef in
+     mark_var_use_at_level ~mode fmode.gen_level_acc;
+     let binding = {typ = fty; gen_level = fmode.gen_level_acc } in
+     let env = Env_vals { vals = SymMap.singleton s binding; rest = env } in
+     let res, body = infer env ~mode body in
+     res,
+     let* fndef = fndef and* body = body in
+     FnDef((s,sloc), fndef, body)
   | App (f, args) ->
      let fty, f = infer env ~mode f in
      let tyargs, ((), tyret) =
@@ -542,6 +516,56 @@ and infer' env ~mode eloc : exp' -> ptyp * exp' elab = function
      tyret,
      let* f = f and* args = elab_fields args in
      App(f, args)
+
+and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def elab =
+   if params.fopen = `Open then failwith "invalid ... in params";
+   let ty, elab, _generalised =
+     elab_gen env ~mode poly (fun env ->
+       let params = map_fields (fun _fn (p, ty) ->
+         match ty with
+         | Some ty ->
+            let ty = typ_of_tyexp env ty in
+            (* check for contravariant joins *)
+            ignore (close_typ_rigid ~ispos:false (env_level env) ty);
+            ty, p, None
+         | None ->
+            fresh_flow env, p, Some (env_level env)) params in
+       let ptys = map_fields (fun _fn (t, p, gen_level) -> check_pat env ~gen_level t p) params in
+       let _, vs = merge_bindings ptys in
+       let env' = Env_vals { vals = vs; rest = env } in
+       let bmode = fresh_gen_mode () in
+       let res, body =
+         match ret with
+         | Some ty ->
+            let ty = typ_of_tyexp env ty in
+            ignore (close_typ_rigid ~ispos:true (env_level env) ty);
+            ty, check env' ~mode:bmode body ty
+         | None ->
+            infer env' ~mode:bmode body in
+       let _ = map_fields (fun _fn (t,_,_) -> wf_ntyp env t) params in
+       (* FIXME params or ptys? What happens if they disagree? *)
+       tcons eloc (Func (map_fields (fun _fn (t,_,_) -> t) params, res)),
+       body, bmode.gen_level_acc) in
+   ty,
+   let* poly, ty, body = elab in
+   let tparams, tret =
+     match ty with
+     | Some (Tfunc (p,r)), _ -> p, r
+     | ty -> intfail "what? %a" pp_tyexp ty in
+   let params =
+     merge_fields params tparams
+       ~left:(fun _ _ -> assert false)
+       ~right:(fun _ _-> assert false)
+       ~both:(fun _fn (p, _) t -> Some (p, Some t))
+       ~extra:(fun ((c, _),_) -> c) in
+(*     let poly =
+     let mark = if generalised then [] else [("NOPOLY", Location.mark), None] in
+     match poly with
+     | None -> if mark = [] then None else Some mark
+     | Some p -> Some (mark @ p)
+   in*)
+   (poly, params, Some tret, body)
+  
 
 and merge_bindings bs =
   let merge k a b =

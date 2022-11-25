@@ -40,18 +40,9 @@ let sep ?(trail=false) s xs =
 let rec exp e = mayloc e @@ function
   | Lit (l, _) -> literal l
   | Var s -> ident s
-  | Fn (poly, params, ty, body) ->
-     group (
-       string "fn" ^^ space ^^
-       (match poly with
-        | None -> empty
-        | Some poly -> typolybounds poly) ^^
-       parens (fields parameter params) ^^
-       (match ty with
-        | None -> empty
-        | Some ty ->
-           indent (blank 1 ^^ group (string "->" ^^ break 1 ^^ group (tyexp ty))))) ^^
-     block body
+  | Fn def -> fndef ~name:None def
+  | FnDef (s, def, body) ->
+     fndef ~name:(Some s) def ^^ break 1 ^^ exp body
   | Seq (e1, e2) ->
      group (exp e1 ^^ semi) ^^ break 1 ^^ exp e2
   | Let (p, ty, e, body) ->
@@ -69,6 +60,20 @@ let rec exp e = mayloc e @@ function
   | Typed (e, t) -> parens (exp e ^^ opt_type_annotation (Some t))
   | Parens e -> parens (exp e)
   | Pragma s -> char '@' ^^ string s
+
+and fndef ~name (poly, params, ty, body) =
+  group (
+    string "fn" ^^ space ^^
+      (match name with None -> empty | Some s -> symbol s) ^^
+      (match poly with
+      | None -> empty
+      | Some poly -> typolybounds poly) ^^
+     parens (fields parameter params) ^^
+     (match ty with
+      | None -> empty
+      | Some ty ->
+         indent (blank 1 ^^ group (string "->" ^^ break 1 ^^ group (tyexp ty))))) ^^
+    block body
 
 and block e =
   space ^^ braces' (indent (break 1 ^^ exp e) ^^ break 1)

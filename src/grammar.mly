@@ -55,12 +55,10 @@ literal_:
 
 exp: e = mayloc(exp_) { e }
 exp_:
-| FN;
-  poly = ioption(typolybounds);
-  LPAR; params = separated_list(COMMA, parameter); RPAR;
-  ty = ioption(ARROW; t = tyexp {t});
-  LBRACE; body = exp; RBRACE
-  { Fn (poly, parse_fields params, ty, body) }
+| FN; def = fndef
+  { Fn def }
+| FN; s = symbol; def = fndef; e = exp %prec SEMI
+  { FnDef (s, def, e) }
 | IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; f = exp; RBRACE
   { If (e, t, f) }
 | s = PRAGMA
@@ -73,6 +71,13 @@ exp_:
   { Seq (e1, e2) }
 | t = term_
   { t }
+
+fndef:
+| poly = ioption(typolybounds);
+  LPAR; params = separated_list(COMMA, parameter); RPAR;
+  ty = ioption(ARROW; t = tyexp {t});
+  LBRACE; body = exp; RBRACE
+  { (poly, parse_fields params, ty, body) }
 
 term: e = mayloc(term_) { e }
 term_:
