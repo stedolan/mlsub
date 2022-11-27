@@ -370,17 +370,19 @@ let upper_is_bot = function
 
 let rec instantiate_flex env vars body =
   let fvars = IArray.map (fun _ -> fresh_flexvar (env_level env)) vars in
+  let fvneg _loc i = Tsimple (IArray.get fvars i) in
+  let fvpos _loc i = Tsimple (of_flexvar (IArray.get fvars i)) in
   IArray.iter2 (fun (fv : flexvar) (_,t) ->
     let b =
       match t with
       | None -> None
-      | Some t -> ntyp_to_upper ~simple:true env (open_typ_flex fvars t) in
+      | Some t -> ntyp_to_upper ~simple:true env (open_typ ~neg:fvpos ~pos:fvneg 0 t) in
     assert (fv.upper = [] && is_bottom fv.lower);
     match b with
     | None -> ()
     | Some b -> fv_set_upper ~changes:(ref []) fv [b])
     fvars vars;
-  open_typ_flex fvars body
+  open_typ ~neg:fvneg ~pos:fvpos 0 body
 
 and ptyp_to_lower ~simple env : ptyp -> flex_lower_bound = function
   | Tsimple t -> t
@@ -389,7 +391,6 @@ and ptyp_to_lower ~simple env : ptyp -> flex_lower_bound = function
      let cons = Cons.map ~neg:(ntyp_to_flexvar ~simple env) ~pos:(ptyp_to_lower ~simple env) cons in
      Lower(Fvset.empty, {cons; rigvars=Rvset.empty})
   | Tvar (_loc, Vbound _) -> intfail "Vbound"
-  | Tvar (_loc, Vflex fv) -> of_flexvar fv
   | Tvar (loc, Vrigid rv) -> of_rigvar (match loc with None -> Location.noloc | Some l -> l) rv
   | Tjoin (a, b) -> join_simple env (ptyp_to_lower ~simple:true env a) (ptyp_to_lower ~simple:true env b)
   | Tpoly {vars; body} ->
@@ -404,7 +405,6 @@ and ntyp_to_upper ~simple env : ntyp -> styp_neg option = function
      let cons = Cons.map ~neg:(ptyp_to_lower ~simple env) ~pos:(ntyp_to_flexvar ~simple env) cons in
      Some (UBcons {cons; rigvars = Rvset.empty})
   | Tvar (_loc, Vbound _) -> intfail "Vbound"
-  | Tvar (_loc, Vflex fv) -> Some (UBvar fv)
   | Tvar (loc, Vrigid rv) ->
      let loc = match loc with None -> Location.noloc | Some l -> l in
      Some (UBcons {cons = Cons.bottom; rigvars = Rvset.single (rv, loc)})
@@ -624,9 +624,9 @@ let rec map_typ_simple : 'neg1 'pos1 'neg2 'pos2 .
               ~pos:(map_typ_simple ~neg ~pos ~index)
               c)
   | Tjoin (a, b) -> Tjoin(map_typ_simple ~neg ~pos ~index a, map_typ_simple ~neg ~pos ~index b)
-  | Tvar (l, Vbound v) -> Tvar (l, Vbound v)
+  | Tvar (l, (Vbound _ as v)) -> Tvar (l, v)
   | Tsimple _
-  | Tvar (_, (Vflex _ | Vrigid _)) as t ->
+  | Tvar (_, Vrigid _) as t ->
      pos ~index t
   | Tpoly {vars; body} ->
      let index = index + 1 in
@@ -838,15 +838,23 @@ let rec promote_lower :
   fun s lb -> match lb with
   | Ltop loc -> Ttop loc
   | Lower (flexvars, {cons; rigvars}) -> 
+     (* FIXME: variable sort order below *)
      let cons = Cons.map ~neg:(promote_fv_neg s) ~pos:(promote_lower s) cons in
      let rigvars = promote_rigvars s rigvars in
-     let flexvars = (flexvars :> flexvar list) |> List.filter_map (promote_flexvar s) in
-     let flexvars = flexvars |> List.map (fun (x : (n,p) promote_flexvar_result) -> match x with
-       | Generalised var -> None, Vbound {index=s.index; var}
-       | Hoisted fv -> None, Vflex fv) in
-     (* FIXME use a better sort *)
-     let tvars = List.sort compare (rigvars @ flexvars) in
-     tvjoin ~base:(tcons cons) tvars
+     let t = tvjoin ~base:(tcons cons) (List.sort compare rigvars) in
+     match List.filter_map (promote_flexvar s) (flexvars :> flexvar list) with
+     | [] -> t
+     | flexvars ->
+        match s.policy with
+        | Policy_generalise ->
+           let flexvars = List.map (fun (Generalised var) -> None, Vbound {index=s.index; var}) flexvars in
+           (* FIXME use a better sort *)
+           tvjoin ~base:t (List.sort compare flexvars)
+        | Policy_hoist _env ->
+           let flexvars = List.map (fun (Hoisted fv) -> fv) flexvars in
+           (* FIXME: This can create joins between Tcons containing Vbound and flexvars.
+              Is this OK? They can only come up in explicit polymorphism w/ unannotated deps *)
+           tjoin t (Tsimple (of_flexvars (Fvset.of_list ~merge:(fun a _ -> a) flexvars)))
 
 and promote_fv_neg :
   type n p . (n, p) promote_info -> flexvar -> (p, n) typ =

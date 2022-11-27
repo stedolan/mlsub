@@ -42,7 +42,7 @@ let rec elaborate : type a . env:_ -> a elab_req -> a =
   | Ptyp t -> unparse_ptyp ~flexvar:ignore ~env t
   | Ntyp t -> unparse_ntyp ~flexvar:ignore ~env t
   | Gen { bounds; body } ->
-     let env, bounds = unparse_bounds ~flexvar:ignore ~env ~pos:(unparse_flex_lower_bound ~flexvar:ignore) ~neg:(unparse_flexvar ~flexvar:ignore) bounds in
+     let env, bounds = unparse_bounds ~env ~pos:(unparse_flex_lower_bound ~flexvar:ignore) ~neg:(unparse_flexvar ~flexvar:ignore) bounds in
      bounds, elaborate ~env body
 
 let rec elabreq_map_typs :

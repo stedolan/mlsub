@@ -22,7 +22,6 @@ let pp_err input loc err : PPrint.document =
   let pp fmt = Format.ksprintf PPrint.utf8string fmt in
   let pp_ty ~env t =
     Typedefs.unparse_gen_typ t
-      ~flexvar:ignore
       ~env
       ~neg:(fun ~env:_ () -> Typedefs.(mktyexp (named_type "_")))
       ~pos:(fun ~env:_ () -> Typedefs.(mktyexp (named_type "_")))
@@ -330,7 +329,7 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _) : ptyp * (typ
   
 let fresh_flow env =
   let fv = fresh_flexvar (env_level env) in
-  Tvar (None, Vflex fv)
+  Tsimple fv, Tsimple (of_flexvar fv)
 
 type inspect_result =
   | Ipoly of (flex_lower_bound, flexvar) poly_typ
@@ -527,10 +526,10 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
             let ty = typ_of_tyexp env ty in
             (* check for contravariant joins *)
             ignore (close_typ_rigid ~ispos:false (env_level env) ty);
-            ty, p, None
+            (ty,ty), p, None
          | None ->
             fresh_flow env, p, Some (env_level env)) params in
-       let ptys = map_fields (fun _fn (t, p, gen_level) -> check_pat env ~gen_level t p) params in
+       let ptys = map_fields (fun _fn ((_tn,tp), p, gen_level) -> check_pat env ~gen_level tp p) params in
        let _, vs = merge_bindings ptys in
        let env' = Env_vals { vals = vs; rest = env } in
        let bmode = fresh_gen_mode () in
@@ -542,9 +541,9 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
             ty, check env' ~mode:bmode body ty
          | None ->
             infer env' ~mode:bmode body in
-       let _ = map_fields (fun _fn (t,_,_) -> wf_ntyp env t) params in
+       let _ = map_fields (fun _fn ((tn,tp),_,_) -> wf_ntyp env tn; wf_ptyp env tp) params in
        (* FIXME params or ptys? What happens if they disagree? *)
-       tcons eloc (Func (map_fields (fun _fn (t,_,_) -> t) params, res)),
+       tcons eloc (Func (map_fields (fun _fn ((tn,_tp),_,_) -> tn) params, res)),
        body, bmode.gen_level_acc) in
    ty,
    let* poly, ty, body = elab in

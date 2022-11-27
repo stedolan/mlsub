@@ -400,7 +400,6 @@ and flex_lower_bound =
 (* Variables in typs *)
 and typ_var =
   | Vbound of {index: int; var:int}
-  | Vflex of flexvar
   | Vrigid of rigvar
 
 (* Temporary structure used during generalisation *)
@@ -491,7 +490,8 @@ let equal_styp_neg (p : styp_neg) (q : styp_neg) =
   | (UBvar _|UBcons _), _ -> false
 
 let bottom = Lower(Fvset.empty, {cons=Cons.bottom;rigvars=Rvset.empty})
-let of_flexvar fv = Lower(Fvset.single fv, {cons=Cons.bottom;rigvars=Rvset.empty})
+let of_flexvars fvs = Lower(fvs, {cons=Cons.bottom;rigvars=Rvset.empty})
+let of_flexvar fv = of_flexvars (Fvset.single fv)
 let of_rigvars rigvars = Lower(Fvset.empty, {cons=Cons.bottom;rigvars})
 let of_rigvar loc rv = of_rigvars (Rvset.single (rv, loc))
 let is_bottom t = equal_flex_lower_bound bottom t
@@ -625,7 +625,7 @@ let fv_gen_visit_neg env visit fv k =
 
 (* Assert that a typ contains no Vbound *)
 let assert_locally_closed_var ix = function
-  | Vrigid _ | Vflex _ -> ()
+  | Vrigid _ -> ()
   | Vbound {index; _} -> assert (index < ix)
 
 let rec assert_locally_closed :
@@ -666,15 +666,9 @@ let rec open_typ :
 let open_typ_rigid vars t =
   let mkv loc i = Tvar (loc, (Vrigid (IArray.get vars i))) in
   open_typ ~neg:mkv ~pos:mkv 0 t
-let open_typ_flex vars t =
-  let mkv loc i = Tvar (loc, (Vflex (IArray.get vars i))) in
-  open_typ ~neg:mkv ~pos:mkv 0 t
-
 
 let close_typ_var lvl f ~ispos ~isjoin index = function
   | Vrigid {level; _} as v when Env_level.equal lvl level ->
-     Vbound {index; var = f v ~ispos ~isjoin}
-  | Vflex fv as v when Env_level.equal lvl fv.level ->
      Vbound {index; var = f v ~ispos ~isjoin}
   | v -> v
 
@@ -794,38 +788,35 @@ and wf_flex_lower_bound ~seen env lvl l =
 
 
 
-let wf_var ~seen env ext = function
-  | Vflex fv -> wf_flexvar ~seen env fv.level fv
+let wf_var env ext = function
   | Vrigid rv -> wf_rigvar env rv.level rv
   | Vbound {index; var} ->
      assert (0 <= index && index < List.length ext);
      assert (0 <= var && var < snd (List.nth ext index))
 
 let rec wf_typ : 'pos 'neg .
-  seen:_ ->
   neg:('neg -> unit) ->
   pos:('pos -> unit) ->
   ispos:bool -> env -> (bool * int) list -> ('neg, 'pos) typ -> unit =
-  fun ~seen ~neg ~pos ~ispos env ext ty ->
+  fun ~neg ~pos ~ispos env ext ty ->
   match ty with
   | Tsimple s -> pos s
   | Ttop _ -> ()
   | Tcons c ->
-     Cons.map ~neg:(wf_typ ~seen ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) ~pos:(wf_typ ~seen ~neg ~pos ~ispos env ext) c |> ignore
-  | Tvar (_, v) -> wf_var ~seen env ext v
+     Cons.map ~neg:(wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) ~pos:(wf_typ ~neg ~pos ~ispos env ext) c |> ignore
+  | Tvar (_, v) -> wf_var env ext v
   | Tjoin (a, b) ->
-     (* FIXME additional check: no Vflex in negative joins *)
-     wf_typ ~seen ~neg ~pos ~ispos env ext a;
-     wf_typ ~seen ~neg ~pos ~ispos env ext b
+     wf_typ ~neg ~pos ~ispos env ext a;
+     wf_typ ~neg ~pos ~ispos env ext b
   | Tpoly {vars; body} ->
      let n_unique_vars = IArray.to_list vars |> List.map fst |> List.map fst |> List.sort_uniq String.compare |> List.length in
      assert (n_unique_vars = IArray.length vars);
      let ext = (ispos, IArray.length vars) :: ext in
      IArray.iter (fun (_, c) ->
        (* FIXME: constraints on c. Can it be e.g. Tsimple?
-          Not Vflex, at least. Prob not same binder either. *)
-       Option.iter (wf_typ ~seen ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) c) vars;
-     wf_typ ~seen ~neg ~pos ~ispos env ext body
+          Prob not same binder either. *)
+       Option.iter (wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) c) vars;
+     wf_typ ~neg ~pos ~ispos env ext body
 
 
 
@@ -882,9 +873,8 @@ let unparse_flexvar ~env:_ ~flexvar fv =
   (* let name = Printf.sprintf "%s@%d" name (Env_level.to_int fv.level) in *)
   mktyexp (named_type name)
 
-let unparse_var ~flexvar ~env = function
+let unparse_var ~env = function
   | Vbound {index; var} -> unparse_bound_var ~env index var
-  | Vflex fv -> unparse_flexvar ~env ~flexvar fv
   | Vrigid rv -> unparse_rigid_var ~env rv
 
 let unparse_joins = function
@@ -893,28 +883,28 @@ let unparse_joins = function
   | x :: xs -> List.fold_left (fun a b -> mktyexp (Exp.Tjoin (a, b))) x xs
 
 let rec unparse_gen_typ :
-  'neg 'pos . flexvar:_ -> env:(_ * _) -> neg:(env:(env*_) -> 'neg -> Exp.tyexp) -> pos:(env:(env*_) -> 'pos -> Exp.tyexp) ->
+  'neg 'pos . env:(_ * _) -> neg:(env:(env*_) -> 'neg -> Exp.tyexp) -> pos:(env:(env*_) -> 'pos -> Exp.tyexp) ->
              ('neg,'pos) typ -> Exp.tyexp =
-  fun ~flexvar ~env ~neg ~pos ty -> match ty with
+  fun ~env ~neg ~pos ty -> match ty with
   | Tsimple t -> pos ~env t
   | Ttop _ -> mktyexp (named_type "any")
   | Tcons c ->
      unparse_joins
        (List.map
-         (unparse_cons ~neg:(unparse_gen_typ ~flexvar ~env ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~flexvar ~env ~neg ~pos)) c.conses)
+         (unparse_cons ~neg:(unparse_gen_typ ~env ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~env ~neg ~pos)) c.conses)
   | Tvar (_, var) ->
-     unparse_var ~flexvar ~env var
+     unparse_var ~env var
   | Tjoin (a, b) ->
-     mktyexp (Exp.Tjoin (unparse_gen_typ ~flexvar ~env ~neg ~pos a,
-                         unparse_gen_typ ~flexvar ~env ~neg ~pos b))
+     mktyexp (Exp.Tjoin (unparse_gen_typ ~env ~neg ~pos a,
+                         unparse_gen_typ ~env ~neg ~pos b))
   | Tpoly { vars; body } ->
-     let env, bounds = unparse_bounds ~flexvar ~env ~neg ~pos vars in
-     mktyexp (Exp.Tforall(bounds, unparse_gen_typ ~flexvar ~env ~neg ~pos body))
+     let env, bounds = unparse_bounds ~env ~neg ~pos vars in
+     mktyexp (Exp.Tforall(bounds, unparse_gen_typ ~env ~neg ~pos body))
 
 and unparse_bounds :
-  'neg 'pos . flexvar:_ -> env:_ -> neg:(env:(env*_) -> 'neg -> Exp.tyexp) -> pos:(env:(env*_) -> 'pos -> Exp.tyexp) ->
+  'neg 'pos . env:_ -> neg:(env:(env*_) -> 'neg -> Exp.tyexp) -> pos:(env:(env*_) -> 'pos -> Exp.tyexp) ->
              (string Location.loc * ('pos,'neg) typ option) iarray -> _ * Exp.typolybounds =
-  fun ~flexvar ~env:(env,ext) ~neg ~pos vars ->
+  fun ~env:(env,ext) ~neg ~pos vars ->
   (* FIXME: this sort of freshening or shifts? *)
   (* FIXME: if freshening, use levels somehow to determine when not needed *)
   let taken name =
@@ -934,7 +924,7 @@ and unparse_bounds :
        | None | Some (Ttop _) ->
           s, None
        | Some t ->
-          s, Some (unparse_gen_typ ~flexvar ~env:(env,ext) ~pos:neg ~neg:pos t)) vars |> IArray.to_list
+          s, Some (unparse_gen_typ ~env:(env,ext) ~pos:neg ~neg:pos t)) vars |> IArray.to_list
 
 let unparse_join = function
   | [] -> mktyexp (named_type "nothing")
@@ -963,9 +953,9 @@ let unparse_styp_neg ~env ~flexvar = function
         List.map (unparse_rigid_var ~env) (List.map fst (Rvset.to_list rigvars)))
 
 let unparse_ptyp ~flexvar ?(env=(Env_nil,[])) (t : ptyp) =
-  unparse_gen_typ ~flexvar ~env ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) t
+  unparse_gen_typ ~env ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) t
 let unparse_ntyp ~flexvar ?(env=(Env_nil,[])) (t : ntyp) =
-  unparse_gen_typ ~flexvar ~env ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) t
+  unparse_gen_typ ~env ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) t
 
 
 
@@ -1057,7 +1047,7 @@ let pp_changes ppf changes =
 let wf_ptyp env (t : ptyp) =
   try
     let seen = Hashtbl.create 10 in
-    wf_typ ~seen ~neg:(wf_flexvar ~seen env (env_level env)) ~pos:(wf_flex_lower_bound ~seen env (env_level env)) ~ispos:true env [] t
+    wf_typ ~neg:(wf_flexvar ~seen env (env_level env)) ~pos:(wf_flex_lower_bound ~seen env (env_level env)) ~ispos:true env [] t
   with
   | Assert_failure (file, line, _char) when file = __FILE__ ->
      intfail "Ill-formed type (%s:%d): %a" file line pp_ptyp t
@@ -1065,7 +1055,7 @@ let wf_ptyp env (t : ptyp) =
 let wf_ntyp env (t : ntyp) =
   try
     let seen = Hashtbl.create 10 in
-    wf_typ ~seen ~neg:(wf_flex_lower_bound ~seen env (env_level env)) ~pos:(wf_flexvar ~seen env (env_level env)) ~ispos:false env [] t
+    wf_typ ~neg:(wf_flex_lower_bound ~seen env (env_level env)) ~pos:(wf_flexvar ~seen env (env_level env)) ~ispos:false env [] t
   with
   | Assert_failure (file, line, _char) when file = __FILE__ ->
      intfail "Ill-formed type (%s:%d): %a" file line pp_ntyp t

@@ -901,8 +901,8 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:a} } else { b } } }
 # no need to hoist in these cases, with no cons (because join commutes)
 fn(f) { fn(a,b) { let z = f(b); if true { b } else { a } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { b } else { a } } }
->   fn [A, B, C](f: (A) -> B) -> (C, A) -> C | A {
->     fn (a: C, b: A) -> C | A {
+>   fn [A, B, C](f: (A) -> B) -> (C, A) -> A | C {
+>     fn (a: C, b: A) -> A | C {
 >       let z : B = f(b);
 >       if true {
 >         b
@@ -911,12 +911,12 @@ fn(f) { fn(a,b) { let z = f(b); if true { b } else { a } } }
 >       }
 >     }
 >   }
-> [A, B, C] ((A) -> B) -> (C, A) -> C | A
+> [A, B, C] ((A) -> B) -> (C, A) -> A | C
 
 fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { a } else { b } } }
->   fn [A, B, C](f: (A) -> B) -> (C, A) -> C | A {
->     fn (a: C, b: A) -> C | A {
+>   fn [A, B, C](f: (A) -> B) -> (C, A) -> A | C {
+>     fn (a: C, b: A) -> A | C {
 >       let z : B = f(b);
 >       if true {
 >         a
@@ -925,7 +925,7 @@ fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
 >       }
 >     }
 >   }
-> [A, B, C] ((A) -> B) -> (C, A) -> C | A
+> [A, B, C] ((A) -> B) -> (C, A) -> A | C
 
 # type validity may require sorting rigvars
 (@bot : [A, B] ((A) -> B) -> [A_2] (A_2, A) -> A | A_2)

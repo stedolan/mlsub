@@ -39,7 +39,7 @@ let dump env (t : ptyp) =
 
 let fresh_flow lvl =
   let fv = fresh_flexvar lvl in
-  Tvar (None, Vflex fv), Tvar (None, Vflex fv)
+  Tsimple fv, Tsimple (of_flexvar fv)
 
 
 let match_as_fn env f =
