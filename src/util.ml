@@ -92,6 +92,7 @@ module UniqList : sig
 
     val iter : t -> f:(el -> unit) -> unit
     val to_list : t -> el list
+    val of_list : merge:(el -> el -> el) -> el list -> t
   end
 end = struct
   type 'a t = 'a list
@@ -136,6 +137,8 @@ end = struct
     let iter xs ~f = List.iter f xs
 
     let to_list x = x
+
+    let of_list ~merge x = append' ~merge empty x
   end
 end
 
