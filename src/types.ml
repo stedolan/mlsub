@@ -531,7 +531,7 @@ let rec match_typ env (p : ptyp) loc head =
      let instneg (_,v) =
        let fv = fresh_flexvar (env_level env) in
        v := Tsimple fv;
-       ptyp_to_lower ~simple:true env (Tvar (None, Vflex fv)) in
+       of_flexvar fv in
      let shead = Cons.map ~neg:instneg ~pos:(fun _ -> ref bottom) head in
      match_sub ~changes:(ref []) env
        (ptyp_to_lower ~simple:false env t)
@@ -658,17 +658,6 @@ design:
   FIXME: 1 is not implemented yet (requires testing)
  *)
 
-type subst_info = {
-  visit: int;
-  bvars: genvar Vector.t;
-  env: env;
-  level: Env_level.t;
-  index: int;
-  mode: [`Poly | `Elab];
-  can_generalise: bool;
-  hoist_env: env;
-}
-
 let is_visited_pos visit fv =
   match fv.gen with
   | Not_generalising -> assert false
@@ -755,10 +744,14 @@ and expand_fv_neg visit ~changes env nv =
           | [] -> ()
           | [{cons; rigvars}] ->
              let cons = Cons.map ~neg:(expand_lower visit ~changes env) ~pos:(expand_fv_neg visit ~changes env) cons in
+             (* FIXME: any point to this?
+             let rigvars = rigvars |> Rvset.filter ~f:(fun rv ->
+               not (spec_sub_rigid_cons env rv {cons; rigvars=Rvset.empty})) in*)
              ignore (fv_maybe_set_upper ~changes nv (UBcons {cons; rigvars} :: vars))
           | _cons ->
              (* FIXME: better error reporting (list rv candidates, at least) *)
              (* FIXME: could drop some with spec_sub? *)
+             (* FIXME: maybe this should move to promote, so that occurrences in Elab don't break things? *)
              unimp "multi RV upper bounds"
   );
   nv
@@ -783,6 +776,21 @@ let expand_ptyp visit ~changes env = snd (expand_typ visit ~changes env)
    rigvars at the current level. *)
 
 
+type ('n, 'p) promotion_policy =
+  | Policy_hoist : env -> (flexvar, flex_lower_bound) promotion_policy
+  | Policy_generalise : (zero, zero) promotion_policy
+
+type ('n, 'p) promote_info = {
+  visit: int;
+  bvars: genvar Vector.t;
+  env: env;
+  level: Env_level.t;
+  index: int;
+  mode: [`Poly | `Elab];
+  policy : ('n, 'p) promotion_policy;
+}
+
+
 (* After expansion, negatively reachable variables will have upper
    bounds in a particular form *)
 type expanded_upper =
@@ -790,7 +798,7 @@ type expanded_upper =
   | EUB_var of flexvar
   (* EUB_cons (c, vs) - none of vs at same level *)
   | EUB_cons of (flex_lower_bound, flexvar) ctor_ty option * flexvar list
-let get_upper (s : subst_info) (fv : flexvar) =
+let get_upper (s : (_, _) promote_info) (fv : flexvar) =
   assert (is_visited_neg s.visit fv);
   match fv.upper with
   | [UBvar v] when Env_level.equal v.level s.level ->
@@ -802,10 +810,13 @@ let get_upper (s : subst_info) (fv : flexvar) =
          | UBvar v -> assert (not (Env_level.equal v.level s.level)); Right v
          | UBcons ctor -> Left ctor)
      in
+(*
      begin match vars with
      | [] -> ()
-     | _ :: _ -> assert (not s.can_generalise) (* MonoLocalBinds *)
+     | _ :: _ ->
+        assert (s.policy <> Policy_generalise); (* MonoLocalBinds *)
      end;
+*)
      match ctors with
      | [] -> EUB_cons (None, vars)
      | [c] -> EUB_cons (Some c, vars)
@@ -818,32 +829,30 @@ let promote_rigvars s rvs =
           Some loc, Vbound {index=s.index; var=rv.var})
     else Some loc, Vrigid rv)
 
+type ('n, 'p) promote_flexvar_result =
+  | Generalised : int -> (zero, zero) promote_flexvar_result
+  | Hoisted : flexvar -> (flexvar, flex_lower_bound) promote_flexvar_result
+
 let rec promote_lower :
-  'n 'p . subst_info -> flex_lower_bound -> ('n, 'p) typ =
+  type n p . (n, p) promote_info -> flex_lower_bound -> (n, p) typ =
   fun s lb -> match lb with
   | Ltop loc -> Ttop loc
-  | Lower (flexvars, {cons; rigvars}) ->
+  | Lower (flexvars, {cons; rigvars}) -> 
      let cons = Cons.map ~neg:(promote_fv_neg s) ~pos:(promote_lower s) cons in
      let rigvars = promote_rigvars s rigvars in
-     let flexvars =
-       (flexvars :> flexvar list) |> List.filter_map (fun (fv : flexvar) ->
-         if Env_level.equal fv.level s.level then begin
-           assert (is_visited_pos s.visit fv);
-           promote_flexvar s fv
-         end else
-           Some (None, Vflex fv))
-     in
+     let flexvars = (flexvars :> flexvar list) |> List.filter_map (promote_flexvar s) in
+     let flexvars = flexvars |> List.map (fun (x : (n,p) promote_flexvar_result) -> match x with
+       | Generalised var -> None, Vbound {index=s.index; var}
+       | Hoisted fv -> None, Vflex fv) in
      (* FIXME use a better sort *)
      let tvars = List.sort compare (rigvars @ flexvars) in
      tvjoin ~base:(tcons cons) tvars
 
 and promote_fv_neg :
-  'n 'p . subst_info -> flexvar -> ('n, 'p) typ =
+  type n p . (n, p) promote_info -> flexvar -> (p, n) typ =
   fun s nv ->
-  if not (Env_level.equal nv.level s.level)
-  then Tvar (None, Vflex nv)
-  else match promote_flexvar s nv with
-  | None ->
+  match promote_flexvar s nv, s.policy with
+  | None, _ -> 
      (* substitute away the variable *)
      begin match get_upper s nv with
      | EUB_var nv' -> promote_fv_neg s nv'
@@ -858,12 +867,32 @@ and promote_fv_neg :
         (* should have been promote_flexvar'd *)
         assert false
      end
-  | Some (loc, v) ->
-     if s.mode = `Elab && is_visited_pos s.visit nv
-     then tvjoin ~base:(promote_lower s nv.lower) [(loc, v)]
-     else Tvar (loc, v)
+  | Some (Generalised var), Policy_generalise ->
+     let v = Vbound {index=s.index; var} in
+     assert (is_visited_pos s.visit nv);
+     begin match s.mode with
+     | `Poly -> Tvar (None, v)
+     | `Elab ->
+        (* Here a positive type is used as negative, but only when:
+           - Elab, so placement of rigid variables doesn't matter
+           - Policy_generalise, so there are no flexible variables *)
+        tvjoin ~base:(promote_lower s nv.lower) [(None, v)]
+     end
+  | Some (Hoisted v), Policy_hoist hoist_env ->
+     assert (Env_level.extends v.level (env_level hoist_env));
+     Tsimple v
 
-and promote_flexvar s fv =
+and promote_flexvar :
+  type n p . (n, p) promote_info -> flexvar -> (n, p) promote_flexvar_result option =
+  fun s fv ->
+  if not (Env_level.equal fv.level s.level) then
+    match s.policy with
+    | Policy_hoist hoist_env ->
+       assert (Env_level.extends fv.level (env_level hoist_env));
+       Some (Hoisted fv)
+    | Policy_generalise ->
+       intfail "Flexible variable found during generalisation" (* MonoLocalBinds *)
+  else begin
   assert (Env_level.equal fv.level s.level);
   match fv.gen with
   | Not_generalising -> assert false
@@ -871,21 +900,23 @@ and promote_flexvar s fv =
      let upper_requires_hoist = function
        | [UBvar v] when Env_level.equal v.level s.level -> false
        | [] | [UBcons _] -> false
-       | _ -> assert (s.can_generalise = false); true
+       | _ -> true
      in
-     if not (gen.visit.neg = s.visit && (gen.visit.pos = s.visit || upper_requires_hoist fv.upper)) then None
+     if not (gen.visit.neg = s.visit && (gen.visit.pos = s.visit || upper_requires_hoist fv.upper))
+     then None
      else match gen.bound_var with
      | Computing_bound ->
+        (* FIXME: detect all recursion cases during expand so this can go away *)
         unimp "flexvar recursive in own bound"
      | Generalised var ->
-        Some (None, (Vbound {index=s.index; var}))
+        (match s.policy with Policy_generalise -> Some (Generalised var) | _ -> assert false)
      | Kept fv ->
-        Some (None, (Vflex fv))
-     | Replace_with_rigid (rv, l) ->
-        Some (Some l, Vrigid rv)
+        (match s.policy with Policy_hoist _ -> Some (Hoisted fv) | _ -> assert false)
+     | Replace_with_rigid _ ->
+        assert false
      | No_var_chosen ->
         gen.bound_var <- Computing_bound;
-        let bv =
+        let bv : flexvar_gen_status =
           assert (is_visited_pos s.visit fv || upper_requires_hoist fv.upper);
           let vars, upper =
             match get_upper s fv with
@@ -898,35 +929,55 @@ and promote_flexvar s fv =
                vars, tvjoin ~base:(tcons cons) rigvars
             | EUB_var _ -> assert false
           in
-          if s.can_generalise then begin
+          match s.policy with
+          | Policy_generalise ->
             assert (vars = []); (* since visited_pos *)
-            let n = Vector.push s.bvars (Gen_flex (fv, upper)) in
+            let n = Vector.push s.bvars (Gen_flex (fv, gen_zero upper)) in
             Generalised n
-          end else begin
+          | Policy_hoist hoist_env ->
               (* FIXME: surely I need to consider fv.lower as well? *)
-            let h = fresh_flexvar (env_level s.hoist_env) in
+            let h = fresh_flexvar (env_level hoist_env) in
             Result.get_ok
-              (subtype s.hoist_env (Tsimple (of_flexvar h)) upper);
+              (subtype hoist_env (Tsimple (of_flexvar h)) upper);
             vars |> List.iter (fun var' ->
               Result.get_ok
-                (subtype s.hoist_env (Tsimple (of_flexvar h)) (Tsimple var')));
+                (subtype hoist_env (Tsimple (of_flexvar h)) (Tsimple var')));
             Kept h
-          end
         in
         gen.bound_var <- bv;
         (* FIXME refactor *)
         promote_flexvar s fv
+  end
 
 
-let substn_typ s =
+let substn_typ (type p) (type n) (s : (n, p) promote_info) =
   let simple = function
     | Tsimple t -> t
     | _ -> intfail "subst on unexpanded simple type" in
-  let pos ~index t =
-    promote_lower {s with index} (simple t) in
-  let neg ~index t =
-    promote_fv_neg {s with index} (simple t) in
+  let pos ~index t : ptyp =
+    let t = promote_lower {s with index} (simple t) in
+    match s.policy with Policy_generalise -> gen_zero t | Policy_hoist _ -> t
+  in
+  let neg ~index t : ntyp =
+    let t = promote_fv_neg {s with index} (simple t) in
+    match s.policy with Policy_generalise -> gen_zero t | Policy_hoist _ -> t
+  in
   map_typ_simple ~neg:pos ~pos:neg ~index:s.index, map_typ_simple ~neg ~pos ~index:s.index
 
-let substn_ntyp s : ntyp -> ntyp = fst (substn_typ s)
-let substn_ptyp s : ptyp -> ptyp = snd (substn_typ s)
+let substn_ntyp ~mode ~policy ~visit ~bvars ~env ~index (t : ntyp) : ntyp =
+  match policy with
+  | `Generalise ->
+     let s = { mode; policy = Policy_generalise; visit; bvars; env; level = env_level env; index } in
+     fst (substn_typ s) t
+  | `Hoist henv ->
+     let s = { mode; policy = Policy_hoist henv; visit; bvars; env; level = env_level env; index } in
+     fst (substn_typ s) t
+
+let substn_ptyp ~mode ~policy ~visit ~bvars ~env ~index (t : ptyp) : ptyp =
+  match policy with
+  | `Generalise ->
+     let s = { mode; policy = Policy_generalise; visit; bvars; env; level = env_level env; index } in
+     snd (substn_typ s) t
+  | `Hoist henv ->
+     let s = { mode; policy = Policy_hoist henv; visit; bvars; env; level = env_level env; index } in
+     snd (substn_typ s) t

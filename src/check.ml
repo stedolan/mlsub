@@ -290,12 +290,12 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _) : ptyp * (typ
   let bvars = Vector.create () in
   rigvars |> IArray.iter (fun rv -> ignore (Vector.push bvars (Gen_rigid rv)));
   (* Format.printf "ELAB2 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
-  let subst = { mode = `Poly; can_generalise; visit; bvars; env = env'; level=env_level env'; index = 0; hoist_env = env } in
-  let ty = substn_ptyp subst ty in
+  let policy = if can_generalise then `Generalise else `Hoist env in
+  let ty = substn_ptyp ~mode:`Poly ~policy ~visit ~bvars ~env:env' ~index:0 ty in
   (* Format.printf "GEN: %a\n --> %a\n%!" dump_ptyp orig_ty pp_ptyp ty; *)
   let erq = elabreq_map_typs erq ~index:0
-              ~neg:(fun ~index t -> substn_ntyp {subst with index; mode=`Elab} t)
-              ~pos:(fun ~index t -> substn_ptyp {subst with index; mode=`Elab} t) in
+              ~neg:(substn_ntyp ~mode:`Elab ~policy ~visit ~bvars ~env:env')
+              ~pos:(substn_ptyp ~mode:`Elab ~policy ~visit ~bvars ~env:env') in
   (* Format.printf "ELAB3 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
   if Vector.length bvars = 0 then
     ty, Elab (Pair(Ptyp ty, erq), fun (t,e) -> None, t, ek e), can_generalise

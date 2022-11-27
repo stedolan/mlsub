@@ -29,8 +29,8 @@ let dump env (t : ptyp) =
   let visit, fl = fixpoint 2 fl in
 
   let bvars = Vector.create () in
-  let fl = promote_lower {mode=`Poly;visit; can_generalise=true; bvars; env; level=env_level env; index=0; hoist_env = env} fl in
-  dump fl;
+  let fl = promote_lower {mode=`Poly;visit; policy=Policy_generalise; bvars; env; level=env_level env; index=0} fl in
+  dump (gen_zero fl);
   Vector.iteri bvars (fun ix v -> match v with
   | Gen_rigid _ -> assert false
   | Gen_flex (_, r) ->
