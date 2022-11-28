@@ -636,8 +636,7 @@ let rec map_typ_simple : 'neg1 'pos1 'neg2 'pos2 .
 (* FIXME: bit weird... There must be a better representation for bvars here *)
 
 type genvar =
-  (* FIXME drop flexvar here *)
-  | Gen_flex of flexvar * ntyp
+  | Gen_flex of ntyp
   | Gen_rigid of rigvar
 
 (*
@@ -939,7 +938,7 @@ and promote_flexvar :
           match s.policy with
           | Policy_generalise ->
             assert (vars = []); (* since visited_pos *)
-            let n = Vector.push s.bvars (Gen_flex (fv, gen_zero upper)) in
+            let n = Vector.push s.bvars (Gen_flex (gen_zero upper)) in
             Generalised n
           | Policy_hoist hoist_env ->
               (* FIXME: surely I need to consider fv.lower as well? *)

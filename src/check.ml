@@ -310,7 +310,7 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _) : ptyp * (typ
       match env_lookup_type_var env' (env_level env') name with
       | Error _ -> name, Location.noloc
       | Ok _ -> mkname () in
-    let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex (_,r) -> mkname (), Some r) |> IArray.of_array in
+    let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex r -> mkname (), Some r) |> IArray.of_array in
     let tpoly = Tpoly { vars = bounds; body = ty } in
     wf_ptyp env tpoly;
     tpoly,
