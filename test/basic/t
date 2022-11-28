@@ -1166,5 +1166,65 @@ fn(x) {
 >   }
 > [A <: {foo: any, ...}] (A) -> {foo: int} | A
 
+# snd has the type var on output removed by clearly_subtype
+{ fst: fn (x) {
+  if true {x} else {
+    let {foo: z} = x;
+    let zz : bool = z;
+    { foo: 42 }
+  }
+}, snd: fn (x) {
+  if true {x} else {
+    let {foo: z} = x;
+    let zz : int = z;
+    { foo: 42 }
+  }
+}}
+> {
+>   fst:
+>   fn (x) {
+>     if true {
+>       x
+>     } else {
+>       let {foo: z} = x;
+>       let zz : bool = z;
+>       {foo: 42}
+>     }
+>   },
+>   snd:
+>   fn (x) {
+>     if true {
+>       x
+>     } else {
+>       let {foo: z} = x;
+>       let zz : int = z;
+>       {foo: 42}
+>     }
+>   }
+> }
+>   {
+>     fst:
+>     fn [A <: bool, B <: {foo: A}](x: B) -> {foo: int} | B {
+>       if true {
+>         x
+>       } else {
+>         let {foo: z} : {foo: A} = x;
+>         let zz : bool = z;
+>         {foo: 42}
+>       }
+>     },
+>     snd:
+>     fn [A <: int](x: {foo: A}) -> {foo: int} {
+>       if true {
+>         x
+>       } else {
+>         let {foo: z} : {foo: A} = x;
+>         let zz : int = z;
+>         {foo: 42}
+>       }
+>     }
+>   }
+> {fst: [A <: bool, B <: {foo: A}] (B) -> {foo: int} | B, snd: [A <: int] ({foo: A}) -> {foo: int}}
 
-> STATS: fix: 65, flex: 1639
+
+> STATS: fix: 66, flex: 1670

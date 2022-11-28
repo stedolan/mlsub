@@ -601,12 +601,11 @@ let rec clearly_subtype env (a :  flexvar) b : bool =
     Rvset.to_list cn.rigvars |> List.for_all (fun rv ->
       Rvset.mem rv ctor.rigvars) &&
     match
-      (* FIXME: raise Exit? Is this actually used? *)
       subtype_conses env cn.cons ctor
         ~neg:(fun a b -> if not (clearly_subtype env a b) then raise Exit)
         ~pos:(fun a b -> if not (clearly_subtype env a b) then raise Exit)
     with
-    | exception SubtypeError _ -> false
+    | exception (SubtypeError _ | Exit) -> false
     | () -> true)
 
 
