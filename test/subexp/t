@@ -767,16 +767,53 @@ fn [A](x:A, f:[B <: A](B) -> B) { x }
 > fn [A](x: A, f: [B <: A] (B) -> B) { x }
 > test:1: Bounds must be constructed types
 
-# note RHS is {foo:int}, not {foo:int}|A
+# Some versions make RHS be {foo:int}, not {foo:int}|A
+# This is equivalent but shorter, as A <= {foo:int}.
+# Not sure it's worth the effort, though
 fn[A <: {foo:int}](x:A, y:{foo:int}) { if true {x} else {y} }
 > fn [A <: {foo: int}](x: A, y: {foo: int}) { if true { x } else { y } }
->   fn [A <: {foo: int}](x: A, y: {foo: int}) -> {foo: int} {
+>   fn [A <: {foo: int}](x: A, y: {foo: int}) -> {foo: int} | A {
 >     if true {
 >       x
 >     } else {
 >       y
 >     }
 >   }
-> [A <: {foo: int}] (A, {foo: int}) -> {foo: int}
+> [A <: {foo: int}] (A, {foo: int}) -> {foo: int} | A
 
-> STATS: fix: 57, flex: 1937
+# multi RV upper bounds tests
+fn[A <: {foo:int}](x) -> (A,{foo:int}) { (x,x) }
+> fn [A <: {foo: int}](x) -> (A, {foo: int}) { (x, x) }
+> typechecking error: unimplemented: multi RV upper bounds
+
+# ensure_rigvars_present gets this one
+fn mkdup[A]() -> (A) -> (A, A) { fn(x) { (x,x) } }
+fn[A <: {foo:int}](x,y : A) -> (A,{foo:int}) { let id = mkdup(); let z = id(y); id(x) }
+> fn mkdup[A]() -> (A) -> (A, A) {
+>   fn (x) {
+>     (x, x)
+>   }
+> }
+> fn [A <: {foo: int}](x, y: A) -> (A, {foo: int}) {
+>   let id = mkdup();
+>   let z = id(y);
+>   id(x)
+> }
+>   fn mkdup[A]() -> (A) -> (A, A) {
+>     fn (x) {
+>       (x, x)
+>     }
+>   }
+>   fn [A <: {foo: int}](x: A, y: A) -> (A, {foo: int}) {
+>     let id : (A) -> (A, A) = mkdup();
+>     let z : (A, A) = id(y);
+>     id(x)
+>   }
+> [A <: {foo: int}] (A, A) -> (A, {foo: int})
+
+fn [A,C,B <: int](x) -> (A|C,int|B|C) { (x,x) }
+> fn [A, C, B <: int](x) -> (A | C, int | B | C) { (x, x) }
+>   fn [A, C, B <: int](x: C) -> (A | C, int | B | C) { (x, x) }
+> [A, C, B <: int] (C) -> (A | C, int | B | C)
+
+> STATS: fix: 59, flex: 1919

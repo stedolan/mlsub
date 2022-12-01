@@ -1227,4 +1227,4 @@ fn(x) {
 > {fst: [A <: bool, B <: {foo: A}] (B) -> {foo: int} | B, snd: [A <: int] ({foo: A}) -> {foo: int}}
 
 
-> STATS: fix: 66, flex: 1670
+> STATS: fix: 66, flex: 1652

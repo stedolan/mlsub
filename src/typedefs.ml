@@ -761,14 +761,7 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
      if fv.rotated then assert (not (Env_level.equal fv.level v.level));
      wf_flexvar ~seen env fv.level v
   | UBcons {cons;rigvars} ->
-     (* Each rigvar set must contain all of the rigvars in the lower bound *)
-     let rvlow =
-       match fv.lower with
-       | Lower (_, ctor) -> Rvset.to_list ctor.rigvars
-       | Ltop _ -> []
-     in
-     (* Well-formedness of bounds *)
-     rvlow |> List.iter (fun rv -> assert (Rvset.mem rv rigvars));
+     rigvars |> Rvset.to_list |> List.iter (fun (rv,_) -> wf_rigvar env lvl rv);
      Cons.map ~neg:(wf_flex_lower_bound ~seen env fv.level) ~pos:(wf_flexvar ~seen env fv.level) cons |> ignore)
   end
 
