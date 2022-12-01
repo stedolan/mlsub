@@ -124,8 +124,8 @@ let rec env_lookup_var env v =
   | Env_types { rest; _ } | Env_vals {rest; _}->
      env_lookup_var rest v
 
-let env_lookup_type_var env lvl name =
-  match env_lookup_type_var env name with
+let env_lookup_type_var env lvl loc name =
+  match env_lookup_type_var env loc name with
   | Some v ->
      if not (Env_level.extends v.level lvl) then
        Error (Illformed_type (`Bound_crosses_levels name))
@@ -179,8 +179,8 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
      begin match lookup_named_type loc name with
      | Some t -> t
      | None ->
-        match env_lookup_type_var env lvl name with
-        | Ok v -> Tvar (Some loc, Vrigid v)
+        match env_lookup_type_var env lvl (Some loc) name with
+        | Ok v -> Tvar (Vrigid v)
         | Error e -> fail loc e
      end
   | Trecord fields ->
@@ -257,7 +257,7 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _) : ptyp * (typ
     | None -> IArray.empty, SymMap.empty
     | Some poly -> enter_polybounds env poly in
 
-  let env', rigvars = enter_rigid env rigvars' rig_names in
+  let env', _rigvars = enter_rigid env rigvars' rig_names in
   let orig_ty, Elab (erq, ek), gen_level = fn env' in
   wf_ptyp env' orig_ty;
   (* Format.printf "ELAB %a{\n%a}@." dump_ptyp orig_ty pp_elab_req erq; *)
@@ -287,7 +287,7 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _) : ptyp * (typ
   (* Format.printf "FIXPOINT: %d\n" (visit/2); *)
 
   let bvars = Vector.create () in
-  rigvars |> IArray.iter (fun rv -> ignore (Vector.push bvars (Gen_rigid rv)));
+  rigvars' |> IArray.iteri (fun var _ -> ignore (Vector.push bvars (Gen_rigid {loc=None;var;level=env_level env'})));
   (* Format.printf "ELAB2 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
   let policy = if can_generalise then `Generalise else `Hoist env in
   let ty = substn_ptyp ~mode:`Poly ~policy ~visit ~bvars ~env:env' ~index:0 ty in
@@ -307,7 +307,7 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _) : ptyp * (typ
         | n when n < 26 -> Printf.sprintf "%c" (Char.chr (Char.code 'A' + n))
         | n -> Printf.sprintf "T_%d" (n-26) in
       (* NB: look up env', to ensure no collisions with rigvars *)
-      match env_lookup_type_var env' (env_level env') name with
+      match env_lookup_type_var env' (env_level env') None name with
       | Error _ -> name, Location.noloc
       | Ok _ -> mkname () in
     let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex r -> mkname (), Some r) |> IArray.of_array in
@@ -398,8 +398,8 @@ and check' env ~mode eloc e ty =
   (* FIXME should I combine Tpoly and Func? *)
   | Fn _ as f, Ipoly { vars; body } ->
      (* rigvars not in scope in body, so no rig_names *)
-     let env', rigvars = enter_rigid env vars SymMap.empty in
-     let body = open_typ_rigid rigvars body in
+     let env', open_rigvars = enter_rigid env vars SymMap.empty in
+     let body = open_rigvars body in
      check' env' ~mode eloc f body
      (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
   | Fn (None, params, ret, body), Icons (Func (ptypes, rtype)) ->

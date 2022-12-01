@@ -137,8 +137,8 @@ let poly () =
   let env = Env_nil and _lvl = Env_level.initial in
   let bvar ?(index=0) ?(rest) var =
     match rest with
-    | None -> Tvar (Some Location.noloc, Vbound {index; var})
-    | Some rest -> Tjoin (rest, Tvar(Some Location.noloc, Vbound{index; var})) in
+    | None -> Tvar (Vbound {index; var; loc=None})
+    | Some rest -> Tjoin (rest, Tvar(Vbound{index; var; loc=None})) in
   let t1 () =
     Tpoly {vars = IArray.of_array [| ("A",noloc), None; ("B",noloc), None |];
            body= tcons (func
