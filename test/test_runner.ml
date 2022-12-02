@@ -125,11 +125,11 @@ let () =
   Printexc.record_backtrace false;
   let lines = rawlines [] in
   let cmds = parse_cmds [] [] lines in
-  Lang.Check.fixpoint_iters := 0;
+  Lang.Types.fixpoint_iters := 0;
   cmds |> List.iter (function
     | Comment s -> Printf.printf "%s\n" s
     | Input cmd ->
        List.iter (Printf.printf "%s\n") cmd;
        let out = run_cmd cmd in
        out |> String.trim |> String.split_on_char '\n' |> List.iter (Printf.printf "> %s\n"));
-  Printf.printf "> STATS: fix: %d, flex: %d\n" !Lang.Check.fixpoint_iters !Lang.Typedefs.next_flexvar_id
+  Printf.printf "> STATS: fix: %d, flex: %d\n" !Lang.Types.fixpoint_iters !Lang.Typedefs.next_flexvar_id

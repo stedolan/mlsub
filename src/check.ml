@@ -248,8 +248,6 @@ let mark_var_use_at_level ~(mode : generalisation_mode) lvl =
     | Some l1, Some l2 ->
        Some (Env_level.min l1 l2)
 
-let fixpoint_iters = ref 0
-let verbose_types = match Sys.getenv "VERBOSE_TYPES" with _ -> true | exception Not_found -> false
 
 let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _) : ptyp * (typolybounds option * tyexp * 'a) elab * bool =
   let rigvars', rig_names =
@@ -260,7 +258,6 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _) : ptyp * (typ
   let env', _rigvars = enter_rigid env rigvars' rig_names in
   let orig_ty, Elab (erq, ek), gen_level = fn env' in
   wf_ptyp env' orig_ty;
-  (* Format.printf "ELAB %a{\n%a}@." dump_ptyp orig_ty pp_elab_req erq; *)
   let can_generalise =
     match gen_level with
     | None -> true
@@ -269,33 +266,16 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _) : ptyp * (typ
        mark_var_use_at_level ~mode lvl;
        false
   in
-  let rec fixpoint visit erq prev_ty =
-    if verbose_types then Format.printf "FIX: %a" dump_ptyp orig_ty;
-    if visit > 99 then intfail "looping?";
-    let changes = ref [] in
-    let ty = expand_ptyp visit ~changes env' prev_ty in
-    wf_ptyp env' ty;
+  let map ~neg ~pos (ty, erq) =
+    let ty = pos ~mode:`Poly ~index:0 ty in
     let erq = elabreq_map_typs erq ~index:0
-                ~neg:(fun ~index:_ -> expand_ntyp visit ~changes env')
-                ~pos:(fun ~index:_ -> expand_ptyp visit ~changes env') in
-    if verbose_types then Format.printf "CHANGED: %a\n\n" pp_changes !changes;
-    if !changes = [] then
-      (visit, erq, ty)
-    else
-      (incr fixpoint_iters; fixpoint (visit+2) erq ty) in
-  let visit, erq, ty = fixpoint 2 erq orig_ty in
-  (* Format.printf "FIXPOINT: %d\n" (visit/2); *)
-
-  let bvars = Vector.create () in
-  rigvars' |> IArray.iteri (fun var _ -> ignore (Vector.push bvars (Gen_rigid {loc=None;var;level=env_level env'})));
-  (* Format.printf "ELAB2 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
+                ~neg:(neg ~mode:`Elab)
+                ~pos:(pos ~mode:`Elab)
+    in
+    (ty, erq)
+  in
   let policy = if can_generalise then `Generalise else `Hoist env in
-  let ty = substn_ptyp ~mode:`Poly ~policy ~visit ~bvars ~env:env' ~index:0 ty in
-  (* Format.printf "GEN: %a\n --> %a\n%!" dump_ptyp orig_ty pp_ptyp ty; *)
-  let erq = elabreq_map_typs erq ~index:0
-              ~neg:(substn_ntyp ~mode:`Elab ~policy ~visit ~bvars ~env:env')
-              ~pos:(substn_ptyp ~mode:`Elab ~policy ~visit ~bvars ~env:env') in
-  (* Format.printf "ELAB3 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
+  let bvars, (ty, erq) = promote ~policy ~rigvars:rigvars' ~env:env' ~map (orig_ty, erq) in
   if Vector.length bvars = 0 then
     ty, Elab (Pair(Ptyp ty, erq), fun (t,e) -> None, t, ek e), can_generalise
   else

@@ -18,19 +18,12 @@ let nope _ = assert false
 let dump env (t : ptyp) =
   dump t;
   flush stdout;
-  let fl = ptyp_to_lower ~simple:false env t in
-  let rec fixpoint visit fl =
-    let changes = ref [] in
-    let fl = expand_lower visit ~changes env fl in
-    Format.printf "changed: %a\n" pp_changes !changes;
-    dump (Tsimple fl);
-    if !changes = [] then visit, fl
-    else fixpoint (visit + 2) fl in
-  let visit, fl = fixpoint 2 fl in
-
-  let bvars = Vector.create () in
-  let fl = promote_lower {mode=`Poly;visit; policy=Policy_generalise; bvars; env; level=env_level env; index=0} fl in
-  dump (gen_zero fl);
+  Types.log_changes := true;
+  let bvars, _t = promote ~policy:`Generalise ~rigvars:IArray.empty ~env t
+                   ~map:(fun ~neg:_ ~pos t ->
+                     let t = pos ~mode:`Poly ~index:0 t in
+                     dump t; t) in
+  Types.log_changes := false;
   Vector.iteri bvars (fun ix v -> match v with
   | Gen_rigid _ -> assert false
   | Gen_flex r ->

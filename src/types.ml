@@ -234,8 +234,8 @@ and subtype_lu ~changes env (p : flex_lower_bound) (n : styp_neg) =
 
 and rotate_flex ~changes env (pv : flexvar) =
   if not pv.rotated then begin
-    (* FIXME backtracking here (add to ~changes) *)
-    pv.rotated <- true;
+    (* pv.rotated <- true; *)
+    fv_set_rotated ~changes pv;
     let rotate, keep = pv.upper |> List.partition_map (function
        | UBvar v' when Env_level.equal v'.level pv.level -> Left v'
        | u -> Right u) in
@@ -706,25 +706,9 @@ and expand_fv_neg visit ~changes env nv =
   );
   nv
 
-
-let expand_typ visit ~changes env =
-  let pos ~index:_ t =
-    let t = ptyp_to_lower ~simple:true env t in
-    let t' = expand_lower visit ~changes env t in
-    if not (equal_flex_lower_bound t t') then
-      changes := Change_expanded_mark :: !changes;
-    Tsimple t' in
-  let neg ~index:_ t =
-    Tsimple (expand_fv_neg visit ~changes env (ntyp_to_flexvar ~simple:true env t)) in
-  map_typ_simple ~neg:pos ~pos:neg ~index:0, map_typ_simple ~neg ~pos ~index:0
-
-let expand_ntyp visit ~changes env = fst (expand_typ visit ~changes env)
-let expand_ptyp visit ~changes env = snd (expand_typ visit ~changes env)
-
 (* FIXME: does not yet detect the creation of contravariant joins
    during promotion. These arise (only?) during promotions with
    rigvars at the current level. *)
-
 
 type ('n, 'p) promotion_policy =
   | Policy_hoist : env -> (flexvar, flex_lower_bound) promotion_policy
@@ -905,35 +889,61 @@ and promote_flexvar :
         promote_flexvar s fv
   end
 
+let fixpoint_iters = ref 0
+let log_changes = ref false
+let verbose_types = match Sys.getenv "VERBOSE_TYPES" with _ -> true | exception Not_found -> false
 
-let substn_typ (type p) (type n) (s : (n, p) promote_info) =
-  let simple = function
-    | Tsimple t -> t
-    | _ -> intfail "subst on unexpanded simple type" in
-  let pos ~index t : ptyp =
-    let t = promote_lower {s with index} (simple t) in
-    match s.policy with Policy_generalise -> gen_zero t | Policy_hoist _ -> t
+let promote ~policy ~rigvars ~env ~(map : neg:_ -> pos:_ -> _ -> _) ty =
+  (* Format.printf "ELAB %a{\n%a}@." dump_ptyp orig_ty pp_elab_req erq; *)
+  let rec fixpoint visit prev_ty =
+    (* if verbose_types then Format.printf "FIX: %a" dump_ptyp orig_ty; *)
+    if visit > 99 then intfail "looping?";
+    let changes = ref [] in
+    let neg_simple ~index:_ t =
+      let t = ntyp_to_flexvar ~simple:true env t in
+      Tsimple (expand_fv_neg visit ~changes env t)
+    in
+    let pos_simple ~index:_ t =
+      let t = ptyp_to_lower ~simple:true env t in
+      let t' = expand_lower visit ~changes env t in
+      if not (equal_flex_lower_bound t t') then
+        changes := Change_expanded_mark :: !changes;
+      Tsimple t'
+    in
+    let neg ~mode:_ ~index t = map_typ_simple ~neg:pos_simple ~pos:neg_simple ~index t in
+    let pos ~mode:_ ~index t = map_typ_simple ~neg:neg_simple ~pos:pos_simple ~index t in
+    let ty = map ~neg ~pos prev_ty in
+    if !log_changes then Format.printf "changed: %a\n\n" pp_changes !changes;
+    (* Change_rotated doesn't actually change any types *)
+    if List.for_all (function Change_rotated _ -> true | _ -> false) !changes then
+      (visit, ty)
+    else
+      (incr fixpoint_iters; fixpoint (visit+2) ty) in
+  let visit, ty = fixpoint 2 ty in
+  (* Format.printf "ELAB2 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
+  let bvars = Vector.create () in
+  rigvars |> IArray.iteri (fun var _ -> ignore (Vector.push bvars (Gen_rigid {loc=None;var;level=env_level env})));
+  let get_simple = function Tsimple t -> t | _ -> intfail "promote unexpanded?" in
+  let promote (type p) (type n) (policy : (n,p) promotion_policy) =
+    let s_base = { visit; bvars; env; level = env_level env; mode = `Poly; index = -1; policy } in
+    let neg_simple ~mode ~index t : ntyp =
+      let t = promote_fv_neg {s_base with mode; index} (get_simple t) in
+      match policy with Policy_generalise -> gen_zero t | Policy_hoist _ -> t
+    in
+    let pos_simple ~mode ~index t : ptyp =
+      let t = promote_lower {s_base with mode; index} (get_simple t) in
+      match policy with Policy_generalise -> gen_zero t | Policy_hoist _ -> t
+    in
+    map ty
+      ~neg:(fun ~mode ~index t ->
+        map_typ_simple ~neg:(pos_simple ~mode) ~pos:(neg_simple ~mode) ~index t)
+      ~pos:(fun ~mode ~index t ->
+        map_typ_simple ~neg:(neg_simple ~mode) ~pos:(pos_simple ~mode) ~index t)  
   in
-  let neg ~index t : ntyp =
-    let t = promote_fv_neg {s with index} (simple t) in
-    match s.policy with Policy_generalise -> gen_zero t | Policy_hoist _ -> t
+  (* Format.printf "ELAB3 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
+  let ty =
+    match policy with
+    | `Generalise -> promote Policy_generalise
+    | `Hoist env -> promote (Policy_hoist env)
   in
-  map_typ_simple ~neg:pos ~pos:neg ~index:s.index, map_typ_simple ~neg ~pos ~index:s.index
-
-let substn_ntyp ~mode ~policy ~visit ~bvars ~env ~index (t : ntyp) : ntyp =
-  match policy with
-  | `Generalise ->
-     let s = { mode; policy = Policy_generalise; visit; bvars; env; level = env_level env; index } in
-     fst (substn_typ s) t
-  | `Hoist henv ->
-     let s = { mode; policy = Policy_hoist henv; visit; bvars; env; level = env_level env; index } in
-     fst (substn_typ s) t
-
-let substn_ptyp ~mode ~policy ~visit ~bvars ~env ~index (t : ptyp) : ptyp =
-  match policy with
-  | `Generalise ->
-     let s = { mode; policy = Policy_generalise; visit; bvars; env; level = env_level env; index } in
-     snd (substn_typ s) t
-  | `Hoist henv ->
-     let s = { mode; policy = Policy_hoist henv; visit; bvars; env; level = env_level env; index } in
-     snd (substn_typ s) t
+  bvars, ty

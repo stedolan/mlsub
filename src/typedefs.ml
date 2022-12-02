@@ -375,9 +375,9 @@ type (+'neg,+'pos) ctor_ty =
      - bounds may become tighter (upper decreases, lower increases) *)
 type flexvar =
   { level: env_level;
+    id: int;    (* for printing/sorting *)
     mutable upper: styp_neg list; (* strictly covariant parts are matchable *)
     mutable lower: flex_lower_bound;
-    id: int;    (* for printing/sorting *)
     mutable gen: flexvar_gen;
     mutable rotated: bool
   }
@@ -503,20 +503,13 @@ let is_bottom t = equal_flex_lower_bound bottom t
 
 type flexvar_change =
   | Change_expanded_mark (* hack for logging expand changes *)
-  (* | Change_level of flexvar * env_level *)
+  | Change_rotated of flexvar * bool
   | Change_upper of flexvar * styp_neg list
   | Change_lower of flexvar * flex_lower_bound
 
-(*
-let fv_set_level ~changes fv level =
-  assert (Env_level.extends level fv.level);
-  if not (Env_level.equal level fv.level) then begin
-    changes := Change_level (fv, fv.level) :: !changes;
-    fv.level <- level;
-    (* Cancel any generalisation in progress (see expand) *)
-    if fv.gen <> Not_generalising then fv.gen <- Not_generalising;
-  end
-*)
+let fv_set_rotated ~changes fv =
+  changes := Change_rotated (fv, fv.rotated) :: !changes;
+  fv.rotated <- true
 
 let fv_set_upper ~changes fv upper =
   changes := Change_upper (fv, fv.upper) :: !changes;
@@ -540,7 +533,7 @@ let fv_maybe_set_upper ~changes (fv : flexvar) upper =
 let revert changes =
   changes |> List.iter (function
   | Change_expanded_mark -> ()
-  (* | Change_level (fv, level) -> fv.level <- level *)
+  | Change_rotated (fv, rot) -> fv.rotated <- rot
   | Change_upper (fv, upper) -> fv.upper <- upper
   | Change_lower (fv, lower) -> fv.lower <- lower)
 
@@ -1028,9 +1021,9 @@ let pp_changes ppf changes =
       Format.fprintf ppf "%s%s%s" sp (flexvar_name fv) ty in
     match ch with
     | Change_expanded_mark -> Format.fprintf ppf "%s!" sp
+    | Change_rotated(v,_) -> pv v "/"
     | Change_upper(v,_) -> pv v "-"
-    | Change_lower(v,_) -> pv v "+"
-(*    | Change_level(v,_) -> pv v "@"*));
+    | Change_lower(v,_) -> pv v "+");
   Format.fprintf ppf "]"
 
 
