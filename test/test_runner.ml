@@ -82,7 +82,7 @@ let run_cmd s =
           wf_ptyp env0 t;
           let t = Check.typ_of_tyexp env0 te in
           let env0 = env0 in
-          Check.check env0 ~mode:(Check.fresh_gen_mode ()) e t |> ignore
+          Check.check env0 ~mode:(Check.fresh_gen_mode ()) e (Checking t) |> ignore
         with e ->
             println "RECHECK: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
         end;
@@ -90,7 +90,7 @@ let run_cmd s =
           wf_ptyp env0 t;
           let t = Check.typ_of_tyexp env0 te in
           let env0 = env0 in
-          Check.check env0 ~mode:(Check.fresh_gen_mode ()) elab t |> ignore
+          Check.check env0 ~mode:(Check.fresh_gen_mode ()) elab (Checking t) |> ignore
         with e ->
             println "ELAB: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
         end;

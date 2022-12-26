@@ -316,128 +316,107 @@ type inspect_result =
   | Icons of (ptyp, ntyp) Cons.t
   | Iother
 
+type ty_mode =
+  | Checking of ntyp
+  | Inference of ptyp ref
+
 let inspect = function
-  | Tsimple _ ->
+  | Checking (Tsimple _) ->
      (* bidirectional checking does not look inside Tsimple *)
      Iother
-  | Tpoly p ->
+  | Checking (Tpoly p) ->
      Ipoly p
-  | Tcons c ->
+  | Checking (Tcons c) ->
      (match Cons.get_single c with Some c -> Icons c | _ -> Iother)
-  | Ttop _ | Tvar _ | Tjoin _ -> Iother
+  | Checking (Ttop _ | Tvar _ | Tjoin _) | Inference _ -> Iother
 
-let rec check env ~(mode : generalisation_mode) e (ty : ntyp) : exp elab =
-  wf_ntyp env ty;
+let rec check env ~(mode : generalisation_mode) e (ty : ty_mode) : exp elab =
+  (match ty with
+   | Checking ty -> wf_ntyp env ty
+   | Inference _ -> ());
   match e with
   | None, loc -> fail loc Syntax
   | Some e, loc ->
      let* e = check' env ~mode loc e ty in
      Some e, loc
-and check' env ~mode eloc e ty =
-  match e, inspect ty with
-  | If (e, ifso, ifnot), _ ->
-     let* e = check env ~mode e (tcons (snd e) Bool)
-     and* ifso = check env ~mode ifso ty
-     and* ifnot = check env ~mode ifnot ty in
-     If (e, ifso, ifnot)
-  | Parens e, _ ->
-     let* e = check env ~mode e ty in
-     Parens e
-  | Tuple ef, Icons (Record tf) ->
-     let infer_typed env ((_,loc) as e) =
-       let ty, e = infer env ~mode e in
-       let* e = e and* ty = elab_ptyp ty in
-       Some (Typed (e, ty)), loc in
-     let merged =
-       merge_fields ef tf
-         ~both:(fun _fn e ty -> Some (check env ~mode e ty))
-         ~left:(fun _fn e -> Some (infer_typed env e))
-         ~right:(fun fn _ty -> failwith ("missing " ^ string_of_field_name fn) )
-         ~extra:(function
-           | _, (`Closed, `Extra) -> failwith "extra"
-           | (`Open, _), _ -> failwith "invalid open tuple ctor" (* no open tuples *)
-           | (`Closed, `Extra), _ -> failwith "missing"
-           | _ -> `Closed) in
-     let* ef = elab_fields merged in
-     Tuple ef
-  | Proj (e, (field, loc)), _ ->
-     (* Because of subtyping, there's a checking form for Proj! *)
-     let r = { fields = FieldMap.singleton (Field_named field) ty;
-               fnames = [Field_named field];
-               fopen = `Open } in
-     let* e = check env ~mode e (tcons eloc (Record r)) in
-     Proj (e, (field, loc))
-  | Let (p, pty, e, body), _ ->
-     let env, pty, e = check_binding env ~mode p pty e in
-     let* e = e and* pty = elab_ptyp pty and* body = check env ~mode body ty in
-     Let(p, Some pty, e, body)
-  | Seq (e1, e2), _ ->
-     let e1 = check env ~mode e1 (unit eloc) in
-     let e2 = check env ~mode e2 ty in
-     let* e1 = e1 and* e2 = e2 in Seq (e1, e2)
-  (* FIXME should I combine Tpoly and Func? *)
-  | Fn _ as f, Ipoly { vars; body } ->
-     (* rigvars not in scope in body, so no rig_names *)
-     let env', open_rigvars = enter_rigid env vars SymMap.empty in
-     let body = open_rigvars body in
-     check' env' ~mode eloc f body
-     (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
-  | Fn (None, params, ret, body), Icons (Func (ptypes, rtype)) ->
-     (* If poly <> None, then we should infer & subtype *)
-     (* FIXME: do we need another level here? Does hoisting break things? *)
-     let _, vals = check_parameters env params ptypes in
-     let env' = Env_vals { vals; rest = env } in
-     let* body = check env' ~mode body (check_annot env' ret rtype) in
-     (* No elaboration. Arguably we could *delete* annotations here! *)
-     Fn (None, params, ret, body)
-  | FnDef ((s, sloc), fndef, body), _ ->
-     let fmode = fresh_gen_mode () in
-     let fty, fndef = infer_func_def env ~mode:fmode eloc fndef in
-     mark_var_use_at_level ~mode fmode.gen_level_acc;
-     let binding = {typ = fty; gen_level = fmode.gen_level_acc } in
-     let env = Env_vals { vals = SymMap.singleton s binding; rest = env } in
-     let body = check env ~mode body ty in
-     let* fndef = fndef and* body = body in
-     FnDef((s,sloc), fndef, body)
-  | Pragma "true", Icons Bool -> elab_pure e
-  | Pragma "false", Icons Bool -> elab_pure e
-  | e, _ ->
-     (* Default case: infer and subtype. *)
-     (* FIXME: we probably shouldn't even attempt this on intro forms
-        at the wrong type. e.g. checking (1,2) against int *)
-     let ty', e = infer' ~mode env eloc e in
-     subtype env ty' ty |> or_raise `Expr eloc;
-     wf_ntyp env ty;
-     let* e = e in e
 
-and infer env ~(mode : generalisation_mode) : exp -> ptyp * exp elab = function
-  | None, loc -> fail loc Syntax
-  | Some e, loc ->
-     let ty, e = infer' env ~mode loc e in
-     wf_ptyp env ty;
-     ty, (let* e = e in Some e, loc)
-and infer' env ~mode eloc : exp' -> ptyp * exp' elab = function
-  | Lit l -> infer_lit l
-  | Var (id,loc) as e ->
+(* FIXME: default is to infer & subtype, but we probably shouldn't
+   even attempt this on intro forms at the wrong type. e.g. checking
+   (1,2) against int *)
+and check' env ~mode eloc e ty =
+  let inferred inf =
+    match ty with
+    | Checking ty ->
+       subtype env inf ty |> or_raise `Expr eloc
+    | Inference slot ->
+       slot := join_ptyp env !slot inf
+  in
+  match e with
+  | Lit l ->
+     let lty, e = infer_lit l in
+     inferred lty;
+     e
+
+  | Var (id, loc) ->
      begin match env_lookup_var env id with
      | Ok v ->
         mark_var_use_at_level ~mode v.gen_level;
-        v.typ, elab_pure e
+        inferred v.typ;
+        elab_pure e
      | Error e -> fail loc e
      end
+
   | Typed (e, ty) ->
      let t = typ_of_tyexp env ty in
-     t, let* e = check env ~mode e t in Typed (e, ty)
+     inferred t;
+     let* e = check env ~mode e (Checking t) in
+     Typed (e, ty)
+
   | Parens e ->
-     let ty, e = infer env ~mode e in
-     ty, let* e = e in Parens e
+     let* e = check env ~mode e ty in
+     Parens e
+
   | If (e, ifso, ifnot) ->
-     let e = check env ~mode e (tcons (snd e) Bool)
-     and tyso, ifso = infer env ~mode ifso
-     and tynot, ifnot = infer env ~mode ifnot in
-     join_ptyp env tyso tynot,
-     let* e = e and* ifso = ifso and* ifnot = ifnot in
+     let* e = check env ~mode e (Checking (tcons (snd e) Bool))
+     and* ifso = check env ~mode ifso ty
+     and* ifnot = check env ~mode ifnot ty in
      If (e, ifso, ifnot)
+
+  | Tuple fields ->
+     if fields.fopen = `Open then failwith "invalid open tuple ctor";
+     let fields =
+       match inspect ty with
+       | Icons (Record tf) ->
+          let infer_typed env ((_,loc) as e) =
+            let ty, e = infer env ~mode e in
+            let* e = e and* ty = elab_ptyp ty in
+            Some (Typed (e, ty)), loc in
+          merge_fields fields tf
+            ~both:(fun _fn e ty -> Some (check env ~mode e (Checking ty)))
+            ~left:(fun _fn e -> Some (infer_typed env e))
+            ~right:(fun fn _ty -> failwith ("missing " ^ string_of_field_name fn) )
+            ~extra:(function
+              | _, (`Closed, `Extra) -> failwith "extra"
+              | (`Open, _), _ -> failwith "invalid open tuple ctor" (* no open tuples *)
+              | (`Closed, `Extra), _ -> failwith "missing"
+              | _ -> `Closed)
+       | _ ->
+          let fields = map_fields (fun _fn e -> infer env ~mode e) fields in
+          inferred (tcons eloc (Record (map_fields (fun _ (ty, _e) -> ty) fields)));
+          map_fields (fun _fn (_ty, e) -> e) fields
+     in
+     let* ef = elab_fields fields in
+     Tuple ef
+
+  (* FIXME delete *)
+  | Proj (e, (field, loc)) when (match ty with Checking _ -> true | _ -> false)  ->
+     (* Because of subtyping, there's a checking form for Proj! *)
+     let r = { fields = FieldMap.singleton (Field_named field) (match ty with Checking t -> t | _ -> assert false);
+               fnames = [Field_named field];
+               fopen = `Open } in
+     let* e = check env ~mode e (Checking (tcons eloc (Record r))) in
+     Proj (e, (field, loc))
+
   | Proj (e, (field, loc)) ->
      let ty, e = infer env ~mode e in
      let f = Field_named field in
@@ -450,38 +429,52 @@ and infer' env ~mode eloc : exp' -> ptyp * exp' elab = function
        | Ok (Record r) -> FieldMap.find f r.fields
        | Ok _ -> assert false
        | Error c -> fail eloc (Conflict (`Expr, c)) in
-     tyf, let* e = e in Proj (e, (field, loc))
-  | Tuple fields ->
-     if fields.fopen = `Open then failwith "invalid open tuple ctor";
-     let fields = map_fields (fun _fn e -> infer env ~mode e) fields in
-     tcons eloc (Record (map_fields (fun _ (ty, _e) -> ty) fields)),
-     let* fields = elab_fields (map_fields (fun _fn (_ty, e) -> e) fields) in
-     Tuple fields
-  | Pragma "bot" as e -> Tcons (Cons.bottom_loc eloc), elab_pure e
-  | Pragma s -> failwith ("pragma: " ^ s)
+     inferred tyf;
+     let* e = e in Proj (e, (field, loc))
+
   | Let (p, pty, e, body) ->
      let env, pty, e = check_binding env ~mode p pty e in
-     let res, body = infer env ~mode body in
-     res,
-     let* e = e and* pty = elab_ptyp pty and* body = body in
+     let* e = e and* pty = elab_ptyp pty and* body = check env ~mode body ty in
      Let(p, Some pty, e, body)
+
   | Seq (e1, e2) ->
-     let e1 = check env ~mode e1 (unit eloc) in
-     let ty, e2 = infer env ~mode e2 in
-     ty, let* e1 = e1 and* e2 = e2 in Seq(e1, e2)
+     let e1 = check env ~mode e1 (Checking (unit eloc)) in
+     let e2 = check env ~mode e2 ty in
+     let* e1 = e1 and* e2 = e2 in Seq (e1, e2)
+
+  (* FIXME should I combine Tpoly and Func? *)
   | Fn fndef ->
-     let ty, fndef = infer_func_def env ~mode eloc fndef in
-     ty, let* fndef = fndef in Fn fndef
-  | FnDef ((s,sloc), fndef, body) ->
+     begin match fndef, inspect ty with
+     | _, Ipoly {vars; body} ->
+        (* rigvars not in scope in body, so no rig_names *)
+        let env', open_rigvars = enter_rigid env vars SymMap.empty in
+        let body = open_rigvars body in
+        check' env' ~mode eloc e (Checking body)
+        (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
+     | (None, params, ret, body), Icons (Func (ptypes, rtype)) ->
+        (* If poly <> None, then we should infer & subtype *)
+        (* FIXME: do we need another level here? Does hoisting break things? *)
+        let _, vals = check_parameters env params ptypes in
+        let env' = Env_vals { vals; rest = env } in
+        let* body = check env' ~mode body (check_annot env' ret rtype) in
+        (* No elaboration. Arguably we could *delete* annotations here! *)
+        Fn (None, params, ret, body)
+     | _ ->
+        let ty, fndef = infer_func_def env ~mode eloc fndef in
+        inferred ty;
+        let* fndef = fndef in Fn fndef
+     end
+
+  | FnDef ((s, sloc), fndef, body) ->
      let fmode = fresh_gen_mode () in
      let fty, fndef = infer_func_def env ~mode:fmode eloc fndef in
      mark_var_use_at_level ~mode fmode.gen_level_acc;
      let binding = {typ = fty; gen_level = fmode.gen_level_acc } in
      let env = Env_vals { vals = SymMap.singleton s binding; rest = env } in
-     let res, body = infer env ~mode body in
-     res,
+     let body = check env ~mode body ty in
      let* fndef = fndef and* body = body in
      FnDef((s,sloc), fndef, body)
+
   | App (f, args) ->
      let fty, f = infer env ~mode f in
      let tyargs, ((), tyret) =
@@ -491,10 +484,21 @@ and infer' env ~mode eloc : exp' -> ptyp * exp' elab = function
        | Ok (Func (a, r)) -> a, r
        | Ok _ -> assert false
        | Error e -> fail eloc (Conflict (`Expr, e)) in
-     let args = map_fields (fun _fn (e, t) -> check env ~mode e t) tyargs in
-     tyret,
+     let args = map_fields (fun _fn (e, t) -> check env ~mode e (Checking t)) tyargs in
+     inferred tyret;
      let* f = f and* args = elab_fields args in
      App(f, args)
+
+  | Pragma ("true"|"false") when match inspect ty with Icons Bool -> true | _ -> false -> elab_pure e
+  | Pragma "bot" -> inferred (Tcons (Cons.bottom_loc eloc)); elab_pure e
+  | Pragma s -> failwith ("pragma: " ^ s)
+
+
+and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * exp elab =
+  let ty = ref (Tcons Cons.bottom) in
+  let e = check env ~mode e (Inference ty) in
+  wf_ptyp env !ty;
+  !ty, e
 
 and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def elab =
    if params.fopen = `Open then failwith "invalid ... in params";
@@ -518,7 +522,7 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
          | Some ty ->
             let ty = typ_of_tyexp env ty in
             ignore (close_typ_rigid ~ispos:true (env_level env) ty);
-            ty, check env' ~mode:bmode body ty
+            ty, check env' ~mode:bmode body (Checking ty)
          | None ->
             infer env' ~mode:bmode body in
        let _ = map_fields (fun _fn ((tn,tp),_,_) -> wf_ntyp env tn; wf_ptyp env tp) params in
@@ -545,7 +549,6 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
    in*)
    (poly, params, Some tret, body)
   
-
 and merge_bindings bs =
   let merge k a b =
     match a, b with
@@ -610,7 +613,7 @@ and check_binding env ~mode p pty e =
        pty, e, bmode.gen_level_acc
     | Some ty ->
        let t = typ_of_tyexp env ty in
-       t, check env ~mode e t, None
+       t, check env ~mode e (Checking t), None
   in
   let pty, vs = check_pat env ~gen_level pty p in
   let env = Env_vals { vals = vs; rest = env } in
@@ -619,8 +622,8 @@ and check_binding env ~mode p pty e =
 and check_annot env annot ty =
   wf_ntyp env ty;
   match annot with
-  | None -> ty
+  | None -> Checking ty
   | Some ty' ->
      let t = typ_of_tyexp env ty' in
      subtype env t ty |> or_raise `Subtype (snd ty');
-     t
+     Checking t

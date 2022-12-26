@@ -458,7 +458,11 @@ let enter_rigid env vars rig_names =
 (* FIXME: rank1 joins maybe?
    FIXME: keep types as Tcons if possible? Better inference. Can this matter? *)
 let join_ptyp env (p : ptyp) (q : ptyp) : ptyp =
-  Tsimple (join_simple env (ptyp_to_lower ~simple:false env p) (ptyp_to_lower ~simple:false env q))
+  match p, q with
+  | Tcons bot, x when Cons.is_bottom bot -> x
+  | x, Tcons bot when Cons.is_bottom bot -> x
+  | p, q ->
+     Tsimple (join_simple env (ptyp_to_lower ~simple:false env p) (ptyp_to_lower ~simple:false env q))
 
 let rec subtype env (p : ptyp) (n : ntyp) =
   (* Format.printf "%a <= %a\n" pp_ptyp p pp_ntyp n; *)
