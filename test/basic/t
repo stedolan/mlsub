@@ -246,11 +246,11 @@ if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot
 > (int, int, ...)
 
 
-# A checking form for projections! Isn't subtyping great?
-({foo: @true}.foo : bool)
-> ({foo: @true}.foo : bool)
->   ({foo: @true}.foo : bool)
-> bool
+# # A checking form for projections! Isn't subtyping great?
+# ({foo: @true}.foo : bool)
+# > ({foo: @true}.foo : bool)
+# > bool
+# # update: no longer think this is cool
 
 # Generalisation of functions allows checking against inferred argument types
 (fn(x) { if x.cond { 1 } else { 2 }})({cond: @true})
@@ -789,17 +789,17 @@ fn (x : (any)->(), wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 >   wid(fn (a) { {x: x(a), y: a}.y })
 > }
 >   fn (x: (any) -> (), wid: ([A] (A) -> A) -> int) -> int {
->     wid(fn (a) { {x: (x(a) : ()), y: a}.y })
+>     wid(fn (a) { {x: x(a), y: a}.y })
 >   }
 > ((any) -> (), ([A] (A) -> A) -> int) -> int
 
 # bidir version requires no annotation
 fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 > fn (x, wid: (([A] (A) -> A) -> int)) { wid(fn (a) { {x: x(a), y: a}.y }) }
->   fn [A](x: (any) -> A, wid: ([A_2] (A_2) -> A_2) -> int) -> int {
->     wid(fn (a) { {x: (x(a) : A), y: a}.y })
+>   fn (x: (any) -> any, wid: ([A] (A) -> A) -> int) -> int {
+>     wid(fn (a) { {x: x(a), y: a}.y })
 >   }
-> [A] ((any) -> A, ([A_2] (A_2) -> A_2) -> int) -> int
+> ((any) -> any, ([A] (A) -> A) -> int) -> int
 
 
 fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let f = fn(a){x(a)}; wid(f) }
@@ -1227,4 +1227,4 @@ fn(x) {
 > {fst: [A <: bool, B <: {foo: A}] (B) -> {foo: int} | B, snd: [A <: int] ({foo: A}) -> {foo: int}}
 
 
-> STATS: fix: 66, flex: 1652
+> STATS: fix: 66, flex: 1550

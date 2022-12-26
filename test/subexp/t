@@ -18,15 +18,13 @@ fn[A](x : A) { if x.cond {x} else {x} }
 > fn [A](x: A) { if x.cond { x } else { x } }
 > test:1: Type error
 >   fn[A](x : A) { if x.cond {x} else {x} }
->                     ^
+>                     ^^^^^^
 >      found: A
 >   expected: {cond: _, ...}
 > This A comes from test:1:
 >   fn[A](x : A) { if x.cond {x} else {x} }
 >             ^
-> but is used as {cond: _, ...} at test:1:
->   fn[A](x : A) { if x.cond {x} else {x} }
->                     ^^^^^^
+> but is used as {cond: _, ...}
 
 fn[A <: {cond:bool}](x : A) { if x.cond {x} else {x} }
 > fn [A <: {cond: bool}](x: A) { if x.cond { x } else { x } }
@@ -816,4 +814,4 @@ fn [A,C,B <: int](x) -> (A|C,int|B|C) { (x,x) }
 >   fn [A, C, B <: int](x: C) -> (A | C, int | B | C) { (x, x) }
 > [A, C, B <: int] (C) -> (A | C, int | B | C)
 
-> STATS: fix: 59, flex: 1919
+> STATS: fix: 59, flex: 1898

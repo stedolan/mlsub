@@ -408,15 +408,6 @@ and check' env ~mode eloc e ty =
      let* ef = elab_fields fields in
      Tuple ef
 
-  (* FIXME delete *)
-  | Proj (e, (field, loc)) when (match ty with Checking _ -> true | _ -> false)  ->
-     (* Because of subtyping, there's a checking form for Proj! *)
-     let r = { fields = FieldMap.singleton (Field_named field) (match ty with Checking t -> t | _ -> assert false);
-               fnames = [Field_named field];
-               fopen = `Open } in
-     let* e = check env ~mode e (Checking (tcons eloc (Record r))) in
-     Proj (e, (field, loc))
-
   | Proj (e, (field, loc)) ->
      let ty, e = infer env ~mode e in
      let f = Field_named field in
