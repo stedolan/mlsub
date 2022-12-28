@@ -334,7 +334,8 @@ let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
 
 let {x: foo, y: bar, ...} = {x: 10, y: true, z: 42}; (foo, bar)
 > let {x: foo, y: bar, ...} = {x: 10, y: true, z: 42}; (foo, bar)
->   let {x: foo, y: bar, ...} : {x: int, y: bool, ...} = {x: 10, y: true, z: 42};
+>   let {x: foo, y: bar, ...} : {x: int, y: bool, z: int} =
+>   {x: 10, y: true, z: 42};
 >   (foo, bar)
 > (int, bool)
 
@@ -348,7 +349,7 @@ let (x, y) = (1, true); (y, x)
 
 let (x, y, ...) = (false, (), 3); {x,y}
 > let (x, y, ...) = (false, (), 3); {x, y}
->   let (x, y, ...) : (bool, (), ...) = (false, (), 3); {x, y}
+>   let (x, y, ...) : (bool, (), int) = (false, (), 3); {x, y}
 > {x: bool, y: ()}
 
 
@@ -557,47 +558,44 @@ fn (x) { if x.cond { {q:2,p:1} } else { {p:2,q:1} } }
 
 fn (x) { let {p,q,...}=x; x }
 > fn (x) { let {p, q, ...} = x; x }
->   fn [A, B, C <: {p: A, q: B, ...}](x: C) -> C {
->     let {p, q, ...} : {p: A, q: B, ...} = x;
->     x
->   }
-> [A, B, C <: {p: A, q: B, ...}] (C) -> C
+>   fn [A <: {p: any, q: any, ...}](x: A) -> A { let {p, q, ...} : A = x; x }
+> [A <: {p: any, q: any, ...}] (A) -> A
 
 fn (x) { let {p,q} = x; let {p,q,r} = x; {p,q} }
 > fn (x) { let {p, q} = x; let {p, q, r} = x; {p, q} }
 >   fn (x: nothing) -> {p: nothing, q: nothing} {
->     let {p, q} : {p: nothing, q: nothing} = x;
->     let {p, q, r} : {p: nothing, q: nothing, r: nothing} = x;
+>     let {p, q} : nothing = x;
+>     let {p, q, r} : nothing = x;
 >     {p, q}
 >   }
 > (nothing) -> {p: nothing, q: nothing}
 
 fn (x) { let {p,q,...} = x; let {p,q,r} = x; {p,q} }
 > fn (x) { let {p, q, ...} = x; let {p, q, r} = x; {p, q} }
->   fn [A, B, C](x: {p: A, q: B, r: C}) -> {p: A, q: B} {
->     let {p, q, ...} : {p: A, q: B, ...} = x;
->     let {p, q, r} : {p: A, q: B, r: C} = x;
+>   fn [A, B, C <: {p: A, q: B, r: any}](x: C) -> {p: A, q: B} {
+>     let {p, q, ...} : C = x;
+>     let {p, q, r} : C = x;
 >     {p, q}
 >   }
-> [A, B, C] ({p: A, q: B, r: C}) -> {p: A, q: B}
+> [A, B, C <: {p: A, q: B, r: any}] (C) -> {p: A, q: B}
 
 fn (x) { let {p,q} = x; let {p,q,r,...} = x; {p,q} }
 > fn (x) { let {p, q} = x; let {p, q, r, ...} = x; {p, q} }
 >   fn (x: nothing) -> {p: nothing, q: nothing} {
->     let {p, q} : {p: nothing, q: nothing} = x;
->     let {p, q, r, ...} : {p: nothing, q: nothing, r: nothing, ...} = x;
+>     let {p, q} : nothing = x;
+>     let {p, q, r, ...} : nothing = x;
 >     {p, q}
 >   }
 > (nothing) -> {p: nothing, q: nothing}
 
 fn (x) { let {p,q,...} = x; let {p,q,r,...} = x; {p,q} }
 > fn (x) { let {p, q, ...} = x; let {p, q, r, ...} = x; {p, q} }
->   fn [A, B, C](x: {p: A, q: B, r: C, ...}) -> {p: A, q: B} {
->     let {p, q, ...} : {p: A, q: B, ...} = x;
->     let {p, q, r, ...} : {p: A, q: B, r: C, ...} = x;
+>   fn [A, B, C <: {p: A, q: B, r: any, ...}](x: C) -> {p: A, q: B} {
+>     let {p, q, ...} : C = x;
+>     let {p, q, r, ...} : C = x;
 >     {p, q}
 >   }
-> [A, B, C] ({p: A, q: B, r: C, ...}) -> {p: A, q: B}
+> [A, B, C <: {p: A, q: B, r: any, ...}] (C) -> {p: A, q: B}
 
 
 fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { {foo: 1, cond: false} }) }
@@ -1204,27 +1202,27 @@ fn(x) {
 > }
 >   {
 >     fst:
->     fn [A <: bool, B <: {foo: A}](x: B) -> {foo: int} | B {
+>     fn [A <: {foo: bool}](x: A) -> {foo: int} | A {
 >       if true {
 >         x
 >       } else {
->         let {foo: z} : {foo: A} = x;
+>         let {foo: z} : A = x;
 >         let zz : bool = z;
 >         {foo: 42}
 >       }
 >     },
 >     snd:
->     fn [A <: int](x: {foo: A}) -> {foo: int} {
+>     fn [A <: {foo: int}](x: A) -> {foo: int} {
 >       if true {
 >         x
 >       } else {
->         let {foo: z} : {foo: A} = x;
+>         let {foo: z} : A = x;
 >         let zz : int = z;
 >         {foo: 42}
 >       }
 >     }
 >   }
-> {fst: [A <: bool, B <: {foo: A}] (B) -> {foo: int} | B, snd: [A <: int] ({foo: A}) -> {foo: int}}
+> {fst: [A <: {foo: bool}] (A) -> {foo: int} | A, snd: [A <: {foo: int}] (A) -> {foo: int}}
 
 
-> STATS: fix: 66, flex: 1550
+> STATS: fix: 68, flex: 1548

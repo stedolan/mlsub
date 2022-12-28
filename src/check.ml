@@ -445,7 +445,7 @@ and check' env ~mode eloc e ty =
      | (None, params, ret, body), Icons (Func (ptypes, rtype)) ->
         (* If poly <> None, then we should infer & subtype *)
         (* FIXME: do we need another level here? Does hoisting break things? *)
-        let _, vals = check_parameters env params ptypes in
+        let vals = check_parameters env params ptypes in
         let env' = Env_vals { vals; rest = env } in
         let* body = check env' ~mode body (check_annot env' ret rtype) in
         (* No elaboration. Arguably we could *delete* annotations here! *)
@@ -505,7 +505,7 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
          | None ->
             fresh_flow env, p, Some (env_level env)) params in
        let ptys = map_fields (fun _fn ((_tn,tp), p, gen_level) -> check_pat env ~gen_level tp p) params in
-       let _, vs = merge_bindings ptys in
+       let vs = merge_bindings ptys in
        let env' = Env_vals { vals = vs; rest = env } in
        let bmode = fresh_gen_mode () in
        let res, body =
@@ -546,15 +546,13 @@ and merge_bindings bs =
     | x, None | None, x -> x
     | Some _, Some _ ->
        failwith ("duplicate bindings " ^ k) in
-  map_fields (fun _fn (ty, _) -> ty) bs,
-  fold_fields (fun acc _fn (_, b) ->
-      SymMap.merge merge acc b) SymMap.empty bs
+  fold_fields (fun acc _fn b -> SymMap.merge merge acc b) SymMap.empty bs
 
 and check_pat env ~gen_level ty = function
   | None, _ -> failwith "bad pat"
   | Some p, loc -> check_pat' env ~gen_level ty loc p
 and check_pat' env ~gen_level ty ploc = function
-  | Pvar (s,_) -> ty, SymMap.singleton s {typ = ty; gen_level }
+  | Pvar (s,_) -> SymMap.singleton s {typ = ty; gen_level }
   | Pparens p -> check_pat env ~gen_level ty p
   | Ptuple fs ->
      let fs =
@@ -566,8 +564,7 @@ and check_pat' env ~gen_level ty ploc = function
        | Ok _ -> assert false
        | Error e -> fail ploc (Conflict (`Pat, e)) in
      let fs = map_fields (fun _fn (p, t) -> check_pat env ~gen_level t p) fs in
-     let fs, bindings = merge_bindings fs in
-     tcons ploc (Record fs), bindings
+     merge_bindings fs
 
 and check_parameters env params ptypes =
   let merged =
@@ -606,7 +603,7 @@ and check_binding env ~mode p pty e =
        let t = typ_of_tyexp env ty in
        t, check env ~mode e (Checking t), None
   in
-  let pty, vs = check_pat env ~gen_level pty p in
+  let vs = check_pat env ~gen_level pty p in
   let env = Env_vals { vals = vs; rest = env } in
   env, pty, e
 
