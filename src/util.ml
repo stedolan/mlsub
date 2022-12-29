@@ -211,3 +211,110 @@ end = struct
   
   let clear vec = vec.length <- 0
 end
+
+module PPFmt = struct
+  type doc_stack =
+    | Finished
+    | Then_group of doc_stack * PPrint.document
+
+  type doc_state = doc_stack * PPrint.document
+
+  (* Output a prefix of a format string, yielding a stack of documents *)
+  open PPrint
+  let rec pp_acc (s : doc_state) (acc : _ CamlinternalFormat.acc) : doc_state =
+    (* FIXME: what to do on bad nesting? *)
+    match acc with
+    (* Semantic tags ignored for now *)
+    | Acc_formatting_gen (acc, Acc_open_tag _)
+    | Acc_formatting_lit (acc, Close_tag) ->
+       pp_acc s acc
+
+    (* FIXME: use box info to decide group type *)
+    | Acc_formatting_gen (acc, Acc_open_box _tag) ->
+       let st, curr = pp_acc s acc in
+       Then_group (st, curr), empty
+    | Acc_formatting_lit (acc, Close_box) ->
+       let st, curr = pp_acc s acc in
+       begin match st with
+       | Then_group (st, pfx) ->
+          st, pfx ^^ group curr
+       | Finished ->
+          failwith "mismatched"
+       end
+
+    (* FIXME: honour offset? *)
+    | Acc_formatting_lit(acc, Break(_, width, _offset)) ->
+       let st, curr = pp_acc s acc in
+       st, curr ^^ break width
+
+    | Acc_formatting_lit(acc, (Force_newline | Flush_newline)) ->
+       let st, curr = pp_acc s acc in
+       st, curr ^^ hardline
+
+    | Acc_formatting_lit(acc, Magic_size _) ->
+       pp_acc s acc
+
+    | Acc_formatting_lit(acc, Escaped_at) ->
+       let st, curr = pp_acc s acc in
+       st, curr ^^ char '@'
+
+    | Acc_formatting_lit(acc, Escaped_percent) ->
+       let st, curr = pp_acc s acc in
+       st, curr ^^ char '%'
+
+    (* FIXME: what is this? *)
+    | Acc_formatting_lit(acc, Scan_indic c) ->
+       let st, curr = pp_acc s acc in
+       st, curr ^^ char '@' ^^ char c
+
+    (* FIXME: how/what? *)
+    | Acc_delay (acc, f) ->
+       let st, curr = pp_acc s acc in
+       let d = f () in
+       st, curr ^^ d
+(*
+       let s = pp_acc s acc in
+       f s*)
+
+    (* 'Flushing' doesn't make much sense here, so ignore *)
+    | Acc_formatting_lit (acc, FFlush)
+    | Acc_flush acc ->
+       pp_acc s acc
+
+    | Acc_string_literal(acc, str)
+    | Acc_data_string (acc, str) ->
+       let st, curr = pp_acc s acc in
+       st, curr ^^ utf8string str
+
+    (* FIXME: Support Magic_size? *)
+(*  | Acc_string_literal (Acc_formatting_lit (acc, Magic_size (_, size)), str)
+    | Acc_data_string (Acc_formatting_lit (acc, Magic_size (_, size)), str) ->
+       let st, curr = pp_acc s acc in
+       asdf
+    | Acc_char_literal (Acc_formatting_lit (acc, Magic_size (_, size)), ch)
+    | Acc_data_char (Acc_formatting_lit (acc, Magic_size (_, size)), ch) ->
+       let st, curr = pp_acc s acc in
+       asdf *)
+
+    | Acc_char_literal (acc, ch)
+    | Acc_data_char (acc, ch) ->
+       let st, curr = pp_acc s acc in
+       st, curr ^^ char ch
+
+    | Acc_invalid_arg (acc, msg) ->
+       ignore (pp_acc s acc); invalid_arg msg
+
+    | End_of_acc -> s
+
+  let pp_acc acc =
+    match pp_acc (Finished, empty) acc with
+    | Finished, s -> s
+    | _ -> failwith "mismatched"
+
+  let kpp k (CamlinternalFormatBasics.Format (fmt, _)) =
+    CamlinternalFormat.make_printf
+      (fun acc -> k (pp_acc acc))
+      End_of_acc fmt
+
+  let pp fmt = kpp id fmt
+end

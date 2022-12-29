@@ -1,6 +1,7 @@
 open PPrint
 open Tuple_fields
 open Exp
+open Util
 
 (* FIXME: precedence is fucked here. Need to insert parens *)
 
@@ -36,7 +37,7 @@ let sep ?(trail=false) s xs =
   group (indent (break 0 ^^ separate_map (s ^^ break 1) group xs) ^^
            (if trail then s else empty) ^^
            break 0)
-
+let pp_doc () d = d
 let rec exp e = mayloc e @@ function
   | Lit (l, _) -> literal l
   | Var s -> ident s
@@ -44,12 +45,19 @@ let rec exp e = mayloc e @@ function
   | FnDef (s, def, body) ->
      fndef ~name:(Some s) def ^^ break 1 ^^ exp body
   | Seq (e1, e2) ->
-     group (exp e1 ^^ semi) ^^ break 1 ^^ exp e2
+     PPFmt.pp "@[%a;@]@ %a" pp_doc (exp e1) pp_doc (exp e2)
+     (* group (exp e1 ^^ semi) ^^ break 1 ^^ exp e2 *)
   | Let (p, ty, e, body) ->
+     PPFmt.pp "@[let %a%a =@ @[%a@];@]@ %a"
+       (fun () d -> d) (pat p)
+       (fun () d -> d) (opt_type_annotation ty)
+       (fun () d -> d) (exp e)
+       (fun () d -> d) (exp body)
+(*
      group (string "let" ^^ space ^^
        pat p ^^ opt_type_annotation ty ^^
        op "=" ^^ group (exp e) ^^
-       string ";") ^^ break 1 ^^ exp body
+       string ";") ^^ break 1 ^^ exp body*)
   | Tuple t -> record ~pun:exp_pun exp t
   | App (f, args) ->
      exp f ^^
