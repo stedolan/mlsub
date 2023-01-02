@@ -213,14 +213,39 @@ end = struct
 end
 
 module PPFmt = struct
+  type group_opts =
+    | No_opts
+    | Junk of string
+    | Nest of int
+
   type doc_stack =
     | Finished
-    | Then_group of doc_stack * PPrint.document
+    | Then_group of doc_stack * group_opts * PPrint.document
 
   type doc_state = doc_stack * PPrint.document
 
-  (* Output a prefix of a format string, yielding a stack of documents *)
+  let box_lit : _ CamlinternalFormat.acc -> string option = function
+    | Acc_string_literal (End_of_acc, s)
+       when String.length s > 2 && s.[0] = '<' && s.[String.length s - 1] = '>' ->
+       Some (String.sub s 1 (String.length s - 2))
+    | _ -> None
+
   open PPrint
+
+  let parse_group_opts = function
+    | None -> No_opts
+    | Some s ->
+       match int_of_string_opt s with
+       | Some n -> Nest n
+       | None -> No_opts
+
+  let group_with_opts opts g =
+    match opts with
+    | No_opts -> group g
+    | Junk s -> group (utf8string s ^^ g)
+    | Nest n -> group (nest n g)
+
+  (* Output a prefix of a format string, yielding a stack of documents *)
   let rec pp_acc (s : doc_state) (acc : _ CamlinternalFormat.acc) : doc_state =
     (* FIXME: what to do on bad nesting? *)
     match acc with
@@ -230,14 +255,14 @@ module PPFmt = struct
        pp_acc s acc
 
     (* FIXME: use box info to decide group type *)
-    | Acc_formatting_gen (acc, Acc_open_box _tag) ->
+    | Acc_formatting_gen (acc, Acc_open_box tag) ->
        let st, curr = pp_acc s acc in
-       Then_group (st, curr), empty
+       Then_group (st, parse_group_opts (box_lit tag), curr), empty
     | Acc_formatting_lit (acc, Close_box) ->
        let st, curr = pp_acc s acc in
        begin match st with
-       | Then_group (st, pfx) ->
-          st, pfx ^^ group curr
+       | Then_group (st, opts, pfx) ->
+          st, pfx ^^ group_with_opts opts curr
        | Finished ->
           failwith "mismatched"
        end

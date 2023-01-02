@@ -57,9 +57,22 @@ let equal_fields f ps qs =
 let map_fields f fs =
   { fs with fields = FieldMap.mapi (fun fn x -> f fn x) fs.fields }
 
+let iter_fields f fs =
+  ignore (map_fields f fs)
+
 let fold_fields f (acc : 'acc) fs =
   List.fold_left (fun acc n ->
       f acc n (FieldMap.find n fs.fields)) acc fs.fnames
+
+let fold_right_fields f fs (acc : 'acc) =
+  List.fold_right (fun n acc ->
+      f n (FieldMap.find n fs.fields) acc) fs.fnames acc
+
+let list_fields fs =
+  List.rev (fold_fields (fun acc fn x -> (fn, x) :: acc) [] fs)
+
+let get_field fs f =
+  FieldMap.find f fs.fields
 
 let merge_fields ~left ~both ~right ~extra fs_l fs_r =
   let rec go_l remaining_r accfields accnames extra_l names_l =

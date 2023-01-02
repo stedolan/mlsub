@@ -449,7 +449,9 @@ type value_binding =
     (* The level of the outermost unannotated lambda-bound parameter
        reachable from this binding by expanding untyped let definitions.
        (cf. Haskell's MonoLocalBinds) *)
-    gen_level: env_level option; }
+    gen_level: env_level option;
+    comp_var: IR.value IR.Binder.ref
+  }
 
 type env =
   | Env_vals of { vals : value_binding SymMap.t; rest : env }

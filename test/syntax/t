@@ -26,11 +26,26 @@ fn(a) { { foo: if true { fn(x) { x } } else { a } } }
 >     {foo: if true { fn [A_2](x: A_2) -> A_2 { x } } else { a }}
 >   }
 > [A, B] (A) -> {foo: ((B) -> B) | A}
+> let  = %yield(0: fun (a) ret {
+>   let k(x) = {
+>     ret((foo: x))
+>   };
+>   match <true> {
+>     true() -> {
+>       k(fun (x) ret2 { ret2(x) })
+>     };
+>     false() -> {
+>       k(a)
+>     }
+>   }
+> });
+> done
 
 fn[A,B](x:A) -> A | (A) -> B { x }
 > fn [A, B](x: A) -> A | (A) -> B { x }
 >   fn [A, B](x: A) -> ((A) -> B) | A { x }
 > [A, B] (A) -> ((A) -> B) | A
+> let  = %yield(0: fun (x) ret { ret(x) }); done
 
 : [A <: ([] int) -> int ] A <: int
 > test:1: Bounds must be simple types
