@@ -71,6 +71,11 @@ let fold_right_fields f fs (acc : 'acc) =
 let list_fields fs =
   List.rev (fold_fields (fun acc fn x -> (fn, x) :: acc) [] fs)
 
+let is_empty fs =
+  match fs.fnames with
+  | [] -> true
+  | _ :: _ -> false
+
 let get_field fs f =
   FieldMap.find f fs.fields
 

@@ -183,7 +183,8 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
         | Ok v -> Tvar (Vrigid v)
         | Error e -> fail loc e
      end
-  | Trecord fields ->
+  | Trecord (_tag, fields) ->
+     (* FIXME tag *)
      tcons loc (Record (typs_of_tuple_tyexp env lvl fields))
   | Tfunc (args, res) ->
      tcons loc (Func (typs_of_tuple_tyexp env lvl args, typ_of_tyexp env lvl res))
@@ -486,7 +487,7 @@ and check' env ~mode eloc e ty : exp' check_output =
            (IR.Symbol.of_string "true", [], Cont ([], ifso.comp (Reified_cont k)));
            (IR.Symbol.of_string "false", [], Cont ([], ifnot.comp (Reified_cont k)))]) }
 
-  | Tuple fields ->
+  | Tuple (tag, fields) ->
      if fields.fopen = `Open then failwith "invalid open tuple ctor";
      let fields =
        match inspect ty with
@@ -514,8 +515,10 @@ and check' env ~mode eloc e ty : exp' check_output =
      in
      { elab =
          (let* ef = elab_fields (map_fields (fun _fn e -> e.elab) fields) in
-          Tuple ef);
-       comp = IRB.tuple None (map_fields (fun _fn e -> e.comp) fields) }
+          Tuple (tag, ef));
+       comp =
+         (let tag = Option.map (fun (t,_) -> IR.Symbol.of_string t) tag in
+          IRB.tuple tag (map_fields (fun _fn e -> e.comp) fields)) }
 
   | Proj (e, (field, loc)) ->
      let ty, e = infer env ~mode e in
@@ -623,6 +626,9 @@ and check' env ~mode eloc e ty : exp' check_output =
           App(f, args));
        comp = IRB.apply f.comp (map_fields (fun _fn a -> a.comp) args)}
 
+  | Match (_e, _cases) ->
+     failwith "FIXME unimplemented match"
+
   | Pragma ("true"|"false" as b) when match inspect ty with Icons Bool -> true | _ -> false ->
      { elab = elab_pure e;
        comp = IRB.literal (Bool (String.equal b "true")) }
@@ -718,7 +724,8 @@ and check_pat' env ~gen_level ty ploc = function
      SymMap.singleton s {typ = ty; gen_level; comp_var = v' },
      (fun x comp -> LetVal (v, x, comp))
   | Pparens p -> check_pat env ~gen_level ty p
-  | Ptuple fs ->
+  | Ptuple (_tag, fs) ->
+     (* FIXME tag *)
      let fs =
        (* FIXME: fvinst? *)
        match
@@ -735,6 +742,8 @@ and check_pat' env ~gen_level ty ploc = function
       Project(v, List.map (fun (_, fn, _) -> fn) fields,
         Cont(List.map (fun ((v,_),_,_) -> v) fields,
           List.fold_right (fun ((_,v),_,cpat) acc -> cpat (IR.Var v) acc) fields comp)))
+  | Por _ ->
+     failwith "unimplemented Por"
 
 and check_parameters env params ptypes =
   let merged =

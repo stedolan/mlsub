@@ -17,6 +17,9 @@ let literal = function
   | String s -> char '"' ^^ string s ^^ char '"'
 
 let symbol (s, _) = string s
+
+let qsymbol s = char '\'' ^^ symbol s
+
 let ident (l, _) =
   let rec go =
     function
@@ -58,13 +61,18 @@ let rec exp e = mayloc e @@ function
        pat p ^^ opt_type_annotation ty ^^
        op "=" ^^ group (exp e) ^^
        string ";") ^^ break 1 ^^ exp body*)
-  | Tuple t -> record ~pun:exp_pun exp t
+  | Tuple (None, t) -> record ~tcomma:true ~pun:exp_pun exp t
+  | Tuple (Some tag, t) when Tuple_fields.is_empty t -> symbol tag
+  | Tuple (Some tag, t) -> symbol tag ^^ record ~tcomma:false ~pun:exp_pun exp t
   | App (f, args) ->
      exp f ^^
      parens (fields argument args)
   | Proj (e, f) -> exp e ^^ char '.' ^^ field_name (Field_named (fst f))
   | If (e, t, f) ->
      string "if" ^^ blank 1 ^^ exp e ^^ block t ^^ blank 1 ^^ string "else" ^^ block f
+  | Match (e, cs) ->
+     string "match" ^^ blank 1 ^^ exp e ^^ space ^^
+       braces' (indent (break 1 ^^ cases cs) ^^ break 1)
   | Typed (e, t) -> parens (exp e ^^ opt_type_annotation (Some t))
   | Parens e -> parens (exp e)
   | Pragma s -> char '@' ^^ string s
@@ -98,12 +106,12 @@ and fields : 'e . ?tcomma:bool -> (pos:bool -> field_name -> 'e -> document) -> 
     (List.map (fun (pos,f) -> print_elem ~pos f (FieldMap.find f fields)) fnames
     @ (match fopen with `Open -> [string "..."] | `Closed -> []))
 
-and record : 'e . pun:(field_name * 'e -> bool) -> ('e -> document) -> 'e tuple_fields -> document =
-  fun ~pun print_elem t ->
+and record : 'e . tcomma:bool -> pun:(field_name * 'e -> bool) -> ('e -> document) -> 'e tuple_fields -> document =
+  fun ~tcomma ~pun print_elem t ->
   if t.fnames = List.init (List.length t.fnames) (fun i -> Field_positional i) then
-    parens (fields ~tcomma:true (fun ~pos:_ _ e -> print_elem e) t)
+    parens (fields ~tcomma (fun ~pos:_ _ e -> print_elem e) t)
   else
-    braces (fields (fun ~pos:_ fn e ->
+    braces (fields ~tcomma:false (fun ~pos:_ fn e ->
        if pun (fn, e) then field_name fn else
           field_name fn ^^ string ":" ^^ break 1 ^^ print_elem e) t)
 
@@ -141,15 +149,27 @@ and opt_type_annotation ?(prespace=true) = function
   | Some ty -> (if prespace then blank 1 else empty) ^^ string ":" ^^ blank 1 ^^ group (tyexp ty)
   | None -> empty
 
+and cases cs =
+  cs |> List.map (fun (p,e) ->
+    group (string "| " ^^ pat p ^^ string " => " ^^ exp e) ^^ break 1)
+  |> concat
+
 and pat p = mayloc p @@ function
   | Pvar s -> symbol s
-  | Ptuple ts -> record ~pun:pat_pun pat ts
+  | Ptuple (None, ts) -> record ~tcomma:true ~pun:pat_pun pat ts
+  | Ptuple (Some tag, ts) when Tuple_fields.is_empty ts -> symbol tag
+  | Ptuple (Some tag, ts) -> symbol tag ^^ record ~tcomma:false ~pun:pat_pun pat ts
+  | Por (p, q) -> pat p ^^ op "|" ^^ pat q
   | Pparens p -> parens (pat p)
 
 and tyexp t = mayloc t @@ function
   | Tnamed s -> ident s
-  | Trecord fields ->
-     record ~pun:(fun _ -> false) tyexp fields
+  | Trecord (None, fields) ->
+     record ~tcomma:true ~pun:(fun _ -> false) tyexp fields
+  | Trecord (Some tag, fields) when Tuple_fields.is_empty fields ->
+     qsymbol tag
+  | Trecord (Some tag, fields) ->
+     qsymbol tag ^^ record ~tcomma:false ~pun:(fun _ -> false) tyexp fields
   | Tfunc (args, ret) ->
      parens (fields argtype args) ^^
        space ^^ group (string "->" ^^ break 1 ^^ group (tyexp ret))

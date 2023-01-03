@@ -825,7 +825,7 @@ let unparse_cons ~neg ~pos ty =
     | Int -> named_type "int"
     | String -> named_type "string"
     | Record fs ->
-       Trecord (Tuple_fields.map_fields (fun _ t -> pos t) fs)
+       Trecord (None, Tuple_fields.map_fields (fun _ t -> pos t) fs)
     | Func (args, ret) ->
        Tfunc (Tuple_fields.map_fields (fun _ t -> neg t) args,
               pos ret) in

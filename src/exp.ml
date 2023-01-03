@@ -8,6 +8,8 @@ type symbol = string loc
 type ident = ident' loc and ident' =
   { label : string; shift : int }
 
+type tuple_tag = string loc
+
 (* Expressions *)
 
 type exp = exp' mayloc and exp' =
@@ -22,7 +24,7 @@ type exp = exp' mayloc and exp' =
   (* f(...) *)
   | App of exp * exp tuple_fields
   (* (a, b, c) or {x: a, y, z: c}*)
-  | Tuple of exp tuple_fields
+  | Tuple of tuple_tag option * exp tuple_fields
   (* let a : t = ...; ... *)
   | Let of pat * tyexp option * exp * exp
   (* e; e *)
@@ -31,12 +33,16 @@ type exp = exp' mayloc and exp' =
   | Proj of exp * symbol
   (* if a { foo } else { bar } *)
   | If of exp * exp * exp
+  (* match e { p => e | ... } *)
+  | Match of exp * case list
   (* (e : A) *)
   | Typed of exp * tyexp
   (* (e) *)
   | Parens of exp
   (* @foo *)
   | Pragma of string
+
+and case = pat * exp
 
 and func_def = typolybounds option * parameters * tyexp option * exp
 
@@ -45,8 +51,9 @@ and parameters = (pat * tyexp option) tuple_fields
 (* Patterns *)
 
 and pat = pat' mayloc and pat' =
-  | Ptuple of pat tuple_fields
+  | Ptuple of tuple_tag option * pat tuple_fields
   | Pvar of symbol
+  | Por of pat * pat
   | Pparens of pat
 
 (* Type expressions *)
@@ -54,7 +61,7 @@ and pat = pat' mayloc and pat' =
 and tyexp = tyexp' mayloc and tyexp' =
   | Tnamed of ident
   | Tforall of typolybounds * tyexp
-  | Trecord of tyexp tuple_fields
+  | Trecord of tuple_tag option * tyexp tuple_fields
   | Tfunc of tyexp tuple_fields * tyexp
   | Tparen of tyexp
   | Tjoin of tyexp * tyexp
@@ -89,6 +96,8 @@ let mapper =
     (poly, args, ret, body)
   in
 
+  let case r (pat, exp) = (r.pat r pat, r.exp r exp) in
+
   let exp = mayloc @@ fun r e -> match e with
     | Lit (l, loc) ->
        Lit (l, r.loc r loc)
@@ -100,8 +109,8 @@ let mapper =
        FnDef (sym r s, fndef r def, r.exp r body)
     | App (f, args) ->
        App (r.exp r f, map_fields (fun _fn e -> r.exp r e) args)
-    | Tuple es ->
-       Tuple (map_fields (fun _fn e -> r.exp r e) es)
+    | Tuple (tag, es) ->
+       Tuple (Option.map (sym r) tag, map_fields (fun _fn e -> r.exp r e) es)
     | Let (p, ty, e, body) ->
        Let (r.pat r p, Option.map (r.tyexp r) ty, r.exp r e, r.exp r body)
     | Seq (e1, e2) ->
@@ -112,6 +121,8 @@ let mapper =
        If (r.exp r e, r.exp r et, r.exp r ef)
     | Typed (e, t) ->
        Typed (r.exp r e, r.tyexp r t)
+    | Match (e, cases) ->
+       Match (r.exp r e, List.map (case r) cases)
     | Parens e ->
        Parens (r.exp r e)
     | Pragma s ->
@@ -119,8 +130,10 @@ let mapper =
   in
 
   let pat = mayloc @@ fun r p -> match p with
-    | Ptuple ps -> Ptuple (map_fields (fun _fn x -> r.pat r x) ps)
+    | Ptuple (tag, ps) ->
+       Ptuple (Option.map (sym r) tag, map_fields (fun _fn x -> r.pat r x) ps)
     | Pvar s -> Pvar (sym r s)
+    | Por (p, q) -> Por (r.pat r p, r.pat r q)
     | Pparens p -> Pparens (r.pat r p)
   in
 
@@ -131,8 +144,8 @@ let mapper =
        let bounds = List.map (fun (s, t) -> (sym r s, Option.map (r.tyexp r) t)) bounds in
        let body = r.tyexp r body in
        Tforall (bounds, body)
-    | Trecord ts ->
-       Trecord (map_fields (fun _fn t -> r.tyexp r t) ts)
+    | Trecord (tag, ts) ->
+       Trecord (Option.map (sym r) tag, map_fields (fun _fn t -> r.tyexp r t) ts)
     | Tfunc (args, ret) ->
        Tfunc (map_fields  (fun _fn t -> r.tyexp r t) args, r.tyexp r ret)
     | Tparen t ->
