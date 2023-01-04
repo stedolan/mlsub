@@ -1,0 +1,101 @@
+
+fn(x) { (Foo(), Bar, Foo{x: 42}, Baz(1)) }
+> fn (x) { (Foo, Bar, Foo{x: 42}, Baz(1)) }
+>   fn (x: any) -> ('Foo, 'Bar, 'Foo{x: int}, 'Baz(int)) {
+>     (Foo, Bar, Foo{x: 42}, Baz(1))
+>   }
+> (any) -> ('Foo, 'Bar, 'Foo{x: int}, 'Baz(int))
+> let  = %yield(0: fun (x) ret {
+>   ret((0: Foo(), 1: Bar(), 2: Foo(x: 42), 3: Baz(0: 1)))
+> });
+> done
+
+# Checking mode
+( if true { Foo(@true) } else { Bar(6) }
+  : 'Foo(bool) | 'Bar(int) )
+> (if true { Foo(@true) } else { Bar(6) } : 'Foo(bool) | 'Bar(int))
+>   (if true { Foo(@true) } else { Bar(6) } : 'Foo(bool) | 'Bar(int))
+> 'Foo(bool) | 'Bar(int)
+> let k(x) = {
+>   let  = %yield(0: x);
+>   done
+> };
+> match <true> {
+>   true() -> {
+>     k(Foo(0: <true>))
+>   };
+>   false() -> {
+>     k(Bar(0: 6))
+>   }
+> }
+
+({x: 42} : 'Foo{x: int})
+> ({x: 42} : 'Foo{x: int})
+> test:1: The tag should be Foo, but no tag is present.
+>   ({x: 42} : 'Foo{x: int})
+>    ^^^^^^^
+>      found: {x: _}
+>   expected: 'Foo{x: _}
+> This {x: _} is used as 'Foo{x: _} at test:1:
+>   ({x: 42} : 'Foo{x: int})
+>              ^^^^^^^^^^^^
+
+(Bar{x: 42} : 'Foo{x: int})
+> (Bar{x: 42} : 'Foo{x: int})
+> test:1: The tag should be Foo, but tag Bar is present.
+>   (Bar{x: 42} : 'Foo{x: int})
+>    ^^^^^^^^^^
+>      found: 'Bar{x: _}
+>   expected: 'Foo{x: _}
+> This 'Bar{x: _} is used as 'Foo{x: _} at test:1:
+>   (Bar{x: 42} : 'Foo{x: int})
+>                 ^^^^^^^^^^^^
+
+fn(c) {
+  let a = if c {Foo{x:Foo}} else {Bar{x:Bar}};
+  (a, a.x)
+}
+> fn (c) { let a = if c { Foo{x: Foo} } else { Bar{x: Bar} }; (a, a.x) }
+>   fn (c: bool) -> ('Foo{x: 'Foo} | 'Bar{x: 'Bar}, 'Foo | 'Bar) {
+>     let a : 'Foo{x: 'Foo} | 'Bar{x: 'Bar} =
+>     if c { Foo{x: Foo} } else { Bar{x: Bar} };
+>     (a, a.x)
+>   }
+> (bool) -> ('Foo{x: 'Foo} | 'Bar{x: 'Bar}, 'Foo | 'Bar)
+> let  = %yield(0: fun (c) ret {
+>   let k(x) = {
+>     let x2 = x.(x);
+>     ret((0: x, 1: x2))
+>   };
+>   match c {
+>     true() -> {
+>       k(Foo(x: Foo()))
+>     };
+>     false() -> {
+>       k(Bar(x: Bar()))
+>     }
+>   }
+> });
+> done
+
+
+# Grammar ambiguity requires parens on return type
+# (otherwise function body is misread as fields)
+fn(x : 'A | 'B | 'C(int) | 'D{x:int}) -> ('Foo | 'Bar) {
+  match x { A => 1 | B() => 2 | C(x) => 3 | D{x:foo} | E(a,b,c) => 5 }
+}
+> fn (x: 'A | 'B | 'C(int) | 'D{x: int}) -> ('Foo | 'Bar) {
+>   match x {
+>     | A => 1
+>     | B => 2
+>     | C(x) => 3
+>     | D{x: foo} | E(a, b, c) => 5
+>     
+>   }
+> }
+> typechecking error: Failure("FIXME unimplemented match")
+
+
+
+# end
+> STATS: fix: 0, flex: 4

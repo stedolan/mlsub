@@ -11,7 +11,7 @@ let dump (t : ptyp) =
 
 let func a b = Cons.Func (Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) a)), b)
 
-let tuple xs = Cons.Record (Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) xs)))
+let tuple xs = Cons.Record (None, Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) xs)))
 
 let nope _ = assert false
 

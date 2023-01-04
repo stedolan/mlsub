@@ -23,13 +23,15 @@ let rec compare_lists f p q =
 module Cons = struct
   open Tuple_fields
 
+  type tuple_tag = string
+
   (* Head type constructors. These do not bind type variables. *)
   type (+'neg, +'pos) t =
     (* FIXME: maybe delete these once abstypes exist? *)
     | Bool
     | Int
     | String
-    | Record of 'pos tuple_fields
+    | Record of tuple_tag option * 'pos tuple_fields
     | Func of 'neg tuple_fields * 'pos
 
 
@@ -38,22 +40,11 @@ module Cons = struct
     | Bool, Bool -> true
     | Int, Int -> true
     | String, String -> true
-    | Record p, Record q ->
+    | Record (pt, p), Record (qt, q) ->
+       Option.equal (String.equal) pt qt &&
        equal_fields pos p q
     | Func (pa, pr), Func (qa, qr) ->
        equal_fields neg pa qa && pos pr qr
-    | (Bool|Int|String|Record _|Func _), _ -> false
-
-  (* same_component isn't quite right: the lattice is more complicated
-     than that because of Record(Closed) *)
-  let same_component p q =
-    match p, q with
-    | Bool, Bool
-    | Int, Int
-    | String, String
-    | Record _, Record _
-    | Func _, Func _
-      -> true
     | (Bool|Int|String|Record _|Func _), _ -> false
 
   let map_one ~neg ~pos = function
@@ -61,7 +52,8 @@ module Cons = struct
     | Int -> Int
 
     | String -> String
-    | Record fields -> Record (map_fields (fun _fn x -> pos x) fields)
+    | Record (tag,fields) ->
+       Record (tag,map_fields (fun _fn x -> pos x) fields)
     | Func (args, res) ->
        let args = map_fields (fun _fn x -> neg x) args in
        let res = pos res in
@@ -97,69 +89,13 @@ module Cons = struct
     | Int -> Int
 
     | String -> String
-    | Record fields -> Record (map_fields (fun fn x -> pos (Record_field fn) x) fields)
+    | Record (tag, fields) ->
+       Record (tag, map_fields (fun fn x -> pos (Record_field fn) x) fields)
     | Func (args, res) ->
        let args = map_fields (fun fn x -> neg (Func_arg fn) x) args in
        let res = pos Func_res res in
        Func (args, res)
 
-
-  module One_or_two = struct
-    type ('a, 'b) t =
-      | L of 'a
-      | R of 'b
-      | LR of 'a * 'b
-
-    let left x = L x
-    let right x = R x
-    let both x y = LR (x,y)
-  end
-
-  (* meet and join return None iff not same_component *)
-
-  let meet_one a b =
-    match a, b with
-    | Bool, Bool -> Some Bool
-    | Int, Int -> Some Int
-    | String, String -> Some String
-    | (Bool|Int|String), _ | _, (Bool|Int|String) -> None
-
-    | Record c, Record c' ->
-       Option.map (fun r -> Record r)
-         One_or_two.(Tuple_fields.union ~left ~right ~both c c')
-
-    | Func (args, res), Func (args', res') ->
-       (* FIXME: fail here rather than assuming variadic functions?
-          Could/should enforce that functions are always `Closed *)
-       let args = One_or_two.(Tuple_fields.inter ~both) args args' in
-       Some (Func (args, LR (res, res')))
-
-    | Record _, Func _ | Func _, Record _ -> None
-
-  let join_one a b =
-    assert (same_component a b); (* FIXME *)
-    match a, b with
-    | Bool, Bool -> Bool
-    | Int, Int -> Int
-    | String, String -> String
-    | (Bool|Int|String), _ | _, (Bool|Int|String) -> assert false
-  
-    | Record c, Record c' ->
-       Record One_or_two.(Tuple_fields.inter ~both c c')
-  
-    | Func (args, res), Func (args', res') ->
-       (* FIXME: components wrong here? Check variadic functions, are these possible? *)
-       begin match One_or_two.(Tuple_fields.union ~left ~right ~both args args') with
-       | Some r ->
-          let res =
-            if true then One_or_two.both res res'
-            else (if false then One_or_two.left res else One_or_two.right res')
-          in
-          Func (r, res)
-       | None -> assert false
-       end
-  
-    | Record _, Func _ | Func _, Record _ -> assert false
 
   type cons_head = (unit, unit) t list
 
@@ -183,29 +119,134 @@ module Cons = struct
   let map ~neg ~pos t = { conses = List.map (map_one ~neg ~pos) t.conses; locs = t.locs }
   let mapi ~neg ~pos t = { conses = List.map (mapi_one ~neg ~pos) t.conses; locs = t.locs }
 
-  let rec join a b =
-    match a with
-    | [] -> List.map (map_one ~neg:One_or_two.right ~pos:One_or_two.right) b
-    | ac :: arest ->
-       let bc, brest = List.partition (same_component ac) b in
-       match bc with
-       | [] ->
-          map_one ~neg:One_or_two.left ~pos:One_or_two.left ac ::
-            join arest brest
-       | [bc] ->
-          join_one ac bc ::
-            join arest brest
-       | _ :: _ :: _ ->
-          failwith "multiple joinable conses"
+
+  (* p and q are compatible if they have a common subtype *)
+  let compatible p q =
+    let compat_fields p q =
+      (p.fopen = `Open || List.for_all (fun f -> FieldMap.mem f p.fields) q.fnames)
+      &&
+      (q.fopen = `Open || List.for_all (fun f -> FieldMap.mem f q.fields) p.fnames)
+    in
+    match p, q with
+    | Bool, Bool
+    | Int, Int
+    | String, String
+    | Func _, Func _ ->
+       true
+    | Record (Some pt, p), Record (Some qt, q) ->
+       String.equal pt qt && compat_fields p q
+    | Record (_, p), Record (_, q) ->
+       compat_fields p q
+    | (Bool|Int|String|Record _|Func _), _ ->
+       false
+
+
+  module TwoLists = struct
+    let left x = [x], []
+    let right x = [], [x]
+    let both x y = [x], [y]
+
+    let join (a,b) (a',b') = a@a', b@b'
+  end
+
+  module One_or_two = struct
+    type ('a, 'b) t =
+      | L of 'a
+      | R of 'b
+      | LR of 'a * 'b
+
+    let left x = L x
+    let right x = R x
+    let both x y = LR (x,y)
+  end
+
+  let meet_one a b =
+    assert (compatible a b);
+    match a, b with
+    | Bool, Bool -> Bool
+    | Int, Int -> Int
+    | String, String -> String
+    | (Bool|Int|String), _ | _, (Bool|Int|String) ->
+       assert false
+
+    | Record (t, c), Record (t', c') ->
+       let tag =
+         match t, t' with
+         | Some s, Some s' -> assert (s = s'); t
+         | (Some _ as tag), None
+         | None, (Some _ as tag) -> tag
+         | None, None -> None
+       in
+       let fields =
+         let open One_or_two in
+         Tuple_fields.union c c' ~left ~right ~both
+       in
+       Record(tag, Option.get fields)
+
+    | Func (args, res), Func (args', res') ->
+       (* FIXME: fail here rather than assuming variadic functions?
+          Could/should enforce that functions are always `Closed *)
+       let open One_or_two in
+       let args = Tuple_fields.inter args args' ~both in
+       Func (args, both res res')
+
+    | Record _, Func _ | Func _, Record _ -> assert false
+
+  let join_one a b =
+    assert (compatible a b);
+    match a, b with
+    | Bool, Bool -> Bool
+    | Int, Int -> Int
+    | String, String -> String
+    | (Bool|Int|String), _ | _, (Bool|Int|String) -> assert false
+  
+    | Record (t, c), Record (t', c') ->
+       let t =
+         match t, t' with
+         | _, None | None, _ -> None
+         | Some s, Some s' -> assert (String.equal s s'); t
+       in
+       let fields = Tuple_fields.inter c c' ~both:TwoLists.join in
+       Record (t, fields)
+  
+    | Func (args, res), Func (args', res') ->
+       let args =
+         Tuple_fields.union args args' ~left:id ~right:id ~both:TwoLists.join
+       in
+       Func(Option.get args, TwoLists.join res res')
+  
+    | Record _, Func _ | Func _, Record _ -> assert false
+
+  let join a b =
+    let rec join1 a bc =
+      match a with
+      | [] -> [], false
+      | ac :: arest when compatible ac bc ->
+         let ab = join_one ac bc in
+         let rest, placed = join1 arest ab in
+         let res = if not placed then ab :: rest else rest in
+         res, true
+      | ac :: arest ->
+         let rest, placed = join1 arest bc in
+         ac :: rest, placed
+    in
+    let join1 a bc =
+      match join1 a bc with
+      | res, true -> res
+      | res, false -> res @ [bc]
+    in
+    let a = List.map (map_one ~neg:TwoLists.left ~pos:TwoLists.left) a in
+    let b = List.map (map_one ~neg:TwoLists.right ~pos:TwoLists.right) b in
+    List.fold_left join1 a b
 
   let join a b = { conses = join a.conses b.conses; locs = Locs.append a.locs b.locs ~merge:(fun a _ -> a) }
 
   let meet a b =
     a |> List.concat_map (fun a ->
       b |> List.concat_map (fun b ->
-        match meet_one a b with
-        | None -> []
-        | Some m -> [m]))
+        if compatible a b then
+          [meet_one a b]
+        else []))
 
   let meet a b = { conses = meet a.conses b.conses; locs = Locs.append a.locs b.locs ~merge:(fun a _ -> a) }
 
@@ -213,7 +254,7 @@ module Cons = struct
   let bottom_loc loc = { conses = []; locs = Locs.single ([], loc) }
   let is_bottom = function { conses = []; _ } -> true | _ -> false
 
-  let get_single = function { conses = [c]; _ } -> Some c | _ -> None
+  let get_single_exn = function { conses = [c]; _ } -> c | _ -> assert false
 
   let make ~loc c = { conses = [c]; locs = Locs.single ([map_one ~pos:ignore ~neg:ignore c], loc) }
 
@@ -225,6 +266,7 @@ module Cons = struct
   type conflict =
     | Fields of field_conflict
     | Args of field_conflict
+    | Tags of (tuple_tag option * tuple_tag)
     | Incompatible
 
 
@@ -260,10 +302,20 @@ module Cons = struct
        | sub -> Ok (sub @ [S_pos (Func_res, (res, res'))])
        | exception FieldError con -> Error (Args con)
        end
-    | Record fs, Record fs' ->
+    | Record (tag, fs), Record (tag', fs') ->
+       let tag_err =
+         match tag, tag' with
+         | _, None -> Ok ()
+         | Some s, Some s' when String.equal s s' -> Ok ()
+         | tag, Some tag' -> Error (Tags (tag, tag'))
+       in
+       begin match tag_err with
+       | Error _ as err -> err
+       | Ok () ->
        begin match subtype_fields ~sub:(fun k s -> S_pos (Record_field k, s)) fs fs' with
        | sub -> Ok sub
        | exception FieldError con -> Error (Fields con)
+       end
        end
     | _, _ -> Error Incompatible
 
@@ -298,6 +350,17 @@ module Cons = struct
        in
        Error { conflict;
                located }
+
+  (* FIXME: bad interface *)
+  let get_single_sub c {conses; _} =
+    match List.filter (compatible c) conses with
+    | [] -> None
+    | _ :: _ :: _ -> assert false
+    | [c'] ->
+       match subtype_one c c' with
+       | Ok _ -> Some c'
+       | _ -> None
+
 end
 
 module SymMap = Tuple_fields.SymMap
@@ -824,8 +887,9 @@ let unparse_cons ~neg ~pos ty =
     | Bool -> named_type "bool"
     | Int -> named_type "int"
     | String -> named_type "string"
-    | Record fs ->
-       Trecord (None, Tuple_fields.map_fields (fun _ t -> pos t) fs)
+    | Record (tag, fs) ->
+       Trecord (Option.map (fun t -> t, noloc) tag,
+                Tuple_fields.map_fields (fun _ t -> pos t) fs)
     | Func (args, ret) ->
        Tfunc (Tuple_fields.map_fields (fun _ t -> neg t) args,
               pos ret) in

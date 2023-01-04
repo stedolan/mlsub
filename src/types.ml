@@ -275,22 +275,27 @@ and join_lower ~changes env level lower ty =
   | Lower (fva, {cons=consa; rigvars=rva}), Lower (fvb, {cons=consb; rigvars=rvb}) ->
     (* (ca,fva) is already wf at level, (cb,fvb) may not be *)
     let resolve cons =
-      let open Cons.One_or_two in
       Cons.map cons
-        ~neg:(function
-          | L l -> l
-          | R r ->
-             let fv' = fresh_flexvar level in
-             noerror (fun () -> subtype_flex_flex ~changes env fv' r); fv'
-          | LR (l, r) ->
-             (* matchability *)
-             noerror (fun () -> subtype_flex_flex ~changes env l r); l)
-        ~pos:(function
-          | L l -> l
-          | R r ->
-             (* Not necessarily id (matchability/levels) *)
-             join_lower ~changes env level bottom r
-          | LR (l, r) -> join_lower ~changes env level l r)
+        ~neg:(fun tys ->
+          let hd, rest =
+            match tys with
+            | l :: ls, rs -> l, ls @ rs
+            | [], rs ->
+               (* fresh variable for matchability *)
+               fresh_flexvar level, rs
+          in
+          noerror (fun () ->
+            rest |> List.iter (fun fv -> subtype_flex_flex ~changes env hd fv));
+          hd)
+        ~pos:(fun tys ->
+          let hd, rest =
+            match tys with
+            | l :: ls, rs -> l, ls @ rs
+            | [], rs ->
+               (* rs is not necessarily valid directly (matchability / levels) *)
+               bottom, rs
+          in
+          List.fold_left (join_lower ~changes env level) hd rest)
     in
     let fvb =
       (fvb :> flexvar list) |> List.map (fun fv ->
@@ -389,9 +394,9 @@ and ntyp_to_upper ~simple env : ntyp -> styp_neg option = function
      | None, _ | _, None -> None
      | Some (UBcons c1), Some (UBcons c2) ->
         (* only valid for nonoverlapping ctors *)
-        let lr : _ Cons.One_or_two.t -> _ = function
-          | L x | R x -> x
-          | LR _ -> intfail "unexpected overlap"
+        let lr = function
+          | [x],[] | [],[x] -> x
+          | _ -> intfail "unexpected overlap"
         in
         let cons = Cons.join c1.cons c2.cons |> Cons.map ~neg:lr ~pos:lr in
         Some (UBcons { cons; rigvars = Rvset.append c1.rigvars c2.rigvars ~merge:(fun a _ -> a) })
@@ -499,9 +504,11 @@ let subtype env p n =
 let rec match_typ env (p : ptyp) loc head =
   match p with
   | Tcons c ->
+     (* FIXME: what about nonlinearity in contravariant positions?
+        Might require a meet. Can it occur? *)
      subtype_conses env c {cons=head;rigvars=Rvset.empty}
        ~neg:(fun (_,v) t -> assert (!v = Ttop None); v := t)
-       ~pos:(fun t (_,v) -> assert (!v = Tcons Cons.bottom); v := t);
+       ~pos:(fun t (_,v) -> v := join_ptyp env !v t);
   | Tpoly {vars; body} ->
      let body = instantiate_flex env vars body in
      match_typ env body loc head
@@ -527,7 +534,7 @@ let match_typ env ty loc head =
      Error e
   | () ->
      wf_ptyp env ty;
-     Ok (Option.get (Cons.get_single (Cons.map ~neg:(fun (x, r) -> x, !r) ~pos:(fun (x, r) -> x, !r) head)))
+     Ok (Cons.get_single_exn (Cons.map ~neg:(fun (x, r) -> x, !r) ~pos:(fun (x, r) -> x, !r) head))
 
 
 (*

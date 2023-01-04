@@ -75,6 +75,9 @@ let pp_err input loc err : PPrint.document =
            pp "A surplus field '%s' is present." (Tuple_fields.string_of_field_name name)
         | Fields (`Extra None) ->
            pp "Surplus fields are present."
+        | Tags (tag, tag') ->
+           let tag = match tag with None -> "no tag" | Some s -> "tag " ^ s in
+           pp "The tag should be %s, but %s is present." tag' tag
         | Args (`Missing name) ->
            pp "The argument '%s' is missing." (Tuple_fields.string_of_field_name name)
         | Args (`Extra (Some name)) ->
@@ -152,9 +155,9 @@ let syn_tjoin loc (a : (_, _) typ) (b : (_, _) typ) =
             let c =
               List.fold_left (fun c1 c2 ->
                 let c = Cons.join c1 c2 in
-                let either : _ Cons.One_or_two.t -> _ = function
-                  | L x | R x -> x
-                  | LR _ ->
+                let either = function
+                  | [x],[] | [],[x] -> x
+                  | _ ->
                      fail loc (Illformed_type `Join_multi_cons)
                 in
                 Cons.map ~pos:either ~neg:either c) c cs
@@ -183,9 +186,8 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
         | Ok v -> Tvar (Vrigid v)
         | Error e -> fail loc e
      end
-  | Trecord (_tag, fields) ->
-     (* FIXME tag *)
-     tcons loc (Record (typs_of_tuple_tyexp env lvl fields))
+  | Trecord (tag, fields) ->
+     tcons loc (Record (Option.map fst tag, typs_of_tuple_tyexp env lvl fields))
   | Tfunc (args, res) ->
      tcons loc (Func (typs_of_tuple_tyexp env lvl args, typ_of_tyexp env lvl res))
   | Tparen t ->
@@ -231,7 +233,7 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string Location.loc * ('a
 
 let typ_of_tyexp env t = typ_of_tyexp env (env_level env) t
 
-let unit loc = tcons loc (Record (Tuple_fields.collect_fields []))
+let unit loc = tcons loc (Record (None, Tuple_fields.collect_fields []))
 
 module IR_Builder = struct
 
@@ -405,23 +407,28 @@ let fresh_flow env =
   let fv = fresh_flexvar (env_level env) in
   Tsimple fv, Tsimple (of_flexvar fv)
 
-type inspect_result =
-  | Ipoly of (flex_lower_bound, flexvar) poly_typ
-  | Icons of (ptyp, ntyp) Cons.t
-  | Iother
-
 type ty_mode =
   | Checking of ntyp
   | Inference of ptyp ref
 
-let inspect = function
+let inspect_poly = function
+  | Checking (Tpoly p) -> Some p
+  | _ -> None
+
+type inspect_result =
+  | Imatches of (ptyp, ntyp) Cons.t
+  (* FIXME: add Ifailed for when a Cons clearly does not match? *)
+  | Iother
+
+let inspect_cons cons = function
   | Checking (Tsimple _) ->
      (* bidirectional checking does not look inside Tsimple *)
      Iother
-  | Checking (Tpoly p) ->
-     Ipoly p
+  | Checking (Tpoly _) ->
+     (* FIXME: maybe make this impossible? *)
+     Iother
   | Checking (Tcons c) ->
-     (match Cons.get_single c with Some c -> Icons c | _ -> Iother)
+     (match Cons.get_single_sub cons c with Some c -> Imatches c | _ -> Iother)
   | Checking (Ttop _ | Tvar _ | Tjoin _) | Inference _ -> Iother
 
 let rec check env ~(mode : generalisation_mode) e (ty : ty_mode) : exp check_output =
@@ -489,9 +496,12 @@ and check' env ~mode eloc e ty : exp' check_output =
 
   | Tuple (tag, fields) ->
      if fields.fopen = `Open then failwith "invalid open tuple ctor";
+     let target_ty = Cons.Record(Option.map fst tag,
+                            map_fields (fun _ _ -> ()) fields) in
      let fields =
-       match inspect ty with
-       | Icons (Record tf) ->
+       (* FIXME: simplify here? *)
+       match inspect_cons target_ty ty with
+       | Imatches (Record (_, tf)) ->
           let infer_typed env ((_,loc) as e) =
             let ty, e = infer env ~mode e in
             { elab =
@@ -510,7 +520,8 @@ and check' env ~mode eloc e ty : exp' check_output =
               | _ -> `Closed)
        | _ ->
           let fields = map_fields (fun _fn e -> infer env ~mode e) fields in
-          inferred (tcons eloc (Record (map_fields (fun _ (ty, _e) -> ty) fields)));
+          inferred (tcons eloc (Record (Option.map fst tag,
+                                        map_fields (fun _ (ty, _e) -> ty) fields)));
           map_fields (fun _fn (_ty, e) -> e) fields
      in
      { elab =
@@ -526,10 +537,11 @@ and check' env ~mode eloc e ty : exp' check_output =
      let (), tyf =
        match
         match_typ env ty eloc
-         (Record { fields = FieldMap.singleton f ();
-                   fnames = [Field_named field]; fopen = `Open })
+         (Record (None,
+                  { fields = FieldMap.singleton f ();
+                   fnames = [Field_named field]; fopen = `Open }))
        with
-       | Ok (Record r) -> FieldMap.find f r.fields
+       | Ok (Record (_, r)) -> FieldMap.find f r.fields
        | Ok _ -> assert false
        | Error c -> fail eloc (Conflict (`Expr, c)) in
      inferred tyf;
@@ -559,42 +571,45 @@ and check' env ~mode eloc e ty : exp' check_output =
          e2.comp k }
 
   (* FIXME should I combine Tpoly and Func? *)
-  | Fn fndef ->
-     begin match fndef, inspect ty with
-     | _, Ipoly {vars; body} ->
+  | Fn ((poly, params, ret, body) as fndef) ->
+     begin match inspect_poly ty with
+     | Some {vars; body} ->
         (* rigvars not in scope in body, so no rig_names *)
         let env', open_rigvars = enter_rigid env vars SymMap.empty in
         let body = open_rigvars body in
         check' env' ~mode eloc e (Checking body)
         (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
-     | (None, params, ret, body), Icons (Func (ptypes, rtype)) ->
-        (* If poly <> None, then we should infer & subtype *)
-        (* FIXME: do we need another level here? Does hoisting break things? *)
-        let vals, cpats = check_parameters env params ptypes in
-        let env' = Env_vals { vals; rest = env } in
-        let body = check env' ~mode body (check_annot env' ret rtype) in
-        { elab =
-            (let* body = body.elab in
-             (* No elaboration. Arguably we could *delete* annotations here! *)
-             Fn (None, params, ret, body));
-          comp = fun k ->
-            let params = map_fields (fun fn c -> IR.Binder.fresh ?name:(pat_name (fst (get_field params fn))) (), c) cpats in
-            let params_list = list_fields params in
-            let return, return' = IR.Binder.fresh () in
-            let body =
-              List.fold_right
-                (fun (_fn,((_,v),cpat)) acc -> cpat (IR.Var v) acc)
-                params_list
-                (body.comp (Reified_cont (Named return')))
-            in
-            IRB.apply_cont k (Lambda(map_fields (fun _ ((v,_),_) -> v) params,
-                                 return,
-                                 body))}
-     | _ ->
-        let ty, fndef, compfn = infer_func_def env ~mode eloc fndef in
-        inferred ty;
-        { elab = (let* fndef = fndef in Fn fndef);
-          comp = fun k -> IRB.apply_cont k compfn }
+     | None ->
+        let target_ty = Cons.Func (map_fields (fun _ _ -> ()) params, ()) in
+        match poly, inspect_cons target_ty ty with
+       | None, Imatches (Func (ptypes, rtype)) ->
+          (* If poly <> None, then we should infer & subtype *)
+          (* FIXME: do we need another level here? Does hoisting break things? *)
+          let vals, cpats = check_parameters env params ptypes in
+          let env' = Env_vals { vals; rest = env } in
+          let body = check env' ~mode body (check_annot env' ret rtype) in
+          { elab =
+              (let* body = body.elab in
+               (* No elaboration. Arguably we could *delete* annotations here! *)
+               Fn (None, params, ret, body));
+            comp = fun k ->
+              let params = map_fields (fun fn c -> IR.Binder.fresh ?name:(pat_name (fst (get_field params fn))) (), c) cpats in
+              let params_list = list_fields params in
+              let return, return' = IR.Binder.fresh () in
+              let body =
+                List.fold_right
+                  (fun (_fn,((_,v),cpat)) acc -> cpat (IR.Var v) acc)
+                  params_list
+                  (body.comp (Reified_cont (Named return')))
+              in
+              IRB.apply_cont k (Lambda(map_fields (fun _ ((v,_),_) -> v) params,
+                                   return,
+                                   body))}
+       | _ ->
+          let ty, fndef, compfn = infer_func_def env ~mode eloc fndef in
+          inferred ty;
+          { elab = (let* fndef = fndef in Fn fndef);
+            comp = fun k -> IRB.apply_cont k compfn }
      end
 
   | FnDef ((s, sloc), fndef, body) ->
@@ -629,7 +644,7 @@ and check' env ~mode eloc e ty : exp' check_output =
   | Match (_e, _cases) ->
      failwith "FIXME unimplemented match"
 
-  | Pragma ("true"|"false" as b) when match inspect ty with Icons Bool -> true | _ -> false ->
+  | Pragma ("true"|"false" as b) when match inspect_cons Bool ty with Imatches Bool -> true | _ -> false ->
      { elab = elab_pure e;
        comp = IRB.literal (Bool (String.equal b "true")) }
   | Pragma "bot" ->
@@ -729,9 +744,9 @@ and check_pat' env ~gen_level ty ploc = function
      let fs =
        (* FIXME: fvinst? *)
        match
-        match_typ env ty ploc (Record fs)
+        match_typ env ty ploc (Record (None, fs))
        with
-       | Ok (Record fs) -> fs
+       | Ok (Record (_, fs)) -> fs
        | Ok _ -> assert false
        | Error e -> fail ploc (Conflict (`Pat, e)) in
      let fs = map_fields (fun _fn (p, t) -> check_pat env ~gen_level t p) fs in
@@ -745,6 +760,7 @@ and check_pat' env ~gen_level ty ploc = function
   | Por _ ->
      failwith "unimplemented Por"
 
+(* FIXME refactor (error cases no longer possible?) *)
 and check_parameters env params ptypes =
   let merged =
     merge_fields params ptypes
