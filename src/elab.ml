@@ -34,6 +34,10 @@ let elab_fields (f : 'a elab tuple_fields) : 'a tuple_fields elab =
   let* fields = fields in
   { f with fields }
 
+let rec elab_list (xs : 'a elab list) : 'a list elab =
+  match xs with
+  | [] -> elab_pure []
+  | x :: xs -> let* x = x and* xs = elab_list xs in x :: xs
 
 let rec elaborate : type a . env:_ -> a elab_req -> a =
   fun ~env rq -> match rq with

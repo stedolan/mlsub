@@ -501,7 +501,7 @@ let subtype env p n =
      Error e
   | () -> Ok ()
 
-let rec match_typ env (p : ptyp) loc head =
+let rec match_typ env (p : ptyp) head =
   match p with
   | Tcons c ->
      (* FIXME: what about nonlinearity in contravariant positions?
@@ -511,7 +511,7 @@ let rec match_typ env (p : ptyp) loc head =
        ~pos:(fun t (_,v) -> v := join_ptyp env !v t);
   | Tpoly {vars; body} ->
      let body = instantiate_flex env vars body in
-     match_typ env body loc head
+     match_typ env body head
   | t ->
      let instneg (_,v) =
        let fv = fresh_flexvar (env_level env) in
@@ -525,17 +525,24 @@ let rec match_typ env (p : ptyp) loc head =
        ~neg:(fun _ _ -> () (*already inserted by instneg*))
        ~pos:(fun t (_,v) -> v := Tsimple !t))
 
+let match_typ2 env ty cons =
+  match match_typ env ty (Cons.map ~neg:(fun x -> (),x) ~pos:(fun x -> (), x) cons) with
+  | exception SubtypeError e ->
+     assert (fst e.env == env);
+     Error e
+  | () ->
+     Ok ()
+
 let match_typ env ty loc head =
   let head = Cons.map ~neg:(fun x -> x, ref (Ttop None)) ~pos:(fun x -> x, ref (Tcons Cons.bottom)) (Cons.make ~loc head) in
   wf_ptyp env ty;
-  match match_typ env ty loc head with
+  match match_typ env ty head with
   | exception SubtypeError e ->
      assert (fst e.env == env);
      Error e
   | () ->
      wf_ptyp env ty;
      Ok (Cons.get_single_exn (Cons.map ~neg:(fun (x, r) -> x, !r) ~pos:(fun (x, r) -> x, !r) head))
-
 
 (*
  * Generalisation

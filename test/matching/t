@@ -51,6 +51,35 @@ fn(x) { (Foo(), Bar, Foo{x: 42}, Baz(1)) }
 >   (Bar{x: 42} : 'Foo{x: int})
 >                 ^^^^^^^^^^^^
 
+#
+# Match errors
+#
+
+fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
+> fn (x) { match x { | (_, _) => 1 | (_, _, _) => 2 } }
+> test:1: This pattern is incompatible with the pattern here:
+>   fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
+>                                  ^^^^^^^
+
+fn(x) { match x { (a,a) => 1 } }
+> fn (x) { match x { | (a, a) => 1 } }
+> test:1: Variable a already is bound here:
+>   fn(x) { match x { (a,a) => 1 } }
+>                      ^
+
+fn(x) { match x, x { a, b, c => 2 } }
+> fn (x) { match x, x { | a, b, c => 2 } }
+> typechecking error: Failure("wrong length of pat row")
+
+fn(x) { match x { Foo => 1 | _ => 2 } }
+> fn (x) { match x { | Foo => 1 | _ => 2 } }
+> test:1: Cannot determine which cases this pattern matches
+
+fn(x) { match x { (a | Foo) => 1 } }
+> fn (x) { match x { | (a | Foo) => 1 } }
+> test:1: The variable a must be bound on both sides of this or-pattern
+
+
 fn(c) {
   let a = if c {Foo{x:Foo}} else {Bar{x:Bar}};
   (a, a.x)
@@ -78,24 +107,320 @@ fn(c) {
 > });
 > done
 
+fn(x) {
+  match x {
+  | A(_, b) => b
+  | A(_, _, _) => 42
+  | B{foo: (C|D), bar:x} => x
+  }
+}
+> fn (x) {
+>   match x {
+>     | A(_, b) =>
+>     b
+>     | A(_, _, _) =>
+>     42
+>     | B{foo: (C | D), bar: x} =>
+>     x
+>   }
+> }
+> test:4: This pattern is incompatible with the pattern here:
+>     | A(_, b) => b
+>       ^^^^^^^
+
+# FIXME: badly broken
+fn() {
+  match D{x:5} {
+    D{x, y} => (x, y)
+  }
+}
+> fn () { match D{x: 5} { | D{x, y} => (x, y) } }
+>   fn () -> (int, nothing) { match D{x: 5} { | D{x, y} => (x, y) } }
+> () -> (int, nothing)
+> let  = %yield(0: fun () ret { wat }); done
+
 
 # Grammar ambiguity requires parens on return type
 # (otherwise function body is misread as fields)
-fn(x : 'A | 'B | 'C(int) | 'D{x:int}) -> ('Foo | 'Bar) {
-  match x { A => 1 | B() => 2 | C(x) => 3 | D{x:foo} | E(a,b,c) => 5 }
+fn(x : 'A | 'B | 'C(int) | 'D{x:int}) -> int {
+  match x { A => 1 | B() => 2 | C(x) => 3 | D{x:foo, y:bar} | E(foo,bar) => 5 }
 }
-> fn (x: 'A | 'B | 'C(int) | 'D{x: int}) -> ('Foo | 'Bar) {
+> fn (x: 'A | 'B | 'C(int) | 'D{x: int}) -> int {
 >   match x {
->     | A => 1
->     | B => 2
->     | C(x) => 3
->     | D{x: foo} | E(a, b, c) => 5
->     
+>     | A =>
+>     1
+>     | B =>
+>     2
+>     | C(x) =>
+>     3
+>     | D{x: foo, y: bar}
+>     | E(foo, bar) =>
+>     5
 >   }
 > }
-> typechecking error: Failure("FIXME unimplemented match")
+>   fn (x: 'A | 'B | 'C(int) | 'D{x: int}) -> int {
+>     match x {
+>       | A =>
+>       1
+>       | B =>
+>       2
+>       | C(x) =>
+>       3
+>       | D{x: foo, y: bar}
+>       | E(foo, bar) =>
+>       5
+>     }
+>   }
+> ('A | 'B | 'C(int) | 'D{x: int}) -> int
+> let  = %yield(0: fun (x) ret { wat }); done
+
+fn (x) {
+  match x {
+  | (A, A) => 1
+  | (A, B) => 2
+  | (B, A) => 3
+  }
+}
+> fn (x) { match x { | (A, A) => 1 | (A, B) => 2 | (B, A) => 3 } }
+>   fn (x: ('B | 'A, 'A)) -> int {
+>     match x {
+>       | (A, A) =>
+>       1
+>       | (A, B) =>
+>       2
+>       | (B, A) =>
+>       3
+>     }
+>   }
+> (('B | 'A, 'A)) -> int
+> RECHECK: Failure("unused case")
+> 
+> ELAB: Failure("unused case")
+> 
+> ELABINF: Failure("unused case")
+> 
+> let  = %yield(0: fun (x) ret { wat }); done
 
 
+let make = fn (x) {
+  if x.good {
+    Good{foo: x.foo, bar: x.bar}
+  } else {
+    Bad{foo: x.foo}
+  }
+};
+fn (x) {
+  let y = make(x);
+  (y.foo, y.bar)
+}
+> let make =
+> fn (x) { if x.good { Good{foo: x.foo, bar: x.bar} } else { Bad{foo: x.foo} } };
+> fn (x) {
+>   let y = make(x);
+>   (y.foo, y.bar)
+> }
+> test:10: The field 'bar' is missing.
+>     (y.foo, y.bar)
+>             ^^^^^
+>      found: 'Good{foo: _, bar: _} | 'Bad{foo: _}
+>   expected: {bar: _, ...}
+> This 'Bad{foo: _} comes from test:5:
+>       Bad{foo: x.foo}
+>       ^^^^^^^^^^^^^^^
+> but is used as {bar: _, ...}
 
+let make = fn (x) {
+  if x.good {
+    Good{foo: x.foo, bar: x.bar}
+  } else {
+    Bad{foo: x.foo}
+  }
+};
+let use = fn (y) {
+  match y {
+  | Good{foo: bar, ...} => bar
+  | Bad{foo: bar, ...} => bar
+  }
+};
+fn (x) { use(make(x)) }
+> let make =
+> fn (x) { if x.good { Good{foo: x.foo, bar: x.bar} } else { Bad{foo: x.foo} } };
+> let use =
+> fn (y) { match y { | Good{foo: bar, ...} => bar | Bad{foo: bar, ...} => bar } };
+> fn (x) {
+>   use(make(x))
+> }
+>   let make : [A, B] ({good: bool, bar: A, foo: B, ...}) ->
+>   'Good{foo: B, bar: A} | 'Bad{foo: B} =
+>   fn [A, B](x: {good: bool, bar: A, foo: B, ...}) ->
+>     'Good{foo: B, bar: A} | 'Bad{foo: B} {
+>     if x.good {
+>       Good{foo: x.foo, bar: x.bar}
+>     } else {
+>       Bad{foo: x.foo}
+>     }
+>   };
+>   let use : [A, B] ('Good{foo: A, ...} | 'Bad{foo: B, ...}) -> A | B =
+>   fn [A, B](y: 'Good{foo: A, ...} | 'Bad{foo: B, ...}) -> A | B {
+>     match y {
+>       | Good{foo: bar, ...} =>
+>       bar
+>       | Bad{foo: bar, ...} =>
+>       bar
+>     }
+>   };
+>   fn [A](x: {good: bool, bar: any, foo: A, ...}) -> A | A {
+>     use(make(x))
+>   }
+> [A] ({good: bool, bar: any, foo: A, ...}) -> A | A
+> let make =
+>   fun (x) ret {
+>     let good = x.(good);
+>     match good {
+>       true() -> {
+>         let bar = x.(bar);
+>         let foo = x.(foo);
+>         ret(Good(foo: foo, bar: bar))
+>       };
+>       false() -> {
+>         let foo = x.(foo);
+>         ret(Bad(foo: foo))
+>       }
+>     }
+>   };
+> let use = fun (y) ret { wat };
+> let  = %yield(0: fun (x) ret { let x2 = make(0: x); ret(use(0: x2)) });
+> done
+
+
+fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
+  match (a, b, c) {
+  | (T, T, _)
+  | (_, T, T)
+  | (T, _, T) => true
+
+  | (F, F, _)
+  | (_, F, F)
+  | (F, _, F) => false
+  }
+}
+> fn (a: ('T | 'F), b: 'T | 'F, c: 'T | 'F) {
+>   match (a, b, c) {
+>     | (T, T, _)
+>     | (_, T, T)
+>     | (T, _, T) =>
+>     true
+>     | (F, F, _)
+>     | (_, F, F)
+>     | (F, _, F) =>
+>     false
+>   }
+> }
+>   fn (a: 'T | 'F, b: 'T | 'F, c: 'T | 'F) -> bool {
+>     match (a, b, c) {
+>       | (T, T, _)
+>       | (_, T, T)
+>       | (T, _, T) =>
+>       true
+>       | (F, F, _)
+>       | (_, F, F)
+>       | (F, _, F) =>
+>       false
+>     }
+>   }
+> ('T | 'F, 'T | 'F, 'T | 'F) -> bool
+> let  = %yield(0: fun (a, b, c) ret { wat }); done
+
+fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
+  match (a, b, c) {
+  | (T, T, _)
+  | (T, _, T) => true
+
+  | (_, F, F)
+  | (F, _, F) => false
+  }
+}
+> fn (a: ('T | 'F), b: 'T | 'F, c: 'T | 'F) {
+>   match (a, b, c) {
+>     | (T, T, _)
+>     | (T, _, T) =>
+>     true
+>     | (_, F, F)
+>     | (F, _, F) =>
+>     false
+>   }
+> }
+> test:2: The following cases are unhandled:
+> | (F, F, T)
+> | (F, T, T)
+
+fn(x : ('A|'B|'C), y : ('A|'B|'C)) {
+  match x, y {
+    A, A => 1
+  }
+}
+> fn (x: ('A | 'B | 'C), y: ('A | 'B | 'C)) { match x, y { | A, A => 1 } }
+> test:2: The following cases are unhandled:
+> | A, B
+> | A, C
+> | B, _
+> | C, _
+
+
+let calls_any = fn(f) {
+  (f(Foo), f(Bar), f(Baz))
+};
+let use = fn(x) {
+  match x {
+  | Foo => 1
+  | Bar => 2
+  }
+};
+calls_any(use)
+> let calls_any = fn (f) { (f(Foo), f(Bar), f(Baz)) };
+> let use = fn (x) { match x { | Foo => 1 | Bar => 2 } };
+> calls_any(use)
+> test:10: The tag should be Foo|Bar, but tag Baz is present.
+>   calls_any(use)
+>             ^^^
+>      found: ('Foo | 'Bar) -> _
+>   expected: ('Foo | 'Bar | 'Baz) -> _
+> This 'Baz comes from test:2:
+>     (f(Foo), f(Bar), f(Baz))
+>                        ^^^
+> but is used as 'Foo | 'Bar at test:6,test:7:
+>     | Foo => 1
+>       ^^^
+>     | Bar => 2
+>       ^^^
+
+fn(x, y) {
+  match x, y {
+  | A, A => 1
+  | A, B => 2
+  | B, A => 3
+  }
+}
+
+> fn (x, y) { match x, y { | A, A => 1 | A, B => 2 | B, A => 3 } }
+>   fn (x: 'B | 'A, y: 'A) -> int {
+>     match x,
+>     y {
+>       | A, A =>
+>       1
+>       | A, B =>
+>       2
+>       | B, A =>
+>       3
+>     }
+>   }
+> ('B | 'A, 'A) -> int
+> RECHECK: Failure("unused case")
+> 
+> ELAB: Failure("unused case")
+> 
+> ELABINF: Failure("unused case")
+> 
+> let  = %yield(0: fun (x, y) ret { wat }); done
 # end
-> STATS: fix: 0, flex: 4
+> STATS: fix: 2, flex: 89

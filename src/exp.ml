@@ -34,7 +34,7 @@ type exp = exp' mayloc and exp' =
   (* if a { foo } else { bar } *)
   | If of exp * exp * exp
   (* match e { p => e | ... } *)
-  | Match of exp * case list
+  | Match of exp list * case list
   (* (e : A) *)
   | Typed of exp * tyexp
   (* (e) *)
@@ -42,7 +42,7 @@ type exp = exp' mayloc and exp' =
   (* @foo *)
   | Pragma of string
 
-and case = pat * exp
+and case = pat list list * exp
 
 and func_def = typolybounds option * parameters * tyexp option * exp
 
@@ -51,8 +51,9 @@ and parameters = (pat * tyexp option) tuple_fields
 (* Patterns *)
 
 and pat = pat' mayloc and pat' =
-  | Ptuple of tuple_tag option * pat tuple_fields
+  | Pany
   | Pvar of symbol
+  | Ptuple of tuple_tag option * pat tuple_fields
   | Por of pat * pat
   | Pparens of pat
 
@@ -96,7 +97,7 @@ let mapper =
     (poly, args, ret, body)
   in
 
-  let case r (pat, exp) = (r.pat r pat, r.exp r exp) in
+  let case r (pats, exp) = (List.map (List.map (r.pat r)) pats, r.exp r exp) in
 
   let exp = mayloc @@ fun r e -> match e with
     | Lit (l, loc) ->
@@ -122,7 +123,7 @@ let mapper =
     | Typed (e, t) ->
        Typed (r.exp r e, r.tyexp r t)
     | Match (e, cases) ->
-       Match (r.exp r e, List.map (case r) cases)
+       Match (List.map (r.exp r) e, List.map (case r) cases)
     | Parens e ->
        Parens (r.exp r e)
     | Pragma s ->
@@ -130,9 +131,10 @@ let mapper =
   in
 
   let pat = mayloc @@ fun r p -> match p with
+    | Pany -> Pany
+    | Pvar s -> Pvar (sym r s)
     | Ptuple (tag, ps) ->
        Ptuple (Option.map (sym r) tag, map_fields (fun _fn x -> r.pat r x) ps)
-    | Pvar s -> Pvar (sym r s)
     | Por (p, q) -> Por (r.pat r p, r.pat r q)
     | Pparens p -> Pparens (r.pat r p)
   in

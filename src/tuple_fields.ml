@@ -71,6 +71,16 @@ let fold_right_fields f fs (acc : 'acc) =
 let list_fields fs =
   List.rev (fold_fields (fun acc fn x -> (fn, x) :: acc) [] fs)
 
+let fields_of_list ~fopen fs =
+  let fields =
+    List.fold_left (fun acc (fn, x) ->
+      if FieldMap.mem fn acc then invalid_arg "duplicate field names";
+      FieldMap.add fn x acc) FieldMap.empty fs in
+  { fopen; fields; fnames = List.map fst fs }
+    
+
+let empty_fields = collect_fields [Fdots]
+
 let is_empty fs =
   match fs.fnames with
   | [] -> true
@@ -78,6 +88,10 @@ let is_empty fs =
 
 let get_field fs f =
   FieldMap.find f fs.fields
+
+let get_field_opt fs f =
+  FieldMap.find_opt f fs.fields
+
 
 let merge_fields ~left ~both ~right ~extra fs_l fs_r =
   let rec go_l remaining_r accfields accnames extra_l names_l =

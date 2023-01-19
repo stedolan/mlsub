@@ -43,8 +43,8 @@ let run_cmd s =
   let pexn = function
     | ((Assert_failure _ | Util.Internal _ | Out_of_memory | Invalid_argument _) as e) ->
        println "%s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
-    | Check.Fail (loc, err) ->
-       pprintln (Check.pp_err s loc err)
+    | Error.Fail (loc, err) ->
+       pprintln (Error.pp_err s loc err)
     | e ->
        println "typechecking error: %s" (Printexc.to_string e) in
   begin match Parse.parse_string text with
@@ -97,8 +97,8 @@ let run_cmd s =
         begin try
           let t', _elab2, _gen, _comp = Check.elab_gen Env_nil ~mode:(Check.fresh_gen_mode ()) None (fun env -> let a, b = Check.infer env ~mode:(Check.fresh_gen_mode ()) elab in a, b.elab, None, ()) in
           let te' = Typedefs.unparse_ptyp ~flexvar:ignore t' in
-          Types.subtype Env_nil t' (Check.typ_of_tyexp Env_nil te) |> Check.or_raise `Subtype noloc;
-          Types.subtype Env_nil t (Check.typ_of_tyexp Env_nil te') |> Check.or_raise `Subtype noloc;
+          Types.subtype Env_nil t' (Check.typ_of_tyexp Env_nil te) |> Error.or_raise `Subtype noloc;
+          Types.subtype Env_nil t (Check.typ_of_tyexp Env_nil te') |> Error.or_raise `Subtype noloc;
           ()
         with e ->
           println "ELABINF: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
@@ -120,7 +120,7 @@ let run_cmd s =
        let t1 = Check.typ_of_tyexp Env_nil t1 in
        let t2 = Check.typ_of_tyexp Env_nil t2 in
        (*PPrint.(ToChannel.pretty 1. 80 stdout (Typedefs.pr_typ Pos t1 ^^ string " <: " ^^ Typedefs.pr_typ Neg t2 ^^ hardline));*)
-       Types.subtype Env_nil t1 t2 |> Check.or_raise `Subtype Typedefs.noloc
+       Types.subtype Env_nil t1 t2 |> Error.or_raise `Subtype Typedefs.noloc
      with
       | () -> println "ok"
       | exception e -> pexn e)

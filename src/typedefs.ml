@@ -108,9 +108,8 @@ module Cons = struct
 
 
   type ('n,'p) conses = {
-    (* At most one of each component *)
     (* FIXME: enforce *)
-    conses: ('n, 'p) t list;
+    conses: ('n, 'p) t list; (* pairwise incompatible - FIXME enforce *)
     locs: Locs.t
    }
 
@@ -239,6 +238,11 @@ module Cons = struct
     let b = List.map (map_one ~neg:TwoLists.right ~pos:TwoLists.right) b in
     List.fold_left join1 a b
 
+  let join_head_one a b =
+    let a = map_one ~neg:TwoLists.left ~pos:TwoLists.left a in
+    let b = map_one ~neg:TwoLists.right ~pos:TwoLists.right b in
+    join_one a b
+
   let join a b = { conses = join a.conses b.conses; locs = Locs.append a.locs b.locs ~merge:(fun a _ -> a) }
 
   let meet a b =
@@ -258,6 +262,8 @@ module Cons = struct
 
   let make ~loc c = { conses = [c]; locs = Locs.single ([map_one ~pos:ignore ~neg:ignore c], loc) }
 
+  let make' ~loc conses = { conses; locs = Locs.single (List.map (map_one ~pos:ignore ~neg:ignore) conses, loc) }
+
   type ('neg, 'pos) subfield =
     | S_neg of field_neg * 'neg
     | S_pos of field_pos * 'pos
@@ -266,7 +272,7 @@ module Cons = struct
   type conflict =
     | Fields of field_conflict
     | Args of field_conflict
-    | Tags of (tuple_tag option * tuple_tag)
+    | Tags of (tuple_tag option * tuple_tag list)
     | Incompatible
 
 
@@ -307,7 +313,7 @@ module Cons = struct
          match tag, tag' with
          | _, None -> Ok ()
          | Some s, Some s' when String.equal s s' -> Ok ()
-         | tag, Some tag' -> Error (Tags (tag, tag'))
+         | tag, Some tag' -> Error (Tags (tag, [tag']))
        in
        begin match tag_err with
        | Error _ as err -> err
@@ -329,9 +335,23 @@ module Cons = struct
         match partition_results (List.map (fun b -> subtype_one a b) b) with
         | [s], _ -> Ok s
         | [], [] -> Error (a, Incompatible)
-        | [], e :: _ -> Error (a, e)
-        (* FIXME: prove this does not occur *)
-        | _ :: _ :: _, _ -> intfail "bad cons join - unmerged ctors")
+        | [], errs ->
+           let tag_errs, other_errs =
+             List.partition_map
+               (function
+                | Tags (tag, tags') -> Left (tag, tags')
+                | e -> Right e) errs
+           in
+           let err =
+             match tag_errs, other_errs with
+             | _, e :: _ -> e
+             | tag_errs, [] ->
+                Tags (fst (List.hd tag_errs),
+                      List.concat_map snd tag_errs)
+           in
+           Error (a, err)
+        | _ :: _ :: _, _ ->
+           intfail "compatibility invariant broken")
     in
     match partition_results parts with
     | subs, [] -> Ok (List.concat subs)
@@ -873,8 +893,8 @@ let rec wf_typ : 'pos 'neg .
  *)
 
 let noloc : Location.t =
- { loc_start = {pos_fname="_";pos_lnum=0;pos_cnum=0;pos_bol=0};
-   loc_end = {pos_fname="_";pos_lnum=0;pos_cnum=0;pos_bol=0} }
+ [{ loc_start = {pos_fname="_";pos_lnum=0;pos_cnum=0;pos_bol=0};
+    loc_end = {pos_fname="_";pos_lnum=0;pos_cnum=0;pos_bol=0} }]
 
 let mktyexp t = (Some t, noloc)
 

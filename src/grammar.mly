@@ -32,7 +32,7 @@ let parse_tyfields fs = collect_fields fs
 
 %inline id(X): X { $1 }
 %inline loc(X): e = X
-  { e, { loc_start = $startpos(e); loc_end = $endpos(e) } }
+  { e, [{ loc_start = $startpos(e); loc_end = $endpos(e) }] }
 %inline mayfail(X): e = X { Some e } | ERROR { None }
 %inline mayloc(X): e = loc(mayfail(X)) { e }
 
@@ -93,8 +93,8 @@ exp_:
   { Let (p, Some t, e, body) }
 | e1 = exp; SEMI; e2 = exp
   { Seq (e1, e2) }
-| MATCH; e = exp; LBRACE; cs = cases; RBRACE
-  { Match (e, cs) }
+| MATCH; es = separated_nonempty_list(COMMA, exp); LBRACE; cs = cases; RBRACE
+  { Match (es, cs) }
 | t = term_
   { t }
 
@@ -164,7 +164,7 @@ cases:
 | ioption(VBAR); cs = separated_nonempty_list(VBAR, case) { cs }
 
 case:
-| p = pat; FATARROW; e = exp { p, e }
+| ps = separated_nonempty_list(VBAR, separated_nonempty_list(COMMA, onepat)); FATARROW; e = exp { ps, e }
 
 tyfield:
 | t = tyexp
@@ -184,8 +184,17 @@ tyfields:
 
 pat: p = mayloc(pat_) { p }
 pat_:
+| p = onepat_
+  { p }
+| p = onepat; VBAR; q = pat
+  { Por(p, q) }
+
+onepat: p = mayloc(onepat_) { p }
+onepat_:
 | v = symbol
   { Pvar v }
+| UNDER
+  { Pany }
 | tag = usymbol
   { Ptuple (Some tag, parse_fields []) }
 | tag = ioption(usymbol); LPAR; RPAR
@@ -200,8 +209,6 @@ pat_:
   { Ptuple (tag, parse_fields (Fpos p :: ps)) }
 | tag = ioption(usymbol); LBRACE; ps = separated_nonempty_list(COMMA, named_field_pat); RBRACE
   { Ptuple (tag, parse_fields ps) }
-| p = pat; VBAR; q = pat
-  { Por (p, q) }
 
 pat_or_dots:
 | p = pat

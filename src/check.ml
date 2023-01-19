@@ -3,119 +3,7 @@ open Tuple_fields
 open Exp
 open Typedefs
 open Types
-
-type error_kind =
-  | Syntax
-  | Bad_name of [`Unknown|`Duplicate] * [`Type|`Var] * string
-  | Illformed_type of [`Join_multi_cons | `Join_not_cons_or_var | `Join_poly | `Bound_not_simple | `Bound_not_cons | `Bound_crosses_levels of string]
-  | Conflict of [`Expr|`Pat|`Subtype] * Types.subtyping_error
-
-exception Fail of Location.t * error_kind
-let fail loc k = raise (Fail (loc, k))
-
-let or_raise kind loc = function
-  | Ok () -> ()
-  | Error c -> fail loc (Conflict (kind, c))
-
-let pp_err input loc err : PPrint.document =
-  let open PPrint in
-  let pp fmt = Format.ksprintf PPrint.utf8string fmt in
-  let pp_ty ~env t =
-    Typedefs.unparse_gen_typ t
-      ~env
-      ~neg:(fun ~env:_ () -> Typedefs.(mktyexp (named_type "_")))
-      ~pos:(fun ~env:_ () -> Typedefs.(mktyexp (named_type "_")))
-    |> Print.tyexp
-  in
-  let pp_loc (loc : Location.t) =
-    (* FIXME character numbers also *)
-    pp "%s:%d" loc.loc_start.pos_fname loc.loc_start.pos_lnum in
-  let pp_context (loc : Location.t) =
-    if loc.loc_start.pos_lnum = 0 then empty else
-      let line = List.nth input (loc.loc_start.pos_lnum - 1) in
-      let offs = loc.loc_start.pos_cnum - loc.loc_start.pos_bol in
-      let cend =
-        if loc.loc_end.pos_lnum = loc.loc_start.pos_lnum then
-          loc.loc_end.pos_cnum - loc.loc_start.pos_bol 
-        else
-          String.length line in
-      pp "%s" line ^^
-      hardline ^^ pp "%*s" cend (String.make (cend-offs) '^')
-  in
-  (* FIXME: more of these could use context *)
-  pp_loc loc ^^ pp ": " ^^ match err with
-  | Syntax -> pp "syntax error"
-  | Bad_name (err,kind,name) ->
-     pp "%s %s name: %s"
-       (match err with `Unknown -> "Unknown" | `Duplicate -> "Duplicate")
-       (match kind with `Type -> "type" | `Var -> "variable")
-       name
-  | Illformed_type `Join_multi_cons ->
-     pp "Joins may only contain one non-variable type"
-  | Illformed_type `Join_not_cons_or_var ->
-     pp "Joins may only contain constructed types and variables"
-  | Illformed_type `Join_poly ->
-     pp "Joins may not contain polymorphic types"
-  | Illformed_type `Bound_not_simple ->
-     pp "Bounds must be simple types"
-  | Illformed_type `Bound_not_cons ->
-     pp "Bounds must be constructed types"
-  | Illformed_type (`Bound_crosses_levels n) ->
-     pp "Rigid variable %s not allowed in join with variable bound earlier" n
-  | Conflict (_kind, err) ->
-     let env = err.env in
-     let conflict =
-       match err.err with
-        | Incompatible ->
-           pp "Type error"
-        (* FIXME improve tuple field names *)
-        | Fields (`Missing name) ->
-           pp "The field '%s' is missing." (Tuple_fields.string_of_field_name name)
-        | Fields (`Extra (Some name)) ->
-           pp "A surplus field '%s' is present." (Tuple_fields.string_of_field_name name)
-        | Fields (`Extra None) ->
-           pp "Surplus fields are present."
-        | Tags (tag, tag') ->
-           let tag = match tag with None -> "no tag" | Some s -> "tag " ^ s in
-           pp "The tag should be %s, but %s is present." tag' tag
-        | Args (`Missing name) ->
-           pp "The argument '%s' is missing." (Tuple_fields.string_of_field_name name)
-        | Args (`Extra (Some name)) ->
-           pp "A surplus argument '%s' is present." (Tuple_fields.string_of_field_name name)
-        | Args (`Extra None) ->
-           pp "Surplus arguments are present."
-     in
-     conflict ^^
-     nest 2 (hardline ^^ pp_context loc) ^^
-     nest 2 (hardline ^^ pp "   found:" ^^ group (nest 3 (break 1 ^^ pp_ty ~env err.lhs))) ^^
-     nest 2 (hardline ^^ pp "expected:" ^^ group (nest 3 (break 1 ^^ pp_ty ~env err.rhs))) ^^
-     (match err.located with
-      | None -> empty
-      | Some ((lty,lloc),(rty,rloc)) ->
-         let lty = nest 4 (break 1 ^^ pp_ty ~env lty) ^^ break 1 in
-         let rty = nest 4 (break 1 ^^ pp_ty ~env rty) ^^ break 1 in
-         let l_interest = not (Location.subset lloc loc) in
-         let r_interest = not (Location.subset rloc loc) in
-         match l_interest, r_interest with
-         | true, true ->
-           hardline ^^
-           group (pp "This" ^^ lty ^^ pp "comes from " ^^ pp_loc lloc ^^ pp ":") ^^
-             nest 2 (hardline ^^ pp_context lloc) ^^
-           hardline ^^
-           group (pp "but is used as" ^^ rty ^^ pp "at " ^^ pp_loc rloc ^^ pp ":") ^^
-             nest 2 (hardline ^^ pp_context rloc)
-         | true, false ->
-           hardline ^^
-           group (pp "This" ^^ lty ^^ pp "comes from " ^^ pp_loc lloc ^^ pp ":") ^^
-             nest 2 (hardline ^^ pp_context lloc) ^^
-           hardline ^^
-           group (pp "but is used as" ^^ rty)
-         | false, true ->
-           hardline ^^
-           group (pp "This" ^^ lty ^^ pp "is used as" ^^ rty ^^ pp "at " ^^ pp_loc rloc ^^ pp ":") ^^
-             nest 2 (hardline ^^ pp_context rloc)
-         | false, false -> empty
-     )
+open Error
 
 let rec env_lookup_var env v =
   match env with
@@ -641,8 +529,34 @@ and check' env ~mode eloc e ty : exp' check_output =
           App(f, args));
        comp = IRB.apply f.comp (map_fields (fun _fn a -> a.comp) args)}
 
-  | Match (_e, _cases) ->
-     failwith "FIXME unimplemented match"
+  | Match (es, cases) ->
+     let es = List.map (infer env ~mode) es in
+     let etyps = List.map fst es in
+     let actions, split, unmatched = Check_pat.split_cases ~matchloc:eloc env etyps cases in
+     if List.exists (fun act -> not act.Check_pat.used) actions then
+       (* FIXME reporting *)
+       failwith "unused case";
+     begin match unmatched with
+     | [] -> ()
+     | _ -> fail eloc (Nonexhaustive unmatched)
+     end;
+     let actions =
+       List.map2 (fun act (_, exp) ->
+         let vals = act.Check_pat.bound |> SymMap.map (fun (ty, var) ->
+           (* FIXME is this the right gen_level? How does this work again? *)
+           { typ = !ty; comp_var = IR.Binder.ref var; gen_level = mode.gen_level_acc }) in
+         let env = Env_vals { vals; rest = env } in
+         check env ~mode exp ty)
+         actions cases
+     in
+     { elab =
+         (let* es = elab_list (List.map (fun (_,e) -> e.elab) es)
+          and* actions = elab_list (List.map (fun e -> e.elab) actions) in
+          let cases = List.map2 (fun (ps,_) e -> ps, e) cases actions in
+          Match(es, cases));
+       comp = fun k ->
+         Trap ("wat")
+     }
 
   | Pragma ("true"|"false" as b) when match inspect_cons Bool ty with Imatches Bool -> true | _ -> false ->
      { elab = elab_pure e;
