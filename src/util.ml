@@ -343,3 +343,296 @@ module PPFmt = struct
 
   let pp fmt = kpp id fmt
 end
+
+
+
+type (_, _) equal = Refl : ('a, 'a) equal
+
+module Type_id : sig
+  type (_,_) eq_result = Equal : ('a,'a) eq_result | Not_equal : ('a,'b) eq_result
+  val to_bool : (_,_) eq_result -> bool
+  val and_eq : ('a, 'b) eq_result -> ('a, 'b) eq_result -> ('a, 'b) eq_result
+
+  type _ tag
+  val fresh : unit -> 'a tag
+  val id : _ tag -> int
+  val hash : _ tag -> int
+  val equal : 'a tag -> 'b tag -> ('a, 'b) eq_result
+end = struct
+  type (_,_) eq_result = Equal : ('a,'a) eq_result | Not_equal : ('a,'b) eq_result
+
+  type _ tag_impl = ..
+  module type Tag = sig type a type _ tag_impl += Tag : a tag_impl end
+  type 'a tag = (module Tag with type a = 'a)
+  let fresh (type t) () : t tag =
+    let module Tag = struct type a = t type _ tag_impl += Tag : t tag_impl end in
+    (module Tag)
+
+  let id (type t) ((module M) : t tag) =
+    Obj.Extension_constructor.(id (of_val M.Tag))
+
+  let hash (type t) tag =
+    let k = id tag * 84374123 in
+    k lxor (k lsr 16)
+
+  let equal (type a) (type b) ((module A) : a tag) ((module B) : b tag) :
+    (a, b) eq_result =
+    match A.Tag with
+    | B.Tag -> Equal
+    | _ -> Not_equal
+
+  let to_bool (type a) (type b) : (a, b) eq_result -> bool =
+    function
+    | Equal -> true
+    | Not_equal -> false
+
+  let and_eq (type a) (type b)
+    (p : (a, b) eq_result)
+    (q : (a, b) eq_result) : (a, b) eq_result =
+    match p, q with
+    | Equal, Equal -> Equal
+    | _ -> Not_equal
+end
+
+module Peano_nat_types = struct
+  type z = Z
+  type _ s = S
+end
+
+
+module Clist : sig
+  open Peano_nat_types
+  type ('n, 'm, +'a) prefix =
+    | [] : ('n, 'n, 'a) prefix
+    | (::) : 'a * ('n, 'm, 'a) prefix -> ('n s, 'm, 'a) prefix
+
+  type ('w, +'a) t = ('w, z, 'a) prefix
+
+  type ('m, 'a) unknown_len =
+    | Ex : ('n, 'm, 'a) prefix -> ('m, 'a) unknown_len [@@unboxed]
+
+  val of_list : 'a list -> ('m, 'a) unknown_len
+  val of_list_length : len:('n, 'm, _) prefix -> 'a list -> ('n, 'm, 'a) prefix option
+  val to_list : ('n, 'm, 'a) prefix -> 'a list
+  val get_single : ('n s, 'n, 'a) prefix -> 'a
+  val length : ('n, 'm, 'a) prefix -> int
+
+  val append : ('n, 'm, 'a) prefix -> ('m, 'o, 'a) prefix -> ('n, 'o, 'a) prefix
+  val split :
+    ('n, 'm, _) prefix ->
+    ('m, 'w, _) prefix ->
+    ('n, 'w, 'a) prefix -> ('n, 'm, 'a) prefix * ('m, 'w, 'a) prefix
+  val map : ('a -> 'b) -> ('n, 'm, 'a) prefix -> ('n, 'm, 'b) prefix
+  val zip : ('n, 'm, 'a) prefix -> ('n, 'm, 'b) prefix -> ('n, 'm, 'a * 'b) prefix
+
+  val equal :
+    ('a -> 'a -> bool) ->
+    ('w, 'n, 'a) prefix -> ('w, 'm, 'a) prefix -> ('n, 'm) Type_id.eq_result
+  val equal' :
+    ('a -> 'a -> bool) ->
+    ('n, 'w, 'a) prefix -> ('m, 'w, 'a) prefix -> ('n, 'm) Type_id.eq_result
+  val compare_lengths :
+    ('n, 'k, 'a) prefix -> ('m, 'k, 'b) prefix -> ('n, 'm) Type_id.eq_result
+  val compare_lengths' :
+    ('k, 'n, 'a) prefix -> ('k, 'm, 'b) prefix -> ('n, 'm) Type_id.eq_result
+end = struct
+  open Peano_nat_types
+  type ('n, 'm, +'a) prefix =
+    | [] : ('n, 'n, 'a) prefix
+    | (::) : 'a * ('n, 'm, 'a) prefix -> ('n s, 'm, 'a) prefix
+
+  type ('w, +'a) t = ('w, z, 'a) prefix
+
+  type ('m, 'a) unknown_len =
+    | Ex : ('n, 'm, 'a) prefix -> ('m, 'a) unknown_len [@@unboxed]
+
+  let refute_pfx (type a) (_ : (a, a s, _) prefix) =
+    (* You can actually hit this by using -rectypes or other trickery to make
+       a type t = t s, so this has to be a runtime failure *)
+    assert false
+
+  let rec of_list : _ list -> (_,_) unknown_len = function
+    | [] -> Ex []
+    | x :: xs ->
+       let Ex xs = of_list xs in
+       Ex (x :: xs)
+
+  let rec to_list : type n m . (n, m, _) prefix -> _ list = function
+    | [] -> []
+    | x :: xs -> x :: to_list xs
+
+  let rec length : type n m . (n, m, _) prefix -> int = function
+    | [] -> 0
+    | _ :: xs -> 1 + length xs
+
+  let rec append : type n m w .
+    (n, m, _) prefix ->
+    (m, w, _) prefix ->
+    (n, w, _) prefix =
+    fun xs ys ->
+    match xs with
+    | [] -> ys
+    | x :: xs -> x :: (append xs ys)
+
+  let rec map : type n m . ('a -> 'b) -> (n, m, 'a) prefix -> (n, m, 'b) prefix =
+    fun f xs ->
+    match xs with
+    | [] -> []
+    | x :: xs ->
+       let y = f x in
+       let ys = map f xs in
+       y :: ys
+
+  let rec split : type n m w .
+    (n, m, _) prefix ->
+    (m, w, _) prefix ->
+    (n, w, 'a) prefix ->
+    (n, m, 'a) prefix * (m, w, 'a) prefix =
+    fun pfx1 pfx2 xs ->
+    match pfx1 with
+    | [] ->
+       [], xs
+    | _ :: pfx1 ->
+       begin match xs with
+       | [] ->
+          refute_pfx (append (map ignore pfx1) (map ignore pfx2))
+       | x :: xs ->
+          let xs1, xs2 = split pfx1 pfx2 xs in
+          x :: xs1, xs2
+       end
+
+  let get_single (type n) : (n s, n, 'a) prefix -> 'a =
+    function
+    | [x] -> x
+    | _ -> assert false
+
+  let rec zip : type n m .
+    (n, m, _) prefix ->
+    (n, m, _) prefix ->
+    (n, m, _) prefix =
+    fun xs ys ->
+    match xs, ys with
+    | [], [] -> []
+    | x :: xs, y :: ys -> (x, y) :: zip xs ys
+    | [], _ :: xs -> refute_pfx xs
+    | _ :: xs, [] -> refute_pfx xs
+
+  let rec equal : type n m w.
+    ('a -> 'a -> bool) ->
+    (w, n, 'a) prefix ->
+    (w, m, 'a) prefix ->
+    (n, m) Type_id.eq_result =
+    fun eq x y ->
+    match x, y with
+    | [], [] -> Equal
+    | x :: xs, y :: ys ->
+       begin match equal eq xs ys with
+       | Equal -> if eq x y then Equal else Not_equal
+       | Not_equal -> Not_equal
+       end
+    | [], _ :: _
+    | _ :: _, [] -> Not_equal
+
+  let rec equal' : type n m w.
+    ('a -> 'a -> bool) ->
+    (n, w, 'a) prefix ->
+    (m, w, 'a) prefix ->
+    (n, m) Type_id.eq_result =
+    fun eq x y ->
+    match x, y with
+    | [], [] -> Equal
+    | x :: xs, y :: ys ->
+       begin match equal' eq xs ys with
+       | Equal -> if eq x y then Equal else Not_equal
+       | Not_equal -> Not_equal
+       end
+    | [], _ :: _
+    | _ :: _, [] -> Not_equal
+
+
+  let rec compare_lengths : type n m k . (n, k, _) prefix -> (m, k, _) prefix -> (n,m) Type_id.eq_result =
+    fun xs ys ->
+    match xs, ys with
+    | [], [] -> Equal
+    | _ :: xs, _ :: ys ->
+       begin match compare_lengths xs ys with
+       | Equal -> Equal
+       | Not_equal -> Not_equal
+       end
+    | [], _ :: _
+    | _ :: _, [] -> Not_equal
+
+  let rec compare_lengths' : type n m k . (k, n, _) prefix -> (k, m, _) prefix -> (n,m) Type_id.eq_result =
+    fun xs ys ->
+    match xs, ys with
+    | [], [] -> Equal
+    | _ :: xs, _ :: ys ->
+       begin match compare_lengths' xs ys with
+       | Equal -> Equal
+       | Not_equal -> Not_equal
+       end
+    | [], _ :: _
+    | _ :: _, [] -> Not_equal
+
+  let of_list_length (type n) ~(len : (n,_,_) prefix) xs : (n,_,_) prefix option =
+    let Ex xs = of_list xs in
+    match compare_lengths len xs with
+    | Equal -> Some xs
+    | Not_equal -> None
+end
+
+
+module HashtblT (X : sig
+  type 'a key
+  type 'a value
+  val hash : 'a key -> int
+  val equal : 'a key -> 'b key -> ('a, 'b) Type_id.eq_result
+end) : sig
+  type t
+  val create : int -> t
+  val clear : t -> unit
+  val add : t -> 'a X.key -> 'a X.value -> unit
+  val replace : t -> 'a X.key -> 'a X.value -> unit
+  val mem : t -> 'b X.key -> bool
+  val find : t -> 'a X.key -> 'a X.value
+  val length : t -> int
+  val find_or_insert :
+    t -> 'a X.key -> (unit -> 'a X.value) -> 'a X.value
+end = struct
+  module Key = struct
+    type t = Packed : 'a X.key -> t
+    let hash (Packed k) = X.hash k
+    let equal (Packed k) (Packed l) = Type_id.to_bool (X.equal k l)
+  end
+  module Hashtbl = Hashtbl.Make(Key)
+
+  type packed = Packed : 'a X.key * 'a X.value -> packed
+  type t = packed Hashtbl.t
+
+  let create n : t = Hashtbl.create n
+  let clear t = Hashtbl.clear t
+
+  let add t k v =
+    Hashtbl.add t (Packed k) (Packed (k, v))
+
+  let replace t k v =
+    Hashtbl.replace t (Packed k) (Packed (k, v))
+
+  let mem t k = Hashtbl.mem t (Packed k)
+
+  let unwrap (type a) (k : a X.key) (Packed (k', v) : packed) : a X.value =
+    match X.equal k k' with Equal -> v | Not_equal -> failwith "HashtblT.unwrap: unequal keys"
+
+  let find t k =
+    Hashtbl.find t (Packed k) |> unwrap k
+
+  let length t = Hashtbl.length t
+
+  let find_or_insert t k f =
+    match find t k with
+    | v -> v
+    | exception Not_found ->
+       let x = f () in
+       add t k x;
+       x
+end

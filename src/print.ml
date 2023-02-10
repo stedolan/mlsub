@@ -159,7 +159,7 @@ and pat p = mayloc p @@ function
   | Pany -> string "_"
   | Pvar s -> symbol s
   | Ptuple (None, ts) -> record ~tcomma:true ~pun:pat_pun pat ts
-  | Ptuple (Some tag, ts) when Tuple_fields.is_empty ts -> symbol tag
+  | Ptuple (Some tag, ts) when Tuple_fields.is_empty ts && ts.fopen = `Closed -> symbol tag
   | Ptuple (Some tag, ts) -> symbol tag ^^ record ~tcomma:false ~pun:pat_pun pat ts
   | Por (p, q) -> pat p ^^ op "|" ^^ pat q
   | Pparens p -> parens (pat p)

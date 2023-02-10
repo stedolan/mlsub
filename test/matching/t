@@ -351,8 +351,7 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 >   }
 > }
 > test:2: The following cases are unhandled:
-> | (F, F, T)
-> | (F, T, T)
+> | (F, _, T)
 
 fn(x : ('A|'B|'C), y : ('A|'B|'C)) {
   match x, y {
@@ -361,11 +360,47 @@ fn(x : ('A|'B|'C), y : ('A|'B|'C)) {
 }
 > fn (x: ('A | 'B | 'C), y: ('A | 'B | 'C)) { match x, y { | A, A => 1 } }
 > test:2: The following cases are unhandled:
-> | A, B
-> | A, C
-> | B, _
-> | C, _
+> | A, B | C
+> | B | C, _
 
+fn (x : (('A(int,int)|'B{x:string,y:string}|'C|'D|'E), 'B|'C|'D)) {
+  match x {
+  | (A(_,_)|B{...}, C|D)
+  | (C, C)
+  | (D, C) => 1
+  }
+}
+> fn (x: (('A(int, int) | 'B{x: string, y: string} | 'C | 'D | 'E), 'B | 'C | 'D)) {
+>   match x {
+>     | (A(_, _) | B(...), C | D)
+>     | (C, C)
+>     | (D, C) =>
+>     1
+>   }
+> }
+> test:2: The following cases are unhandled:
+> | (A(_, _) | B{x: _, y: _}, B)
+> | (C | D, B | D)
+> | (E, _)
+
+fn(x : 'A(int, 'P|'Q|'R) | 'B(int, 'P|'Q|'R)) {
+  match x, 5 {
+  | A(x, P|Q), y => 1
+  | B(x, P|Q), y => 1
+  }
+}
+> fn (x: 'A(int, 'P | 'Q | 'R) | 'B(int, 'P | 'Q | 'R)) {
+>   match x,
+>   5 {
+>     | A(x, P | Q), y =>
+>     1
+>     | B(x, P | Q), y =>
+>     1
+>   }
+> }
+> test:2: The following cases are unhandled:
+> | A(_, R), _
+> | B(_, R), _
 
 let calls_any = fn(f) {
   (f(Foo), f(Bar), f(Baz))

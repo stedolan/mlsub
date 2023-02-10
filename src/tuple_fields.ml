@@ -19,10 +19,12 @@ let string_of_field_name = function
   | Field_named s -> s
   | Field_positional i -> Printf.sprintf ".%d" i
 
+type fields_open = [`Open|`Closed]
+
 type +'a tuple_fields =
   { fields : 'a FieldMap.t;
     fnames : field_name list;
-    fopen : [`Open|`Closed] }
+    fopen : fields_open }
 
 type 'a field_syntax =
   | Fpos of 'a

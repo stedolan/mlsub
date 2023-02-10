@@ -1,169 +1,7 @@
 open Exp
 open Typedefs
 open Tuple_fields
-
-type (_, _) equal = Refl : ('a, 'a) equal
-
-module Type_id = struct
-  type (_,_) eq_result = Equal : ('a,'a) eq_result | Not_equal : ('a,'b) eq_result
-
-  type _ tag_impl = ..
-  module type Tag = sig type a type _ tag_impl += Tag : a tag_impl end
-  type 'a tag = (module Tag with type a = 'a)
-  let fresh (type t) () : t tag =
-    let module Tag = struct type a = t type _ tag_impl += Tag : t tag_impl end in
-    (module Tag)
-
-  let code (type t) ((module M) : t tag) =
-    Obj.Extension_constructor.(id (of_val M.Tag))
-
-  let hash (type t) tag = code tag
-
-  let equal (type a) (type b) ((module A) : a tag) ((module B) : b tag) :
-    (a, b) eq_result =
-    match A.Tag with
-    | B.Tag -> Equal
-    | _ -> Not_equal
-
-  let to_bool (type a) (type b) : (a, b) eq_result -> bool =
-    function
-    | Equal -> true
-    | Not_equal -> false
-    
-
-  let and_eq (type a) (type b)
-    (p : (a, b) eq_result)
-    (q : (a, b) eq_result) : (a, b) eq_result =
-    match p, q with
-    | Equal, Equal -> Equal
-    | _ -> Not_equal
-end
-
-type z = Z and 'a s = S
-type 'n count = Z : z count | S : 'n count -> 'n s count
-module Clist = struct
-  type ('n, 'm, +'a) prefix =
-    | [] : ('n, 'n, 'a) prefix
-    | (::) : 'a * ('n, 'm, 'a) prefix -> ('n s, 'm, 'a) prefix
-
-  type ('w, +'a) t = ('w, z, 'a) prefix
-
-  type ('m, 'a) unknown_len =
-    | Ex : ('n, 'm, 'a) prefix -> ('m, 'a) unknown_len [@@unboxed]
-
-  let refute_pfx (type a) (_ : (a, a s, _) prefix) =
-    (* You can actually hit this by using -rectypes or other trickery to make
-       a type t = t s, so this has to be a runtime failure *)
-    assert false
-
-  let rec of_list : _ list -> (_,_) unknown_len = function
-    | [] -> Ex []
-    | x :: xs ->
-       let Ex xs = of_list xs in
-       Ex (x :: xs)
-
-  let rec to_list : type n m . (n, m, _) prefix -> _ list = function
-    | [] -> []
-    | x :: xs -> x :: to_list xs
-
-  let rec append : type n m w .
-    (n, m, _) prefix ->
-    (m, w, _) prefix ->
-    (n, w, _) prefix =
-    fun xs ys ->
-    match xs with
-    | [] -> ys
-    | x :: xs -> x :: (append xs ys)
-
-  let rec map : type n m . ('a -> 'b) -> (n, m, 'a) prefix -> (n, m, 'b) prefix =
-    fun f xs ->
-    match xs with
-    | [] -> []
-    | x :: xs ->
-       let y = f x in
-       let ys = map f xs in
-       y :: ys
-
-  let rec split : type n m w .
-    (n, m, _) prefix ->
-    (m, w, _) prefix ->
-    (n, w, 'a) prefix ->
-    (n, m, 'a) prefix * (m, w, 'a) prefix =
-    fun pfx1 pfx2 xs ->
-    match pfx1 with
-    | [] ->
-       [], xs
-    | _ :: pfx1 ->
-       begin match xs with
-       | [] ->
-          refute_pfx (append (map ignore pfx1) (map ignore pfx2))
-       | x :: xs ->
-          let xs1, xs2 = split pfx1 pfx2 xs in
-          x :: xs1, xs2
-       end
-
-  let rec zip : type n m .
-    (n, m, _) prefix ->
-    (n, m, _) prefix ->
-    (n, m, _) prefix =
-    fun xs ys ->
-    match xs, ys with
-    | [], [] -> []
-    | x :: xs, y :: ys -> (x, y) :: zip xs ys
-    | _ -> assert false
-
-  let rec equal : type n m w.
-    ('a -> 'a -> bool) ->
-    (w, n, 'a) prefix ->
-    (w, m, 'a) prefix ->
-    (n, m) Type_id.eq_result =
-    fun eq x y ->
-    match x, y with
-    | [], [] -> Equal
-    | x :: xs, y :: ys ->
-       begin match equal eq xs ys with
-       | Equal -> if eq x y then Equal else Not_equal
-       | Not_equal -> Not_equal
-       end
-    | [], _ :: _
-    | _ :: _, [] -> Not_equal
-
-  let rec equal' : type n m w.
-    ('a -> 'a -> bool) ->
-    (n, w, 'a) prefix ->
-    (m, w, 'a) prefix ->
-    (n, m) Type_id.eq_result =
-    fun eq x y ->
-    match x, y with
-    | [], [] -> Equal
-    | x :: xs, y :: ys ->
-       begin match equal' eq xs ys with
-       | Equal -> if eq x y then Equal else Not_equal
-       | Not_equal -> Not_equal
-       end
-    | [], _ :: _
-    | _ :: _, [] -> Not_equal
-
-
-  let rec compare_lengths : type n m k . (n, k, _) prefix -> (m, k, _) prefix -> (n,m) Type_id.eq_result =
-    fun xs ys ->
-    match xs, ys with
-    | [], [] -> Equal
-    | _ :: xs, _ :: ys ->
-       begin match compare_lengths xs ys with
-       | Equal -> Equal
-       | Not_equal -> Not_equal
-       end
-    | [], _ :: _
-    | _ :: _, [] -> Not_equal
-
-  let of_list_length (type n) ~(len : (n,_,_) prefix) xs : (n,_,_) prefix option =
-    let Ex xs = of_list xs in
-    match compare_lengths len xs with
-    | Equal -> Some xs
-    | Not_equal -> None
-end
-
+open Util
 
 type action = {
   rhs: exp;
@@ -178,6 +16,7 @@ type 'w pat_row = ('w, pat) Clist.t * (bindings * action)
 
 type 'w pat_matrix = 'w pat_row list
 
+open Peano_nat_types
 type 'n dectree =
   { tree: 'n dectree';
     tag: 'n Type_id.tag;
@@ -194,10 +33,7 @@ and _ dectree' =
   | Fields : 'n fields_split -> 'n s dectree'
 
 and 'n fields_split =
-  | Proj : ('m, 'n, Tuple_fields.field_name) Clist.prefix * 'm dectree -> 'n fields_split
-
-
-type packed_dectree' = Packed : 'n dectree' -> packed_dectree'
+  | Proj : ('m, 'n, Tuple_fields.field_name) Clist.prefix * Tuple_fields.fields_open * 'm dectree -> 'n fields_split
 
 module DectreeHash = struct
   let equal_dectree (type a) (type b) (a : a dectree) (b : b dectree) : (a, b) Type_id.eq_result =
@@ -209,9 +45,10 @@ module DectreeHash = struct
 
   let equal_fields_split (type a) (type b) (a : a fields_split) (b : b fields_split) :
         (a, b) Type_id.eq_result =
-    let Proj (pfxa, a) = a in
-    let Proj (pfxb, b) = b in
-    match equal_dectree a b with
+    let Proj (pfxa, ao, a) = a in
+    let Proj (pfxb, bo, b) = b in
+    if ao <> bo then Not_equal
+    else match equal_dectree a b with
     | Equal ->
        begin match Clist.equal (Stdlib.(=)) pfxa pfxb with
        | Equal -> Equal
@@ -257,13 +94,6 @@ module DectreeHash = struct
        end
     | (Done _ | Failure | Any _ | Cases _ | Fields _), _ -> Not_equal
 
-  type t = packed_dectree'
-
-  let equal (Packed a) (Packed b) =
-    match equal_dectree' a b with
-    | Equal -> true
-    | Not_equal -> false
-
   let mix h =
     let h = h * 0x43297583 in
     let h = h lxor (h lsr 16) in
@@ -276,13 +106,13 @@ module DectreeHash = struct
   let hash_dectree' a =
     mix (Type_id.hash a.tag)
 
-  let hash_fields (Proj (pfx, t)) =
+  let hash_fields (Proj (pfx, o, t)) =
     List.fold_left
       (fun h fn -> h + Hashtbl.hash fn)
-      (hash_dectree' t)
+      (mix (hash_dectree' t) + Hashtbl.hash o)
       (Clist.to_list pfx)
 
-  let hash (Packed a) =
+  let hash (type w) (a : w dectree') =
     mix @@ match a with
     | Done a ->
        mix 1 + a.id
@@ -298,33 +128,33 @@ module DectreeHash = struct
 end
 
 module Hashcons = struct
-  module Tbl = Hashtbl.Make (DectreeHash)
-  type packed_kv =
-    | Packed : 'w dectree' * 'w dectree -> packed_kv
-  type t = packed_kv Tbl.t
+  module Tbl = HashtblT (struct
+    type 'w key = 'w dectree'
+    type 'w value = 'w dectree
+    let hash = DectreeHash.hash
+    let equal a b = DectreeHash.equal_dectree' a b
+  end)
+  type t = Tbl.t
   let fresh_table () : t = Tbl.create 20
 
   let is_empty (type a) : a dectree' -> bool = function
     | Done _ -> false
     | Failure -> true
     | Any t -> t.empty
-    | Cases cases -> List.for_all (fun (_, Proj (_, fs)) -> fs.empty) cases
-    | Fields (Proj (_, fs)) -> fs.empty
+    | Cases cases -> List.for_all (fun (_, Proj (_, _, fs)) -> fs.empty) cases
+    | Fields (Proj (_, _, fs)) -> fs.empty
 
   let is_total (type a) : a dectree' -> bool = function
     | Done _ -> true
     | Failure -> false
     | Any t -> t.total
-    | Cases cases -> List.for_all (fun (_, Proj (_, fs)) -> fs.total) cases
-    | Fields (Proj (_, fs)) -> fs.total
+    | Cases cases -> List.for_all (fun (_, Proj (_, _, fs)) -> fs.total) cases
+    | Fields (Proj (_, _, fs)) -> fs.total
 
   let mk tbl (type n) (t : n dectree') : n dectree =
-    match Tbl.find tbl (Packed t) with
-    | Packed (t', res) ->
-       begin match DectreeHash.equal_dectree' t t' with
-       | Equal -> res.refcount <- res.refcount + 1; res
-       | Not_equal -> assert false
-       end
+    match Tbl.find tbl t with
+    | res ->
+       res.refcount <- res.refcount + 1; res
     | exception Not_found ->
        let res =
          { tree = t;
@@ -333,7 +163,7 @@ module Hashcons = struct
            total = is_total t;
            refcount = 1 }
        in
-       Tbl.add tbl (Packed t) (Packed (t, res));
+       Tbl.add tbl t res;
        res
 end
 
@@ -463,6 +293,7 @@ let decide_split_kind ~matchloc env (ty : ptyp) (heads : _ peeled_row list) =
                  | _ -> assert false) inferred_cases)
 
 let any : pat = (Some Pany, noloc)
+let pat_or p q : pat = (Some (Por (p, q)), noloc)
 
 (* FIXME as patterns here *)
 let read_fields :
@@ -481,6 +312,7 @@ let read_fields :
      let lookup fn =
        match get_field_opt fs fn with
        | Some pat -> pat
+       | None when fs.fopen = `Open -> any
        | None -> failwith "missing!"
      in
      Clist.append (Clist.map lookup fields) row, act
@@ -516,13 +348,14 @@ let rec split_cases :
 
   | typ :: typs ->
      let split_fields ~tag fs mat =
+        let fopen = fs.fopen in
         let Ex fs = Clist.of_list (list_fields fs) in
         let field_names = Clist.map fst fs in
         let field_types = Clist.map snd fs in
         let mat = List.map (read_fields ~tag field_names) mat in
         let rest =
           split_cases ~table ~matchloc env vars (Clist.append field_types typs) mat in
-        Proj (field_names, rest)
+        Proj (field_names, fopen, rest)
      in
 
      let mat = peel_pat_heads mat in
@@ -541,34 +374,6 @@ let rec split_cases :
         let cases = SymMap.to_seq cases |> List.of_seq in
         Hashcons.mk table (Cases cases)
 
-module Memo_table(X : sig type !_ input type 'a t constraint 'a = _ input end) = struct
-  include X
-  type wpacked = Packed : 'w dectree * 'w X.t -> wpacked
-
-  module Tbl = Hashtbl.Make (struct
-    type t = int
-    let equal = Int.equal
-    let hash = Hashtbl.hash
-  end)
-  type t = wpacked Tbl.t
-  let fresh () : t = Tbl.create 20
-
-  let memoize (type w) (type a) (table : t) (f : w X.input dectree' -> w X.input X.t) (x : w X.input dectree) : w X.input X.t =
-    let id = Type_id.code x.tag in
-    match Tbl.find table id with
-    | Packed (x', v) ->
-       begin match Type_id.equal x.tag x'.tag with
-       | Not_equal -> assert false
-       | Equal -> assert (x == x'); v
-       end
-    | exception Not_found ->
-       let r = f x.tree in
-       Tbl.add table id (Packed (x, r));
-       r
-
-  type memoized = { f : 'a. 'a X.input dectree -> 'a X.input X.t }
-end
-
 let find_map_unique ~equal f xs =
   let rec aux u = function
     | [] -> Some u
@@ -586,122 +391,52 @@ let find_map_unique ~equal f xs =
      | None -> None
      | Some u -> aux u xs
 
-module Dectree_tails_tag = struct
-  type 'a input = 'a s
-  type 'ws t = 'w dectree option constraint 'ws = 'w s
+module Dectree_tails_K = struct
+  type 'k key = Packed : 'n dectree * ('n, 'k, unit) Clist.prefix -> 'k key
+  type 'k value = 'k dectree option
+  let equal (type k1) (type k2) (Packed (t1, p1) : k1 key) (Packed (t2, p2) : k2 key) : (k1, k2) Type_id.eq_result =
+    match DectreeHash.equal_dectree t1 t2 with
+    | Not_equal -> Not_equal
+    | Equal ->
+       match Clist.compare_lengths' p1 p2 with
+       | Not_equal -> Not_equal
+       | Equal -> Equal
+
+  let hash (Packed (t, p)) =
+    DectreeHash.hash_dectree' t + Clist.length p * 84930283
 end
-let dectree_tails () : Memo_table(Dectree_tails_tag).memoized =
-  let module Memo_table = Memo_table (Dectree_tails_tag) in
-  let table = Memo_table.fresh () in
+module Memo_dectree_tails = HashtblT (Dectree_tails_K)
+
+let rec dectree_tails : type n k a. table:Memo_dectree_tails.t -> (n, k, unit) Clist.prefix -> n dectree -> k dectree option =
+  fun ~table pfx t ->
+  Memo_dectree_tails.find_or_insert table (Packed (t, pfx)) @@ fun () ->
   let unique_dt f xs =
     find_map_unique ~equal:(fun a b -> DectreeHash.equal_dectree a b |> Type_id.to_bool) f xs in
 
-  let rec dectree_tails : type w . w s dectree' -> w dectree option =
-    function
-    | Any tail ->
-       Some tail
-    | Cases cases ->
-       cases |> unique_dt (fun (_, fs) -> dectree_fields_tails fs)
-    | Fields fs ->
-       dectree_fields_tails fs
-  
-  and dectree_fields_tails : type n . n fields_split -> n dectree option =
-    fun (Proj (fs, t)) ->
-    let rec aux : type m . (m, n, field_name) Clist.prefix -> m dectree -> n dectree option =
-      fun pfx t ->
-      match pfx with
-      | [] -> Some t
-      | _ :: fs ->
-         let ans = Memo_table.memoize table dectree_tails t in
-         match ans with
-         | None -> None
-         | Some t -> aux fs t
-    in
-    aux fs t
-  in
-  { f = fun t -> Memo_table.memoize table dectree_tails t }
+  match pfx, t.tree with
+  | [], _ -> Some t
+  | _ :: pfx, Any tail ->
+     dectree_tails ~table pfx tail
+  | _ :: pfx, Cases cases ->
+     cases |> unique_dt (fun (_, Proj (fs, _, t)) ->
+       dectree_tails ~table (Clist.append (Clist.map ignore fs) pfx) t)
+  | _ :: pfx, Fields (Proj (fs, _, t)) ->
+     dectree_tails ~table (Clist.append (Clist.map ignore fs) pfx) t
 
-module Dectree_heads_tag = struct
-  type 'n head_dectree = Chopped : ('k, 'n, _) Clist.prefix * ('k dectree) -> 'n head_dectree
-  type (_,_) tag = T : ('n, 'n head_dectree) tag
-  type fn = { f : 'k 'n 'a . ('k, 'n, 'a) Clist.prefix -> 'n dectree -> 'k dectree }
-end
-(*
-let dectree_head () : Dectree_heads_tag.fn =
-  let module Memo_table = Memo_table (Dectree_heads_tag) in
-  let table = Memo_table.fresh () in
-  let rec dectree_head : type k n . (k, n, _) Clist.prefix -> n dectree -> k dectree =
-    fun pfx dt ->
-    let Chopped (pfx', t') = dectree_head' dt in
-    
-  and dectree_head' : type n . n dectree -> n Dectree_heads_tag.head_dectree =
-    asdf
-  in
-  { f = dectree_head }
-*)
-(*
-let rec dectree_head : type k n . (n, k, _) Clist.prefix -> n dectree -> k dectree =
-  fun pfx dt ->
-  match pfx, dt with
-  | [], dt -> dt
-  | _::pfx, Any dt ->
-     let h = dectree_head pfx dt.dectree in
-     Any h
-  | _::pfx, Cases cases -> asdf
-  | _::pfx, Fields fs -> asdf
-*)
-(*
-let counterexamples t =
-  let dectree_tails = dectree_tails () in
-  let unmatched_fields :
-    type n m . tag:string option -> (m, n, field_name) Clist.prefix ->
-      (m, pat) Clist.t -> (n s, pat) Clist.t =
-    fun ~tag fields unmatched ->
-    let fs, rest = Clist.split fields unmatched in
-    let fields =
-      Clist.zip fields fs
-      |> Clist.to_list
-      |> Tuple_fields.fields_of_list ~fopen:`Closed(*FIXME*)
-    in
-    let pat =
-      Ptuple (Option.map (fun s -> s, Location.noloc) tag, fields)
-    in
-    (Some pat, Location.noloc) :: rest
-  in
-  
-  let rec counterexamples :
-    type w . w dectree -> (w, pat) Clist.t list =
-    function
-    | Done _ -> []
-    | Failure -> [[]]
-    | Any t ->
-       let unmatched = counterexamples t.dectree in
-       List.map (fun ps -> Clist.(any :: ps)) unmatched
-    | Cases cases ->
-       cases |> List.concat_map (fun (tag, (Proj (names, t))) ->
-         List.map (unmatched_fields ~tag:(Some tag) names) (counterexamples t.dectree))
-    | Fields (Proj (names, t')) as t ->
-       begin match dectree_tails.f T t with
-       | None ->
-          List.map (unmatched_fields ~tag:None names) (counterexamples t'.dectree)
-       | Some tail ->
-          let tail = counterexamples tail.dectree in
-          asdf
-       end
-  in
-  counterexamples t
-*)
+
 let counterexamples depth t =
-  let dectree_tails = dectree_tails () in
+  let tail_tbl = Memo_dectree_tails.create 20 in
+  let dectree_tails pfx t = dectree_tails ~table:tail_tbl pfx t in
   let unmatched_fields :
-    type n m k . tag:string option -> (m, n, field_name) Clist.prefix -> (n, k, _) Clist.prefix ->
+    type n m k . tag:string option -> fopen:Tuple_fields.fields_open ->
+      (m, n, field_name) Clist.prefix -> (n, k, _) Clist.prefix ->
       (m, k, pat) Clist.prefix -> (n s, k, pat) Clist.prefix =
-    fun ~tag fields pfx unmatched ->
+    fun ~tag ~fopen fields pfx unmatched ->
     let fs, rest = Clist.split fields pfx unmatched in
     let fields =
       Clist.zip fields fs
       |> Clist.to_list
-      |> Tuple_fields.fields_of_list ~fopen:`Closed(*FIXME*)
+      |> Tuple_fields.fields_of_list ~fopen
     in
     let pat =
       Ptuple (Option.map (fun s -> s, Location.noloc) tag, fields)
@@ -710,41 +445,57 @@ let counterexamples depth t =
   in
   
   let rec examples :
-    type n k . sense:bool -> (n, k, _) Clist.prefix -> n dectree -> (n, k, pat) Clist.prefix list =
-    fun ~sense pfx dt ->
-    match sense, dt with
-    | true, { empty = true; _ }
-    | false, { total = true; _ } ->
-       (* No examples / counterexamples *)
-       []
-    | true, { total = true; _ }
-    | false, { empty = true; _ } ->
-       (* Everything is an example / counterexample *)
-       [ Clist.map (fun _ -> any) pfx ]
-    | _, { total = false; empty = false; _ } ->
-       match pfx with
-       | [] -> [ [] ]
-       | _ :: pfx ->
-          match dectree_tails.f dt with
-          | Some tail ->
-             (* Separable decision tree (all tails agree) *)
-             let ex_head = examples ~sense [()] dt in
-             let ex_tail = examples ~sense pfx tail in
-             assert false
-          | None ->
-             match dt.tree with
-             | Any dt ->
-                let ex = examples ~sense pfx dt in
-                 List.map (fun ps -> Clist.(any :: ps)) ex
-             | Cases cases ->
-                cases |> List.concat_map (fun (tag, (Proj (names, t))) ->
-                  List.map (unmatched_fields ~tag:(Some tag) names pfx)
-                    (examples ~sense (Clist.append (Clist.map ignore names) pfx) t))
-             | Fields (Proj (names, t')) ->
-                let ex = examples ~sense (Clist.append (Clist.map ignore names) pfx) t' in
-                List.map (unmatched_fields ~tag:None names pfx) ex
+    type n k . (n, k, _) Clist.prefix -> n dectree -> (n, k, pat) Clist.prefix list =
+    fun pfx dt ->
+    if dt.total then []
+    else match pfx with
+    | [] -> [ [] ]
+    | _ :: pfx ->
+       match dectree_tails [()] dt with
+       | Some tail ->
+          (* head must be total! *)
+          let ex = examples pfx tail in
+          List.map (fun ps -> Clist.(any :: ps)) ex
+       | None ->
+          match dt.tree with
+          | Any _ -> assert false (* has tail *)
+          | Fields (Proj (names, fopen, t')) ->
+             let ex = examples (Clist.append (Clist.map ignore names) pfx) t' in
+             List.map (unmatched_fields ~tag:None ~fopen names pfx) ex
+          | Cases cases ->
+             let cases =
+               cases |> List.map (fun (c, (Proj (names, _, t) as fs)) ->
+                 c, fs, dectree_tails (Clist.map ignore names) t)
+             in
+             let rec group_cases = function
+               | [] -> []
+               | (tag, Proj (names, fopen, t), None) :: rest ->
+                  let ex = examples (Clist.append (Clist.map ignore names) pfx) t in
+                  List.map (unmatched_fields ~tag:(Some tag) ~fopen names pfx) ex
+                  @ group_cases rest
+               | (_, Proj (_, _, _), Some tail) as first :: rest ->
+                  let same_tail, rest =
+                    List.partition (function
+                      | (_, _, Some tail') when Type_id.to_bool (DectreeHash.equal_dectree tail tail') ->
+                         true
+                      | _ -> false) rest
+                  in
+                  let ex_tail = examples pfx tail in
+                  let pats =
+                    (first :: same_tail)
+                    |> List.map (fun (tag, (Proj (names, fopen, _)), _) ->
+                       let names = Clist.to_list names |> List.map (fun f -> f, any) in
+                       let fs = Tuple_fields.fields_of_list names ~fopen in
+                       let pat = Ptuple (Some (tag, Location.noloc), fs) in
+                       (Some pat, Location.noloc))
+                  in
+                  let pat = List.fold_left pat_or (List.hd pats) (List.tl pats) in
+                  List.map (fun ps -> Clist.(pat :: ps)) ex_tail
+                  @ group_cases rest
+             in
+             group_cases cases
   in
-  examples ~sense:false depth t
+  examples depth t
 
 
 (*
@@ -824,3 +575,69 @@ let split_cases ~matchloc env (typs : ptyp list) (cases : case list) =
   let unmatched = counterexamples (Clist.map ignore typs) dtree in 
   let unmatched = List.map Clist.to_list unmatched in
   actions, Ex dtree, unmatched
+
+
+
+module Compile_K = struct
+  type 'w key = 'w dectree
+  type 'w value = unit
+  let equal = DectreeHash.equal_dectree
+  let hash = DectreeHash.hash_dectree'
+end
+module Memo_compile = HashtblT (Compile_K)
+
+(*
+
+Which values should be passed along to shared continuations?
+Do I need to compute the dominator tree?
+
+To match dectree against vs, walk downwards collecting values
+Shared subtree: track height of each?
+
+Is it always a shared vtail?
+Dectree operations are always on a prefix
+But that can probably change?
+
+Consider:
+  | A(x, foo: P|Q), R
+  | B(x, bar: P|Q), R
+
+Shared subtree:
+  P, R
+  Q, R
+
+reached after both A and B
+
+yet the two applications of this subtree match different values
+
+and it is not shared in the source language.
+
+if I leave this unshared, I generate simpler code in most cases.
+How to detect sharing purely of tails?
+
+(1) Hashcons but mark tails somehow
+(2) something smarter?
+
+Could track paths in pattern matrices & key hashconsing off that?
+Also produces reasonable domtrees
+
+  | A(x, foo: P|Q), R
+  | B(x, bar: P|Q), R
+
+Alternatively, keep sharing as-is and pass the values along as needed.
+Does this mean every continuation abstracts over all pattern variables?
+I suppose I could compute dominator trees easily enough.
+
+I need to precompute which variables each node abstracts over.
+Maybe just compute the common prefix by hand?
+It's fine for this not to be optimal!
+
+
+AltAlt: just don't hashcons. Nahhhhhhh.
+
+*)
+(*
+let rec compile ~table (type w) (dt : w dectree) (vals : (w, IR.value) Clist.t) =
+  match Memo_table.find table dt with
+  if Memo_compile.mem table dt 
+*)
