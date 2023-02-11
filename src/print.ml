@@ -71,8 +71,9 @@ let rec exp e = mayloc e @@ function
   | If (e, t, f) ->
      string "if" ^^ blank 1 ^^ exp e ^^ block t ^^ blank 1 ^^ string "else" ^^ block f
   | Match (e, cs) ->
-     string "match" ^^ blank 1 ^^ separate_map (comma ^^ break 1) exp e ^^ space ^^
-       braces' (indent (break 1 ^^ cases cs) ^^ break 1)
+     string "match" ^^
+       group (indent (break 1 ^^ separate_map (comma ^^ break 1) exp e) ^^ break 1) ^^
+       braces' (indent (break 1 ^^ ifflat empty (string "| ") ^^ cases cs) ^^ break 1)
   | Typed (e, t) -> parens (exp e ^^ opt_type_annotation (Some t))
   | Parens e -> parens (exp e)
   | Pragma s -> char '@' ^^ string s
@@ -150,10 +151,10 @@ and opt_type_annotation ?(prespace=true) = function
   | None -> empty
 
 and cases cs =
-  cs |> separate_map (break 1) @@ fun (pps, e) ->
-    (pps |> separate_map (break 1) @@ fun ps ->
-      string "| " ^^ group (separate_map (comma ^^ break 1) pat ps))
-    ^^ op "=>" ^^ exp e
+  cs |> separate_map (break 1 ^^ string "| ") @@ fun (pps, e) ->
+    (pps |> separate_map (break 1 ^^ string "| ") @@ fun ps ->
+      group (separate_map (comma ^^ break 1) pat ps))
+    ^^ space ^^ string "=>" ^^ group (indent (break 1 ^^ exp e))
 
 and pat p = mayloc p @@ function
   | Pany -> string "_"

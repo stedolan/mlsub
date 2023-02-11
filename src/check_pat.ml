@@ -232,7 +232,7 @@ let decide_split_kind ~matchloc env (ty : ptyp) (heads : _ peeled_row list) =
   if List.for_all (function {head=Hany;_} -> true | _ -> false) heads then
     (* If there are no destructuring patterns, any type will do *)
     Sany
-  else if List.for_all (function {head=Hany | Hfields _;_} -> true | {head=Hcase _;_} -> false) heads then
+  else if List.for_all (function {head=Hany | Hfields _; _} -> true | {head=Hcase _; _} -> false) heads then
     (* All product field constructors *)
     let fields =
       List.concat_map (fun {head; head_loc; _} ->
@@ -632,8 +632,6 @@ I need to precompute which variables each node abstracts over.
 Maybe just compute the common prefix by hand?
 It's fine for this not to be optimal!
 
-
-AltAlt: just don't hashcons. Nahhhhhhh.
 
 *)
 (*
