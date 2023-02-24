@@ -68,8 +68,8 @@ end = struct
   let deref (type p) (type a) ((module P) : (p,a) phase) cell =
     match cell.entry with
     | P.P x -> x
-    | Idle -> invalid_arg "deref outside with_binder"
-    | _ -> invalid_arg "incorrect binder"
+    | Idle -> invalid_arg (Printf.sprintf "deref outside with_binder of %s" (Option.value ~default:"_" cell.name))
+    | _ -> invalid_arg (Printf.sprintf "incorrect binder of %s" (Option.value ~default:"_" cell.name))
 end
 
 module Symbol : sig

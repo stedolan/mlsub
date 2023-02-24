@@ -365,6 +365,22 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 >   }
 > ('T | 'F, 'T | 'F, 'T | 'F) -> bool
 > let  = %yield(0: fun (a, b, c) ret {
+>   let case() = {
+>     ret(<false>)
+>   };
+>   let case2() = {
+>     ret(<true>)
+>   };
+>   let case3(v) = {
+>     match v {
+>       F() -> {
+>         case()
+>       };
+>       T() -> {
+>         case2()
+>       }
+>     }
+>   };
 >   let v0, v1, v2 = (0: a, 1: b, 2: c).(0, 1, 2);
 >   match v0 {
 >     F() -> {
@@ -372,44 +388,30 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 >         F() -> {
 >           match v2 {
 >             F() -> {
->               ret(<false>)
+>               case()
 >             };
 >             T() -> {
->               ret(<false>)
+>               case()
 >             }
 >           }
 >         };
 >         T() -> {
->           match v2 {
->             F() -> {
->               ret(<false>)
->             };
->             T() -> {
->               ret(<true>)
->             }
->           }
+>           case3(v2)
 >         }
 >       }
 >     };
 >     T() -> {
 >       match v1 {
 >         F() -> {
->           match v2 {
->             F() -> {
->               ret(<false>)
->             };
->             T() -> {
->               ret(<true>)
->             }
->           }
+>           case3(v2)
 >         };
 >         T() -> {
 >           match v2 {
 >             F() -> {
->               ret(<true>)
+>               case2()
 >             };
 >             T() -> {
->               ret(<true>)
+>               case2()
 >             }
 >           }
 >         }

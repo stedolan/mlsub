@@ -598,6 +598,9 @@ end) : sig
   val length : t -> int
   val find_or_insert :
     t -> 'a X.key -> (unit -> 'a X.value) -> 'a X.value
+
+  type kv_pair = KV : 'a X.key * 'a X.value -> kv_pair
+  val fold : (kv_pair -> 'acc -> 'acc) -> t -> 'acc -> 'acc
 end = struct
   module Key = struct
     type t = Packed : 'a X.key -> t
@@ -606,21 +609,21 @@ end = struct
   end
   module Hashtbl = Hashtbl.Make(Key)
 
-  type packed = Packed : 'a X.key * 'a X.value -> packed
-  type t = packed Hashtbl.t
+  type kv_pair = KV : 'a X.key * 'a X.value -> kv_pair
+  type t = kv_pair Hashtbl.t
 
   let create n : t = Hashtbl.create n
   let clear t = Hashtbl.clear t
 
   let add t k v =
-    Hashtbl.add t (Packed k) (Packed (k, v))
+    Hashtbl.add t (Packed k) (KV (k, v))
 
   let replace t k v =
-    Hashtbl.replace t (Packed k) (Packed (k, v))
+    Hashtbl.replace t (Packed k) (KV (k, v))
 
   let mem t k = Hashtbl.mem t (Packed k)
 
-  let unwrap (type a) (k : a X.key) (Packed (k', v) : packed) : a X.value =
+  let unwrap (type a) (k : a X.key) (KV (k', v)) : a X.value =
     match X.equal k k' with Equal -> v | Not_equal -> failwith "HashtblT.unwrap: unequal keys"
 
   let find t k =
@@ -635,4 +638,7 @@ end = struct
        let x = f () in
        add t k x;
        x
+
+  let fold f t acc =
+    Hashtbl.fold (fun _ kv acc -> f kv acc) t acc
 end

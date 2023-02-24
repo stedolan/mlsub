@@ -577,75 +577,65 @@ let split_cases ~matchloc env (typs : ptyp list) (cases : case list) =
   actions, Ex (typs, dtree), unmatched
 
 
-
 module Compile_K = struct
   type 'w key = 'w dectree
-  type 'w value = unit
+  type 'w value =
+    {
+      vpos : int SymMap.t;
+      cont_name : IR.cont IR.Binder.t;
+      body : IR.cont
+    }
   let equal = DectreeHash.equal_dectree
   let hash = DectreeHash.hash_dectree'
 end
-module Memo_compile = HashtblT (Compile_K)
-
-(*
-
-Which values should be passed along to shared continuations?
-Do I need to compute the dominator tree?
-
-To match dectree against vs, walk downwards collecting values
-Shared subtree: track height of each?
-
-Is it always a shared vtail?
-Dectree operations are always on a prefix
-But that can probably change?
-
-Consider:
-  | A(x, foo: P|Q), R
-  | B(x, bar: P|Q), R
-
-Shared subtree:
-  P, R
-  Q, R
-
-reached after both A and B
-
-yet the two applications of this subtree match different values
-
-and it is not shared in the source language.
-
-if I leave this unshared, I generate simpler code in most cases.
-How to detect sharing purely of tails?
-
-(1) Hashcons but mark tails somehow
-(2) something smarter?
-
-Could track paths in pattern matrices & key hashconsing off that?
-Also produces reasonable domtrees
-
-  | A(x, foo: P|Q), R
-  | B(x, bar: P|Q), R
-
-Alternatively, keep sharing as-is and pass the values along as needed.
-Does this mean every continuation abstracts over all pattern variables?
-I suppose I could compute dominator trees easily enough.
-
-I need to precompute which variables each node abstracts over.
-Maybe just compute the common prefix by hand?
-It's fine for this not to be optimal!
-
-No, every continuation abstracts over all pattern variables. Much simpler.
-
-*)
-(*
-let rec compile ~table (type w) (dt : w dectree) (vals : (w, IR.value) Clist.t) =
-  match Memo_table.find table dt with
-  if Memo_compile.mem table dt 
-*)
+module Compile_table = HashtblT (Compile_K)
 
 let compile ~cont ~actions vals orig_dt =
+  let shared = Compile_table.create 10 in
+  let shared_list = ref [] in
   let rec compile :
      type w . vars:(IR.value * string) list -> vals:(w, IR.value) Clist.t -> w dectree -> IR.comp =
     fun ~vars ~vals dt ->
-    match dt.tree, vals with
+    assert (dt.refcount > 0);
+    if dt.refcount = 1 then
+      compile_tree ~vars ~vals dt.tree
+    else
+      match Compile_table.find shared dt with
+      | { vpos; cont_name; body = _ } ->
+         let vtable = Array.make (SymMap.cardinal vpos) None in
+         vars |> List.iter (fun (v, name) ->
+           vtable.(SymMap.find name vpos) <- Some v);
+         let args =
+           Array.to_list (Array.map Option.get vtable)
+           @ Clist.to_list vals
+         in
+         Jump (IR.Binder.ref cont_name, args)
+      | exception Not_found ->
+         let vpos = SymMap.of_seq (List.mapi (fun i (_, s) -> s, i) vars |> List.to_seq) in
+         let cont_name, _ = IR.Binder.fresh ~name:"case" () in
+         let cont_vars = List.map (fun (_,s) -> IR.Binder.fresh ~name:s (), s) vars in
+         let cont_vals = Clist.map (fun _ -> IR.Binder.fresh ~name:"v" ()) vals in
+         let body =
+           compile_tree
+             ~vars:(List.map (fun ((_,v),s) -> IR.Var v,s) cont_vars)
+             ~vals:(Clist.map (fun (_,v) -> IR.Var v) cont_vals)
+             dt.tree
+         in
+         let body : IR.cont =
+           Cont (List.map (fun ((v,_),_) -> v) cont_vars
+                 @ Clist.to_list (Clist.map (fun (v,_) -> v) cont_vals),
+                 body)
+         in
+         let share : _ Compile_K.value = { vpos; cont_name; body } in
+         Compile_table.add shared dt share;
+         shared_list := share :: !shared_list;
+         let args = List.map fst vars @ Clist.to_list vals in
+         Jump (IR.Binder.ref cont_name, args)
+
+  and compile_tree :
+     type w . vars:(IR.value * string) list -> vals:(w, IR.value) Clist.t -> w dectree' -> IR.comp =
+    fun ~vars ~vals dt ->
+    match dt, vals with
     | Done act, [] ->
        (* FIXME bind the variables properly *)
        SymMap.fold (fun _ (_, var) comp ->
@@ -687,4 +677,11 @@ let compile ~cont ~actions vals orig_dt =
   in
   let Ex (len, dt) = orig_dt in
   let vals = Option.get (Clist.of_list_length ~len vals) in
-  compile ~vars:[] ~vals dt
+  let code = compile ~vars:[] ~vals dt in
+  List.fold_left
+    (fun acc (cont : _ Compile_K.value) : IR.comp ->
+      LetCont (cont.cont_name,
+               cont.body,
+               acc))
+    code
+    !shared_list
