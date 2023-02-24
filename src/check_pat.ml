@@ -550,7 +550,7 @@ let check_fvs_mat loc = function
        (List.map check_fvs_list pps)
   
 
-type ex_split = Ex : 'n dectree -> ex_split
+type ex_split = Ex : (('n,_) Clist.t * 'n dectree) -> ex_split
 let split_cases ~matchloc env (typs : ptyp list) (cases : case list) =
   let actions =
     cases |> List.mapi (fun id (pps, exp) ->
@@ -574,7 +574,7 @@ let split_cases ~matchloc env (typs : ptyp list) (cases : case list) =
     split_cases ~table ~matchloc env SymMap.empty typs mat in
   let unmatched = counterexamples (Clist.map ignore typs) dtree in 
   let unmatched = List.map Clist.to_list unmatched in
-  actions, Ex dtree, unmatched
+  actions, Ex (typs, dtree), unmatched
 
 
 
@@ -632,6 +632,7 @@ I need to precompute which variables each node abstracts over.
 Maybe just compute the common prefix by hand?
 It's fine for this not to be optimal!
 
+No, every continuation abstracts over all pattern variables. Much simpler.
 
 *)
 (*
@@ -639,3 +640,51 @@ let rec compile ~table (type w) (dt : w dectree) (vals : (w, IR.value) Clist.t) 
   match Memo_table.find table dt with
   if Memo_compile.mem table dt 
 *)
+
+let compile ~cont ~actions vals orig_dt =
+  let rec compile :
+     type w . vars:(IR.value * string) list -> vals:(w, IR.value) Clist.t -> w dectree -> IR.comp =
+    fun ~vars ~vals dt ->
+    match dt.tree, vals with
+    | Done act, [] ->
+       (* FIXME bind the variables properly *)
+       SymMap.fold (fun _ (_, var) comp ->
+         fun k : IR.comp ->
+         LetVal (var, Literal (Int 42), comp k))
+         act.bound
+         actions.(act.id)
+         cont
+    | Failure, [] ->
+       (* FIXME better error *)
+       IR.Trap "match failure"
+    | Any dt, _ :: vals ->
+       compile ~vars ~vals dt
+    | Cases cases, v :: vals ->
+       let cases =
+         cases |> List.map (fun (tag, fs) ->
+           let fields, cont = compile_fields ~vars ~vals fs in
+           IR.Symbol.of_string tag, fields, cont)
+       in
+       Match (v, cases)
+    | Fields fs, v :: vals ->
+       let fields, cont = compile_fields ~vars ~vals fs in
+       Project (v, fields, cont)
+
+  and compile_fields :
+    type w . vars:(IR.value * string) list -> vals:(w, IR.value) Clist.t -> w fields_split -> field_name list * IR.cont =
+    fun ~vars ~vals (Proj (fs, _op, dt)) ->
+    let vname : Tuple_fields.field_name -> string = function
+      | Field_named s -> s
+      | Field_positional n -> Printf.sprintf "v%d" n
+    in
+    let field_vars = Clist.map (fun name -> IR.Binder.fresh ~name:(vname name) ()) fs in
+    let binders = Clist.map (fun (v, _) -> v) field_vars in
+    let field_vars = Clist.map (fun (_, v) -> IR.Var v) field_vars in
+    let vals = Clist.append field_vars vals in
+    let rest = compile ~vars ~vals dt in
+    Clist.to_list fs, Cont (Clist.to_list binders, rest)
+
+  in
+  let Ex (len, dt) = orig_dt in
+  let vals = Option.get (Clist.of_list_length ~len vals) in
+  compile ~vars:[] ~vals dt

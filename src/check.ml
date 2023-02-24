@@ -144,6 +144,10 @@ let reify_dup_cont cont f =
      let k, k' = IR.Binder.fresh ~name:"k" () in
      LetCont(k, body, f (Named k'))
 
+let maybe_dup_cont ~uses cont f =
+  if uses <= 1 then f cont
+  else reify_dup_cont cont (fun k -> f (Reified_cont k))
+
 let apply_cont cont v : IR.comp =
   match cont with
   | Reified_cont k -> IR.cut k [v]
@@ -165,6 +169,17 @@ let eval_cont_fields (fs : exp tuple_fields) (cont : IR.value tuple_fields -> IR
     acc (FieldMap.add fn v valmap)
   in
   (Tuple_fields.fold_fields add_field final fs) FieldMap.empty
+
+let eval_cont_list (es : exp list) (cont : IR.value list -> IR.comp) =
+  let final : IR.value list -> IR.comp =
+    fun vals -> cont (List.rev vals)
+  in
+  let add_exp (acc : IR.value list -> IR.comp) exp =
+    fun vals ->
+    eval_cont exp @@ fun v ->
+    acc (v :: vals)
+  in
+  List.fold_left add_exp final es []
 
 let apply_pat (p : pat) (v : IR.value) (body : IR.comp) =
   p v body
@@ -531,7 +546,7 @@ and check' env ~mode eloc e ty : exp' check_output =
 
   | Match (es, cases) ->
      let es = List.map (infer env ~mode) es in
-     let etyps = List.map fst es in
+     let etyps, es = List.map fst es, List.map snd es in
      let actions, split, unmatched = Check_pat.split_cases ~matchloc:eloc env etyps cases in
      if List.exists (fun act -> not act.Check_pat.used) actions then
        (* FIXME reporting *)
@@ -550,12 +565,15 @@ and check' env ~mode eloc e ty : exp' check_output =
          actions cases
      in
      { elab =
-         (let* es = elab_list (List.map (fun (_,e) -> e.elab) es)
+         (let* es = elab_list (List.map (fun e -> e.elab) es)
           and* actions = elab_list (List.map (fun e -> e.elab) actions) in
           let cases = List.map2 (fun (ps,_) e -> ps, e) cases actions in
           Match(es, cases));
        comp = fun k ->
-         Trap ("wat")
+         let actions = Array.of_list actions |> Array.map (fun {comp;_} -> comp) in
+         IRB.maybe_dup_cont ~uses:(Array.length actions) k @@ fun k ->
+         IRB.eval_cont_list (List.map (fun e -> e.comp) es) @@ fun vals ->
+         Check_pat.compile ~cont:k ~actions vals split
      }
 
   | Pragma ("true"|"false" as b) when match inspect_cons Bool ty with Imatches Bool -> true | _ -> false ->

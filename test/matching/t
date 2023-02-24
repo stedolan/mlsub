@@ -134,7 +134,14 @@ fn() {
 > fn () { match D{x: 5} { D{x, y} => (x, y) } }
 >   fn () -> (int, nothing) { match D{x: 5} { D{x, y} => (x, y) } }
 > () -> (int, nothing)
-> let  = %yield(0: fun () ret { wat }); done
+> let  = %yield(0: fun () ret {
+>   match D(x: 5) {
+>     D(x: x) -> {
+>       ret((0: 42, 1: 42))
+>     }
+>   }
+> });
+> done
 
 
 # Grammar ambiguity requires parens on return type
@@ -161,7 +168,23 @@ fn(x : 'A | 'B | 'C(int) | 'D{x:int}) -> int {
 >     }
 >   }
 > ('A | 'B | 'C(int) | 'D{x: int}) -> int
-> let  = %yield(0: fun (x) ret { wat }); done
+> let  = %yield(0: fun (x) ret {
+>   match x {
+>     A() -> {
+>       ret(1)
+>     };
+>     B() -> {
+>       ret(2)
+>     };
+>     C(0: v0) -> {
+>       ret(3)
+>     };
+>     D(x: x2) -> {
+>       ret(5)
+>     }
+>   }
+> });
+> done
 
 fn (x) {
   match x {
@@ -185,7 +208,29 @@ fn (x) {
 > 
 > ELABINF: Failure("unused case")
 > 
-> let  = %yield(0: fun (x) ret { wat }); done
+> let  = %yield(0: fun (x) ret {
+>   let v0, v1 = x.(0, 1);
+>   match v0 {
+>     A() -> {
+>       match v1 {
+>         A() -> {
+>           ret(1)
+>         };
+>         B() -> {
+>           ret(2)
+>         }
+>       }
+>     };
+>     B() -> {
+>       match v1 {
+>         A() -> {
+>           ret(3)
+>         }
+>       }
+>     }
+>   }
+> });
+> done
 
 
 let make = fn (x) {
@@ -272,7 +317,17 @@ fn (x) { use(make(x)) }
 >       }
 >     }
 >   };
-> let use = fun (y) ret { wat };
+> let use =
+>   fun (y) ret {
+>     match y {
+>       Bad(foo: foo) -> {
+>         ret(42)
+>       };
+>       Good(foo: foo) -> {
+>         ret(42)
+>       }
+>     }
+>   };
 > let  = %yield(0: fun (x) ret { let x2 = make(0: x); ret(use(0: x2)) });
 > done
 
@@ -309,7 +364,60 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 >     }
 >   }
 > ('T | 'F, 'T | 'F, 'T | 'F) -> bool
-> let  = %yield(0: fun (a, b, c) ret { wat }); done
+> let  = %yield(0: fun (a, b, c) ret {
+>   let v0, v1, v2 = (0: a, 1: b, 2: c).(0, 1, 2);
+>   match v0 {
+>     F() -> {
+>       match v1 {
+>         F() -> {
+>           match v2 {
+>             F() -> {
+>               ret(<false>)
+>             };
+>             T() -> {
+>               ret(<false>)
+>             }
+>           }
+>         };
+>         T() -> {
+>           match v2 {
+>             F() -> {
+>               ret(<false>)
+>             };
+>             T() -> {
+>               ret(<true>)
+>             }
+>           }
+>         }
+>       }
+>     };
+>     T() -> {
+>       match v1 {
+>         F() -> {
+>           match v2 {
+>             F() -> {
+>               ret(<false>)
+>             };
+>             T() -> {
+>               ret(<true>)
+>             }
+>           }
+>         };
+>         T() -> {
+>           match v2 {
+>             F() -> {
+>               ret(<true>)
+>             };
+>             T() -> {
+>               ret(<true>)
+>             }
+>           }
+>         }
+>       }
+>     }
+>   }
+> });
+> done
 
 fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
   match (a, b, c) {
@@ -429,6 +537,27 @@ fn(x, y) {
 > 
 > ELABINF: Failure("unused case")
 > 
-> let  = %yield(0: fun (x, y) ret { wat }); done
+> let  = %yield(0: fun (x, y) ret {
+>   match y {
+>     A() -> {
+>       match x {
+>         A() -> {
+>           ret(1)
+>         };
+>         B() -> {
+>           ret(2)
+>         }
+>       }
+>     };
+>     B() -> {
+>       match x {
+>         A() -> {
+>           ret(3)
+>         }
+>       }
+>     }
+>   }
+> });
+> done
 # end
 > STATS: fix: 2, flex: 89
