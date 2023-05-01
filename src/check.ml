@@ -547,8 +547,8 @@ and check' env ~mode eloc e ty : exp' check_output =
   | Match (es, cases) ->
      let es = List.map (infer env ~mode) es in
      let etyps, es = List.map fst es, List.map snd es in
-     let actions, split, unmatched = Check_pat.split_cases ~matchloc:eloc env etyps cases in
-     if List.exists (fun act -> not act.Check_pat.used) actions then
+     let orig_actions, split, unmatched = Check_pat.split_cases ~matchloc:eloc env etyps cases in
+     if List.exists (fun act -> act.Check_pat.refcount = 0) orig_actions then
        (* FIXME reporting *)
        failwith "unused case";
      begin match unmatched with
@@ -557,12 +557,12 @@ and check' env ~mode eloc e ty : exp' check_output =
      end;
      let actions =
        List.map2 (fun act (_, exp) ->
-         let vals = act.Check_pat.bound |> SymMap.map (fun (ty, var) ->
+         let vals = act.Check_pat.bindings |> SymMap.map (fun (typ, var) ->
            (* FIXME is this the right gen_level? How does this work again? *)
-           { typ = !ty; comp_var = IR.Binder.ref var; gen_level = mode.gen_level_acc }) in
+           { typ; comp_var = IR.Binder.ref var; gen_level = mode.gen_level_acc }) in
          let env = Env_vals { vals; rest = env } in
          check env ~mode exp ty)
-         actions cases
+         orig_actions cases
      in
      { elab =
          (let* es = elab_list (List.map (fun e -> e.elab) es)
@@ -570,7 +570,8 @@ and check' env ~mode eloc e ty : exp' check_output =
           let cases = List.map2 (fun (ps,_) e -> ps, e) cases actions in
           Match(es, cases));
        comp = fun k ->
-         let actions = Array.of_list actions |> Array.map (fun {comp;_} -> comp) in
+         let actions = List.map2 (fun act act' -> {act with Check_pat.rhs = act'.comp}) orig_actions actions in
+         let actions = Array.of_list actions in
          IRB.maybe_dup_cont ~uses:(Array.length actions) k @@ fun k ->
          IRB.eval_cont_list (List.map (fun e -> e.comp) es) @@ fun vals ->
          Check_pat.compile ~cont:k ~actions vals split

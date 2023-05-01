@@ -3,31 +3,30 @@ open Typedefs
 open Tuple_fields
 open Util
 
-type action = {
-  rhs: exp;
+type bindings = (ptyp * IR.value IR.Binder.t) SymMap.t
+
+type 'rhs action = {
+  rhs: 'rhs;
   id: int;
-  bound: (ptyp ref * IR.value IR.Binder.t) SymMap.t;
-  mutable used: bool;
+  mutable bindings: bindings;
+  mutable refcount: int;
 }
 
-type bindings = ptyp SymMap.t
-
-type 'w pat_row = ('w, pat) Clist.t * (bindings * action)
+type 'w pat_row = ('w, pat) Clist.t * (bindings * exp action)
 
 type 'w pat_matrix = 'w pat_row list
 
 open Peano_nat_types
 type 'n dectree =
   { tree: 'n dectree';
-    tag: 'n Type_id.tag;
     empty: bool;
-    total: bool;
-    mutable refcount : int }
+    total: bool }
 
 and _ dectree' =
-  | Done : action -> z dectree'
+  | Done : IR.value IR.Binder.t SymMap.t * exp action -> z dectree'
   | Failure : z dectree'
   | Any : 'n dectree -> 'n s dectree'
+  | Bind : IR.value IR.Binder.t * 'n s dectree -> 'n s dectree'
   (* Cases: nonempty and sorted *)
   | Cases : (Typedefs.Cons.tuple_tag * 'n fields_split) list -> 'n s dectree'
   | Fields : 'n fields_split -> 'n s dectree'
@@ -35,136 +34,37 @@ and _ dectree' =
 and 'n fields_split =
   | Proj : ('m, 'n, Tuple_fields.field_name) Clist.prefix * Tuple_fields.fields_open * 'm dectree -> 'n fields_split
 
-module DectreeHash = struct
-  let equal_dectree (type a) (type b) (a : a dectree) (b : b dectree) : (a, b) Type_id.eq_result =
-    let eq = Type_id.equal a.tag b.tag in
-    (match eq with
-     | Equal -> assert (a == b)
-     | Not_equal -> assert (Obj.repr a != Obj.repr b));
-    eq
-
-  let equal_fields_split (type a) (type b) (a : a fields_split) (b : b fields_split) :
-        (a, b) Type_id.eq_result =
-    let Proj (pfxa, ao, a) = a in
-    let Proj (pfxb, bo, b) = b in
-    if ao <> bo then Not_equal
-    else match equal_dectree a b with
-    | Equal ->
-       begin match Clist.equal (Stdlib.(=)) pfxa pfxb with
-       | Equal -> Equal
-       | Not_equal -> Not_equal
-       end
-    | Not_equal ->
-       Not_equal
-
-  let equal_dectree' (type a) (type b) (a : a dectree') (b : b dectree') : (a, b) Type_id.eq_result =
-    match a, b with
-    | Done a, Done b ->
-       assert ((a.id = b.id) = (a == b));
-       if a.id = b.id then Equal else Not_equal
-    | Failure, Failure ->
-       Equal
-    | Any a, Any b ->
-       begin match equal_dectree a b with
-       | Equal -> Equal
-       | Not_equal -> Not_equal
-       end
-    | Cases a, Cases b ->
-       let eq_case (sa, ca) (sb, cb) =
-         if String.equal sa sb
-         then equal_fields_split ca cb
-         else Type_id.Not_equal
-       in
-       if List.compare_lengths a b <> 0 then Not_equal
-       else begin match
-         List.fold_left
-           (Type_id.and_eq)
-           (eq_case (List.hd a) (List.hd b))
-           (List.map2 eq_case (List.tl a) (List.tl b))
-       with
-       | Equal -> Equal
-       | Not_equal -> Not_equal
-       end
-    | Fields a, Fields b ->
-       begin match
-         equal_fields_split a b
-       with
-       | Equal -> Equal
-       | Not_equal -> Not_equal
-       end
-    | (Done _ | Failure | Any _ | Cases _ | Fields _), _ -> Not_equal
-
-  let mix h =
-    let h = h * 0x43297583 in
-    let h = h lxor (h lsr 16) in
-    let h = h * 0x85ebca6b in
-    let h = h lxor (h lsr 13) in
-    let h = h * 0xc2b2ae35 in
-    let h = h lxor (h lsr 16) in
-    h
-
-  let hash_dectree' a =
-    mix (Type_id.hash a.tag)
-
-  let hash_fields (Proj (pfx, o, t)) =
-    List.fold_left
-      (fun h fn -> h + Hashtbl.hash fn)
-      (mix (hash_dectree' t) + Hashtbl.hash o)
-      (Clist.to_list pfx)
-
-  let hash (type w) (a : w dectree') =
-    mix @@ match a with
-    | Done a ->
-       mix 1 + a.id
-    | Failure ->
-       mix 2
-    | Any a ->
-       mix 3 + hash_dectree' a
-    | Cases cases ->
-       List.fold_left (fun h (s, fs) ->
-         h + Hashtbl.hash s + hash_fields fs) (mix 4) cases
-    | Fields fs ->
-       mix 5 + hash_fields fs
-end
-
 module Hashcons = struct
-  module Tbl = HashtblT (struct
-    type 'w key = 'w dectree'
-    type 'w value = 'w dectree
-    let hash = DectreeHash.hash
-    let equal a b = DectreeHash.equal_dectree' a b
-  end)
-  type t = Tbl.t
-  let fresh_table () : t = Tbl.create 20
 
-  let is_empty (type a) : a dectree' -> bool = function
+  let is_empty : type a . a dectree' -> bool = function
     | Done _ -> false
     | Failure -> true
     | Any t -> t.empty
+    | Bind (_, t) -> t.empty
     | Cases cases -> List.for_all (fun (_, Proj (_, _, fs)) -> fs.empty) cases
     | Fields (Proj (_, _, fs)) -> fs.empty
 
-  let is_total (type a) : a dectree' -> bool = function
+  let is_total : type a . a dectree' -> bool = function
     | Done _ -> true
     | Failure -> false
     | Any t -> t.total
+    | Bind (_, t) -> t.total
     | Cases cases -> List.for_all (fun (_, Proj (_, _, fs)) -> fs.total) cases
     | Fields (Proj (_, _, fs)) -> fs.total
 
-  let mk tbl (type n) (t : n dectree') : n dectree =
-    match Tbl.find tbl t with
-    | res ->
-       res.refcount <- res.refcount + 1; res
-    | exception Not_found ->
-       let res =
-         { tree = t;
-           tag = Type_id.fresh ();
-           empty = is_empty t;
-           total = is_total t;
-           refcount = 1 }
-       in
-       Tbl.add tbl t res;
-       res
+  let mk (type n) (t : n dectree') : n dectree =
+    { tree = t;
+      empty = is_empty t;
+      total = is_total t }
+(*
+  let rec same_values : type n . n dectree -> n dectree -> bool =
+    fun a b ->
+    match a.tree, b.tree with
+    | Done _, Done _ -> true
+    | Failure _, Failure _ -> true
+    | Any _, Any _ -> true
+*)
+
 end
 
 
@@ -323,30 +223,57 @@ let matches_tag tag row =
   | Hfields _ -> true
   | Hcase (tag', _) -> String.equal tag tag'
 
-let row_tail typ row =
+let row_tail ~binding typ row : _ pat_row =
   match row.var, row.rest with
   | None, rest -> rest
   | Some v, (pats, (bindings, act)) ->
-     (pats, (SymMap.add v typ bindings, act))
+     (pats, (SymMap.add v (typ, Option.get binding) bindings, act))
 
 
 let rec split_cases :
-  type w . table:_ -> matchloc:_ -> _ -> _ -> (w, ptyp) Clist.t -> w pat_matrix -> w dectree =
-  fun ~table ~matchloc env vars typs mat ->
+  type w . matchloc:_ -> env:_ -> (w, ptyp) Clist.t -> w pat_matrix -> w dectree =
+  fun ~matchloc ~env typs mat ->
   match typs with
   | [] ->
      begin match mat with
      | [] ->
-        Hashcons.mk table Failure
+        Hashcons.mk Failure
      | ([], (bindings, act)) :: _ ->
-        act.used <- true;
-        bindings |> SymMap.iter (fun v typ ->
-          let (r, _) = SymMap.find v act.bound in
-          r := Types.join_ptyp env !r typ);
-        Hashcons.mk table (Done act)
+        (* We have already checked that all paths to
+           the same action bind the same vars *)
+        act.refcount <- act.refcount + 1;
+        if act.refcount = 1 then begin
+          assert (SymMap.is_empty act.bindings);
+          act.bindings <- bindings;
+        end else begin
+          let old_bindings =
+            if act.refcount > 2 then act.bindings
+            else
+              SymMap.mapi
+                (fun name (typ, _var) -> typ, fst (IR.Binder.fresh ~name ()))
+                act.bindings
+          in
+          act.bindings <-
+            old_bindings
+            |> SymMap.mapi (fun name (typ, var) ->
+                   Types.join_ptyp env typ (fst (SymMap.find name bindings)),
+                   var)
+        end;
+        Hashcons.mk (Done (SymMap.map snd bindings, act))
      end
 
   | typ :: typs ->
+     let mat = peel_pat_heads mat in
+     let binding =
+       let all_bound =
+         List.concat_map (fun r -> Option.to_list r.var) mat in
+       match all_bound with
+       | [] -> None
+       | name :: _ ->
+          let v, _ = IR.Binder.fresh ~name () in
+          Some v
+     in
+
      let split_fields ~tag fs mat =
         let fopen = fs.fopen in
         let Ex fs = Clist.of_list (list_fields fs) in
@@ -354,25 +281,35 @@ let rec split_cases :
         let field_types = Clist.map snd fs in
         let mat = List.map (read_fields ~tag field_names) mat in
         let rest =
-          split_cases ~table ~matchloc env vars (Clist.append field_types typs) mat in
+          split_cases ~matchloc ~env (Clist.append field_types typs) mat in
         Proj (field_names, fopen, rest)
      in
 
-     let mat = peel_pat_heads mat in
-       
-     match decide_split_kind ~matchloc env typ mat with
-     | Sany ->
-        let rest = split_cases ~table ~matchloc env vars typs (List.map (row_tail typ) mat) in
-        Hashcons.mk table (Any rest)
-     | Sfields fs ->
-        let fs = split_fields ~tag:None fs mat in
-        Hashcons.mk table (Fields fs)
-     | Scases cases ->
-        let cases = SymMap.mapi (fun tag fs ->
-          let mat = List.filter (matches_tag tag) mat in
-          split_fields ~tag:(Some tag) fs mat) cases in
-        let cases = SymMap.to_seq cases |> List.of_seq in
-        Hashcons.mk table (Cases cases)
+     let dt =
+       match decide_split_kind ~matchloc env typ mat with
+       | Sany ->
+          let rest = split_cases ~matchloc ~env typs (List.map (row_tail ~binding typ) mat) in
+          Any rest
+       | Sfields fs ->
+          let fs = split_fields ~tag:None fs mat in
+          Fields fs
+       | Scases cases ->
+          let cases = SymMap.mapi (fun tag fs ->
+            let mat = List.filter (matches_tag tag) mat in
+            split_fields ~tag:(Some tag) fs mat) cases in
+          let cases = SymMap.to_seq cases |> List.of_seq in
+          Cases cases
+     in
+
+     let dt =
+       match binding with
+       | Some v ->
+          Bind (v, Hashcons.mk dt)
+       | None ->
+          dt
+     in
+     Hashcons.mk dt
+     
 
 let find_map_unique ~equal f xs =
   let rec aux u = function
@@ -391,42 +328,32 @@ let find_map_unique ~equal f xs =
      | None -> None
      | Some u -> aux u xs
 
-module Dectree_tails_K = struct
-  type 'k key = Packed : 'n dectree * ('n, 'k, unit) Clist.prefix -> 'k key
-  type 'k value = 'k dectree option
-  let equal (type k1) (type k2) (Packed (t1, p1) : k1 key) (Packed (t2, p2) : k2 key) : (k1, k2) Type_id.eq_result =
-    match DectreeHash.equal_dectree t1 t2 with
-    | Not_equal -> Not_equal
-    | Equal ->
-       match Clist.compare_lengths' p1 p2 with
-       | Not_equal -> Not_equal
-       | Equal -> Equal
+let equal_dectree a b =
+  (* FIXME: is this a good enough approx for counterexamples? *)
+  (a.total && b.total)
+  ||
+  (a.empty && b.empty)
 
-  let hash (Packed (t, p)) =
-    DectreeHash.hash_dectree' t + Clist.length p * 84930283
-end
-module Memo_dectree_tails = HashtblT (Dectree_tails_K)
-
-let rec dectree_tails : type n k a. table:Memo_dectree_tails.t -> (n, k, unit) Clist.prefix -> n dectree -> k dectree option =
-  fun ~table pfx t ->
-  Memo_dectree_tails.find_or_insert table (Packed (t, pfx)) @@ fun () ->
+let rec dectree_tails : type n k. (n, k, unit) Clist.prefix -> n dectree -> k dectree option =
+  fun pfx t ->
+  (* FIXME: same results with equal = false?! *)
   let unique_dt f xs =
-    find_map_unique ~equal:(fun a b -> DectreeHash.equal_dectree a b |> Type_id.to_bool) f xs in
+    find_map_unique ~equal:(fun a b -> equal_dectree a b) f xs in
 
   match pfx, t.tree with
   | [], _ -> Some t
   | _ :: pfx, Any tail ->
-     dectree_tails ~table pfx tail
+     dectree_tails pfx tail
+  | _ :: _ as pfx, Bind (_, tail) ->
+     dectree_tails pfx tail
   | _ :: pfx, Cases cases ->
      cases |> unique_dt (fun (_, Proj (fs, _, t)) ->
-       dectree_tails ~table (Clist.append (Clist.map ignore fs) pfx) t)
+       dectree_tails (Clist.append (Clist.map ignore fs) pfx) t)
   | _ :: pfx, Fields (Proj (fs, _, t)) ->
-     dectree_tails ~table (Clist.append (Clist.map ignore fs) pfx) t
+     dectree_tails (Clist.append (Clist.map ignore fs) pfx) t
 
 
 let counterexamples depth t =
-  let tail_tbl = Memo_dectree_tails.create 20 in
-  let dectree_tails pfx t = dectree_tails ~table:tail_tbl pfx t in
   let unmatched_fields :
     type n m k . tag:string option -> fopen:Tuple_fields.fields_open ->
       (m, n, field_name) Clist.prefix -> (n, k, _) Clist.prefix ->
@@ -450,7 +377,7 @@ let counterexamples depth t =
     if dt.total then []
     else match pfx with
     | [] -> [ [] ]
-    | _ :: pfx ->
+    | _ :: pfx as orig_pfx ->
        match dectree_tails [()] dt with
        | Some tail ->
           (* head must be total! *)
@@ -459,6 +386,7 @@ let counterexamples depth t =
        | None ->
           match dt.tree with
           | Any _ -> assert false (* has tail *)
+          | Bind (_, t) -> examples orig_pfx t
           | Fields (Proj (names, fopen, t')) ->
              let ex = examples (Clist.append (Clist.map ignore names) pfx) t' in
              List.map (unmatched_fields ~tag:None ~fopen names pfx) ex
@@ -476,7 +404,7 @@ let counterexamples depth t =
                | (_, Proj (_, _, _), Some tail) as first :: rest ->
                   let same_tail, rest =
                     List.partition (function
-                      | (_, _, Some tail') when Type_id.to_bool (DectreeHash.equal_dectree tail tail') ->
+                      | (_, _, Some tail') when equal_dectree tail tail' ->
                          true
                       | _ -> false) rest
                   in
@@ -554,11 +482,11 @@ type ex_split = Ex : (('n,_) Clist.t * 'n dectree) -> ex_split
 let split_cases ~matchloc env (typs : ptyp list) (cases : case list) =
   let actions =
     cases |> List.mapi (fun id (pps, exp) ->
-      let fvs = check_fvs_mat matchloc pps in
+      let _fvs = check_fvs_mat matchloc pps in
       { rhs = exp;
         id;
-        bound = SymMap.map (fun _loc -> ref (Tcons Cons.bottom), fst (IR.Binder.fresh ())) fvs;
-        used = false })
+        bindings = SymMap.empty; (* FIXME types are poor here *)
+        refcount = 0 })
   in
   let Ex typs = Clist.of_list typs in
   let mat =
@@ -569,100 +497,62 @@ let split_cases ~matchloc env (typs : ptyp list) (cases : case list) =
         | None -> failwith (*FIXME*)  "wrong length of pat row"
         | Some ps -> ps, (SymMap.empty, act)))
   in
-  let table = Hashcons.fresh_table () in
   let dtree =
-    split_cases ~table ~matchloc env SymMap.empty typs mat in
+    split_cases ~matchloc ~env typs mat in
   let unmatched = counterexamples (Clist.map ignore typs) dtree in 
   let unmatched = List.map Clist.to_list unmatched in
   actions, Ex (typs, dtree), unmatched
 
-
-module Compile_K = struct
-  type 'w key = 'w dectree
-  type 'w value =
-    {
-      vpos : int SymMap.t;
-      cont_name : IR.cont IR.Binder.t;
-      body : IR.cont
-    }
-  let equal = DectreeHash.equal_dectree
-  let hash = DectreeHash.hash_dectree'
-end
-module Compile_table = HashtblT (Compile_K)
-
+(* FIXME: Check dedups cont. Should that happen here instead? *)
 let compile ~cont ~actions vals orig_dt =
-  let shared = Compile_table.create 10 in
-  let shared_list = ref [] in
-  let rec compile :
-     type w . vars:(IR.value * string) list -> vals:(w, IR.value) Clist.t -> w dectree -> IR.comp =
-    fun ~vars ~vals dt ->
-    assert (dt.refcount > 0);
-    if dt.refcount = 1 then
-      compile_tree ~vars ~vals dt.tree
-    else
-      match Compile_table.find shared dt with
-      | { vpos; cont_name; body = _ } ->
-         let vtable = Array.make (SymMap.cardinal vpos) None in
-         vars |> List.iter (fun (v, name) ->
-           vtable.(SymMap.find name vpos) <- Some v);
-         let args =
-           Array.to_list (Array.map Option.get vtable)
-           @ Clist.to_list vals
-         in
-         Jump (IR.Binder.ref cont_name, args)
-      | exception Not_found ->
-         let vpos = SymMap.of_seq (List.mapi (fun i (_, s) -> s, i) vars |> List.to_seq) in
-         let cont_name, _ = IR.Binder.fresh ~name:"case" () in
-         let cont_vars = List.map (fun (_,s) -> IR.Binder.fresh ~name:s (), s) vars in
-         let cont_vals = Clist.map (fun _ -> IR.Binder.fresh ~name:"v" ()) vals in
-         let body =
-           compile_tree
-             ~vars:(List.map (fun ((_,v),s) -> IR.Var v,s) cont_vars)
-             ~vals:(Clist.map (fun (_,v) -> IR.Var v) cont_vals)
-             dt.tree
-         in
-         let body : IR.cont =
-           Cont (List.map (fun ((v,_),_) -> v) cont_vars
-                 @ Clist.to_list (Clist.map (fun (v,_) -> v) cont_vals),
-                 body)
-         in
-         let share : _ Compile_K.value = { vpos; cont_name; body } in
-         Compile_table.add shared dt share;
-         shared_list := share :: !shared_list;
-         let args = List.map fst vars @ Clist.to_list vals in
-         Jump (IR.Binder.ref cont_name, args)
+  let actions = actions |> Array.map (fun act ->
+    let label =
+      if act.refcount >= 2
+      then Some (fst (IR.Binder.fresh ~name:"case" ()),
+                 List.map (fun (name, (_ty, var)) -> name, var) (SymMap.bindings act.bindings))
+      else None
+    in
+    { act with rhs = (label, act.rhs cont) })
+  in
 
+  let rec compile :
+     type w . vals:(w, IR.value) Clist.t -> w dectree -> IR.comp =
+    fun ~vals dt -> compile_tree ~vals dt.tree
   and compile_tree :
-     type w . vars:(IR.value * string) list -> vals:(w, IR.value) Clist.t -> w dectree' -> IR.comp =
-    fun ~vars ~vals dt ->
+     type w . vals:(w, IR.value) Clist.t -> w dectree' -> IR.comp =
+    fun ~vals dt ->
     match dt, vals with
-    | Done act, [] ->
+    | Done (bindings, act), [] ->
        (* FIXME bind the variables properly *)
-       SymMap.fold (fun _ (_, var) comp ->
-         fun k : IR.comp ->
-         LetVal (var, Literal (Int 42), comp k))
-         act.bound
-         actions.(act.id)
-         cont
+       assert (act.refcount > 0);
+       begin match actions.(act.id).rhs with
+       | Some (label, vars), _body ->
+          Jump (IR.Binder.ref label,
+                List.map (fun (v,_) -> IR.Var (IR.Binder.ref (SymMap.find v bindings))) vars)
+       | None, body ->
+          body
+       end
     | Failure, [] ->
        (* FIXME better error *)
        IR.Trap "match failure"
     | Any dt, _ :: vals ->
-       compile ~vars ~vals dt
+       compile ~vals dt
+    | Bind (var, dt), (v :: _ as vals) ->
+       LetVal (var, v, compile ~vals dt)
     | Cases cases, v :: vals ->
        let cases =
          cases |> List.map (fun (tag, fs) ->
-           let fields, cont = compile_fields ~vars ~vals fs in
+           let fields, cont = compile_fields ~vals fs in
            IR.Symbol.of_string tag, fields, cont)
        in
        Match (v, cases)
     | Fields fs, v :: vals ->
-       let fields, cont = compile_fields ~vars ~vals fs in
+       let fields, cont = compile_fields ~vals fs in
        Project (v, fields, cont)
 
   and compile_fields :
-    type w . vars:(IR.value * string) list -> vals:(w, IR.value) Clist.t -> w fields_split -> field_name list * IR.cont =
-    fun ~vars ~vals (Proj (fs, _op, dt)) ->
+    type w . vals:(w, IR.value) Clist.t -> w fields_split -> field_name list * IR.cont =
+    fun ~vals (Proj (fs, _op, dt)) ->
     let vname : Tuple_fields.field_name -> string = function
       | Field_named s -> s
       | Field_positional n -> Printf.sprintf "v%d" n
@@ -671,17 +561,18 @@ let compile ~cont ~actions vals orig_dt =
     let binders = Clist.map (fun (v, _) -> v) field_vars in
     let field_vars = Clist.map (fun (_, v) -> IR.Var v) field_vars in
     let vals = Clist.append field_vars vals in
-    let rest = compile ~vars ~vals dt in
+    let rest = compile ~vals dt in
     Clist.to_list fs, Cont (Clist.to_list binders, rest)
 
   in
   let Ex (len, dt) = orig_dt in
   let vals = Option.get (Clist.of_list_length ~len vals) in
-  let code = compile ~vars:[] ~vals dt in
-  List.fold_left
-    (fun acc (cont : _ Compile_K.value) : IR.comp ->
-      LetCont (cont.cont_name,
-               cont.body,
-               acc))
+  let code = compile ~vals dt in
+  List.fold_right
+    (fun act acc ->
+      match act.rhs with
+      | None, _ -> acc
+      | Some (label, names), body ->
+         IR.LetCont (label, Cont (List.map snd names, body), acc))
+    (Array.to_list actions)
     code
-    !shared_list

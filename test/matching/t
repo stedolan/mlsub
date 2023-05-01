@@ -110,6 +110,45 @@ fn(c) {
 fn(x) {
   match x {
   | A(_, b) => b
+  | B{foo: (C|D), bar:x} => x
+  }
+}
+> fn (x) { match x { A(_, b) => b | B{foo: (C | D), bar: x} => x } }
+>   fn [A, B](x: 'B{foo: 'D | 'C, bar: A} | 'A(any, B)) -> A | B {
+>     match x {
+>       | A(_, b) => b
+>       | B{foo: (C | D), bar: x} => x
+>     }
+>   }
+> [A, B] ('B{foo: 'D | 'C, bar: A} | 'A(any, B)) -> A | B
+> let  = %yield(0: fun (x) ret {
+>   let case(x2) = {
+>     ret(x2)
+>   };
+>   match x {
+>     A(0: v0,
+>     1: v1) -> {
+>       ret(v1)
+>     };
+>     B(foo: foo,
+>     bar: bar) -> {
+>       match foo {
+>         C() -> {
+>           case(bar)
+>         };
+>         D() -> {
+>           case(bar)
+>         }
+>       }
+>     }
+>   }
+> });
+> done
+
+
+fn(x) {
+  match x {
+  | A(_, b) => b
   | A(_, _, _) => 42
   | B{foo: (C|D), bar:x} => x
   }
@@ -132,16 +171,7 @@ fn() {
   }
 }
 > fn () { match D{x: 5} { D{x, y} => (x, y) } }
->   fn () -> (int, nothing) { match D{x: 5} { D{x, y} => (x, y) } }
-> () -> (int, nothing)
-> let  = %yield(0: fun () ret {
->   match D(x: 5) {
->     D(x: x) -> {
->       ret((0: 42, 1: 42))
->     }
->   }
-> });
-> done
+> test:3: Unknown variable name: y
 
 
 # Grammar ambiguity requires parens on return type
@@ -321,10 +351,10 @@ fn (x) { use(make(x)) }
 >   fun (y) ret {
 >     match y {
 >       Bad(foo: foo) -> {
->         ret(42)
+>         ret(foo)
 >       };
 >       Good(foo: foo) -> {
->         ret(42)
+>         ret(foo)
 >       }
 >     }
 >   };
@@ -366,20 +396,10 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 > ('T | 'F, 'T | 'F, 'T | 'F) -> bool
 > let  = %yield(0: fun (a, b, c) ret {
 >   let case() = {
->     ret(<false>)
->   };
->   let case2() = {
 >     ret(<true>)
 >   };
->   let case3(v) = {
->     match v {
->       F() -> {
->         case()
->       };
->       T() -> {
->         case2()
->       }
->     }
+>   let case2() = {
+>     ret(<false>)
 >   };
 >   let v0, v1, v2 = (0: a, 1: b, 2: c).(0, 1, 2);
 >   match v0 {
@@ -388,22 +408,12 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 >         F() -> {
 >           match v2 {
 >             F() -> {
->               case()
+>               case2()
 >             };
 >             T() -> {
->               case()
+>               case2()
 >             }
 >           }
->         };
->         T() -> {
->           case3(v2)
->         }
->       }
->     };
->     T() -> {
->       match v1 {
->         F() -> {
->           case3(v2)
 >         };
 >         T() -> {
 >           match v2 {
@@ -411,7 +421,31 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 >               case2()
 >             };
 >             T() -> {
+>               case()
+>             }
+>           }
+>         }
+>       }
+>     };
+>     T() -> {
+>       match v1 {
+>         F() -> {
+>           match v2 {
+>             F() -> {
 >               case2()
+>             };
+>             T() -> {
+>               case()
+>             }
+>           }
+>         };
+>         T() -> {
+>           match v2 {
+>             F() -> {
+>               case()
+>             };
+>             T() -> {
+>               case()
 >             }
 >           }
 >         }
@@ -439,7 +473,8 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 >   }
 > }
 > test:2: The following cases are unhandled:
-> | (F, _, T)
+> | (F, F, T)
+> | (F, T, T)
 
 fn(x : ('A|'B|'C), y : ('A|'B|'C)) {
   match x, y {
@@ -466,8 +501,10 @@ fn (x : (('A(int,int)|'B{x:string,y:string}|'C|'D|'E), 'B|'C|'D)) {
 >   }
 > }
 > test:2: The following cases are unhandled:
-> | (A(_, _) | B{x: _, y: _}, B)
-> | (C | D, B | D)
+> | (A(_, _), B)
+> | (B{x: _, y: _}, B)
+> | (C, B | D)
+> | (D, B | D)
 > | (E, _)
 
 fn(x : 'A(int, 'P|'Q|'R) | 'B(int, 'P|'Q|'R)) {
@@ -516,6 +553,27 @@ calls_any(use)
 >     | Bar => 2
 >       ^^^
 
+# codegen test for single-case matches
+fn(x) {
+  match x {
+  | (a, b, c) =>
+    let c2 = match c { y => y };
+    (c2, b, a)
+  }
+}
+> fn (x) { match x { (a, b, c) => let c2 = match c { y => y }; (c2, b, a) } }
+>   fn [A, B, C](x: (A, B, C)) -> (C, B, A) {
+>     match x {
+>       | (a, b, c) => let c2 : C = match c { y => y }; (c2, b, a)
+>     }
+>   }
+> [A, B, C] ((A, B, C)) -> (C, B, A)
+> let  = %yield(0: fun (x) ret {
+>   let v0, v1, v2 = x.(0, 1, 2);
+>   ret((0: v2, 1: v1, 2: v0))
+> });
+> done
+
 fn(x, y) {
   match x, y {
   | A, A => 1
@@ -523,7 +581,6 @@ fn(x, y) {
   | B, A => 3
   }
 }
-
 > fn (x, y) { match x, y { A, A => 1 | A, B => 2 | B, A => 3 } }
 >   fn (x: 'B | 'A, y: 'A) -> int {
 >     match x, y {
@@ -562,4 +619,4 @@ fn(x, y) {
 > });
 > done
 # end
-> STATS: fix: 2, flex: 89
+> STATS: fix: 2, flex: 123
