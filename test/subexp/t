@@ -1091,11 +1091,11 @@ fn  [A](a) -> A { let x = a; x }
 > fn [A](a) -> A { let x = a; x }
 >   fn [A, B <: A](a: B) -> A { let x : B = a; x }
 > [A, B <: A] (B) -> A
-> RECHECK: Lang.Error.Fail(_, _)
+> RECHECK: Lang.Error.Fail(_)
 > 
-> ELAB: Lang.Error.Fail(_, _)
+> ELAB: Lang.Error.Fail(_)
 > 
-> ELABINF: Lang.Error.Fail(_, _)
+> ELABINF: Lang.Error.Fail(_)
 > 
 > let  = %yield(0: fun (a) ret { ret(a) }); done
 

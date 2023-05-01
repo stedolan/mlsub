@@ -8,6 +8,7 @@ type bindings = (ptyp * IR.value IR.Binder.t) SymMap.t
 type 'rhs action = {
   rhs: 'rhs;
   id: int;
+  pat_loc: Location.t;
   mutable bindings: bindings;
   mutable refcount: int;
 }
@@ -481,9 +482,10 @@ let check_fvs_mat loc = function
 type ex_split = Ex : (('n,_) Clist.t * 'n dectree) -> ex_split
 let split_cases ~matchloc env (typs : ptyp list) (cases : case list) =
   let actions =
-    cases |> List.mapi (fun id (pps, exp) ->
+    cases |> List.mapi (fun id ((pps,pat_loc), exp) ->
       let _fvs = check_fvs_mat matchloc pps in
       { rhs = exp;
+        pat_loc;
         id;
         bindings = SymMap.empty; (* FIXME types are poor here *)
         refcount = 0 })
@@ -491,17 +493,22 @@ let split_cases ~matchloc env (typs : ptyp list) (cases : case list) =
   let Ex typs = Clist.of_list typs in
   let mat =
     List.map2 (fun (pps, _) b -> pps, b) cases actions
-    |> List.concat_map (fun (pps, act) ->
+    |> List.concat_map (fun ((pps,_loc), act) ->
       pps |> List.map (fun ps ->
         match Clist.of_list_length ~len:typs ps with
         | None -> failwith (*FIXME*)  "wrong length of pat row"
         | Some ps -> ps, (SymMap.empty, act)))
   in
-  let dtree =
-    split_cases ~matchloc ~env typs mat in
-  let unmatched = counterexamples (Clist.map ignore typs) dtree in 
-  let unmatched = List.map Clist.to_list unmatched in
-  actions, Ex (typs, dtree), unmatched
+  let dtree = split_cases ~matchloc ~env typs mat in
+  actions |> List.iter (fun act ->
+    if act.refcount = 0 then
+      Error.log ~loc:act.pat_loc Unused_pattern);
+  begin match counterexamples (Clist.map ignore typs) dtree with
+  | [] -> ()
+  | unmatched ->
+     Error.log ~loc:matchloc (Nonexhaustive (List.map Clist.to_list unmatched))
+  end;
+  actions, Ex (typs, dtree)
 
 (* FIXME: Check dedups cont. Should that happen here instead? *)
 let compile ~cont ~actions vals orig_dt =

@@ -7,9 +7,16 @@ type error_kind =
   | Illformed_pat of [`Duplicate_name of string * Location.t | `Orpat_different_names of string | `Wrong_length of int | `Unknown_cases ]
   | Incompatible_patterns of Location.t
   | Nonexhaustive of Exp.pat list list
+  | Unused_pattern
 
-exception Fail of Location.t * error_kind
+type t = Location.t * error_kind
+
+exception Fail of t
+
 let fail loc k = raise (Fail (loc, k))
+
+(* FIXME: for now, log always Fail's *)
+let log ~loc e = fail loc e
 
 let or_raise kind loc = function
   | Ok () -> ()

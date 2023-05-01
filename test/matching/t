@@ -216,6 +216,7 @@ fn(x : 'A | 'B | 'C(int) | 'D{x:int}) -> int {
 > });
 > done
 
+# FIXME the exhaustivity checking is kinda broken here as types change
 fn (x) {
   match x {
   | (A, A) => 1
@@ -232,11 +233,11 @@ fn (x) {
 >     }
 >   }
 > (('B | 'A, 'A)) -> int
-> RECHECK: Failure("unused case")
+> RECHECK: Lang.Error.Fail(_)
 > 
-> ELAB: Failure("unused case")
+> ELAB: Lang.Error.Fail(_)
 > 
-> ELABINF: Failure("unused case")
+> ELABINF: Lang.Error.Fail(_)
 > 
 > let  = %yield(0: fun (x) ret {
 >   let v0, v1 = x.(0, 1);
@@ -590,11 +591,11 @@ fn(x, y) {
 >     }
 >   }
 > ('B | 'A, 'A) -> int
-> RECHECK: Failure("unused case")
+> RECHECK: Lang.Error.Fail(_)
 > 
-> ELAB: Failure("unused case")
+> ELAB: Lang.Error.Fail(_)
 > 
-> ELABINF: Failure("unused case")
+> ELABINF: Lang.Error.Fail(_)
 > 
 > let  = %yield(0: fun (x, y) ret {
 >   match y {

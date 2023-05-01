@@ -42,7 +42,7 @@ type exp = exp' mayloc and exp' =
   (* @foo *)
   | Pragma of string
 
-and case = pat list list * exp
+and case = pat list list loc * exp
 
 and func_def = typolybounds option * parameters * tyexp option * exp
 
@@ -97,7 +97,7 @@ let mapper =
     (poly, args, ret, body)
   in
 
-  let case r (pats, exp) = (List.map (List.map (r.pat r)) pats, r.exp r exp) in
+  let case r ((pats, ploc), exp) = ((List.map (List.map (r.pat r)) pats, r.loc r ploc), r.exp r exp) in
 
   let exp = mayloc @@ fun r e -> match e with
     | Lit (l, loc) ->

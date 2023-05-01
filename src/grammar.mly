@@ -164,7 +164,9 @@ cases:
 | ioption(VBAR); cs = separated_nonempty_list(VBAR, case) { cs }
 
 case:
-| ps = separated_nonempty_list(VBAR, separated_nonempty_list(COMMA, onepat)); FATARROW; e = exp { ps, e }
+| ps = loc(separated_nonempty_list(VBAR, separated_nonempty_list(COMMA, onepat)));
+  FATARROW; e = exp
+  { ps, e }
 
 tyfield:
 | t = tyexp

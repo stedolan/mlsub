@@ -547,14 +547,7 @@ and check' env ~mode eloc e ty : exp' check_output =
   | Match (es, cases) ->
      let es = List.map (infer env ~mode) es in
      let etyps, es = List.map fst es, List.map snd es in
-     let orig_actions, split, unmatched = Check_pat.split_cases ~matchloc:eloc env etyps cases in
-     if List.exists (fun act -> act.Check_pat.refcount = 0) orig_actions then
-       (* FIXME reporting *)
-       failwith "unused case";
-     begin match unmatched with
-     | [] -> ()
-     | _ -> fail eloc (Nonexhaustive unmatched)
-     end;
+     let orig_actions, split = Check_pat.split_cases ~matchloc:eloc env etyps cases in
      let actions =
        List.map2 (fun act (_, exp) ->
          let vals = act.Check_pat.bindings |> SymMap.map (fun (typ, var) ->

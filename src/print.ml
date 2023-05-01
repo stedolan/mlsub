@@ -151,7 +151,7 @@ and opt_type_annotation ?(prespace=true) = function
   | None -> empty
 
 and cases cs =
-  cs |> separate_map (break 1 ^^ string "| ") @@ fun (pps, e) ->
+  cs |> separate_map (break 1 ^^ string "| ") @@ fun ((pps,_), e) ->
     (pps |> separate_map (break 1 ^^ string "| ") @@ fun ps ->
       group (separate_map (comma ^^ break 1) pat ps))
     ^^ space ^^ string "=>" ^^ group (indent (break 1 ^^ exp e))
