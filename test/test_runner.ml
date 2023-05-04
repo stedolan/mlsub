@@ -105,7 +105,7 @@ let run_cmd s =
         end;
         begin
           let comp : IR.comp =
-            Check.IRB.eval_cont bcomp (fun v -> Apply (Prim "yield", (Tuple_fields.collect_fields [Fpos v]), (Cont ([], Trap "done"))))
+            Check.IRB.eval_cont bcomp (fun v -> Apply (Prim "yield", (Tuple_fields.collect_fields [Fpos v]), [], Trap "done"))
           in
           IR.wf comp;
           let comp = IR.subst_aliases comp in

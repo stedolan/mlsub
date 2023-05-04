@@ -415,7 +415,11 @@ fn (x) { use(make(x)) }
 >       }
 >     }
 >   };
-> let  = %yield(0: fun (x) ret { let x2 = make(0: x); ret(use(0: x2)) });
+> let  = %yield(0: fun (x) ret {
+>   let x2 = make(0: x);
+>   let x3 = use(0: x2);
+>   ret(x3)
+> });
 > done
 
 

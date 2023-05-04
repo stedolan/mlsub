@@ -126,31 +126,26 @@ let unit loc = tcons loc (Record (None, Tuple_fields.collect_fields []))
 module IR_Builder = struct
 
 type syn_cont =
-  | Reified_cont of IR.cont
+  | Named_cont of IR.cont IR.Binder.ref
   | Gen_cont of (IR.value -> IR.comp)
 
-let reify_cont ?(vname="x") cont f : IR.comp =
-  match cont with
-  | Reified_cont k -> f k
-  | Gen_cont g ->
-     let x = IR.Binder.fresh ~name:vname () in
-     f (Cont ([x], g (IR.var x)))
-
 (* Can be used more than once *)
-let reify_dup_cont cont f =
-  reify_cont cont @@ function
-  | Named _ as k -> f k
-  | Cont _ as body ->
+let name_cont cont f : IR.comp =
+  match cont with
+  | Named_cont k -> f k
+  | Gen_cont g ->
+     let x = IR.Binder.fresh ~name:"x" () in
      let k = IR.Binder.fresh ~name:"k" () in
-     LetCont(k, body, f (Named (IR.Binder.ref k)))
+     LetCont(k, [x], g (IR.var x),
+             f (IR.Binder.ref k))
 
 let maybe_dup_cont ~uses cont f =
   if uses <= 1 then f cont
-  else reify_dup_cont cont (fun k -> f (Reified_cont k))
+  else name_cont cont (fun k -> f (Named_cont k))
 
 let apply_cont cont v : IR.comp =
   match cont with
-  | Reified_cont k -> IR.cut k [v]
+  | Named_cont k -> Jump(k, [v])
   | Gen_cont f -> f v
 
 type exp = syn_cont -> IR.comp
@@ -185,7 +180,6 @@ let apply_pat (p : pat) (v : IR.value) (body : IR.comp) =
   p v body
 
 
-
 let literal lit : exp =
   fun k -> apply_cont k (Literal lit)
 
@@ -201,16 +195,18 @@ let tuple tag fields =
 
 let project e field =
   fun k ->
-  reify_cont ~vname:field k @@ fun k ->
   eval_cont e @@ fun v ->
-  Project (v, [Field_named field], k)
+  let vfield = IR.Binder.fresh ~name:field () in  
+  Project (v, ([Field_named field, vfield],
+               apply_cont k (IR.var vfield)))
 
 let apply fn args =
   fun k ->
-  reify_cont k @@ fun k ->
   eval_cont fn @@ fun fn ->
   eval_cont_fields args @@ fun args ->
-  Apply (Func fn, args, k)
+  let vret = IR.Binder.fresh ~name:"x" () in
+  Apply (Func fn, args, [vret],
+         apply_cont k (IR.var vret))
 
 let trap s : exp =
   fun _k ->
@@ -391,11 +387,11 @@ and check' env ~mode eloc e ty : exp' check_output =
      { elab = (let* e = e.elab and* ifso = ifso.elab and* ifnot = ifnot.elab in
                If (e, ifso, ifnot));
        comp = fun k ->
-         IRB.reify_dup_cont k @@ fun k ->
+         IRB.name_cont k @@ fun k ->
          IRB.eval_cont e.comp @@ fun cond ->
          Match(cond, [
-           (IR.Symbol.of_string "true", [], Cont ([], ifso.comp (Reified_cont k)));
-           (IR.Symbol.of_string "false", [], Cont ([], ifnot.comp (Reified_cont k)))]) }
+           (IR.Symbol.of_string "true", ([], ifso.comp (Named_cont k)));
+           (IR.Symbol.of_string "false", ([], ifnot.comp (Named_cont k)))]) }
 
   | Tuple (tag, fields) ->
      if fields.fopen = `Open then failwith "invalid open tuple ctor";
@@ -529,7 +525,7 @@ and check' env ~mode eloc e ty : exp' check_output =
 
                 let body =
                   Check_pat.compile
-                    ~cont:(IRB.Reified_cont (Named (IR.Binder.ref return)))
+                    ~cont:(IRB.Named_cont (IR.Binder.ref return))
                     ~actions
                     (list_fields params |> List.map (fun (_fn, v) -> IR.var v))
                     split
@@ -675,7 +671,7 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
      let ret = IR.Binder.fresh() in
      Lambda(map_fields (fun _fn v -> v) params,
             ret,
-            Check_pat.compile ~cont:(IRB.Reified_cont (Named (IR.Binder.ref ret))) ~actions (list_fields params |> List.map (fun (_,v) -> IR.var v)) split)
+            Check_pat.compile ~cont:(IRB.Named_cont (IR.Binder.ref ret)) ~actions (list_fields params |> List.map (fun (_,v) -> IR.var v)) split)
    in
    ty, fndef, cps
 

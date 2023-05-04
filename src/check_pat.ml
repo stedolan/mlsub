@@ -550,27 +550,26 @@ let compile ~cont ~actions vals orig_dt =
     | Cases cases, v :: vals ->
        let cases =
          cases |> List.map (fun (tag, fs) ->
-           let fields, cont = compile_fields ~vals fs in
-           IR.Symbol.of_string tag, fields, cont)
+           let cont = compile_fields ~vals fs in
+           IR.Symbol.of_string tag, cont)
        in
        Match (v, cases)
     | Fields fs, v :: vals ->
-       let fields, cont = compile_fields ~vals fs in
-       Project (v, fields, cont)
+       Project (v, compile_fields ~vals fs)
 
   and compile_fields :
-    type w . vals:(w, IR.value) Clist.t -> w fields_split -> field_name list * IR.cont =
+    type w . vals:(w, IR.value) Clist.t -> w fields_split -> IR.unpacking_cont =
     fun ~vals (Proj (fs, _op, dt)) ->
     let vname : Tuple_fields.field_name -> string = function
       | Field_named s -> s
       | Field_positional n -> Printf.sprintf "v%d" n
     in
-    let field_vars = Clist.map (fun name -> IR.Binder.fresh ~name:(vname name) ()) fs in
+    let field_vars = Clist.map (fun name -> name, IR.Binder.fresh ~name:(vname name) ()) fs in
     let binders = field_vars in
-    let field_vars = Clist.map IR.var field_vars in
+    let field_vars = Clist.map (fun (_,v) -> IR.var v) field_vars in
     let vals = Clist.append field_vars vals in
     let rest = compile ~vals dt in
-    Clist.to_list fs, Cont (Clist.to_list binders, rest)
+    Clist.to_list binders, rest
 
   in
   let Ex (len, dt) = orig_dt in
@@ -581,6 +580,6 @@ let compile ~cont ~actions vals orig_dt =
       match act.rhs with
       | None, _ -> acc
       | Some (label, names), body ->
-         IR.LetCont (label, Cont (List.map snd names, body), acc))
+         IR.LetCont (label, List.map snd names, body, acc))
     (Array.to_list actions)
     code

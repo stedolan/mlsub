@@ -15,8 +15,9 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let 
 >   ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) -> int
 > ) -> int
 > let  = %yield(0: fun (x, wid) ret {
->   let f = fun (a) ret2 { ret2(x(0: a)) };
->   ret(wid(0: f))
+>   let f = fun (a) ret2 { let x2 = x(0: a); ret2(x2) };
+>   let x2 = wid(0: f);
+>   ret(x2)
 > });
 > done
 
@@ -28,8 +29,9 @@ fn (x, wid : ((any) -> any) -> int) { let f = fn(a){x(a)}; wid(f) }
 >   }
 > [A] ((any) -> A, ((any) -> any) -> int) -> int
 > let  = %yield(0: fun (x, wid) ret {
->   let f = fun (a) ret2 { ret2(x(0: a)) };
->   ret(wid(0: f))
+>   let f = fun (a) ret2 { let x2 = x(0: a); ret2(x2) };
+>   let x2 = wid(0: f);
+>   ret(x2)
 > });
 > done
 
@@ -37,7 +39,13 @@ fn (x) { (fn(a){x(a)})(6) }
 > fn (x) { (fn (a) { x(a) })(6) }
 >   fn [A, B](x: (int | A) -> B) -> B { (fn (a: int | A) -> B { x(a) })(6) }
 > [A, B] ((int | A) -> B) -> B
-> let  = %yield(0: fun (x) ret { ret(fun (a) ret2 { ret2(x(0: a)) }(0: 6)) });
+> let  = %yield(0: fun (x) ret {
+>   let x2 = fun (a) ret2 {
+>     let x2 = x(0: a);
+>     ret2(x2)
+>   }(0: 6);
+>   ret(x2)
+> });
 > done
 
 fn (x) { let y = x; 1 }
@@ -55,7 +63,7 @@ let id=fn[A](){fn(a:A){a}}; fn(){let x=id(); x(1)}
 >   }
 > [A] () -> int | A
 > let id = fun () ret { ret(fun (a) ret2 { ret2(a) }) };
-> let  = %yield(0: fun () ret { let x = id(); ret(x(0: 1)) });
+> let  = %yield(0: fun () ret { let x = id(); let x2 = x(0: 1); ret(x2) });
 > done
 
 fn (x) -> (any) -> any { let f = fn(a){x(a)}; f }
@@ -65,7 +73,10 @@ fn (x) -> (any) -> any { let f = fn(a){x(a)}; f }
 >     f
 >   }
 > [A] ((any) -> A) -> (any) -> any
-> let  = %yield(0: fun (x) ret { let f = fun (a) ret2 { ret2(x(0: a)) }; ret(f) });
+> let  = %yield(0: fun (x) ret {
+>   let f = fun (a) ret2 { let x2 = x(0: a); ret2(x2) };
+>   ret(f)
+> });
 > done
 
 fn (f) { fn(g,x) { (g(x.foo), f(x)) } }
@@ -102,8 +113,12 @@ fn() { twice(id, id)(id) }
 >     twice(id, id)(id)
 >   }
 > [A] () -> (A) -> A
-> let twice = fun (f, x) ret { let x2 = f(0: x); ret(f(0: x2)) };
+> let twice = fun (f, x) ret { let x2 = f(0: x); let x3 = f(0: x2); ret(x3) };
 > let id = fun (a) ret { ret(a) };
-> let  = %yield(0: fun () ret { let x = twice(0: id, 1: id); ret(x(0: id)) });
+> let  = %yield(0: fun () ret {
+>   let x = twice(0: id, 1: id);
+>   let x2 = x(0: id);
+>   ret(x2)
+> });
 > done
 > STATS: fix: 14, flex: 267
