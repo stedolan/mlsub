@@ -316,8 +316,8 @@ let subst_aliases origc =
     | Tuple _ | Lambda _ -> false
   in
   let is_trivial_comp = function
-    | Jump (_, vs) when List.for_all is_trivial vs -> true
-    | _ -> false
+    | Jump (k, vs) when List.for_all is_trivial vs -> Some(k, vs)
+    | _ -> None
   in
 
   let rec value = function
@@ -341,12 +341,17 @@ let subst_aliases origc =
        let k =
          Binder.with_binders substv (List.map (fun p -> p, var p) params) (fun () -> comp k)
        in
-       (* FIXME 
-       if is_trivial_comp k then
-         Binder.with_binder substk x k @@ fun () -> comp body
-       else*)
+       begin match is_trivial_comp k with
+       | Some (k, vs) ->
+          let sub vs' =
+            Binder.with_binders substv (List.map2 (fun a b -> a,b) params vs') @@ fun () ->
+              Jump(k, List.map value vs)
+          in
+          Binder.with_binder substk x sub @@ fun () -> comp body
+       | None ->
          LetCont(x, params, k,
                  Binder.with_binder substk x (fun vs -> jump x vs) (fun () -> comp body))
+       end
     | Jump (k, args) ->
        (Binder.deref substk k) (List.map value args)
     | Match (v, cases) ->

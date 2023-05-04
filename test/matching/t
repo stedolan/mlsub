@@ -65,15 +65,12 @@ fn((A|B), x) { x }
 >   fn [A]((A | B): 'B | 'A, x: A) -> A { x }
 > [A] ('B | 'A, A) -> A
 > let  = %yield(0: fun (0, x) ret {
->   let case(x2) = {
->     ret(x2)
->   };
 >   match 0 {
 >     A() -> {
->       case(x)
+>       ret(x)
 >     };
 >     B() -> {
->       case(x)
+>       ret(x)
 >     }
 >   }
 > });
@@ -178,9 +175,6 @@ fn(x) {
 >   }
 > [A, B] ('B{foo: 'D | 'C, bar: A} | 'A(any, B)) -> A | B
 > let  = %yield(0: fun (x) ret {
->   let case(x2) = {
->     ret(x2)
->   };
 >   match x {
 >     A(0: v0,
 >     1: v1) -> {
@@ -190,10 +184,10 @@ fn(x) {
 >     bar: bar) -> {
 >       match foo {
 >         C() -> {
->           case(bar)
+>           ret(bar)
 >         };
 >         D() -> {
->           case(bar)
+>           ret(bar)
 >         }
 >       }
 >     }
@@ -456,12 +450,6 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 >   }
 > ('T | 'F, 'T | 'F, 'T | 'F) -> bool
 > let  = %yield(0: fun (a, b, c) ret {
->   let case() = {
->     ret(<true>)
->   };
->   let case2() = {
->     ret(<false>)
->   };
 >   let v0, v1, v2 = (0: a, 1: b, 2: c).(0, 1, 2);
 >   match v0 {
 >     F() -> {
@@ -469,20 +457,20 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 >         F() -> {
 >           match v2 {
 >             F() -> {
->               case2()
+>               ret(<false>)
 >             };
 >             T() -> {
->               case2()
+>               ret(<false>)
 >             }
 >           }
 >         };
 >         T() -> {
 >           match v2 {
 >             F() -> {
->               case2()
+>               ret(<false>)
 >             };
 >             T() -> {
->               case()
+>               ret(<true>)
 >             }
 >           }
 >         }
@@ -493,20 +481,20 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 >         F() -> {
 >           match v2 {
 >             F() -> {
->               case2()
+>               ret(<false>)
 >             };
 >             T() -> {
->               case()
+>               ret(<true>)
 >             }
 >           }
 >         };
 >         T() -> {
 >           match v2 {
 >             F() -> {
->               case()
+>               ret(<true>)
 >             };
 >             T() -> {
->               case()
+>               ret(<true>)
 >             }
 >           }
 >         }
