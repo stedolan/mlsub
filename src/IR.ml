@@ -8,7 +8,7 @@ module Binder : sig
   val ref : 'a t -> 'a ref
   val name : 'a t -> string option
 
-  val fresh : ?name:string -> unit -> 'a t * 'a ref
+  val fresh : ?name:string -> unit -> 'a t
 
   type (_,_) phase
   val phase : unit -> ('p, 'a) phase
@@ -35,8 +35,7 @@ end = struct
   let ref x = x
 
   let fresh ?name () =
-    let c = { entry = Idle; name } in
-    c, c
+    { entry = Idle; name }
 
   let phase (type p) (type a) () : (p, a) phase =
     let module M = struct
@@ -137,6 +136,8 @@ let cut cont vals =
   | Cont (params, body) ->
      assert (List.length params = List.length vals);
      List.fold_right2 (fun v e body -> LetVal (v, e, body)) params vals body
+
+let var v = Var (Binder.ref v)
 
 (* Check that cont arities match and binders are well-scoped *)
 let wf orig_c =

@@ -133,16 +133,16 @@ let reify_cont ?(vname="x") cont f : IR.comp =
   match cont with
   | Reified_cont k -> f k
   | Gen_cont g ->
-     let x, x' = IR.Binder.fresh ~name:vname () in
-     f (Cont ([x], g (Var x')))
+     let x = IR.Binder.fresh ~name:vname () in
+     f (Cont ([x], g (IR.var x)))
 
 (* Can be used more than once *)
 let reify_dup_cont cont f =
   reify_cont cont @@ function
   | Named _ as k -> f k
   | Cont _ as body ->
-     let k, k' = IR.Binder.fresh ~name:"k" () in
-     LetCont(k, body, f (Named k'))
+     let k = IR.Binder.fresh ~name:"k" () in
+     LetCont(k, body, f (Named (IR.Binder.ref k)))
 
 let maybe_dup_cont ~uses cont f =
   if uses <= 1 then f cont
@@ -523,18 +523,18 @@ and check' env ~mode eloc e ty : exp' check_output =
                Fn (None, params, ret, body));
             comp = fun k ->
               let params = map_fields (fun _fn (p,_ty) -> IR.Binder.fresh ?name:(pat_name p) ()) params in
-              let return, return' = IR.Binder.fresh () in
+              let return = IR.Binder.fresh () in
               let cps: IR.value =
                 let actions = [| { act with rhs = body.comp } |] in
 
                 let body =
                   Check_pat.compile
-                    ~cont:(IRB.Reified_cont (Named return'))
+                    ~cont:(IRB.Reified_cont (Named (IR.Binder.ref return)))
                     ~actions
-                    (list_fields (map_fields (fun _fn (_,v)->v) params) |> List.map (fun (_,v) -> IR.Var v))
+                    (list_fields params |> List.map (fun (_fn, v) -> IR.var v))
                     split
                 in
-                (Lambda(map_fields (fun _ (v,_) -> v) params,
+                (Lambda(map_fields (fun _ v -> v) params,
                                    return,
                                    body))
               in
@@ -550,8 +550,8 @@ and check' env ~mode eloc e ty : exp' check_output =
      let fmode = fresh_gen_mode () in
      let fty, fndef, compfn = infer_func_def env ~mode:fmode eloc fndef in
      mark_var_use_at_level ~mode fmode.gen_level_acc;
-     let cvar, cvar' = IR.Binder.fresh ~name:s () in
-     let binding = {typ = fty; gen_level = fmode.gen_level_acc; comp_var = cvar'} in
+     let cvar = IR.Binder.fresh ~name:s () in
+     let binding = {typ = fty; gen_level = fmode.gen_level_acc; comp_var = IR.Binder.ref cvar} in
      let env = Env_vals { vals = SymMap.singleton s binding; rest = env } in
      let body = check env ~mode body ty in
      { elab =
@@ -672,10 +672,10 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
    let cps : IR.value =
      let actions = [| { act with rhs = ecomp } |] in
      let params = map_fields (fun fn _ -> IR.Binder.fresh ?name:(pat_name (fst (get_field params fn))) ()) params in
-     let ret, ret' = IR.Binder.fresh() in
-     Lambda(map_fields (fun _fn (v,_) -> v) params,
+     let ret = IR.Binder.fresh() in
+     Lambda(map_fields (fun _fn v -> v) params,
             ret,
-            Check_pat.compile ~cont:(IRB.Reified_cont (Named ret')) ~actions (list_fields (map_fields (fun _fn (_,v) -> v) params) |> List.map (fun (_,v) -> IR.Var v)) split)
+            Check_pat.compile ~cont:(IRB.Reified_cont (Named (IR.Binder.ref ret))) ~actions (list_fields params |> List.map (fun (_,v) -> IR.var v)) split)
    in
    ty, fndef, cps
 

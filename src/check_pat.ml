@@ -251,7 +251,7 @@ let rec split_cases :
             if act.refcount > 2 then act.bindings
             else
               SymMap.mapi
-                (fun name (typ, lvl, _var) -> typ, lvl, fst (IR.Binder.fresh ~name ()))
+                (fun name (typ, lvl, _var) -> typ, lvl, IR.Binder.fresh ~name ())
                 act.bindings
           in
           act.bindings <-
@@ -272,7 +272,7 @@ let rec split_cases :
        match all_bound with
        | [] -> None
        | name :: _ ->
-          let v, _ = IR.Binder.fresh ~name () in
+          let v = IR.Binder.fresh ~name () in
           Some v
      in
 
@@ -516,7 +516,7 @@ let compile ~cont ~actions vals orig_dt =
   let actions = actions |> Array.map (fun act ->
     let label =
       if act.refcount >= 2
-      then Some (fst (IR.Binder.fresh ~name:"case" ()),
+      then Some (IR.Binder.fresh ~name:"case" (),
                  List.map (fun (name, (_ty, _lvl, var)) -> name, var) (SymMap.bindings act.bindings))
       else None
     in
@@ -566,8 +566,8 @@ let compile ~cont ~actions vals orig_dt =
       | Field_positional n -> Printf.sprintf "v%d" n
     in
     let field_vars = Clist.map (fun name -> IR.Binder.fresh ~name:(vname name) ()) fs in
-    let binders = Clist.map (fun (v, _) -> v) field_vars in
-    let field_vars = Clist.map (fun (_, v) -> IR.Var v) field_vars in
+    let binders = field_vars in
+    let field_vars = Clist.map IR.var field_vars in
     let vals = Clist.append field_vars vals in
     let rest = compile ~vals dt in
     Clist.to_list fs, Cont (Clist.to_list binders, rest)
