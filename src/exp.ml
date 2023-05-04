@@ -34,7 +34,7 @@ type exp = exp' mayloc and exp' =
   (* if a { foo } else { bar } *)
   | If of exp * exp * exp
   (* match e { p => e | ... } *)
-  | Match of exp list * case list
+  | Match of exp list loc * case list
   (* (e : A) *)
   | Typed of exp * tyexp
   (* (e) *)
@@ -122,8 +122,8 @@ let mapper =
        If (r.exp r e, r.exp r et, r.exp r ef)
     | Typed (e, t) ->
        Typed (r.exp r e, r.tyexp r t)
-    | Match (e, cases) ->
-       Match (List.map (r.exp r) e, List.map (case r) cases)
+    | Match ((e, eloc), cases) ->
+       Match ((List.map (r.exp r) e, r.loc r eloc), List.map (case r) cases)
     | Parens e ->
        Parens (r.exp r e)
     | Pragma s ->

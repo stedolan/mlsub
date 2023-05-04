@@ -3,7 +3,7 @@ open Typedefs
 open Tuple_fields
 open Util
 
-type bindings = (ptyp * IR.value IR.Binder.t) SymMap.t
+type bindings = (ptyp * Typedefs.gen_level * IR.value IR.Binder.t) SymMap.t
 
 type 'rhs action = {
   rhs: 'rhs;
@@ -145,7 +145,7 @@ let decide_split_kind ~matchloc env (ty : ptyp) (heads : _ peeled_row list) =
       |> join_pat_conses
     in
     match
-      Types.match_typ env ty (Location.noloc (*FIXME*)) fields
+      Types.match_typ env ty matchloc fields
     with
     | Ok (Record (_, fs)) -> Sfields (map_fields (fun _fn ((),ty) -> ty) fs)
     | Ok _ -> assert false
@@ -224,15 +224,15 @@ let matches_tag tag row =
   | Hfields _ -> true
   | Hcase (tag', _) -> String.equal tag tag'
 
-let row_tail ~binding typ row : _ pat_row =
+let row_tail ~binding typ gen_level row : _ pat_row =
   match row.var, row.rest with
   | None, rest -> rest
   | Some v, (pats, (bindings, act)) ->
-     (pats, (SymMap.add v (typ, Option.get binding) bindings, act))
+     (pats, (SymMap.add v (typ, gen_level, Option.get binding) bindings, act))
 
 
 let rec split_cases :
-  type w . matchloc:_ -> env:_ -> (w, ptyp) Clist.t -> w pat_matrix -> w dectree =
+  type w . matchloc:_ -> env:_ -> (w, ptyp * Typedefs.gen_level) Clist.t -> w pat_matrix -> w dectree =
   fun ~matchloc ~env typs mat ->
   match typs with
   | [] ->
@@ -251,19 +251,20 @@ let rec split_cases :
             if act.refcount > 2 then act.bindings
             else
               SymMap.mapi
-                (fun name (typ, _var) -> typ, fst (IR.Binder.fresh ~name ()))
+                (fun name (typ, lvl, _var) -> typ, lvl, fst (IR.Binder.fresh ~name ()))
                 act.bindings
           in
           act.bindings <-
             old_bindings
-            |> SymMap.mapi (fun name (typ, var) ->
-                   Types.join_ptyp env typ (fst (SymMap.find name bindings)),
+            |> SymMap.mapi (fun name (typ, lvl, var) ->
+                   Types.join_ptyp env typ (let (ty,_,_) = (SymMap.find name bindings) in ty),
+                   lvl,
                    var)
         end;
-        Hashcons.mk (Done (SymMap.map snd bindings, act))
+        Hashcons.mk (Done (SymMap.map (fun (_,_,v) -> v) bindings, act))
      end
 
-  | typ :: typs ->
+  | (typ, lvl) :: typs ->
      let mat = peel_pat_heads mat in
      let binding =
        let all_bound =
@@ -277,7 +278,7 @@ let rec split_cases :
 
      let split_fields ~tag fs mat =
         let fopen = fs.fopen in
-        let Ex fs = Clist.of_list (list_fields fs) in
+        let Ex fs = Clist.of_list (list_fields fs |> List.map (fun (f,t) -> f, (t, lvl))) in
         let field_names = Clist.map fst fs in
         let field_types = Clist.map snd fs in
         let mat = List.map (read_fields ~tag field_names) mat in
@@ -289,7 +290,7 @@ let rec split_cases :
      let dt =
        match decide_split_kind ~matchloc env typ mat with
        | Sany ->
-          let rest = split_cases ~matchloc ~env typs (List.map (row_tail ~binding typ) mat) in
+          let rest = split_cases ~matchloc ~env typs (List.map (row_tail ~binding typ lvl) mat) in
           Any rest
        | Sfields fs ->
           let fs = split_fields ~tag:None fs mat in
@@ -480,7 +481,7 @@ let check_fvs_mat loc = function
   
 
 type ex_split = Ex : (('n,_) Clist.t * 'n dectree) -> ex_split
-let split_cases ~matchloc env (typs : ptyp list) (cases : case list) =
+let split_cases ~matchloc env (typs : (ptyp * Typedefs.gen_level) list) (cases : case list) =
   let actions =
     cases |> List.mapi (fun id ((pps,pat_loc), exp) ->
       let _fvs = check_fvs_mat matchloc pps in
@@ -516,7 +517,7 @@ let compile ~cont ~actions vals orig_dt =
     let label =
       if act.refcount >= 2
       then Some (fst (IR.Binder.fresh ~name:"case" ()),
-                 List.map (fun (name, (_ty, var)) -> name, var) (SymMap.bindings act.bindings))
+                 List.map (fun (name, (_ty, _lvl, var)) -> name, var) (SymMap.bindings act.bindings))
       else None
     in
     { act with rhs = (label, act.rhs cont) })

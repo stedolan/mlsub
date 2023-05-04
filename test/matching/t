@@ -52,6 +52,48 @@ fn(x) { (Foo(), Bar, Foo{x: 42}, Baz(1)) }
 >                 ^^^^^^^^^^^^
 
 #
+# Matching syntax in functions and lets
+#
+fn(x, x) { x }
+> fn (x, x) { x }
+> test:1: Variable x already is bound here:
+>   fn(x, x) { x }
+>      ^
+
+fn((A|B), x) { x }
+> fn ((A | B), x) { x }
+>   fn [A]((A | B): 'B | 'A, x: A) -> A { x }
+> [A] ('B | 'A, A) -> A
+> let  = %yield(0: fun (0, x) ret {
+>   let case(x2) = {
+>     ret(x2)
+>   };
+>   match 0 {
+>     A() -> {
+>       case(x)
+>     };
+>     B() -> {
+>       case(x)
+>     }
+>   }
+> });
+> done
+
+# FIXME: don't like this elaboration!
+fn(x) { let (a, b, c) = x; (c, b, a) }
+> fn (x) { let (a, b, c) = x; (c, b, a) }
+>   fn [A, B, C, D <: (A, B, C)](x: D) -> (C, B, A) {
+>     let (a, b, c) : D = x;
+>     (c, b, a)
+>   }
+> [A, B, C, D <: (A, B, C)] (D) -> (C, B, A)
+> let  = %yield(0: fun (x) ret {
+>   let v0, v1, v2 = x.(0, 1, 2);
+>   ret((0: v2, 1: v1, 2: v0))
+> });
+> done
+
+#
 # Match errors
 #
 
@@ -78,6 +120,20 @@ fn(x) { match x { Foo => 1 | _ => 2 } }
 fn(x) { match x { (a | Foo) => 1 } }
 > fn (x) { match x { (a | Foo) => 1 } }
 > test:1: The variable a must be bound on both sides of this or-pattern
+
+fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
+> fn (x) { match (A(1, 2)) { A(x, C) => 1 } }
+> test:1: Type error
+>   fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
+>                 ^^^^^^^^^
+>      found: int
+>   expected: 'C
+> This int comes from test:1:
+>   fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
+>                       ^
+> but is used as 'C at test:1:
+>   fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
+>                                 ^
 
 
 fn(c) {
@@ -620,4 +676,4 @@ fn(x, y) {
 > });
 > done
 # end
-> STATS: fix: 2, flex: 123
+> STATS: fix: 2, flex: 151

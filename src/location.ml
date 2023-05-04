@@ -19,6 +19,9 @@ let subset s t =
     t |> List.exists (fun t ->
       subspan s t))
 
+let equal s t =
+  subset s t && subset t s
+
 let noloc : t =
   let loc : Lexing.position = {pos_fname="_";pos_lnum=0;pos_cnum=0;pos_bol=0} in
   [{ loc_start = loc; loc_end = loc}]

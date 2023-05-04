@@ -170,7 +170,7 @@ let (x,) = (1,); {x}
 > let (x,) = (1,); {x}
 >   let (x,) : (int,) = (1,); {x}
 > {x: int}
-> let x = (0: 1).(0); let  = %yield(0: (x: x)); done
+> let v0 = (0: 1).(0); let  = %yield(0: (x: v0)); done
 
 let (x) = (1,); {x}
 > let (x) = (1,); {x}
@@ -249,6 +249,10 @@ true.foo
 >   ^^^^^^^^
 >      found: bool
 >   expected: {foo: _, ...}
+> This bool comes from test:1:
+>   true.foo
+>   ^^^^
+> but is used as {foo: _, ...}
 
 @bot
 > @bot
@@ -470,7 +474,7 @@ let {x: foo, y: bar} = {x: 10, y: true}; (foo, bar)
 > let {x: foo, y: bar} = {x: 10, y: true}; (foo, bar)
 >   let {x: foo, y: bar} : {x: int, y: bool} = {x: 10, y: true}; (foo, bar)
 > (int, bool)
-> let x, x2 = (x: 10, y: <true>).(x, y); let  = %yield(0: (0: x, 1: x2)); done
+> let x, y = (x: 10, y: <true>).(x, y); let  = %yield(0: (0: x, 1: y)); done
 
 let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
 > let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
@@ -490,8 +494,8 @@ let {x: foo, y: bar, ...} = {x: 10, y: true, z: 42}; (foo, bar)
 >   {x: 10, y: true, z: 42};
 >   (foo, bar)
 > (int, bool)
-> let x, x2 = (x: 10, y: <true>, z: 42).(x, y);
-> let  = %yield(0: (0: x, 1: x2));
+> let x, y = (x: 10, y: <true>, z: 42).(x, y);
+> let  = %yield(0: (0: x, 1: y));
 > done
 
 
@@ -501,14 +505,14 @@ let (x, y) = (1, true); (y, x)
 > let (x, y) = (1, true); (y, x)
 >   let (x, y) : (int, bool) = (1, true); (y, x)
 > (bool, int)
-> let x, x2 = (0: 1, 1: <true>).(0, 1); let  = %yield(0: (0: x2, 1: x)); done
+> let v0, v1 = (0: 1, 1: <true>).(0, 1); let  = %yield(0: (0: v1, 1: v0)); done
 
 let (x, y, ...) = (false, (), 3); {x,y}
 > let (x, y, ...) = (false, (), 3); {x, y}
 >   let (x, y, ...) : (bool, (), int) = (false, (), 3); {x, y}
 > {x: bool, y: ()}
-> let x, x2 = (0: <false>, 1: (), 2: 3).(0, 1);
-> let  = %yield(0: (x: x, y: x2));
+> let v0, v1 = (0: <false>, 1: (), 2: 3).(0, 1);
+> let  = %yield(0: (x: v0, y: v1));
 > done
 
 
@@ -516,7 +520,7 @@ let {x: foo, y: bar} : {x:int, y:bool} = {x:1, y:true}; foo
 > let {x: foo, y: bar} : {x: int, y: bool} = {x: 1, y: true}; foo
 >   let {x: foo, y: bar} : {x: int, y: bool} = {x: 1, y: true}; foo
 > int
-> let x, x2 = (x: 1, y: <true>).(x, y); let  = %yield(0: x); done
+> let x, y = (x: 1, y: <true>).(x, y); let  = %yield(0: x); done
 let {x: foo, y: bar} : {x:int} = {x:1, y:true}; foo
 > let {x: foo, y: bar} : {x: int} = {x: 1, y: true}; foo
 > test:1: A surplus field 'y' is present.
@@ -554,30 +558,26 @@ let {x, y} : {x:int, y:bool} = {x:1, y:true}; (y,x)
 > let {x, y} : {x: int, y: bool} = {x: 1, y: true}; (y, x)
 >   let {x, y} : {x: int, y: bool} = {x: 1, y: true}; (y, x)
 > (bool, int)
-> let x, x2 = (x: 1, y: <true>).(x, y); let  = %yield(0: (0: x2, 1: x)); done
+> let x, y = (x: 1, y: <true>).(x, y); let  = %yield(0: (0: y, 1: x)); done
 
 let {x, y} = {x:1, y:true}; (y,x)
 > let {x, y} = {x: 1, y: true}; (y, x)
 >   let {x, y} : {x: int, y: bool} = {x: 1, y: true}; (y, x)
 > (bool, int)
-> let x, x2 = (x: 1, y: <true>).(x, y); let  = %yield(0: (0: x2, 1: x)); done
+> let x, y = (x: 1, y: <true>).(x, y); let  = %yield(0: (0: y, 1: x)); done
 
 let {x, y} = {x:1, y:true}; {y,x,z:3}
 > let {x, y} = {x: 1, y: true}; {y, x, z: 3}
 >   let {x, y} : {x: int, y: bool} = {x: 1, y: true}; {y, x, z: 3}
 > {y: bool, x: int, z: int}
-> let x, x2 = (x: 1, y: <true>).(x, y);
-> let  = %yield(0: (y: x2, x: x, z: 3));
-> done
+> let x, y = (x: 1, y: <true>).(x, y); let  = %yield(0: (y: y, x: x, z: 3)); done
 
 let {x, y} = {x:1, y:true}; ({y,x,z:3} : {y: bool, x: int, z: int})
 > let {x, y} = {x: 1, y: true}; ({y, x, z: 3} : {y: bool, x: int, z: int})
 >   let {x, y} : {x: int, y: bool} = {x: 1, y: true};
 >   ({y, x, z: 3} : {y: bool, x: int, z: int})
 > {y: bool, x: int, z: int}
-> let x, x2 = (x: 1, y: <true>).(x, y);
-> let  = %yield(0: (y: x2, x: x, z: 3));
-> done
+> let x, y = (x: 1, y: <true>).(x, y); let  = %yield(0: (y: y, x: x, z: 3)); done
 
 
 # subtyping checks
@@ -815,7 +815,7 @@ fn (x) { let {p,q,...}=x; x }
 > fn (x) { let {p, q, ...} = x; x }
 >   fn [A <: {p: any, q: any, ...}](x: A) -> A { let {p, q, ...} : A = x; x }
 > [A <: {p: any, q: any, ...}] (A) -> A
-> let  = %yield(0: fun (x) ret { let x2, x3 = x.(p, q); ret(x) }); done
+> let  = %yield(0: fun (x) ret { let p, q = x.(p, q); ret(x) }); done
 
 fn (x) { let {p,q} = x; let {p,q,r} = x; {p,q} }
 > fn (x) { let {p, q} = x; let {p, q, r} = x; {p, q} }
@@ -826,9 +826,9 @@ fn (x) { let {p,q} = x; let {p,q,r} = x; {p,q} }
 >   }
 > (nothing) -> {p: nothing, q: nothing}
 > let  = %yield(0: fun (x) ret {
->   let x2, x3 = x.(p, q);
->   let x4, x5, x6 = x.(p, q, r);
->   ret((p: x4, q: x5))
+>   let p, q = x.(p, q);
+>   let p2, q2, r = x.(p, q, r);
+>   ret((p: p2, q: q2))
 > });
 > done
 
@@ -841,9 +841,9 @@ fn (x) { let {p,q,...} = x; let {p,q,r} = x; {p,q} }
 >   }
 > [A, B, C <: {p: A, q: B, r: any}] (C) -> {p: A, q: B}
 > let  = %yield(0: fun (x) ret {
->   let x2, x3 = x.(p, q);
->   let x4, x5, x6 = x.(p, q, r);
->   ret((p: x4, q: x5))
+>   let p, q = x.(p, q);
+>   let p2, q2, r = x.(p, q, r);
+>   ret((p: p2, q: q2))
 > });
 > done
 
@@ -856,9 +856,9 @@ fn (x) { let {p,q} = x; let {p,q,r,...} = x; {p,q} }
 >   }
 > (nothing) -> {p: nothing, q: nothing}
 > let  = %yield(0: fun (x) ret {
->   let x2, x3 = x.(p, q);
->   let x4, x5, x6 = x.(p, q, r);
->   ret((p: x4, q: x5))
+>   let p, q = x.(p, q);
+>   let p2, q2, r = x.(p, q, r);
+>   ret((p: p2, q: q2))
 > });
 > done
 
@@ -871,9 +871,9 @@ fn (x) { let {p,q,...} = x; let {p,q,r,...} = x; {p,q} }
 >   }
 > [A, B, C <: {p: A, q: B, r: any, ...}] (C) -> {p: A, q: B}
 > let  = %yield(0: fun (x) ret {
->   let x2, x3 = x.(p, q);
->   let x4, x5, x6 = x.(p, q, r);
->   ret((p: x4, q: x5))
+>   let p, q = x.(p, q);
+>   let p2, q2, r = x.(p, q, r);
+>   ret((p: p2, q: q2))
 > });
 > done
 
@@ -2029,7 +2029,7 @@ fn(x) {
 >       ret(x)
 >     };
 >     false() -> {
->       let x2 = x.(foo);
+>       let foo = x.(foo);
 >       ret((foo: 42))
 >     }
 >   }
@@ -2040,7 +2040,7 @@ fn(x) {
 >       ret(x)
 >     };
 >     false() -> {
->       let x2 = x.(foo);
+>       let foo = x.(foo);
 >       ret((foo: 42))
 >     }
 >   }

@@ -452,18 +452,22 @@ and check' env ~mode eloc e ty : exp' check_output =
          (let* e = e.elab in Proj (e, (field, loc)));
        comp = IRB.project e.comp field }
 
-  | Let (p, pty, e, body) ->
-     let pty, e, gen_level = check_rhs env ~mode pty e in
-     let vs, cpat = check_pat env ~gen_level pty p in
-     let env = Env_vals { vals = vs; rest = env } in
+  | Let (p, pty, rhs, body) ->
+     let pty, e, gen_level = check_rhs env ~mode pty rhs in
+
+     let case : case = ([[p]], snd p), body in
+     let act, split = Check_pat.split_cases ~matchloc:(snd p) env [pty, gen_level] [case] in
+     let act = Util.as_singleton act in
+     let env = extend_env env act in
      let body = check env ~mode body ty in
      { elab =
          (let* e = e.elab and* pty = elab_ptyp pty and* body = body.elab in
           Let(p, Some pty, e, body));
        comp = fun k ->
+         let actions = [| { act with Check_pat.rhs = body.comp } |] in
          IRB.eval_cont e.comp @@ fun e ->
-         IRB.apply_pat cpat e @@
-         body.comp k }
+         Check_pat.compile ~cont:k ~actions [e] split
+     }
 
   | Seq (e1, e2) ->
      let e1 = check env ~mode e1 (Checking (unit eloc)) in
@@ -488,26 +492,53 @@ and check' env ~mode eloc e ty : exp' check_output =
        | None, Imatches (Func (ptypes, rtype)) ->
           (* If poly <> None, then we should infer & subtype *)
           (* FIXME: do we need another level here? Does hoisting break things? *)
-          let vals, cpats = check_parameters env params ptypes in
-          let env' = Env_vals { vals; rest = env } in
+          let param_list = Tuple_fields.list_fields params in
+          let param_list =
+            param_list |> List.map (fun (fn, (pat, pty)) ->
+              let ty = Tuple_fields.get_field ptypes fn in
+              let ty_level =
+                match pty with
+                | None -> ty, Some (env_level env)
+                | Some pty ->
+                   let t = typ_of_tyexp env pty in
+                   subtype env ty t |> or_raise `Pat (snd pty);
+                   t, None
+              in
+              fn, pat, ty_level
+            )
+          in
+          let param_ptyps = List.map (fun (_fn, _p, tl) -> tl) param_list in
+          let case : case =
+            ([List.map (fun (_fn, p, _tl) -> p) param_list], eloc), body
+          in
+          let act, split =
+            Check_pat.split_cases ~matchloc:eloc env param_ptyps [case] in
+          let act = Util.as_singleton act in
+
+          let env' = extend_env env act in
           let body = check env' ~mode body (check_annot env' ret rtype) in
           { elab =
               (let* body = body.elab in
                (* No elaboration. Arguably we could *delete* annotations here! *)
                Fn (None, params, ret, body));
             comp = fun k ->
-              let params = map_fields (fun fn c -> IR.Binder.fresh ?name:(pat_name (fst (get_field params fn))) (), c) cpats in
-              let params_list = list_fields params in
+              let params = map_fields (fun _fn (p,_ty) -> IR.Binder.fresh ?name:(pat_name p) ()) params in
               let return, return' = IR.Binder.fresh () in
-              let body =
-                List.fold_right
-                  (fun (_fn,((_,v),cpat)) acc -> cpat (IR.Var v) acc)
-                  params_list
-                  (body.comp (Reified_cont (Named return')))
-              in
-              IRB.apply_cont k (Lambda(map_fields (fun _ ((v,_),_) -> v) params,
+              let cps: IR.value =
+                let actions = [| { act with rhs = body.comp } |] in
+
+                let body =
+                  Check_pat.compile
+                    ~cont:(IRB.Reified_cont (Named return'))
+                    ~actions
+                    (list_fields (map_fields (fun _fn (_,v)->v) params) |> List.map (fun (_,v) -> IR.Var v))
+                    split
+                in
+                (Lambda(map_fields (fun _ (v,_) -> v) params,
                                    return,
-                                   body))}
+                                   body))
+              in
+              IRB.apply_cont k cps }
        | _ ->
           let ty, fndef, compfn = infer_func_def env ~mode eloc fndef in
           inferred ty;
@@ -544,24 +575,22 @@ and check' env ~mode eloc e ty : exp' check_output =
           App(f, args));
        comp = IRB.apply f.comp (map_fields (fun _fn a -> a.comp) args)}
 
-  | Match (es, cases) ->
+  | Match ((es, matchloc), cases) ->
      let es = List.map (infer env ~mode) es in
-     let etyps, es = List.map fst es, List.map snd es in
-     let orig_actions, split = Check_pat.split_cases ~matchloc:eloc env etyps cases in
+     (* FIXME is this the right gen_level? How does this work again? *)
+     let gen_level = mode.gen_level_acc in
+     let etyps, es = List.map (fun (t, _) -> t, gen_level) es, List.map snd es in
+     let orig_actions, split = Check_pat.split_cases ~matchloc env etyps cases in
      let actions =
        List.map2 (fun act (_, exp) ->
-         let vals = act.Check_pat.bindings |> SymMap.map (fun (typ, var) ->
-           (* FIXME is this the right gen_level? How does this work again? *)
-           { typ; comp_var = IR.Binder.ref var; gen_level = mode.gen_level_acc }) in
-         let env = Env_vals { vals; rest = env } in
+         let env = extend_env env  act in
          check env ~mode exp ty)
          orig_actions cases
      in
      { elab =
          (let* es = elab_list (List.map (fun e -> e.elab) es)
           and* actions = elab_list (List.map (fun e -> e.elab) actions) in
-          let cases = List.map2 (fun (ps,_) e -> ps, e) cases actions in
-          Match(es, cases));
+          Match((es, matchloc), List.map2 (fun (ps,_) e -> ps, e) cases actions));
        comp = fun k ->
          let actions = List.map2 (fun act act' -> {act with Check_pat.rhs = act'.comp}) orig_actions actions in
          let actions = Array.of_list actions in
@@ -588,7 +617,7 @@ and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * exp check_output 
 
 and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def elab * IR.value =
    if params.fopen = `Open then failwith "invalid ... in params";
-   let ty, elab, _generalised, (ecomp, cpats) =
+   let ty, elab, _generalised, (ecomp, (act, split)) =
      elab_gen env ~mode poly (fun env ->
        let params = map_fields (fun _fn (p, ty) ->
          match ty with
@@ -599,10 +628,14 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
             (ty,ty), p, None
          | None ->
             fresh_flow env, p, Some (env_level env)) params in
-       let ptys = map_fields (fun _fn ((_tn,tp), p, gen_level) -> check_pat env ~gen_level tp p) params in
-       let vs = merge_bindings ptys in
-       let cpats = map_fields (fun _fn (_, cpat) -> cpat) ptys in
-       let env' = Env_vals { vals = vs; rest = env } in
+       let param_list = Tuple_fields.list_fields params in
+       let param_ptyps = List.map (fun (_fn, ((_tn, tp), _p, gen_level)) -> tp, gen_level) param_list in
+       let case : case =
+         ([List.map (fun (_fn, (_ty, p, _lvl)) -> p) param_list], eloc), body in
+       let act, split = Check_pat.split_cases ~matchloc:eloc env param_ptyps [case] in
+       let act = Util.as_singleton act in
+       let env' = extend_env env act in
+
        let bmode = fresh_gen_mode () in
        let res, body =
          match ret with
@@ -616,7 +649,7 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
        (* FIXME params or ptys? What happens if they disagree? *)
        tcons eloc (Func (map_fields (fun _fn ((tn,_tp),_,_) -> tn) params, res)),
        body.elab, bmode.gen_level_acc,
-       (body.comp, cpats)) in
+       (body.comp, (act, split))) in
    let fndef =
      let* poly, ty, body = elab in
      let tparams, tret =
@@ -637,74 +670,20 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
      in*)
      (poly, params, Some tret, body) in
    let cps : IR.value =
-     let params = map_fields (fun fn c -> IR.Binder.fresh ?name:(pat_name (fst (get_field params fn))) (), c) cpats in
+     let actions = [| { act with rhs = ecomp } |] in
+     let params = map_fields (fun fn _ -> IR.Binder.fresh ?name:(pat_name (fst (get_field params fn))) ()) params in
      let ret, ret' = IR.Binder.fresh() in
-     Lambda(map_fields (fun _fn ((v,_),_) -> v) params,
+     Lambda(map_fields (fun _fn (v,_) -> v) params,
             ret,
-            List.fold_right
-              (fun (_fn, ((_,v),cpat)) acc -> cpat (IR.Var v) acc) (list_fields params)
-              (ecomp (Reified_cont (Named ret'))))
+            Check_pat.compile ~cont:(IRB.Reified_cont (Named ret')) ~actions (list_fields (map_fields (fun _fn (_,v) -> v) params) |> List.map (fun (_,v) -> IR.Var v)) split)
    in
    ty, fndef, cps
 
-  
-and merge_bindings bs =
-  let merge k a b =
-    match a, b with
-    | x, None | None, x -> x
-    | Some _, Some _ ->
-       failwith ("duplicate bindings " ^ k) in
-  fold_fields (fun acc _fn (b,_) -> SymMap.merge merge acc b) SymMap.empty bs
-
-and check_pat env ~gen_level ty = function
-  | None, _ -> failwith "bad pat"
-  | Some p, loc -> check_pat' env ~gen_level ty loc p
-and check_pat' env ~gen_level ty ploc = function
-  | Pvar (s,_) ->
-     let v, v' = IR.Binder.fresh ~name:s () in
-     SymMap.singleton s {typ = ty; gen_level; comp_var = v' },
-     (fun x comp -> LetVal (v, x, comp))
-  | Pparens p -> check_pat env ~gen_level ty p
-  | Ptuple (_tag, fs) ->
-     (* FIXME tag *)
-     let fs =
-       (* FIXME: fvinst? *)
-       match
-        match_typ env ty ploc (Record (None, fs))
-       with
-       | Ok (Record (_, fs)) -> fs
-       | Ok _ -> assert false
-       | Error e -> fail ploc (Conflict (`Pat, e)) in
-     let fs = map_fields (fun _fn (p, t) -> check_pat env ~gen_level t p) fs in
-     merge_bindings fs,
-     (fun v comp : IR.comp ->
-      let fields =
-        fold_fields (fun acc fn (_,c) -> (IR.Binder.fresh(), fn, c)::acc) [] fs |> List.rev in
-      Project(v, List.map (fun (_, fn, _) -> fn) fields,
-        Cont(List.map (fun ((v,_),_,_) -> v) fields,
-          List.fold_right (fun ((_,v),_,cpat) acc -> cpat (IR.Var v) acc) fields comp)))
-  | Por _ ->
-     failwith "unimplemented Por"
-
-(* FIXME refactor (error cases no longer possible?) *)
-and check_parameters env params ptypes =
-  let merged =
-    merge_fields params ptypes
-      ~both:(fun _fn (p,aty) typ ->
-        let ty, gen_level =
-          match aty with
-          | None ->
-             typ, Some (env_level env)
-          | Some ty ->
-             let t = typ_of_tyexp env ty in
-             subtype env typ t |> or_raise `Pat (snd ty);
-             t, None in
-        Some (check_pat env ~gen_level ty p))
-      ~left:(fun _fn (_p, _aty) -> failwith "extra param")
-      ~right:(fun _fn _typ -> failwith "missing param")
-      ~extra:(fun _ -> `Closed) in
-  merge_bindings merged,
-  map_fields (fun _fn (_, x) -> x) merged
+ 
+and extend_env env act =
+  let vals = act.Check_pat.bindings |> SymMap.map (fun (typ, gen_level, var) ->
+     { typ; comp_var = IR.Binder.ref var; gen_level }) in
+  Env_vals { vals; rest = env }
 
 and infer_lit = function
   | l, loc ->

@@ -8,7 +8,7 @@ let x = 1; (let y = 2 2; {x,y})
 
 fn (id : [A]. A -> A) { id(42) }
 > fn (<err>) { id(42) }
-> typechecking error: Failure("bad pat")
+> test:1: syntax error
 
 fn(x, y, ~k: int) { (x:int,k,y) }
 > fn (x, y, ~k : int) { (<err>) }

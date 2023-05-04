@@ -93,7 +93,7 @@ exp_:
   { Let (p, Some t, e, body) }
 | e1 = exp; SEMI; e2 = exp
   { Seq (e1, e2) }
-| MATCH; es = separated_nonempty_list(COMMA, exp); LBRACE; cs = cases; RBRACE
+| MATCH; es = loc(separated_nonempty_list(COMMA, exp)); LBRACE; cs = cases; RBRACE
   { Match (es, cs) }
 | t = term_
   { t }

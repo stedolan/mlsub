@@ -10,10 +10,10 @@ fn[A,B](id : [A](A) -> A, (x,y):(A, B)) { (id(y),id(x)) }
 >   fn [A, B](id: [A_2] (A_2) -> A_2, (x, y): (A, B)) -> (B, A) { (id(y), id(x)) }
 > [A, B] ([A_2] (A_2) -> A_2, (A, B)) -> (B, A)
 > let  = %yield(0: fun (id, 1) ret {
->   let x, x2 = 1.(0, 1);
->   let x3 = id(0: x);
->   let x4 = id(0: x2);
->   ret((0: x4, 1: x3))
+>   let v0, v1 = 1.(0, 1);
+>   let x = id(0: v0);
+>   let x2 = id(0: v1);
+>   ret((0: x2, 1: x))
 > });
 > done
 
@@ -22,10 +22,10 @@ fn(id : [A](A) -> A, (x,y)) { (id(y),id(x)) }
 >   fn [A, B](id: [A_2] (A_2) -> A_2, (x, y): (A, B)) -> (B, A) { (id(y), id(x)) }
 > [A, B] ([A_2] (A_2) -> A_2, (A, B)) -> (B, A)
 > let  = %yield(0: fun (id, 1) ret {
->   let x, x2 = 1.(0, 1);
->   let x3 = id(0: x);
->   let x4 = id(0: x2);
->   ret((0: x4, 1: x3))
+>   let v0, v1 = 1.(0, 1);
+>   let x = id(0: v0);
+>   let x2 = id(0: v1);
+>   ret((0: x2, 1: x))
 > });
 > done
 

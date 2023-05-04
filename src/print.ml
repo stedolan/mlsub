@@ -70,7 +70,7 @@ let rec exp e = mayloc e @@ function
   | Proj (e, f) -> exp e ^^ char '.' ^^ field_name (Field_named (fst f))
   | If (e, t, f) ->
      string "if" ^^ blank 1 ^^ exp e ^^ block t ^^ blank 1 ^^ string "else" ^^ block f
-  | Match (e, cs) ->
+  | Match ((e, _loc), cs) ->
      string "match" ^^
        group (indent (break 1 ^^ separate_map (comma ^^ break 1) exp e) ^^ break 1) ^^
        braces' (indent (break 1 ^^ ifflat empty (string "| ") ^^ cases cs) ^^ break 1)

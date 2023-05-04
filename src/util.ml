@@ -13,6 +13,10 @@ let id x = x
 type zero = |
 let never : zero -> 'a = function _ -> .
 
+let as_singleton = function
+  | [x] -> x
+  | _ -> raise (Invalid_argument "Util.as_singleton")
+
 (* Immutable arrays *)
 module IArray : sig
   type +'a t

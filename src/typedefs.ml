@@ -527,12 +527,14 @@ and (+'neg, +'pos) poly_typ =
 type ptyp = (flexvar, flex_lower_bound) typ
 type ntyp = (flex_lower_bound, flexvar) typ
 
+type gen_level = env_level option
+
 type value_binding =
   { typ: ptyp;
     (* The level of the outermost unannotated lambda-bound parameter
        reachable from this binding by expanding untyped let definitions.
        (cf. Haskell's MonoLocalBinds) *)
-    gen_level: env_level option;
+    gen_level: gen_level;
     comp_var: IR.value IR.Binder.ref
   }
 

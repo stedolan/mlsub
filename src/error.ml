@@ -101,8 +101,8 @@ let pp_err input loc err : PPrint.document =
       | Some ((lty,lloc),(rty,rloc)) ->
          let lty = nest 4 (break 1 ^^ pp_ty ~env lty) ^^ break 1 in
          let rty = nest 4 (break 1 ^^ pp_ty ~env rty) ^^ break 1 in
-         let l_interest = not (Location.subset lloc loc) in
-         let r_interest = not (Location.subset rloc loc) in
+         let l_interest = not (Location.equal lloc loc) in
+         let r_interest = not (Location.equal rloc loc) in
          match l_interest, r_interest with
          | true, true ->
            hardline ^^
@@ -139,3 +139,5 @@ let pp_err input loc err : PPrint.document =
      pp "The following cases are unhandled:" ^^ hardline ^^
        separate_map (break 1) (fun ps ->
          string "| " ^^ group (separate_map (comma ^^ break 1) Print.pat ps)) missing
+  | Unused_pattern ->
+     pp "This pattern is unused"
