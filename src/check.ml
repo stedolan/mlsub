@@ -391,7 +391,7 @@ and check' env ~mode eloc e ty : exp' check_output =
          IRB.eval_cont e.comp @@ fun cond ->
          Match(cond, [
            (IR.Symbol.of_string "true", ([], ifso.comp (Named_cont k)));
-           (IR.Symbol.of_string "false", ([], ifnot.comp (Named_cont k)))]) }
+           (IR.Symbol.of_string "false", ([], ifnot.comp (Named_cont k)))], None) }
 
   | Tuple (tag, fields) ->
      if fields.fopen = `Open then failwith "invalid open tuple ctor";

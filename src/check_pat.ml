@@ -553,7 +553,7 @@ let compile ~cont ~actions vals orig_dt =
            let cont = compile_fields ~vals fs in
            IR.Symbol.of_string tag, cont)
        in
-       Match (v, cases)
+       Match (v, cases, None)
     | Fields fs, v :: vals ->
        Project (v, compile_fields ~vals fs)
 

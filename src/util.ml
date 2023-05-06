@@ -17,6 +17,11 @@ let as_singleton = function
   | [x] -> x
   | _ -> raise (Invalid_argument "Util.as_singleton")
 
+let all_distinct ~compare xs =
+  List.equal (fun a b -> compare a b = 0)
+    (List.sort compare xs)
+    (List.sort_uniq compare xs)
+
 (* Immutable arrays *)
 module IArray : sig
   type +'a t

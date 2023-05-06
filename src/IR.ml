@@ -121,7 +121,7 @@ and comp =
   | LetCont of cont Binder.t * value Binder.t list * comp * comp
 
   | Jump of cont Binder.ref * value list
-  | Match of value * (tag * unpacking_cont) list
+  | Match of value * (tag * unpacking_cont) list * (tag list * comp) option
   | Project of value * unpacking_cont
   | Apply of callee * value TF.tuple_fields * value Binder.t list * comp
   | Trap of string
@@ -162,9 +162,14 @@ let wf orig_c =
        let arity = Binder.deref pcont k in
        assert (List.length args = arity);
        List.iter value args
-    | Match (v, cases) ->
+    | Match (v, cases, def) ->
        value v;
+       let tags =
+         List.map fst cases @
+         Option.value ~default:[] (Option.map fst def) in
+       assert (Util.all_distinct ~compare tags);
        cases |> List.iter (fun (_tag, c) -> unpacking_cont lam c);
+       def |> Option.iter (fun (_tags, c) -> comp lam c)
     | Project (v, c) ->
        value v;
        unpacking_cont lam c
@@ -273,12 +278,21 @@ let pp origc =
        pp "%s(@[%a@])"
          (deref cname k)
          (fun () d -> d) (PPrint.separate_map (pp ",@ ") (value env ()) vs)
-    | Match (v, cases) ->
+    | Match (v, cases, def) ->
+       let cases =
+         List.map (fun (t, c) -> [t], c) cases @
+         Option.to_list (Option.map (fun (t, c) -> t, ([],c)) def)
+       in
+       let ptags = function
+         | [x] -> pp "%s" (Symbol.to_string x)
+         | xs -> pp "@[(%a)@]" (fun () d -> d) (PPrint.separate_map (pp "|") (fun x -> pp "%s" (Symbol.to_string x)) xs)
+       in
        let pcase = function
-         | (tag, (fields, body)) ->
+         | (tags, (fields, body)) ->
             let vars, body = fresh_binder_list ~defname:"x" vname env (List.map snd fields) (fun vns env -> vns, comp env () body) in
-            pp "%s(%a) -> {%a@ }"
-              (Symbol.to_string tag)
+            pp "%a(%a) -> {%a@ }"
+              (fun () d -> d)
+              (ptags tags)
               (fun () d -> d)
               (PPrint.separate_map (pp ",@ ") (fun (f, v) -> pp "%s: %s" (field_name f) v) (List.map2 (fun (a,_) b -> a,b) fields vars)) 
               (fun () d -> d)
@@ -354,10 +368,11 @@ let subst_aliases origc =
        end
     | Jump (k, args) ->
        (Binder.deref substk k) (List.map value args)
-    | Match (v, cases) ->
+    | Match (v, cases, def) ->
        Match
          (value v,
-          List.map (fun (t, c) -> t, unpacking_cont c) cases)
+          List.map (fun (t, c) -> t, unpacking_cont c) cases,
+          Option.map (fun (t, c) -> t, comp c) def)
     | Project (v, fields) ->
        Project (value v, unpacking_cont fields)
     | Apply (f, args, ret, k) ->
