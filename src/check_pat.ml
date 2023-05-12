@@ -29,7 +29,9 @@ and _ dectree' =
   | Any : 'n dectree -> 'n s dectree'
   | Bind : IR.value IR.Binder.t * 'n s dectree -> 'n s dectree'
   (* Cases: nonempty and sorted *)
-  | Cases : (Typedefs.Cons.tuple_tag * 'n fields_split) list -> 'n s dectree'
+  | Cases :
+      (Typedefs.Cons.tuple_tag * 'n fields_split) list
+      * (Typedefs.Cons.tuple_tag list * 'n dectree) option -> 'n s dectree'
   | Fields : 'n fields_split -> 'n s dectree'
 
 and 'n fields_split =
@@ -42,7 +44,10 @@ module Hashcons = struct
     | Failure -> true
     | Any t -> t.empty
     | Bind (_, t) -> t.empty
-    | Cases cases -> List.for_all (fun (_, Proj (_, _, fs)) -> fs.empty) cases
+    | Cases (cases, def) ->
+       List.for_all (fun (_, Proj (_, _, fs)) -> fs.empty) cases
+       &&
+       (match def with Some (_, t) -> t.empty | None -> true)
     | Fields (Proj (_, _, fs)) -> fs.empty
 
   let is_total : type a . a dectree' -> bool = function
@@ -50,7 +55,10 @@ module Hashcons = struct
     | Failure -> false
     | Any t -> t.total
     | Bind (_, t) -> t.total
-    | Cases cases -> List.for_all (fun (_, Proj (_, _, fs)) -> fs.total) cases
+    | Cases (cases, def) ->
+       List.for_all (fun (_, Proj (_, _, fs)) -> fs.total) cases
+       &&
+       (match def with Some (_, t) -> t.total | None -> true)
     | Fields (Proj (_, _, fs)) -> fs.total
 
   let mk (type n) (t : n dectree') : n dectree =
@@ -68,168 +76,90 @@ module Hashcons = struct
 
 end
 
+(* The result of splitting a (w+1)-size matrix along the first column *)
+type 'w split_head =
+  | Sp_any of 'w pat_matrix
+  | Sp_fields of 'w split_fields
+  | Sp_cases of tuple_tag list * 'w split_fields SymMap.t * 'w pat_matrix
 
-type pat_head =
-  | Hany
-  | Hcase of Cons.tuple_tag * pat tuple_fields
-  | Hfields of pat tuple_fields
+and 'w split_fields =
+  (pat tuple_fields Location.loc * 'w pat_row) list
 
-type 'w peeled_row =
-  { head: pat_head;
-    head_loc: Location.t;
-    var: symbol option;
-    rest: 'w pat_row }
-
-let rec peel_pat_heads :
-  type w . w s pat_matrix -> w peeled_row list
-  = function
-  | [] -> []
-  | (((None,loc) :: _ps), _act) :: _rest ->
+let rec split_head_row :
+  type w . _ -> w s pat_row -> IR.value IR.Binder.t option * w split_head -> IR.value IR.Binder.t option * w split_head
+  = fun head_typ mat ((var, split) as acc) ->
+  match mat with
+  | ((None,loc) :: _ps), _act ->
      Error.fail loc Syntax
-  | (((Some p,head_loc) :: ps), act) :: rest ->
+  | ((Some p,head_loc) :: ps), act ->
      match p with
      | Pparens p ->
-        peel_pat_heads (((p :: ps), act) :: rest)
+        split_head_row head_typ ((p :: ps), act) acc
      | Por (p, q) ->
-        peel_pat_heads (((p :: ps), act) :: ((q :: ps), act) :: rest)
+        let acc = split_head_row head_typ ((q :: ps), act) acc in
+        let acc = split_head_row head_typ ((p :: ps), act) acc in
+        acc
      | Pany ->
-        {head=Hany; head_loc; var=None; rest=(ps, act)} ::
-        peel_pat_heads rest
-     | Pvar (v,_) ->
-        {head=Hany; head_loc; var=Some v; rest = (ps, act)} ::
-        peel_pat_heads rest
+        let split =
+          let no_fields fields =
+            ((empty_fields, head_loc), (ps, act)) :: fields
+          in
+          match split with
+          | Sp_any m ->
+             Sp_any ((ps, act) :: m)
+          | Sp_fields fields ->
+             Sp_fields (no_fields fields)
+          | Sp_cases (tags, cases, def) ->
+             Sp_cases (tags,
+                       SymMap.map no_fields cases,
+                       (ps,act) :: def)
+        in
+        var, split
      | Ptuple (None, fields) ->
-        {head=Hfields fields; head_loc; var=None; rest= (ps, act)} ::
-        peel_pat_heads rest
-     | Ptuple (Some (tag, _), fields) ->
-        {head=Hcase (tag, fields); head_loc; var=None; rest= (ps, act)} ::
-        peel_pat_heads rest
+        let acc_fields =
+          match split with
+          | Sp_fields fields -> fields
+          | Sp_any m -> List.map (fun r -> (empty_fields, []), r) m
+          | Sp_cases (_tags, _cases, _def) ->
+             Error.fail head_loc (Incompatible_patterns head_loc (* FIXME loc *))
+        in
+        let split = Sp_fields (((fields, head_loc), (ps, act)) :: acc_fields) in
+        var, split
+     | Ptuple (Some ((tag,_) as tagloc), fields) ->
+        let acc_tags, acc_cases, acc_def =
+          match split with
+          | Sp_cases (tags, cases, def) -> tags, cases, def
+          | Sp_any m -> [], SymMap.empty, m
+          | Sp_fields _ ->
+             Error.fail head_loc (Incompatible_patterns head_loc (*FIXME loc*))
+        in
+        let tail =
+          try SymMap.find tag acc_cases
+          with Not_found -> List.map (fun r -> (empty_fields, []), r) acc_def
+        in
+        var,
+        Sp_cases (
+            (if SymMap.mem tag acc_cases then acc_tags else tagloc :: acc_tags),
+            SymMap.add tag (((fields, head_loc), (ps, act)) :: tail) acc_cases,
+            acc_def)
+     | Pvar (name, _) ->
+        let var =
+          match var with
+          | None -> IR.Binder.fresh ~name ()
+          | Some v -> v
+        in
+        let subpat = (Some Pany, head_loc) in
+        let bindings, action = act in
+        let ptyp, gen_level = head_typ in
+        let bindings = SymMap.add name (ptyp, gen_level, var) bindings in
+        let acc = Some var, split in
+        split_head_row head_typ ((subpat :: ps), (bindings, action)) acc
 
-type split_kind =
-  | Sany
-  | Scases of ptyp tuple_fields SymMap.t
-  | Sfields of ptyp tuple_fields
-
-let join_pat_conses cons_locs =
-  let rec aux = function
-    | [] -> assert false
-    | [cons, _loc] ->
-       Cons.map_one ~neg:(fun _ -> ()) ~pos:(fun _ -> ()) cons
-    | (cons, loc) :: rest ->
-       let cons' = aux rest in
-       if not (Cons.compatible cons cons') then begin
-         let loc' =
-           List.find_map (fun (cons', loc') -> if Cons.compatible cons cons' then None else Some loc') rest
-           |> Option.value ~default:Location.noloc in
-         Error.fail loc (Incompatible_patterns loc')
-       end;
-       let cons = Cons.join_head_one cons cons' in
-       Cons.map_one ~neg:(fun _ -> ()) ~pos:(fun _ -> ()) cons
-  in
-  aux cons_locs
-
-(* Decide the split kind that we are going to check the patterns with. *)
-let decide_split_kind ~matchloc env (ty : ptyp) (heads : _ peeled_row list) =
-  if List.for_all (function {head=Hany;_} -> true | _ -> false) heads then
-    (* If there are no destructuring patterns, any type will do *)
-    Sany
-  else if List.for_all (function {head=Hany | Hfields _; _} -> true | {head=Hcase _; _} -> false) heads then
-    (* All product field constructors *)
-    let fields =
-      List.concat_map (fun {head; head_loc; _} ->
-        match head with
-        | Hany -> []
-        | Hcase _ -> assert false
-        | Hfields fs -> [Cons.Record(None, fs), head_loc])
-        heads
-      |> join_pat_conses
-    in
-    match
-      Types.match_typ env ty matchloc fields
-    with
-    | Ok (Record (_, fs)) -> Sfields (map_fields (fun _fn ((),ty) -> ty) fs)
-    | Ok _ -> assert false
-    | Error e -> Error.fail matchloc (Conflict (`Pat, e))
-  else match ty with
-  | Tcons {conses;_}
-       when List.for_all (function Cons.Record (Some _, _) -> true | _ -> false) conses ->
-     let cases =
-       conses
-       |> List.map (function
-         | Cons.Record (Some tag, fields) -> tag, fields
-         | _ -> assert false)
-       |> List.to_seq
-       |> SymMap.of_seq
-     in
-     Scases cases
-  | _ ->
-     let inferred_cases =
-       List.fold_left (fun acc row ->
-         match row.head with
-         | Hany | Hfields _ ->
-            Error.fail row.head_loc (Illformed_pat `Unknown_cases)
-         | Hcase (tag, fields) ->
-            let cons = Cons.Record(Some tag, fields) in
-            let prev =
-              try SymMap.find tag acc
-              with Not_found -> []
-            in
-            SymMap.add tag ((cons,row.head_loc) :: prev) acc)
-         SymMap.empty
-         heads
-       |> SymMap.map join_pat_conses
-     in
-     let loc = List.concat_map (fun row -> row.head_loc) heads in
-     let inferred_cases =
-       SymMap.map (Cons.map_one ~neg:(fun _ -> assert false) ~pos:(fun () -> ref (Tcons Cons.bottom))) inferred_cases in
-     let cons =
-       Cons.make' ~loc (SymMap.fold (fun _tag fields acc -> fields :: acc) inferred_cases [])
-     in
-     begin match Types.match_typ2 env ty cons with
-     | Ok () -> ()
-     | Error e -> Error.fail matchloc (Conflict (`Pat, e))
-     end;
-     Scases (SymMap.map (function
-                 | Cons.Record (_, fs) -> map_fields (fun _fn r -> !r) fs
-                 | _ -> assert false) inferred_cases)
+let split_head head_typ (m : _ pat_matrix) =
+  List.fold_right (split_head_row head_typ) m (None, Sp_any [])
 
 let any : pat = (Some Pany, noloc)
 let pat_or p q : pat = (Some (Por (p, q)), noloc)
-
-(* FIXME as patterns here *)
-let read_fields :
-  type n m . tag:string option -> (m, n, field_name) Clist.prefix -> n peeled_row -> m pat_row =
-  fun ~tag fields {head; head_loc=_; var=_; rest=(row, act)} ->
-  match head with
-  | Hany ->
-     Clist.append (Clist.map (fun _ -> any) fields) row, act
-  | Hcase (_, fs)
-  | Hfields fs ->
-     begin match head, tag with
-     | Hcase (tag', _), Some tag -> assert (String.equal tag tag')
-     | Hcase (_, _), None -> assert false
-     | _ -> ()
-     end;
-     let lookup fn =
-       match get_field_opt fs fn with
-       | Some pat -> pat
-       | None when fs.fopen = `Open -> any
-       | None -> failwith "missing!"
-     in
-     Clist.append (Clist.map lookup fields) row, act
-
-let matches_tag tag row =
-  match row.head with
-  | Hany -> true
-  | Hfields _ -> true
-  | Hcase (tag', _) -> String.equal tag tag'
-
-let row_tail ~binding typ gen_level row : _ pat_row =
-  match row.var, row.rest with
-  | None, rest -> rest
-  | Some v, (pats, (bindings, act)) ->
-     (pats, (SymMap.add v (typ, gen_level, Option.get binding) bindings, act))
-
 
 let rec split_cases :
   type w . matchloc:_ -> env:_ -> (w, ptyp * Typedefs.gen_level) Clist.t -> w pat_matrix -> w dectree =
@@ -265,50 +195,141 @@ let rec split_cases :
      end
 
   | (typ, lvl) :: typs ->
-     let mat = peel_pat_heads mat in
-     let binding =
-       let all_bound =
-         List.concat_map (fun r -> Option.to_list r.var) mat in
-       match all_bound with
-       | [] -> None
-       | name :: _ ->
-          let v = IR.Binder.fresh ~name () in
-          Some v
+     let var, split = split_head (typ, lvl) mat in
+
+     let collect_fields (fields : _ split_fields) =
+       List.fold_left (fun (acc_loc, acc) ((fs, loc), _) ->
+         acc_loc @ loc,
+         (Tuple_fields.union acc fs
+           ~left:(fun () -> ())
+           ~right:(fun _ -> ())
+           ~both:(fun () _ -> ())
+         |> function
+           | Some x -> x
+           | None ->
+              Error.fail loc (Incompatible_patterns acc_loc)) )
+         ([], empty_fields)
+         fields
      in
 
-     let split_fields ~tag fs mat =
-        let fopen = fs.fopen in
-        let Ex fs = Clist.of_list (list_fields fs |> List.map (fun (f,t) -> f, (t, lvl))) in
-        let field_names = Clist.map fst fs in
-        let field_types = Clist.map snd fs in
-        let mat = List.map (read_fields ~tag field_names) mat in
-        let rest =
-          split_cases ~matchloc ~env (Clist.append field_types typs) mat in
-        Proj (field_names, fopen, rest)
+     let split_fields (ftypes : ptyp tuple_fields) (fields : _ split_fields) : _ fields_split =
+       let fopen = ftypes.fopen in
+       let Ex fs = Clist.of_list (list_fields ftypes |> List.map (fun (f, t) -> f, (t, lvl))) in
+       let field_names = Clist.map fst fs in
+       let field_types = Clist.map snd fs in
+       let mat =
+         fields
+         |> List.map (fun (((pats, _loc), (row, act)) : pat tuple_fields Location.loc * _ pat_row) ->
+            let lookup fn =
+              match get_field_opt pats fn with
+              | Some pat -> pat
+              | None when pats.fopen = `Open -> any
+              | None -> failwith "missing" (*FIXME possible?*)
+            in
+            Clist.append (Clist.map lookup field_names) row, act)
+       in
+       let tail = split_cases ~matchloc ~env (Clist.append field_types typs) mat in
+       Proj (field_names, fopen, tail)
      in
 
      let dt =
-       match decide_split_kind ~matchloc env typ mat with
-       | Sany ->
-          let rest = split_cases ~matchloc ~env typs (List.map (row_tail ~binding typ lvl) mat) in
+       match split with
+       | Sp_any mat ->
+          let rest = split_cases ~matchloc ~env typs mat in
           Any rest
-       | Sfields fs ->
-          let fs = split_fields ~tag:None fs mat in
-          Fields fs
-       | Scases cases ->
-          let cases = SymMap.mapi (fun tag fs ->
-            let mat = List.filter (matches_tag tag) mat in
-            split_fields ~tag:(Some tag) fs mat) cases in
-          let cases = SymMap.to_seq cases |> List.of_seq in
-          Cases cases
+       | Sp_fields fields ->
+          let loc, fnames = collect_fields fields in
+          (* FIXME loc? *)
+          let cons = Cons.Record(None, fnames) in
+          begin match Types.match_typ env typ matchloc cons with
+          | Ok (Record (_, ftypes)) ->
+             let ftypes = map_fields (fun _ ((),t) -> t) ftypes in
+             Fields (split_fields ftypes fields)
+          | Ok _ -> assert false
+          | Error e -> Error.fail loc (Conflict (`Pat, e))
+          end
+       | Sp_cases (tags, cases, def) ->
+          let extract_cases = function
+            | Tcons {conses; _} ->
+               conses
+               |> List.map (function
+                 | Cons.Record (Some tag, fields) -> tag, fields
+                 | _ -> raise Exit)
+               |> List.to_seq
+               |> SymMap.of_seq
+            | _ -> raise Exit
+          in
+          match extract_cases typ with
+          | case_types ->
+             let default_tags = ref [] in
+             let cases =
+               SymMap.merge
+                 (fun tag typ fields ->
+                   match typ, fields with
+                   | None, None -> None
+                   | Some _typ, None ->
+                      default_tags := tag :: !default_tags;
+                      None
+                   | None, Some _ ->
+                      failwith "unknown ctor"
+                               (*
+                      Error.fail matchloc(*FIXME*)
+                        (Illformed_pat (`Unknown_constructor tag)); *)
+                   | Some typ, Some fields ->
+                      Some (split_fields typ fields))
+                 case_types cases
+             in
+             let cases =
+               tags |> List.map (fun (tag,_) ->
+                 tag, SymMap.find tag cases)
+             in
+             let defaults =
+               match !default_tags with
+               | [] -> None
+               | default_tags ->
+                  Some (default_tags,
+                        split_cases ~matchloc ~env typs def)
+             in
+             Cases (cases, defaults)
+          | exception Exit ->
+             begin match def with
+             | [] -> ()
+             | row :: _ ->
+                Error.fail Location.noloc(*FIXME*) (Illformed_pat `Unknown_cases)
+             end;
+             let inferred_cases =
+               cases |>
+               SymMap.map (fun fields ->
+                 let loc, fnames = collect_fields fields in
+                 let fields = map_fields (fun _ () -> ref (Tcons Cons.bottom)) fnames in
+                 loc, fields)
+             in
+             let loc =
+               tags |> List.concat_map (fun (tag,_) ->
+                 fst (SymMap.find tag inferred_cases)) in
+             let conses =
+               tags |> List.map (fun (tag,_) ->
+                 let _, fields = SymMap.find tag inferred_cases in
+                 Cons.Record(Some tag, fields)) in
+             let cons = Cons.make' ~loc conses in
+             begin match Types.match_typ2 env typ cons with
+             | Ok () -> ()
+             | Error e -> Error.fail matchloc (Conflict (`Pat, e))
+             end;
+             let case_list =
+               tags
+               |> List.map (fun (tag,_) ->
+                  let (loc, fields) = SymMap.find tag inferred_cases in
+                  let fields = map_fields (fun _ r -> !r) fields in
+                  let case = SymMap.find tag cases in
+                  tag, split_fields fields case)
+             in
+             Cases (case_list, None)
      in
-
      let dt =
-       match binding with
-       | Some v ->
-          Bind (v, Hashcons.mk dt)
-       | None ->
-          dt
+       match var with
+       | Some v -> Bind (v, Hashcons.mk dt)
+       | None -> dt
      in
      Hashcons.mk dt
      
@@ -348,9 +369,15 @@ let rec dectree_tails : type n k. (n, k, unit) Clist.prefix -> n dectree -> k de
      dectree_tails pfx tail
   | _ :: _ as pfx, Bind (_, tail) ->
      dectree_tails pfx tail
-  | _ :: pfx, Cases cases ->
-     cases |> unique_dt (fun (_, Proj (fs, _, t)) ->
-       dectree_tails (Clist.append (Clist.map ignore fs) pfx) t)
+  | _ :: pfx, Cases (cases, defaults) ->
+     let subtrees =
+       List.map (fun (_, Proj (fs, _, t)) ->
+           dectree_tails (Clist.append (Clist.map ignore fs) pfx) t) cases
+       @
+       Option.to_list (Option.map (fun (_,t) ->
+           dectree_tails pfx t) defaults)
+     in
+     unique_dt Fun.id subtrees
   | _ :: pfx, Fields (Proj (fs, _, t)) ->
      dectree_tails (Clist.append (Clist.map ignore fs) pfx) t
 
@@ -392,7 +419,15 @@ let counterexamples depth t =
           | Fields (Proj (names, fopen, t')) ->
              let ex = examples (Clist.append (Clist.map ignore names) pfx) t' in
              List.map (unmatched_fields ~tag:None ~fopen names pfx) ex
-          | Cases cases ->
+          | Cases (cases,defaults) ->
+             let cases =
+               cases @
+               match defaults with
+               | None -> []
+               | Some (tags, t) ->
+                  (* FIXME: `Open or `Closed? *)
+                  List.map (fun tag -> tag, Proj ([], `Closed, t)) tags
+             in
              let cases =
                cases |> List.map (fun (c, (Proj (names, _, t) as fs)) ->
                  c, fs, dectree_tails (Clist.map ignore names) t)
@@ -547,13 +582,17 @@ let compile ~cont ~actions vals orig_dt =
        compile ~vals dt
     | Bind (var, dt), (v :: _ as vals) ->
        LetVal (var, v, compile ~vals dt)
-    | Cases cases, v :: vals ->
+    | Cases (cases, default), v :: vals ->
        let cases =
          cases |> List.map (fun (tag, fs) ->
            let cont = compile_fields ~vals fs in
            IR.Symbol.of_string tag, cont)
        in
-       Match (v, cases, None)
+       let default =
+         default |> Option.map (fun (tags, dt) ->
+           List.map IR.Symbol.of_string tags, compile ~vals dt)
+       in
+       Match (v, cases, default)
     | Fields fs, v :: vals ->
        Project (v, compile_fields ~vals fs)
 

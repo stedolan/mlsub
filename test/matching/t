@@ -62,8 +62,8 @@ fn(x, x) { x }
 
 fn((A|B), x) { x }
 > fn ((A | B), x) { x }
->   fn [A]((A | B): 'B | 'A, x: A) -> A { x }
-> [A] ('B | 'A, A) -> A
+>   fn [A]((A | B): 'A | 'B, x: A) -> A { x }
+> [A] ('A | 'B, A) -> A
 > let  = %yield(0: fun (0, x) ret {
 >   match 0 {
 >     A() -> {
@@ -98,7 +98,7 @@ fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
 > fn (x) { match x { (_, _) => 1 | (_, _, _) => 2 } }
 > test:1: This pattern is incompatible with the pattern here:
 >   fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
->                                  ^^^^^^^
+>                     ^^^^^
 
 fn(x) { match x { (a,a) => 1 } }
 > fn (x) { match x { (a, a) => 1 } }
@@ -112,7 +112,7 @@ fn(x) { match x, x { a, b, c => 2 } }
 
 fn(x) { match x { Foo => 1 | _ => 2 } }
 > fn (x) { match x { Foo => 1 | _ => 2 } }
-> test:1: Cannot determine which cases this pattern matches
+> _:0: Cannot determine which cases this pattern matches
 
 fn(x) { match x { (a | Foo) => 1 } }
 > fn (x) { match x { (a | Foo) => 1 } }
@@ -131,6 +131,22 @@ fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
 > but is used as 'C at test:1:
 >   fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
 >                                 ^
+
+fn(x : 'A(int, int) | 'B(int, int)) {
+  match x {
+  | A(x, y) => (x, y)
+  | (a, b) => (a, b)
+  }
+}
+> fn (x: 'A(int, int) | 'B(int, int)) {
+>   match x {
+>     | A(x, y) => (x, y)
+>     | (a, b) => (a, b)
+>   }
+> }
+> test:3: This pattern is incompatible with the pattern here:
+>     | A(x, y) => (x, y)
+>       ^^^^^^^
 
 
 fn(c) {
@@ -167,13 +183,13 @@ fn(x) {
   }
 }
 > fn (x) { match x { A(_, b) => b | B{foo: (C | D), bar: x} => x } }
->   fn [A, B](x: 'B{foo: 'D | 'C, bar: A} | 'A(any, B)) -> A | B {
+>   fn [A, B](x: 'A(any, A) | 'B{foo: 'C | 'D, bar: B}) -> A | B {
 >     match x {
 >       | A(_, b) => b
 >       | B{foo: (C | D), bar: x} => x
 >     }
 >   }
-> [A, B] ('B{foo: 'D | 'C, bar: A} | 'A(any, B)) -> A | B
+> [A, B] ('A(any, A) | 'B{foo: 'C | 'D, bar: B}) -> A | B
 > let  = %yield(0: fun (x) ret {
 >   match x {
 >     A(0: v0,
@@ -238,35 +254,10 @@ fn(x : 'A | 'B | 'C(int) | 'D{x:int}) -> int {
 >     | E(foo, bar) => 5
 >   }
 > }
->   fn (x: 'A | 'B | 'C(int) | 'D{x: int}) -> int {
->     match x {
->       | A => 1
->       | B => 2
->       | C(x) => 3
->       | D{x: foo, y: bar}
->       | E(foo, bar) => 5
->     }
->   }
-> ('A | 'B | 'C(int) | 'D{x: int}) -> int
-> let  = %yield(0: fun (x) ret {
->   match x {
->     A() -> {
->       ret(1)
->     };
->     B() -> {
->       ret(2)
->     };
->     C(0: v0) -> {
->       ret(3)
->     };
->     D(x: x2) -> {
->       ret(5)
->     }
->   }
-> });
-> done
+> typechecking error: Failure("unknown ctor")
 
 # FIXME the exhaustivity checking is kinda broken here as types change
+# Should either report an unused pat on case 2 or unhandled (B,B)
 fn (x) {
   match x {
   | (A, A) => 1
@@ -275,19 +266,19 @@ fn (x) {
   }
 }
 > fn (x) { match x { (A, A) => 1 | (A, B) => 2 | (B, A) => 3 } }
->   fn (x: ('B | 'A, 'A)) -> int {
+>   fn (x: ('A | 'B, 'A)) -> int {
 >     match x {
 >       | (A, A) => 1
 >       | (A, B) => 2
 >       | (B, A) => 3
 >     }
 >   }
-> (('B | 'A, 'A)) -> int
-> RECHECK: Lang.Error.Fail(_)
+> (('A | 'B, 'A)) -> int
+> RECHECK: Failure("unknown ctor")
 > 
-> ELAB: Lang.Error.Fail(_)
+> ELAB: Failure("unknown ctor")
 > 
-> ELABINF: Lang.Error.Fail(_)
+> ELABINF: Failure("unknown ctor")
 > 
 > let  = %yield(0: fun (x) ret {
 >   let v0, v1 = x.(0, 1);
@@ -401,10 +392,10 @@ fn (x) { use(make(x)) }
 > let use =
 >   fun (y) ret {
 >     match y {
->       Bad(foo: foo) -> {
+>       Good(foo: foo) -> {
 >         ret(foo)
 >       };
->       Good(foo: foo) -> {
+>       Bad(foo: foo) -> {
 >         ret(foo)
 >       }
 >     }
@@ -452,49 +443,49 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 > let  = %yield(0: fun (a, b, c) ret {
 >   let v0, v1, v2 = (0: a, 1: b, 2: c).(0, 1, 2);
 >   match v0 {
->     F() -> {
+>     T() -> {
 >       match v1 {
->         F() -> {
+>         T() -> {
 >           match v2 {
->             F() -> {
->               ret(<false>)
->             };
 >             T() -> {
->               ret(<false>)
+>               ret(<true>)
+>             };
+>             F() -> {
+>               ret(<true>)
 >             }
 >           }
 >         };
->         T() -> {
+>         F() -> {
 >           match v2 {
->             F() -> {
->               ret(<false>)
->             };
 >             T() -> {
 >               ret(<true>)
+>             };
+>             F() -> {
+>               ret(<false>)
 >             }
 >           }
 >         }
 >       }
 >     };
->     T() -> {
+>     F() -> {
 >       match v1 {
+>         T() -> {
+>           match v2 {
+>             T() -> {
+>               ret(<true>)
+>             };
+>             F() -> {
+>               ret(<false>)
+>             }
+>           }
+>         };
 >         F() -> {
 >           match v2 {
 >             F() -> {
 >               ret(<false>)
 >             };
 >             T() -> {
->               ret(<true>)
->             }
->           }
->         };
->         T() -> {
->           match v2 {
->             F() -> {
->               ret(<true>)
->             };
->             T() -> {
->               ret(<true>)
+>               ret(<false>)
 >             }
 >           }
 >         }
@@ -631,19 +622,19 @@ fn(x, y) {
   }
 }
 > fn (x, y) { match x, y { A, A => 1 | A, B => 2 | B, A => 3 } }
->   fn (x: 'B | 'A, y: 'A) -> int {
+>   fn (x: 'A | 'B, y: 'A) -> int {
 >     match x, y {
 >       | A, A => 1
 >       | A, B => 2
 >       | B, A => 3
 >     }
 >   }
-> ('B | 'A, 'A) -> int
-> RECHECK: Lang.Error.Fail(_)
+> ('A | 'B, 'A) -> int
+> RECHECK: Failure("unknown ctor")
 > 
-> ELAB: Lang.Error.Fail(_)
+> ELAB: Failure("unknown ctor")
 > 
-> ELABINF: Lang.Error.Fail(_)
+> ELABINF: Failure("unknown ctor")
 > 
 > let  = %yield(0: fun (x, y) ret {
 >   match y {
