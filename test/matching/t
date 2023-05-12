@@ -658,5 +658,69 @@ fn(x, y) {
 >   }
 > });
 > done
+
+# Compilation & errors with default cases
+fn (x : 'A | 'B | 'C | 'D | 'E, y) -> int {
+  match x, y {
+  | A, (A | B) => 1
+  | _, (A | B) => 2
+  }
+}
+> fn (x: 'A | 'B | 'C | 'D | 'E, y) -> int {
+>   match x, y {
+>     | A, (A | B) => 1
+>     | _, (A | B) => 2
+>   }
+> }
+>   fn (x: 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
+>     match x, y {
+>       | A, (A | B) => 1
+>       | _, (A | B) => 2
+>     }
+>   }
+> ('A | 'B | 'C | 'D | 'E, 'A | 'B) -> int
+> let  = %yield(0: fun (x, y) ret {
+>   match y {
+>     A() -> {
+>       match x {
+>         A() -> {
+>           ret(1)
+>         };
+>         B() -> {
+>           ret(1)
+>         }
+>       }
+>     };
+>     (B|C|D|E)() -> {
+>       match x {
+>         A() -> {
+>           ret(2)
+>         };
+>         B() -> {
+>           ret(2)
+>         }
+>       }
+>     }
+>   }
+> });
+> done
+
+# FIXME: gets the right answer, but needs parens in printing
+fn (x : 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
+  match x, y {
+  | A, (A | B) => 1
+  | _, (A) => 2
+  }
+}
+> fn (x: 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
+>   match x, y {
+>     | A, (A | B) => 1
+>     | _, (A) => 2
+>   }
+> }
+> test:2: The following cases are unhandled:
+> | B | C | D | E, B
+
+
 # end
-> STATS: fix: 2, flex: 151
+> STATS: fix: 2, flex: 152
