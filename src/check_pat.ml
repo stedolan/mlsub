@@ -31,7 +31,7 @@ and _ dectree' =
   (* Cases: nonempty and sorted *)
   | Cases :
       (Typedefs.Cons.tuple_tag * 'n fields_split) list
-      * (Typedefs.Cons.tuple_tag list * 'n dectree) option -> 'n s dectree'
+      * ((Typedefs.Cons.tuple_tag * unit tuple_fields) list * 'n dectree) option -> 'n s dectree'
   | Fields : 'n fields_split -> 'n s dectree'
 
 and 'n fields_split =
@@ -65,15 +65,6 @@ module Hashcons = struct
     { tree = t;
       empty = is_empty t;
       total = is_total t }
-(*
-  let rec same_values : type n . n dectree -> n dectree -> bool =
-    fun a b ->
-    match a.tree, b.tree with
-    | Done _, Done _ -> true
-    | Failure _, Failure _ -> true
-    | Any _, Any _ -> true
-*)
-
 end
 
 (* The result of splitting a (w+1)-size matrix along the first column *)
@@ -267,8 +258,9 @@ let rec split_cases :
                  (fun tag typ fields ->
                    match typ, fields with
                    | None, None -> None
-                   | Some _typ, None ->
-                      default_tags := tag :: !default_tags;
+                   | Some typ, None ->
+                      default_tags :=
+                        (tag, map_fields (fun _fn _ -> ()) typ) :: !default_tags;
                       None
                    | None, Some _ ->
                       failwith "unknown ctor"
@@ -332,135 +324,49 @@ let rec split_cases :
        | None -> dt
      in
      Hashcons.mk dt
-     
-
-let find_map_unique ~equal f xs =
-  let rec aux u = function
-    | [] -> Some u
-    | x :: xs ->
-       begin match f x with
-       | Some u' when equal u u' -> aux u xs
-       | _ -> None
-       end
-  in
-  match xs with
-  | [] ->
-     invalid_arg "find_map_unique: empty list"
-  | x :: xs ->
-     match f x with
-     | None -> None
-     | Some u -> aux u xs
-
-let equal_dectree a b =
-  (* FIXME: is this a good enough approx for counterexamples? *)
-  (a.total && b.total)
-  ||
-  (a.empty && b.empty)
-
-let rec dectree_tails : type n k. (n, k, unit) Clist.prefix -> n dectree -> k dectree option =
-  fun pfx t ->
-  (* FIXME: same results with equal = false?! *)
-  let unique_dt f xs =
-    find_map_unique ~equal:(fun a b -> equal_dectree a b) f xs in
-
-  match pfx, t.tree with
-  | [], _ -> Some t
-  | _ :: pfx, Any tail ->
-     dectree_tails pfx tail
-  | _ :: _ as pfx, Bind (_, tail) ->
-     dectree_tails pfx tail
-  | _ :: pfx, Cases (cases, defaults) ->
-     let subtrees =
-       List.map (fun (_, Proj (fs, _, t)) ->
-           dectree_tails (Clist.append (Clist.map ignore fs) pfx) t) cases
-       @
-       Option.to_list (Option.map (fun (_,t) ->
-           dectree_tails pfx t) defaults)
-     in
-     unique_dt Fun.id subtrees
-  | _ :: pfx, Fields (Proj (fs, _, t)) ->
-     dectree_tails (Clist.append (Clist.map ignore fs) pfx) t
 
 
-let counterexamples depth t =
-  let unmatched_fields :
-    type n m k . tag:string option -> fopen:Tuple_fields.fields_open ->
-      (m, n, field_name) Clist.prefix -> (n, k, _) Clist.prefix ->
-      (m, k, pat) Clist.prefix -> (n s, k, pat) Clist.prefix =
-    fun ~tag ~fopen fields pfx unmatched ->
-    let fs, rest = Clist.split fields pfx unmatched in
+let rec counterexamples :
+  type n . (n, _) Clist.t -> n dectree -> (n, pat) Clist.t list =
+  fun len dt ->
+  if dt.total then []
+  else if dt.empty then [Clist.map (fun _ -> any) len]
+  else match len, dt.tree with
+  | [], _ -> assert false (* zero len means dt must be empty or total *)
+  | _ :: _ as len, Bind (_, dt) -> counterexamples len dt
+  | _ :: len, Any dt ->
+     counterexamples len dt
+     |> List.map (fun ps -> Clist.(any :: ps))
+  | _ :: len, Fields fields ->
+     counterexamples_fields ~tag:None len fields
+  | _ :: len, Cases (cases, defaults) ->
+     List.concat_map (fun (tag, fields) ->
+       counterexamples_fields ~tag:(Some (tag, noloc)) len fields) cases
+     @
+     match defaults with
+     | Some (tags, dt) when not dt.total ->
+        let case_pats : pat list =
+          List.map (fun (tag, fields) ->
+             Some (Ptuple (Some (tag, noloc),
+                           map_fields (fun _ () -> any) fields)), noloc) tags
+        in
+        let head = List.fold_left pat_or (List.hd case_pats) (List.tl case_pats) in
+        counterexamples len dt
+        |> List.map (fun ps -> Clist.(head :: ps))
+     | _ -> []
+
+and counterexamples_fields :
+  type n . tag:_ -> (n, _) Clist.t -> n fields_split -> (n s, pat) Clist.t list =
+  fun ~tag len (Proj (names, fopen, dt)) ->
+  counterexamples (Clist.append (Clist.map ignore names) len) dt
+  |> List.map (fun unmatched ->
+    let fs, rest = Clist.split names len unmatched in
     let fields =
-      Clist.zip fields fs
+      Clist.zip names fs
       |> Clist.to_list
       |> Tuple_fields.fields_of_list ~fopen
     in
-    let pat =
-      Ptuple (Option.map (fun s -> s, Location.noloc) tag, fields)
-    in
-    (Some pat, Location.noloc) :: rest
-  in
-  
-  let rec examples :
-    type n k . (n, k, _) Clist.prefix -> n dectree -> (n, k, pat) Clist.prefix list =
-    fun pfx dt ->
-    if dt.total then []
-    else match pfx with
-    | [] -> [ [] ]
-    | _ :: pfx as orig_pfx ->
-       match dectree_tails [()] dt with
-       | Some tail ->
-          (* head must be total! *)
-          let ex = examples pfx tail in
-          List.map (fun ps -> Clist.(any :: ps)) ex
-       | None ->
-          match dt.tree with
-          | Any _ -> assert false (* has tail *)
-          | Bind (_, t) -> examples orig_pfx t
-          | Fields (Proj (names, fopen, t')) ->
-             let ex = examples (Clist.append (Clist.map ignore names) pfx) t' in
-             List.map (unmatched_fields ~tag:None ~fopen names pfx) ex
-          | Cases (cases,defaults) ->
-             let cases =
-               cases @
-               match defaults with
-               | None -> []
-               | Some (tags, t) ->
-                  (* FIXME: `Open or `Closed? *)
-                  List.map (fun tag -> tag, Proj ([], `Closed, t)) tags
-             in
-             let cases =
-               cases |> List.map (fun (c, (Proj (names, _, t) as fs)) ->
-                 c, fs, dectree_tails (Clist.map ignore names) t)
-             in
-             let rec group_cases = function
-               | [] -> []
-               | (tag, Proj (names, fopen, t), None) :: rest ->
-                  let ex = examples (Clist.append (Clist.map ignore names) pfx) t in
-                  List.map (unmatched_fields ~tag:(Some tag) ~fopen names pfx) ex
-                  @ group_cases rest
-               | (_, Proj (_, _, _), Some tail) as first :: rest ->
-                  let same_tail, rest =
-                    List.partition (function
-                      | (_, _, Some tail') when equal_dectree tail tail' ->
-                         true
-                      | _ -> false) rest
-                  in
-                  let ex_tail = examples pfx tail in
-                  let pats =
-                    (first :: same_tail)
-                    |> List.map (fun (tag, (Proj (names, fopen, _)), _) ->
-                       let names = Clist.to_list names |> List.map (fun f -> f, any) in
-                       let fs = Tuple_fields.fields_of_list names ~fopen in
-                       let pat = Ptuple (Some (tag, Location.noloc), fs) in
-                       (Some pat, Location.noloc))
-                  in
-                  let pat = List.fold_left pat_or (List.hd pats) (List.tl pats) in
-                  List.map (fun ps -> Clist.(pat :: ps)) ex_tail
-                  @ group_cases rest
-             in
-             group_cases cases
-  in
-  examples depth t
+    Clist.((Some (Ptuple (tag, fields)), noloc) :: rest))
 
 
 (*
@@ -513,7 +419,7 @@ let check_fvs_mat loc = function
      List.fold_left (check_equ_fvs loc)
        (check_fvs_list ps)
        (List.map check_fvs_list pps)
-  
+
 
 type ex_split = Ex : (('n,_) Clist.t * 'n dectree) -> ex_split
 let split_cases ~matchloc env (typs : (ptyp * Typedefs.gen_level) list) (cases : case list) =
@@ -590,7 +496,8 @@ let compile ~cont ~actions vals orig_dt =
        in
        let default =
          default |> Option.map (fun (tags, dt) ->
-           List.map IR.Symbol.of_string tags, compile ~vals dt)
+           List.map (fun (tag,_fs) -> IR.Symbol.of_string tag) tags,
+           compile ~vals dt)
        in
        Match (v, cases, default)
     | Fields fs, v :: vals ->
