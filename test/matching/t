@@ -56,7 +56,10 @@ fn(x) { (Foo(), Bar, Foo{x: 42}, Baz(1)) }
 #
 fn(x, x) { x }
 > fn (x, x) { x }
-> test:1: Variable x already is bound here:
+> test:1: The variable name x is already in use:
+>   fn(x, x) { x }
+>         ^
+> as it is previously bound here:
 >   fn(x, x) { x }
 >      ^
 
@@ -96,19 +99,27 @@ fn(x) { let (a, b, c) = x; (c, b, a) }
 
 fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
 > fn (x) { match x { (_, _) => 1 | (_, _, _) => 2 } }
-> test:1: This pattern is incompatible with the pattern here:
+> test:1: This pattern:
+>   fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
+>                                  ^^^^^^^
+> is incompatible with the pattern at test:1:
 >   fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
 >                     ^^^^^
 
 fn(x) { match x { (a,a) => 1 } }
 > fn (x) { match x { (a, a) => 1 } }
-> test:1: Variable a already is bound here:
+> test:1: The variable name a is already in use:
+>   fn(x) { match x { (a,a) => 1 } }
+>                        ^
+> as it is previously bound here:
 >   fn(x) { match x { (a,a) => 1 } }
 >                      ^
 
 fn(x) { match x, x { a, b, c => 2 } }
 > fn (x) { match x, x { a, b, c => 2 } }
-> typechecking error: Failure("wrong length of pat row")
+> test:1: Expected 2 patterns but found 3:
+>   fn(x) { match x, x { a, b, c => 2 } }
+>                        ^^^^^^^
 
 fn(x) { match x { Foo => 1 | _ => 2 } }
 > fn (x) { match x { Foo => 1 | _ => 2 } }
@@ -117,6 +128,8 @@ fn(x) { match x { Foo => 1 | _ => 2 } }
 fn(x) { match x { (a | Foo) => 1 } }
 > fn (x) { match x { (a | Foo) => 1 } }
 > test:1: The variable a must be bound on both sides of this or-pattern
+>   fn(x) { match x { (a | Foo) => 1 } }
+>                      ^^^^^^^
 
 fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
 > fn (x) { match (A(1, 2)) { A(x, C) => 1 } }
@@ -144,9 +157,12 @@ fn(x : 'A(int, int) | 'B(int, int)) {
 >     | (a, b) => (a, b)
 >   }
 > }
-> test:3: This pattern is incompatible with the pattern here:
+> test:3: This pattern:
 >     | A(x, y) => (x, y)
 >       ^^^^^^^
+> is incompatible with the pattern at test:4:
+>     | (a, b) => (a, b)
+>       ^^^^^^
 
 
 fn(c) {
@@ -226,7 +242,10 @@ fn(x) {
 >     | B{foo: (C | D), bar: x} => x
 >   }
 > }
-> test:4: This pattern is incompatible with the pattern here:
+> test:4: This pattern:
+>     | A(_, _, _) => 42
+>       ^^^^^^^^^^
+> is incompatible with the pattern at test:3:
 >     | A(_, b) => b
 >       ^^^^^^^
 
@@ -237,7 +256,9 @@ fn() {
   }
 }
 > fn () { match D{x: 5} { D{x, y} => (x, y) } }
-> test:3: Unknown variable name: y
+> test:3: Unknown variable name y
+>       D{x, y} => (x, y)
+>                      ^
 
 
 # Grammar ambiguity requires parens on return type
@@ -512,7 +533,10 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 >     | (F, _, F) => false
 >   }
 > }
-> test:2: The following cases are unhandled:
+> test:2: Some cases of this pattern-match are missing:
+>     match (a, b, c) {
+>           ^^^^^^^^^
+> The following cases are unhandled:
 > | (F, F, T)
 > | (F, T, T)
 
@@ -522,7 +546,10 @@ fn(x : ('A|'B|'C), y : ('A|'B|'C)) {
   }
 }
 > fn (x: ('A | 'B | 'C), y: ('A | 'B | 'C)) { match x, y { A, A => 1 } }
-> test:2: The following cases are unhandled:
+> test:2: Some cases of this pattern-match are missing:
+>     match x, y {
+>           ^^^^
+> The following cases are unhandled:
 > | A, B | C
 > | B | C, _
 
@@ -540,7 +567,10 @@ fn (x : (('A(int,int)|'B{x:string,y:string}|'C|'D|'E), 'B|'C|'D)) {
 >     | (D, C) => 1
 >   }
 > }
-> test:2: The following cases are unhandled:
+> test:2: Some cases of this pattern-match are missing:
+>     match x {
+>           ^
+> The following cases are unhandled:
 > | (A(_, _), B)
 > | (B{x: _, y: _}, B)
 > | (C, B | D)
@@ -562,7 +592,10 @@ fn(x : 'A(int, 'P|'Q|'R) | 'B(int, 'P|'Q|'R)) {
 >     | B(x, P | Q), y => 1
 >   }
 > }
-> test:2: The following cases are unhandled:
+> test:2: Some cases of this pattern-match are missing:
+>     match {averylongnameinanexpression: {averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression, {x:0,y:5}.y {
+>           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> The following cases are unhandled:
 > | A(_, R), _
 > | B(_, R), _
 
@@ -718,7 +751,10 @@ fn (x : 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
 >     | _, (A) => 2
 >   }
 > }
-> test:2: The following cases are unhandled:
+> test:2: Some cases of this pattern-match are missing:
+>     match x, y {
+>           ^^^^
+> The following cases are unhandled:
 > | B | C | D | E, B
 
 

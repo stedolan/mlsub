@@ -233,7 +233,9 @@ if (false) { {foo:1,bar:2} } else { {foo:1,baz:()} }
 
 ((1,2,asdf) : (int, int, ...))
 > ((1, 2, asdf) : (int, int, ...))
-> test:1: Unknown variable name: asdf
+> test:1: Unknown variable name asdf
+>   ((1,2,asdf) : (int, int, ...))
+>         ^^^^
 
 ((1,2,3) : (int, int, ...))
 > ((1, 2, 3) : (int, int, ...))

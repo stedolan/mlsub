@@ -111,8 +111,13 @@ let rec split_head_row :
           match split with
           | Sp_fields fields -> fields
           | Sp_any m -> List.map (fun r -> (empty_fields, []), r) m
-          | Sp_cases (_tags, _cases, _def) ->
-             Error.fail head_loc (Incompatible_patterns head_loc (* FIXME loc *))
+          | Sp_cases (_tags, cases, _def) ->
+             let other_locs =
+               SymMap.bindings cases
+               |> List.concat_map snd
+               |> List.concat_map (fun ((_,l),_) -> l)
+             in
+             Error.fail head_loc (Incompatible_patterns other_locs)
         in
         let split = Sp_fields (((fields, head_loc), (ps, act)) :: acc_fields) in
         var, split
@@ -121,8 +126,12 @@ let rec split_head_row :
           match split with
           | Sp_cases (tags, cases, def) -> tags, cases, def
           | Sp_any m -> [], SymMap.empty, m
-          | Sp_fields _ ->
-             Error.fail head_loc (Incompatible_patterns head_loc (*FIXME loc*))
+          | Sp_fields fs ->
+             let other_locs =
+               fs
+               |> List.concat_map (fun ((_,l),_) -> l)
+             in
+             Error.fail head_loc (Incompatible_patterns other_locs)
         in
         let tail =
           try SymMap.find tag acc_cases
@@ -435,10 +444,10 @@ let split_cases ~matchloc env (typs : (ptyp * Typedefs.gen_level) list) (cases :
   let Ex typs = Clist.of_list typs in
   let mat =
     List.map2 (fun (pps, _) b -> pps, b) cases actions
-    |> List.concat_map (fun ((pps,_loc), act) ->
+    |> List.concat_map (fun ((pps,loc), act) ->
       pps |> List.map (fun ps ->
         match Clist.of_list_length ~len:typs ps with
-        | None -> failwith (*FIXME*)  "wrong length of pat row"
+        | None -> Error.fail loc (Illformed_pat (`Wrong_length (List.length ps, Clist.length typs)))
         | Some ps -> ps, (SymMap.empty, act)))
   in
   let dtree = split_cases ~matchloc ~env typs mat in

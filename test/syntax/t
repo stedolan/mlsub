@@ -1,18 +1,26 @@
 let f = fn (x) { x, x }; f
 > let f = fn (x) { <err> }; f
 > test:1: syntax error
+>   let f = fn (x) { x, x }; f
+>                     ^
 
 let x = 1; (let y = 2 2; {x,y})
 > let x = 1; (<err>)
 > test:1: syntax error
+>   let x = 1; (let y = 2 2; {x,y})
+>                         ^
 
 fn (id : [A]. A -> A) { id(42) }
 > fn (<err>) { id(42) }
 > test:1: syntax error
+>   fn (id : [A]. A -> A) { id(42) }
+>               ^
 
 fn(x, y, ~k: int) { (x:int,k,y) }
 > fn (x, y, ~k : int) { (<err>) }
 > test:1: syntax error
+>   fn(x, y, ~k: int) { (x:int,k,y) }
+>                             ^
 
 
 fn (x)
@@ -49,4 +57,6 @@ fn[A,B](x:A) -> A | (A) -> B { x }
 
 : [A <: ([] int) -> int ] A <: int
 > test:1: Bounds must be simple types
+>   : [A <: ([] int) -> int ] A <: int
+>           ^^^^^^^^^^^^^^^
 > STATS: fix: 0, flex: 63

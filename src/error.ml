@@ -4,7 +4,7 @@ type error_kind =
   | Illformed_type of [`Join_multi_cons | `Join_not_cons_or_var | `Join_poly | `Bound_not_simple | `Bound_not_cons | `Bound_crosses_levels of string]
   | Conflict of [`Expr|`Pat|`Subtype] * Types.subtyping_error
 
-  | Illformed_pat of [`Duplicate_name of string * Location.t | `Orpat_different_names of string | `Wrong_length of int | `Unknown_cases ]
+  | Illformed_pat of [`Duplicate_name of string * Location.t | `Orpat_different_names of string | `Wrong_length of int * int | `Unknown_cases | `Unknown_constructor of string]
   | Incompatible_patterns of Location.t
   | Nonexhaustive of Exp.pat list list
   | Unused_pattern
@@ -49,26 +49,27 @@ let pp_err input loc err : PPrint.document =
       pp "%s" line ^^
       hardline ^^ pp "%*s" cend (String.make (cend-offs) '^')) loc
   in
+  let context = nest 2 (hardline ^^ pp_context loc) in
   (* FIXME: more of these could use context *)
   pp_loc loc ^^ pp ": " ^^ match err with
-  | Syntax -> pp "syntax error"
+  | Syntax -> pp "syntax error" ^^ context
   | Bad_name (err,kind,name) ->
-     pp "%s %s name: %s"
+     pp "%s %s name %s"
        (match err with `Unknown -> "Unknown" | `Duplicate -> "Duplicate")
        (match kind with `Type -> "type" | `Var -> "variable")
-       name
+       name ^^ context
   | Illformed_type `Join_multi_cons ->
-     pp "Joins may only contain one non-variable type"
+     pp "Joins may only contain one non-variable type" ^^ context
   | Illformed_type `Join_not_cons_or_var ->
-     pp "Joins may only contain constructed types and variables"
+     pp "Joins may only contain constructed types and variables" ^^ context
   | Illformed_type `Join_poly ->
-     pp "Joins may not contain polymorphic types"
+     pp "Joins may not contain polymorphic types" ^^ context
   | Illformed_type `Bound_not_simple ->
-     pp "Bounds must be simple types"
+     pp "Bounds must be simple types" ^^ context
   | Illformed_type `Bound_not_cons ->
-     pp "Bounds must be constructed types"
+     pp "Bounds must be constructed types" ^^ context
   | Illformed_type (`Bound_crosses_levels n) ->
-     pp "Rigid variable %s not allowed in join with variable bound earlier" n
+     pp "Rigid variable %s not allowed in join with variable bound earlier" n ^^ context
   | Conflict (_kind, err) ->
      let env = err.env in
      let conflict =
@@ -124,20 +125,26 @@ let pp_err input loc err : PPrint.document =
          | false, false -> empty
      )
   | Incompatible_patterns other_loc ->
-     pp "This pattern is incompatible with the pattern here:" ^^
+     pp "This pattern:" ^^ context ^^
+       hardline ^^ pp "is incompatible with the pattern at " ^^ pp_loc other_loc ^^ pp ":" ^^
        nest 2 (hardline ^^ pp_context other_loc)
   | Illformed_pat (`Duplicate_name (k, other)) ->
-     pp "Variable %s already is bound here:" k ^^
+     pp "The variable name %s is already in use:" k ^^ context ^^
+       hardline ^^ pp "as it is previously bound here:" ^^
        nest 2 (hardline ^^ pp_context other)
-  | Illformed_pat (`Wrong_length expected) ->
-     pp "Expected %d patterns" expected
+  | Illformed_pat (`Wrong_length (found, expected)) ->
+     pp "Expected %d patterns but found %d:" expected found ^^ context
   | Illformed_pat `Unknown_cases ->
-     pp "Cannot determine which cases this pattern matches"
+     pp "Cannot determine which cases this pattern matches" ^^ context
   | Illformed_pat (`Orpat_different_names k) ->
-     pp "The variable %s must be bound on both sides of this or-pattern" k
+     pp "The variable %s must be bound on both sides of this or-pattern" k ^^ context
+  | Illformed_pat (`Unknown_constructor s) ->
+     (* FIXME should show source of ty *)
+     pp "This type does not have a constructor %s" s ^^ context
   | Nonexhaustive missing ->
-     pp "The following cases are unhandled:" ^^ hardline ^^
+     pp "Some cases of this pattern-match are missing:" ^^ context  ^^
+     hardline ^^ pp "The following cases are unhandled:" ^^ hardline ^^
        separate_map (break 1) (fun ps ->
          string "| " ^^ group (separate_map (comma ^^ break 1) Print.pat ps)) missing
   | Unused_pattern ->
-     pp "This pattern is unused"
+     pp "This pattern is unused" ^^ context

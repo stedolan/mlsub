@@ -70,10 +70,14 @@ fn(f) { fn[A](x : A) { f(x) } }
 fn[A,B <: A](x : A) -> B { x }
 > fn [A, B <: A](x: A) -> B { x }
 > test:1: Bounds must be constructed types
+>   fn[A,B <: A](x : A) -> B { x }
+>             ^
 
 fn[A,B <: A](x : B) -> A { x }
 > fn [A, B <: A](x: B) -> A { x }
 > test:1: Bounds must be constructed types
+>   fn[A,B <: A](x : B) -> A { x }
+>             ^
 
 # contravariant join checks
 fn[A,B](x : A|B) -> A|B {x}
@@ -189,7 +193,9 @@ fn (a) { (fn(x) { (x, fn(x) { x }) })(a) }
 
 (fn (x: A) { x } : [A] (A) -> A)
 > (fn (x: A) { x } : [A] (A) -> A)
-> test:1: Unknown type name: A
+> test:1: Unknown type name A
+>   (fn (x: A) { x } : [A] (A) -> A)
+>           ^
 
 (fn (x: bool) { x } : [A] (A) -> A)
 > (fn (x: bool) { x } : [A] (A) -> A)
@@ -640,10 +646,14 @@ let id = fn(y) { y }; (fn(x) {id(x)} : [A] (A) -> A)
 fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> B { x }
 > fn [A, B](x: [X <: B] (X | A) -> X) -> (A) -> B { x }
 > test:1: Bounds must be constructed types
+>   fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> B { x }
+>                     ^
 
 fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
 > fn [A, B](x: [X <: B] (X | A) -> X) -> (A) -> A | B { x }
 > test:1: Bounds must be constructed types
+>   fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
+>                     ^
 
 # wtf:
 # fn[A,B,A <: B](x : [X, X <: A, X :> B](X) -> X) -> [X <: A, Y :> B, X <: Y](X) -> Y { x }
@@ -667,10 +677,14 @@ fn[A,B](x : [X <: B](X|A) -> X) -> (A) -> A|B { x }
 (@bot : [A <: [B]int]int)
 > (@bot : [A <: [B] int] int)
 > test:1: Bounds must be constructed types
+>   (@bot : [A <: [B]int]int)
+>                 ^^^^^^
 
 (@bot : [A, B] ({foo : A} | {foo : B}))
 > (@bot : [A, B] ({foo: A} | {foo: B}))
 > test:1: Joins may only contain one non-variable type
+>   (@bot : [A, B] ({foo : A} | {foo : B}))
+>                   ^^^^^^^^^^^^^^^^^^^^^
 
 # bug in substn_ntyp
 fn[A](id: [B](A) -> int) { id }
@@ -1146,6 +1160,8 @@ fn  [A](a) -> A { let x = a; x }
 fn [A](x:A, f:[B <: A](B) -> B) { x }
 > fn [A](x: A, f: [B <: A] (B) -> B) { x }
 > test:1: Bounds must be constructed types
+>   fn [A](x:A, f:[B <: A](B) -> B) { x }
+>                       ^
 
 # Some versions make RHS be {foo:int}, not {foo:int}|A
 # This is equivalent but shorter, as A <= {foo:int}.
