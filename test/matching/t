@@ -82,11 +82,11 @@ fn((A|B), x) { x }
 # FIXME: don't like this elaboration!
 fn(x) { let (a, b, c) = x; (c, b, a) }
 > fn (x) { let (a, b, c) = x; (c, b, a) }
->   fn [A, B, C, D <: (A, B, C)](x: D) -> (C, B, A) {
->     let (a, b, c) : D = x;
+>   fn [A, B, C](x: (A, B, C)) -> (C, B, A) {
+>     let (a, b, c) : (A, B, C) = x;
 >     (c, b, a)
 >   }
-> [A, B, C, D <: (A, B, C)] (D) -> (C, B, A)
+> [A, B, C] ((A, B, C)) -> (C, B, A)
 > let  = %yield(0: fun (x) ret {
 >   let v0, v1, v2 = x.(0, 1, 2);
 >   ret((0: v2, 1: v1, 2: v0))
@@ -858,4 +858,4 @@ fn (x : 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
 
 
 # end
-> STATS: fix: 2, flex: 192
+> STATS: fix: 2, flex: 193

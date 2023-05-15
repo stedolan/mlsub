@@ -285,14 +285,15 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _ * 'rest) : pty
     rest
 
 (* FIXME:
-   Can't decide whether this makes types better or worse! *)
-(*let elab_ptyp = function
+   This improves elaborations but is a bit of a hack.
+   Decide whether to keep it! *)
+let elab_ptyp = function
   | Tsimple (Lower(fv, ctor)) as ty when is_bottom (Lower(Fvset.empty,ctor)) ->
      (match (fv :> flexvar list) with
       | [fv] -> Elab (Ntyp (Tsimple fv), fun x -> x)
       | _ -> Elab (Ptyp ty, fun x -> x))
   | ty ->
-     Elab (Ptyp ty, fun x -> x)*)
+     Elab (Ptyp ty, fun x -> x)
 
 let rec pat_name = function
   | Some (Pparens p), _ -> pat_name p

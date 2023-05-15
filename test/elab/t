@@ -50,8 +50,8 @@ fn (x) { (fn(a){x(a)})(6) }
 
 fn (x) { let y = x; 1 }
 > fn (x) { let y = x; 1 }
->   fn [A](x: A) -> int { let y : A = x; 1 }
-> [A] (A) -> int
+>   fn (x: any) -> int { let y : any = x; 1 }
+> (any) -> int
 > let  = %yield(0: fun (x) ret { ret(1) }); done
 
 let id=fn[A](){fn(a:A){a}}; fn(){let x=id(); x(1)}
@@ -121,4 +121,4 @@ fn() { twice(id, id)(id) }
 >   ret(x2)
 > });
 > done
-> STATS: fix: 14, flex: 267
+> STATS: fix: 14, flex: 262

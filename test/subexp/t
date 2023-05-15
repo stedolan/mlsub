@@ -533,10 +533,10 @@ let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){l
 > }
 >   let wid : ([B, A <: {foo: B}] (A) -> B) -> int =
 >   fn (id: [B, A <: {foo: B}] (A) -> B) -> int { id({foo: 5}) };
->   fn [A](f: ({bar: {foo: any}}) -> A) -> int {
->     wid(fn (x) { let z : A = f({bar: x}); x.foo })
+>   fn (f: ({bar: {foo: any}}) -> any) -> int {
+>     wid(fn (x) { let z : any = f({bar: x}); x.foo })
 >   }
-> [A] (({bar: {foo: any}}) -> A) -> int
+> (({bar: {foo: any}}) -> any) -> int
 > let wid = fun (id) ret { let x = id(0: (foo: 5)); ret(x) };
 > let  = %yield(0: fun (f) ret {
 >   let x = wid(0: fun (x) ret2 {
@@ -584,13 +584,13 @@ let id = fn(x) { x }; fn () { (id (id), id) }
 
 fn(f) { fn(id: [A] (A) -> A) { let x = f(id); id(1) } }
 > fn (f) { fn (id: [A] (A) -> A) { let x = f(id); id(1) } }
->   fn [A, B](f: ((A) -> A) -> B) -> ([A_2] (A_2) -> A_2) -> int {
+>   fn [A](f: ((A) -> A) -> any) -> ([A_2] (A_2) -> A_2) -> int {
 >     fn (id: [A_2] (A_2) -> A_2) -> int {
->       let x : B = f(id);
+>       let x : any = f(id);
 >       id(1)
 >     }
 >   }
-> [A, B] (((A) -> A) -> B) -> ([A_2] (A_2) -> A_2) -> int
+> [A] (((A) -> A) -> any) -> ([A_2] (A_2) -> A_2) -> int
 > let  = %yield(0: fun (f) ret {
 >   ret(fun (id) ret2 { let x = f(0: id); let x2 = id(0: 1); ret2(x2) })
 > });
@@ -598,12 +598,12 @@ fn(f) { fn(id: [A] (A) -> A) { let x = f(id); id(1) } }
 
 fn(f) { fn(id: [A] (A) -> A) { id(fn(y) { let x = f(y); y }) } }
 > fn (f) { fn (id: [A] (A) -> A) { id(fn (y) { let x = f(y); y }) } }
->   fn [A, B](f: (A) -> B) -> ([A_2] (A_2) -> A_2) -> (A) -> A {
+>   fn [A](f: (A) -> any) -> ([A_2] (A_2) -> A_2) -> (A) -> A {
 >     fn (id: [A_2] (A_2) -> A_2) -> (A) -> A {
->       id(fn (y: A) -> A { let x : B = f(y); y })
+>       id(fn (y: A) -> A { let x : any = f(y); y })
 >     }
 >   }
-> [A, B] ((A) -> B) -> ([A_2] (A_2) -> A_2) -> (A) -> A
+> [A] ((A) -> any) -> ([A_2] (A_2) -> A_2) -> (A) -> A
 > let  = %yield(0: fun (f) ret {
 >   ret(fun (id) ret2 {
 >     let x = id(0: fun (y) ret3 { let x = f(0: y); ret3(y) });
@@ -954,7 +954,7 @@ fn(x, y, k1, k2, k3) {
 >   ) -> (D, F) {
 >     let ch : [X] (X, X) -> X =
 >     fn [X](a: X, b: X) -> X { if true { a } else { b } };
->     let z : D | F = ch(x, y)(fn (x: A) -> B { k1(x) });
+>     let z : any = ch(x, y)(fn (x: A) -> B { k1(x) });
 >     (x(k2), y(k3))
 >   }
 > [A, B, C, D, E, F] ((((A) -> B) | C) -> D, (((A) -> B) | E) -> F, (A) -> B, C, E) -> (D, F)
@@ -993,7 +993,7 @@ fn(x, y) {
 >   fn [A, B](x: {bar: A, ...}, y: {bar: B, ...}) -> (A, B) {
 >     let ch : [X] (X, X) -> X =
 >     fn [X](a: X, b: X) -> X { if true { a } else { b } };
->     let z : A | B = ch(x, y).bar;
+>     let z : any = ch(x, y).bar;
 >     (x.bar, y.bar)
 >   }
 > [A, B] ({bar: A, ...}, {bar: B, ...}) -> (A, B)
@@ -1028,13 +1028,13 @@ fn(y) {
 >   let z = ch({bar: true}, y).bar;
 >   (y.bar : int)
 > }
->   fn [A <: int](y: {bar: A, ...}) -> int {
+>   fn (y: {bar: int, ...}) -> int {
 >     let ch : [X] (X, X) -> X =
 >     fn [X](a: X, b: X) -> X { if true { a } else { b } };
->     let z : bool | A = ch({bar: true}, y).bar;
+>     let z : any = ch({bar: true}, y).bar;
 >     (y.bar : int)
 >   }
-> [A <: int] ({bar: A, ...}) -> int
+> ({bar: int, ...}) -> int
 > let  = %yield(0: fun (y) ret {
 >   let ch =
 >     fun (a, b) ret2 {
@@ -1120,8 +1120,7 @@ fn (x, y, k) {
 >   ) -> (C, F) {
 >     let ch : [X] (X, X) -> X =
 >     fn [X](a: X, b: X) -> X { if true { a } else { b } };
->     let z : C | F =
->     ch(x, y)(fn (a: A | D | G) -> int { let z : int = k(a); 1 });
+>     let z : any = ch(x, y)(fn (a: A | D | G) -> int { let z : int = k(a); 1 });
 >     (x(fn [A_2](x: A_2) -> A_2 { x }), y(fn [A_2](x: A_2) -> A_2 { x }))
 >   }
 > [A, B, C, D, E, F, G] (((A) -> int | A | B) -> C, ((D) -> int | D | E) -> F, (A | D | G) -> int) -> (C, F)
@@ -1147,14 +1146,8 @@ fn (x, y, k) {
 
 fn  [A](a) -> A { let x = a; x }
 > fn [A](a) -> A { let x = a; x }
->   fn [A, B <: A](a: B) -> A { let x : B = a; x }
-> [A, B <: A] (B) -> A
-> RECHECK: Lang.Error.Fail(_)
-> 
-> ELAB: Lang.Error.Fail(_)
-> 
-> ELABINF: Lang.Error.Fail(_)
-> 
+>   fn [A](a: A) -> A { let x : A = a; x }
+> [A] (A) -> A
 > let  = %yield(0: fun (a) ret { ret(a) }); done
 
 fn [A](x:A, f:[B <: A](B) -> B) { x }
@@ -1232,4 +1225,4 @@ fn [A,C,B <: int](x) -> (A|C,int|B|C) { (x,x) }
 > [A, C, B <: int] (C) -> (A | C, int | B | C)
 > let  = %yield(0: fun (x) ret { ret((0: x, 1: x)) }); done
 
-> STATS: fix: 59, flex: 1898
+> STATS: fix: 58, flex: 1885

@@ -839,12 +839,12 @@ fn (x) { let {p,q} = x; let {p,q,r} = x; {p,q} }
 
 fn (x) { let {p,q,...} = x; let {p,q,r} = x; {p,q} }
 > fn (x) { let {p, q, ...} = x; let {p, q, r} = x; {p, q} }
->   fn [A, B, C <: {p: A, q: B, r: any}](x: C) -> {p: A, q: B} {
->     let {p, q, ...} : C = x;
->     let {p, q, r} : C = x;
+>   fn [A, B](x: {p: A, q: B, r: any}) -> {p: A, q: B} {
+>     let {p, q, ...} : {p: A, q: B, r: any} = x;
+>     let {p, q, r} : {p: A, q: B, r: any} = x;
 >     {p, q}
 >   }
-> [A, B, C <: {p: A, q: B, r: any}] (C) -> {p: A, q: B}
+> [A, B] ({p: A, q: B, r: any}) -> {p: A, q: B}
 > let  = %yield(0: fun (x) ret {
 >   let p, q = x.(p, q);
 >   let p2, q2, r = x.(p, q, r);
@@ -869,12 +869,12 @@ fn (x) { let {p,q} = x; let {p,q,r,...} = x; {p,q} }
 
 fn (x) { let {p,q,...} = x; let {p,q,r,...} = x; {p,q} }
 > fn (x) { let {p, q, ...} = x; let {p, q, r, ...} = x; {p, q} }
->   fn [A, B, C <: {p: A, q: B, r: any, ...}](x: C) -> {p: A, q: B} {
->     let {p, q, ...} : C = x;
->     let {p, q, r, ...} : C = x;
+>   fn [A, B](x: {p: A, q: B, r: any, ...}) -> {p: A, q: B} {
+>     let {p, q, ...} : {p: A, q: B, r: any, ...} = x;
+>     let {p, q, r, ...} : {p: A, q: B, r: any, ...} = x;
 >     {p, q}
 >   }
-> [A, B, C <: {p: A, q: B, r: any, ...}] (C) -> {p: A, q: B}
+> [A, B] ({p: A, q: B, r: any, ...}) -> {p: A, q: B}
 > let  = %yield(0: fun (x) ret {
 >   let p, q = x.(p, q);
 >   let p2, q2, r = x.(p, q, r);
@@ -1238,13 +1238,13 @@ fn(id) {
   fn(x) { z(x) }
 }
 > fn (id) { let z = id; fn (x) { z(x) } }
->   fn [A, B, C <: (A) -> B](id: C) -> (A) -> B {
->     let z : C = id;
+>   fn [A, B](id: (A) -> B) -> (A) -> B {
+>     let z : (A) -> B = id;
 >     fn (x: A) -> B {
 >       z(x)
 >     }
 >   }
-> [A, B, C <: (A) -> B] (C) -> (A) -> B
+> [A, B] ((A) -> B) -> (A) -> B
 > let  = %yield(0: fun (id) ret {
 >   ret(fun (x) ret2 { let x2 = id(0: x); ret2(x2) })
 > });
@@ -1443,9 +1443,9 @@ fn() { (fn (x) { x })(fn (x) { x }) }
 # this way around is fine: {foo:b}|a, when a is bound more deeply
 fn(f) { fn(a,b) { let z = f(b); if true { {foo:b} } else { a } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { {foo: b} } else { a } } }
->   fn [A, B, C](f: (A) -> B) -> (C, A) -> {foo: A} | C {
->     fn (a: C, b: A) -> {foo: A} | C {
->       let z : B = f(b);
+>   fn [A, B](f: (A) -> any) -> (B, A) -> {foo: A} | B {
+>     fn (a: B, b: A) -> {foo: A} | B {
+>       let z : any = f(b);
 >       if true {
 >         {foo: b}
 >       } else {
@@ -1453,7 +1453,7 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:b} } else { a } } }
 >       }
 >     }
 >   }
-> [A, B, C] ((A) -> B) -> (C, A) -> {foo: A} | C
+> [A, B] ((A) -> any) -> (B, A) -> {foo: A} | B
 > let  = %yield(0: fun (f) ret {
 >   ret(fun (a, b) ret2 {
 >     let x = f(0: b);
@@ -1473,9 +1473,9 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:b} } else { a } } }
 # hoists a to avoid an invalid Tvjoin
 fn(f) { fn(a,b) { let z = f(b); if true { {foo:a} } else { b } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { {foo: a} } else { b } } }
->   fn [A, B, C](f: (A) -> B) -> (C, A) -> {foo: C} | A {
->     fn (a: C, b: A) -> {foo: C} | A {
->       let z : B = f(b);
+>   fn [A, B](f: (A) -> any) -> (B, A) -> {foo: B} | A {
+>     fn (a: B, b: A) -> {foo: B} | A {
+>       let z : any = f(b);
 >       if true {
 >         {foo: a}
 >       } else {
@@ -1483,7 +1483,7 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:a} } else { b } } }
 >       }
 >     }
 >   }
-> [A, B, C] ((A) -> B) -> (C, A) -> {foo: C} | A
+> [A, B] ((A) -> any) -> (B, A) -> {foo: B} | A
 > let  = %yield(0: fun (f) ret {
 >   ret(fun (a, b) ret2 {
 >     let x = f(0: b);
@@ -1502,9 +1502,9 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:a} } else { b } } }
 # no need to hoist in these cases, with no cons (because join commutes)
 fn(f) { fn(a,b) { let z = f(b); if true { b } else { a } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { b } else { a } } }
->   fn [A, B, C](f: (A) -> B) -> (C, A) -> A | C {
->     fn (a: C, b: A) -> A | C {
->       let z : B = f(b);
+>   fn [A, B](f: (A) -> any) -> (B, A) -> A | B {
+>     fn (a: B, b: A) -> A | B {
+>       let z : any = f(b);
 >       if true {
 >         b
 >       } else {
@@ -1512,7 +1512,7 @@ fn(f) { fn(a,b) { let z = f(b); if true { b } else { a } } }
 >       }
 >     }
 >   }
-> [A, B, C] ((A) -> B) -> (C, A) -> A | C
+> [A, B] ((A) -> any) -> (B, A) -> A | B
 > let  = %yield(0: fun (f) ret {
 >   ret(fun (a, b) ret2 {
 >     let x = f(0: b);
@@ -1530,9 +1530,9 @@ fn(f) { fn(a,b) { let z = f(b); if true { b } else { a } } }
 
 fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { a } else { b } } }
->   fn [A, B, C](f: (A) -> B) -> (C, A) -> A | C {
->     fn (a: C, b: A) -> A | C {
->       let z : B = f(b);
+>   fn [A, B](f: (A) -> any) -> (B, A) -> A | B {
+>     fn (a: B, b: A) -> A | B {
+>       let z : any = f(b);
 >       if true {
 >         a
 >       } else {
@@ -1540,7 +1540,7 @@ fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
 >       }
 >     }
 >   }
-> [A, B, C] ((A) -> B) -> (C, A) -> A | C
+> [A, B] ((A) -> any) -> (B, A) -> A | B
 > let  = %yield(0: fun (f) ret {
 >   ret(fun (a, b) ret2 {
 >     let x = f(0: b);
@@ -2001,12 +2001,13 @@ fn(f) { fn(x) { (x, f(x)) } }
 
 fn(x) { let y = (fn(x){x})(x); (x.foo.bar.a.b.c, y.foo.bar.a.b.c) }
 > fn (x) { let y = (fn (x) { x })(x); (x.foo.bar.a.b.c, y.foo.bar.a.b.c) }
->   fn [A, B <: {foo: {bar: {a: {b: {c: A, ...}, ...}, ...}, ...}, ...}](x: B) ->
->     (A, A) {
->     let y : B = (fn [A_2](x: A_2) -> A_2 { x })(x);
+>   fn [A, B](x: {foo: {bar: {a: {b: {c: A, ...}, ...}, ...}, ...}, ...}) ->
+>     (A, A | B) {
+>     let y : {foo: {bar: {a: {b: {c: A | B, ...}, ...}, ...}, ...}, ...} =
+>     (fn [A_2](x: A_2) -> A_2 { x })(x);
 >     (x.foo.bar.a.b.c, y.foo.bar.a.b.c)
 >   }
-> [A, B <: {foo: {bar: {a: {b: {c: A, ...}, ...}, ...}, ...}, ...}] (B) -> (A, A)
+> [A, B] ({foo: {bar: {a: {b: {c: A, ...}, ...}, ...}, ...}, ...}) -> (A, A | B)
 > let  = %yield(0: fun (x) ret {
 >   let x2 = fun (x2) ret2 {
 >     ret2(x2)
@@ -2036,8 +2037,8 @@ fn(x) {
 >   idf(choose(x, {foo: 5}))
 > }
 >   fn [A <: {foo: any, ...}](x: A) -> {foo: int} | A {
->     let idf : [A_2, B <: {foo: A_2, ...}] (B) -> B =
->     fn [A_2, B <: {foo: A_2, ...}](x: B) -> B { let y : A_2 = x.foo; x };
+>     let idf : [A_2 <: {foo: any, ...}] (A_2) -> A_2 =
+>     fn [A_2 <: {foo: any, ...}](x: A_2) -> A_2 { let y : any = x.foo; x };
 >     let choose : [A_2] (A_2, A_2) -> A_2 =
 >     fn [A_2](x: A_2, y: A_2) -> A_2 { if true { x } else { y } };
 >     idf(choose(x, {foo: 5}))
@@ -2110,17 +2111,17 @@ fn(x) {
 >       }
 >     },
 >     snd:
->     fn [A <: {foo: int}](x: A) -> {foo: int} {
+>     fn (x: {foo: int}) -> {foo: int} {
 >       if true {
 >         x
 >       } else {
->         let {foo: z} : A = x;
+>         let {foo: z} : {foo: int} = x;
 >         let zz : int = z;
 >         {foo: 42}
 >       }
 >     }
 >   }
-> {fst: [A <: {foo: bool}] (A) -> {foo: int} | A, snd: [A <: {foo: int}] (A) -> {foo: int}}
+> {fst: [A <: {foo: bool}] (A) -> {foo: int} | A, snd: ({foo: int}) -> {foo: int}}
 > let  = %yield(0: 
 > (fst: fun (x) ret {
 >   match <true> {
@@ -2147,4 +2148,4 @@ fn(x) {
 > done
 
 
-> STATS: fix: 68, flex: 1619
+> STATS: fix: 66, flex: 1562
