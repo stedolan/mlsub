@@ -52,7 +52,7 @@ and parameters = (pat * tyexp option) tuple_fields
 
 and pat = pat' mayloc and pat' =
   | Pany
-  | Pvar of symbol
+  | Pbind of symbol * pat
   | Ptuple of tuple_tag option * pat tuple_fields
   | Por of pat * pat
   | Pparens of pat
@@ -132,7 +132,7 @@ let mapper =
 
   let pat = mayloc @@ fun r p -> match p with
     | Pany -> Pany
-    | Pvar s -> Pvar (sym r s)
+    | Pbind (s, p) -> Pbind (sym r s, r.pat r p)
     | Ptuple (tag, ps) ->
        Ptuple (Option.map (sym r) tag, map_fields (fun _fn x -> r.pat r x) ps)
     | Por (p, q) -> Por (r.pat r p, r.pat r q)

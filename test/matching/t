@@ -287,6 +287,79 @@ fn() {
 >                      ^
 
 
+#
+# At-patterns
+#
+
+fn((a @ b @ c @ (d,e), f)){(a,b,c,d,e,f)}
+> fn ((a @ b @ c @ (d, e), f)) { (a, b, c, d, e, f) }
+>   fn [A, B, C <: (A, B), D]((a @ b @ c @ (d, e), f): (C, D)) ->
+>     (C, C, C, A, B, D) {
+>     (a, b, c, d, e, f)
+>   }
+> [A, B, C <: (A, B), D] ((C, D)) -> (C, C, C, A, B, D)
+> let  = %yield(0: fun (0) ret {
+>   let v0, v1 = 0.(0, 1);
+>   let v02, v12 = v0.(0, 1);
+>   ret((0: v0, 1: v0, 2: v0, 3: v02, 4: v12, 5: v1))
+> });
+> done
+
+fn(p, q) {
+  match p, q {
+    | (y @ A), (z @ A)
+    | (z @ A), (y @ B)
+    | (y @ B), (z @ A) => (y,z)
+    | (z @ B), (y @ B) => (y,z)
+  }
+}
+> fn (p, q) {
+>   match p, q {
+>     | (y @ A), (z @ A)
+>     | (z @ A), (y @ B)
+>     | (y @ B), (z @ A) => (y, z)
+>     | (z @ B), (y @ B) => (y, z)
+>   }
+> }
+>   fn [A <: 'A | 'B, B <: 'A | 'B](p: A, q: B) -> (A | B, A | B) {
+>     match p, q {
+>       | (y @ A), (z @ A)
+>       | (z @ A), (y @ B)
+>       | (y @ B), (z @ A) => (y, z)
+>       | (z @ B), (y @ B) => (y, z)
+>     }
+>   }
+> [A <: 'A | 'B, B <: 'A | 'B] (A, B) -> (A | B, A | B)
+> let  = %yield(0: fun (p, q) ret {
+>   let case(y, z) = {
+>     ret((0: y, 1: z))
+>   };
+>   match p {
+>     A() -> {
+>       match q {
+>         A() -> {
+>           case(p, q)
+>         };
+>         B() -> {
+>           case(q, p)
+>         }
+>       }
+>     };
+>     B() -> {
+>       match q {
+>         A() -> {
+>           case(p, q)
+>         };
+>         B() -> {
+>           ret((0: q, 1: p))
+>         }
+>       }
+>     }
+>   }
+> });
+> done
+
+
 # Grammar ambiguity requires parens on return type
 # (otherwise function body is misread as fields)
 fn(x : 'A | 'B | 'C(int) | 'D{x:int}) -> int {
@@ -785,4 +858,4 @@ fn (x : 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
 
 
 # end
-> STATS: fix: 2, flex: 159
+> STATS: fix: 2, flex: 192

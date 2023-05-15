@@ -28,6 +28,7 @@ let rec lex buf =
   | "=>" -> FATARROW
   | "<:" -> SUBTYPE
   | ":>" -> SUPTYPE
+  | '@' -> AT
 
   | "fn" -> FN
   | "let" -> LET

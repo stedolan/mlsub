@@ -9,13 +9,13 @@
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
 %token COLON EQUALS DOT DOTS COMMA SEMI UNDER QUESTION ARROW FATARROW AMPER VBAR
 %token FN LET TRUE FALSE IF ELSE AS TILDE
-%token SUBTYPE SUPTYPE
+%token SUBTYPE SUPTYPE AT
 %token MATCH
 
 %nonassoc low_priority
 %nonassoc ARROW
 %nonassoc LPAR LBRACE
-%left VBAR
+%left VBAR                      (* FIXME VBAR vs AT precedence? *)
 %right AS
 %right SEMI
 (*%nonassoc high_priority*)
@@ -26,6 +26,8 @@
 %{
 let parse_fields fs = collect_fields fs
 let parse_tyfields fs = collect_fields fs
+
+let pvar s = Pbind (s, (Some Pany, snd s))
 %}
 %%
 
@@ -149,7 +151,7 @@ parameter:
 | p = pat; ty = opt_type_annotation
   { Fpos (p, ty) }
 | TILDE; f = symbol; ty = opt_type_annotation
-  { Fnamed (fst f, ((Some (Pvar f), snd f), ty)) }
+  { Fnamed (fst f, ((Some (pvar f), snd f), ty)) }
 | TILDE; f = SYMBOL; p = pat; ty = opt_type_annotation
   { Fnamed (f, (p, ty)) }
 
@@ -188,13 +190,15 @@ pat: p = mayloc(pat_) { p }
 pat_:
 | p = onepat_
   { p }
+| v = symbol; AT; p = pat
+  { Pbind (v, p) }
 | p = onepat; VBAR; q = pat
   { Por(p, q) }
 
 onepat: p = mayloc(onepat_) { p }
 onepat_:
 | v = symbol
-  { Pvar v }
+  { pvar v }
 | UNDER
   { Pany }
 | tag = usymbol
@@ -222,7 +226,7 @@ named_field_pat:
 | f = SYMBOL; COLON; p = pat
   { Fnamed(f, p) }
 | f = symbol
-  { Fnamed(fst f, (Some (Pvar f), snd f)) }
+  { Fnamed(fst f, (Some (pvar f), snd f)) }
 | DOTS
   { Fdots }
 

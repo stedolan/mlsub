@@ -125,7 +125,7 @@ and exp_pun = function
   | Field_named s, (Some (Var ({label=s';shift=0}, _)), _) -> s = s'
   | _ -> false
 and pat_pun = function
-  | Field_named s, (Some (Pvar (s',_)), _) -> s = s'
+  | Field_named s, (Some (Pbind ((s', _), (Some Pany, _))), _) -> s = s'
   | _ -> false
 
 and argument ~pos fn arg =
@@ -139,7 +139,7 @@ and argument ~pos fn arg =
 and parameter ~pos fn (p,ty) =
   match fn, p with
   | _ when pos -> pat p ^^ opt_type_annotation ~prespace:false ty
-  | Field_named s, (Some (Pvar (s',_)), _) when s = s' ->
+  | Field_named s, (Some (Pbind ((s', _), (Some Pany, _))), _) when s = s' ->
      string "~" ^^ field_name fn ^^
        opt_type_annotation ty
   | _ ->
@@ -158,7 +158,8 @@ and cases cs =
 
 and pat p = mayloc p @@ function
   | Pany -> string "_"
-  | Pvar s -> symbol s
+  | Pbind (s, (Some Pany, _)) -> symbol s
+  | Pbind (s, p) -> symbol s ^^ op "@" ^^ pat p
   | Ptuple (None, ts) -> record ~tcomma:true ~pun:pat_pun pat ts
   | Ptuple (Some tag, ts) when Tuple_fields.is_empty ts && ts.fopen = `Closed -> symbol tag
   | Ptuple (Some tag, ts) -> symbol tag ^^ record ~tcomma:false ~pun:pat_pun pat ts

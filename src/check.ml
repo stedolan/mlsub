@@ -296,7 +296,7 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _ * 'rest) : pty
 
 let rec pat_name = function
   | Some (Pparens p), _ -> pat_name p
-  | Some (Pvar v), _ -> Some (fst v : string)
+  | Some (Pbind (v,_)), _ -> Some (fst v : string)
   | _ -> None
   
 let fresh_flow env =

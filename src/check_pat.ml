@@ -142,13 +142,12 @@ let rec split_head_row :
             (if SymMap.mem tag acc_cases then acc_tags else tagloc :: acc_tags),
             SymMap.add tag (((fields, head_loc), (ps, act)) :: tail) acc_cases,
             acc_def)
-     | Pvar (name, _) ->
+     | Pbind ((name, _), subpat) ->
         let var =
           match var with
           | None -> IR.Binder.fresh ~name ()
           | Some v -> v
         in
-        let subpat = (Some Pany, head_loc) in
         let bindings, action = act in
         let ptyp, gen_level = head_typ in
         let bindings = SymMap.add name (ptyp, gen_level, var) bindings in
@@ -411,8 +410,9 @@ and check_fvs = function
 and check_fvs' ploc = function
   | Pany ->
      SymMap.empty
-  | Pvar (v, _) ->
-     SymMap.singleton v ploc
+  | Pbind ((v, _), p) ->
+     let p = check_fvs p in
+     SymMap.add v ploc p
   | Ptuple (_, fs) ->
      check_fvs_list (List.map snd (list_fields fs))
   | Pparens p ->
