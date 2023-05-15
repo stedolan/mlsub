@@ -1218,6 +1218,57 @@ fn (f) { fn(x) { (f(x), x) } }
 > });
 > done
 
+#
+# MonoLocalBinds tests
+#
+
+# This one generalises, because its free vars are generalised
+let id = fn(x) { x };
+fn(x) { id(x) }
+> let id = fn (x) { x }; fn (x) { id(x) }
+>   let id : [A] (A) -> A = fn [A](x: A) -> A { x }; fn [A](x: A) -> A { id(x) }
+> [A] (A) -> A
+> let id = fun (x) ret { ret(x) };
+> let  = %yield(0: fun (x) ret { let x2 = id(0: x); ret(x2) });
+> done
+
+# This one does not generalise (internally), because it has a free inferred var
+fn(id) {
+  let z = id;
+  fn(x) { z(x) }
+}
+> fn (id) { let z = id; fn (x) { z(x) } }
+>   fn [A, B, C <: (A) -> B](id: C) -> (A) -> B {
+>     let z : C = id;
+>     fn (x: A) -> B {
+>       z(x)
+>     }
+>   }
+> [A, B, C <: (A) -> B] (C) -> (A) -> B
+> let  = %yield(0: fun (id) ret {
+>   ret(fun (x) ret2 { let x2 = id(0: x); ret2(x2) })
+> });
+> done
+
+# This one does generalise internally, because its free var is not inferred
+fn(id : [A] (A) -> A) {
+  let z = id;
+  fn(x) { id(x) }
+}
+> fn (id: [A] (A) -> A) { let z = id; fn (x) { id(x) } }
+>   fn (id: [A] (A) -> A) -> [A] (A) -> A {
+>     let z : [A] (A) -> A = id;
+>     fn [A](x: A) -> A {
+>       id(x)
+>     }
+>   }
+> ([A] (A) -> A) -> [A] (A) -> A
+> let  = %yield(0: fun (id) ret {
+>   ret(fun (x) ret2 { let x2 = id(0: x); ret2(x2) })
+> });
+> done
+
+
 
 # poly id as an argument!
 fn (f) { (f(1), f(true)) }
@@ -2096,4 +2147,4 @@ fn(x) {
 > done
 
 
-> STATS: fix: 68, flex: 1553
+> STATS: fix: 68, flex: 1619
