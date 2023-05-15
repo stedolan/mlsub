@@ -166,15 +166,12 @@ let eval_cont_fields (fs : exp tuple_fields) (cont : IR.value tuple_fields -> IR
   (Tuple_fields.fold_fields add_field final fs) FieldMap.empty
 
 let eval_cont_list (es : exp list) (cont : IR.value list -> IR.comp) =
-  let final : IR.value list -> IR.comp =
-    fun vals -> cont (List.rev vals)
-  in
   let add_exp (acc : IR.value list -> IR.comp) exp =
     fun vals ->
     eval_cont exp @@ fun v ->
     acc (v :: vals)
   in
-  List.fold_left add_exp final es []
+  List.fold_left add_exp cont es []
 
 let apply_pat (p : pat) (v : IR.value) (body : IR.comp) =
   p v body

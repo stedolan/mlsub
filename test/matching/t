@@ -249,6 +249,32 @@ fn(x) {
 >     | A(_, b) => b
 >       ^^^^^^^
 
+#
+# Regression for a reversal bug
+#
+
+fn(a, b) {
+  match a, b {
+  | A, y => y
+  | B, y => y
+  }
+}
+> fn (a, b) { match a, b { A, y => y | B, y => y } }
+>   fn [A](a: 'A | 'B, b: A) -> A { match a, b { A, y => y | B, y => y } }
+> [A] ('A | 'B, A) -> A
+> let  = %yield(0: fun (a, b) ret {
+>   match a {
+>     A() -> {
+>       ret(b)
+>     };
+>     B() -> {
+>       ret(b)
+>     }
+>   }
+> });
+> done
+
+
 # FIXME: badly broken
 fn() {
   match D{x:5} {
@@ -670,9 +696,9 @@ fn(x, y) {
 > ELABINF: Failure("unknown ctor")
 > 
 > let  = %yield(0: fun (x, y) ret {
->   match y {
+>   match x {
 >     A() -> {
->       match x {
+>       match y {
 >         A() -> {
 >           ret(1)
 >         };
@@ -682,7 +708,7 @@ fn(x, y) {
 >       }
 >     };
 >     B() -> {
->       match x {
+>       match y {
 >         A() -> {
 >           ret(3)
 >         }
@@ -713,9 +739,9 @@ fn (x : 'A | 'B | 'C | 'D | 'E, y) -> int {
 >   }
 > ('A | 'B | 'C | 'D | 'E, 'A | 'B) -> int
 > let  = %yield(0: fun (x, y) ret {
->   match y {
+>   match x {
 >     A() -> {
->       match x {
+>       match y {
 >         A() -> {
 >           ret(1)
 >         };
@@ -725,7 +751,7 @@ fn (x : 'A | 'B | 'C | 'D | 'E, y) -> int {
 >       }
 >     };
 >     (B|C|D|E)() -> {
->       match x {
+>       match y {
 >         A() -> {
 >           ret(2)
 >         };
@@ -759,4 +785,4 @@ fn (x : 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
 
 
 # end
-> STATS: fix: 2, flex: 152
+> STATS: fix: 2, flex: 159
