@@ -3,14 +3,18 @@ open Typedefs
 open Tuple_fields
 open Util
 
-type bindings = (ptyp * Typedefs.gen_level * IR.value IR.Binder.t) SymMap.t
+type bindings = Typedefs.value_binding SymMap.t
+
+type act_bindings =
+  { bindings: bindings;
+    shared_cont:
+      (IR.cont IR.Binder.t * (string * IR.value IR.Binder.t) list) option }
 
 type 'rhs action = {
   rhs: 'rhs;
   id: int;
   pat_loc: Location.t;
-  mutable bindings: bindings;
-  mutable refcount: int;
+  mutable bindings: act_bindings option;
 }
 
 type 'w pat_row = ('w, pat) Clist.t * (bindings * exp action)
@@ -24,7 +28,7 @@ type 'n dectree =
     total: bool }
 
 and _ dectree' =
-  | Done : IR.value IR.Binder.t SymMap.t * exp action -> z dectree'
+  | Done : IR.value IR.Binder.ref SymMap.t * exp action -> z dectree'
   | Failure : z dectree'
   | Any : 'n dectree -> 'n s dectree'
   | Bind : IR.value IR.Binder.t * 'n s dectree -> 'n s dectree'
@@ -147,8 +151,8 @@ let rec split_head_row :
           | Some v -> v
         in
         let bindings, action = act in
-        let ptyp, gen_level = head_typ in
-        let bindings = SymMap.add name (ptyp, gen_level, var) bindings in
+        let typ, gen_level = head_typ in
+        let bindings = SymMap.add name {typ; gen_level; comp_var = IR.Binder.ref var} bindings in
         let acc = Some var, split in
         split_head_row head_typ ((subpat :: ps), (bindings, action)) acc
 
@@ -169,26 +173,35 @@ let rec split_cases :
      | ([], (bindings, act)) :: _ ->
         (* We have already checked that all paths to
            the same action bind the same vars *)
-        act.refcount <- act.refcount + 1;
-        if act.refcount = 1 then begin
-          assert (SymMap.is_empty act.bindings);
-          act.bindings <- bindings;
-        end else begin
-          let old_bindings =
-            if act.refcount > 2 then act.bindings
-            else
-              SymMap.mapi
-                (fun name (typ, lvl, _var) -> typ, lvl, IR.Binder.fresh ~name ())
-                act.bindings
-          in
-          act.bindings <-
-            old_bindings
-            |> SymMap.mapi (fun name (typ, lvl, var) ->
-                   Types.join_ptyp env typ (let (ty,_,_) = (SymMap.find name bindings) in ty),
-                   lvl,
-                   var)
-        end;
-        Hashcons.mk (Done (SymMap.map (fun (_,_,v) -> v) bindings, act))
+        act.bindings <-
+          (match act.bindings with
+          | None ->
+             (* First use of action *)
+             Some { bindings; shared_cont = None }
+          | Some { bindings = prev_bindings; shared_cont } ->
+             let prev_bindings, shared_cont =
+               match shared_cont with
+               | Some _ ->
+                  prev_bindings, shared_cont
+               | None ->
+                  let cont = IR.Binder.fresh ~name:"case" () in
+                  let freshened =
+                    SymMap.mapi (fun name x -> IR.Binder.fresh ~name (), x) prev_bindings in
+                  SymMap.map (fun (v, vb) -> {vb with comp_var = IR.Binder.ref v}) freshened,
+                  Some (cont,
+                        SymMap.bindings freshened
+                        |> List.map (fun (name, (v, _)) -> name,v))
+             in
+             let bindings =
+               prev_bindings
+               |> SymMap.mapi (fun name vb ->
+                  { vb with
+                    typ =
+                      Types.join_ptyp env vb.typ
+                        (SymMap.find name bindings).typ })
+             in
+             Some {bindings; shared_cont});
+        Hashcons.mk (Done (SymMap.map (fun vb -> vb.comp_var) bindings, act))
      end
 
   | (typ, lvl) :: typs ->
@@ -434,8 +447,7 @@ let split_cases ~matchloc env (typs : (ptyp * Typedefs.gen_level) list) (cases :
       { rhs = exp;
         pat_loc;
         id;
-        bindings = SymMap.empty; (* FIXME types are poor here *)
-        refcount = 0 })
+        bindings = None })
   in
   let Ex typs = Clist.of_list typs in
   let mat =
@@ -448,7 +460,7 @@ let split_cases ~matchloc env (typs : (ptyp * Typedefs.gen_level) list) (cases :
   in
   let dtree = split_cases ~matchloc ~env typs mat in
   actions |> List.iter (fun act ->
-    if act.refcount = 0 then
+    if act.bindings = None then
       Error.log ~loc:act.pat_loc Unused_pattern);
   begin match counterexamples (Clist.map ignore typs) dtree with
   | [] -> ()
@@ -460,13 +472,7 @@ let split_cases ~matchloc env (typs : (ptyp * Typedefs.gen_level) list) (cases :
 (* FIXME: Check dedups cont. Should that happen here instead? *)
 let compile ~cont ~actions vals orig_dt =
   let actions = actions |> Array.map (fun act ->
-    let label =
-      if act.refcount >= 2
-      then Some (IR.Binder.fresh ~name:"case" (),
-                 List.map (fun (name, (_ty, _lvl, var)) -> name, var) (SymMap.bindings act.bindings))
-      else None
-    in
-    { act with rhs = (label, act.rhs cont) })
+    { act with rhs = act.rhs cont })
   in
 
   let rec compile :
@@ -477,14 +483,13 @@ let compile ~cont ~actions vals orig_dt =
     fun ~vals dt ->
     match dt, vals with
     | Done (bindings, act), [] ->
-       (* FIXME bind the variables properly *)
-       assert (act.refcount > 0);
-       begin match actions.(act.id).rhs with
-       | Some (label, vars), _body ->
-          Jump (IR.Binder.ref label,
-                List.map (fun (v,_) -> IR.Var (IR.Binder.ref (SymMap.find v bindings))) vars)
-       | None, body ->
-          body
+       begin match actions.(act.id).bindings with
+       | None -> assert false
+       | Some { bindings = _; shared_cont = Some (lbl, args) } ->
+          Jump (IR.Binder.ref lbl,
+                List.map (fun (v,_) -> IR.Var (SymMap.find v bindings)) args)
+       | Some { bindings = _; shared_cont = None } ->
+          actions.(act.id).rhs
        end
     | Failure, [] ->
        (* FIXME better error *)
@@ -528,9 +533,9 @@ let compile ~cont ~actions vals orig_dt =
   let code = compile ~vals dt in
   List.fold_right
     (fun act acc ->
-      match act.rhs with
-      | None, _ -> acc
-      | Some (label, names), body ->
-         IR.LetCont (label, List.map snd names, body, acc))
+      match act.bindings with
+      | Some {bindings=_; shared_cont = Some (label, names)} ->
+         IR.LetCont (label, List.map snd names, act.rhs, acc)
+      | _ -> acc)
     (Array.to_list actions)
     code

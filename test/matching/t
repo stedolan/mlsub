@@ -79,7 +79,6 @@ fn((A|B), x) { x }
 > });
 > done
 
-# FIXME: don't like this elaboration!
 fn(x) { let (a, b, c) = x; (c, b, a) }
 > fn (x) { let (a, b, c) = x; (c, b, a) }
 >   fn [A, B, C](x: (A, B, C)) -> (C, B, A) {

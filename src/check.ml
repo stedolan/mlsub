@@ -664,11 +664,9 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
             Check_pat.compile ~cont:(IRB.Named_cont (IR.Binder.ref ret)) ~actions (list_fields params |> List.map (fun (_,v) -> IR.var v)) split)
    in
    ty, fndef, cps
-
  
 and extend_env env act =
-  let vals = act.Check_pat.bindings |> SymMap.map (fun (typ, gen_level, var) ->
-     { typ; comp_var = IR.Binder.ref var; gen_level }) in
+  let vals = (Option.get act.Check_pat.bindings).bindings in
   Env_vals { vals; rest = env }
 
 and infer_lit = function
