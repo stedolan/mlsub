@@ -293,7 +293,7 @@ let elab_ptyp = function
   | ty ->
      Elab (Ptyp ty, fun x -> x)
 
-let rec pat_name = function
+let pat_name = function
   | Some (Pbind (v,_)), _ -> Some (fst v : string)
   | _ -> None
   
