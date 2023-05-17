@@ -78,8 +78,6 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
      tcons loc (Record (Option.map fst tag, typs_of_tuple_tyexp env lvl fields))
   | Tfunc (args, res) ->
      tcons loc (Func (typs_of_tuple_tyexp env lvl args, typ_of_tyexp env lvl res))
-  | Tparen t ->
-     typ_of_tyexp env lvl t
   | Tjoin (a, b) ->
      syn_tjoin loc (typ_of_tyexp env lvl a) (typ_of_tyexp env lvl b)
   | Tforall (vars, body) ->
@@ -296,7 +294,6 @@ let elab_ptyp = function
      Elab (Ptyp ty, fun x -> x)
 
 let rec pat_name = function
-  | Some (Pparens p), _ -> pat_name p
   | Some (Pbind (v,_)), _ -> Some (fst v : string)
   | _ -> None
   
@@ -371,11 +368,6 @@ and check' env ~mode eloc e ty : exp' check_output =
      inferred t;
      let e = check env ~mode e (Checking t) in
      { elab = (let* e = e.elab in Typed (e, ty));
-       comp = e.comp }
-
-  | Parens e ->
-     let e = check env ~mode e ty in
-     { elab = (let* e = e.elab in Parens e);
        comp = e.comp }
 
   | If (e, ifso, ifnot) ->

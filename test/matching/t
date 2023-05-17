@@ -129,10 +129,10 @@ fn(x) { match x { (a | Foo) => 1 } }
 > fn (x) { match x { (a | Foo) => 1 } }
 > test:1: The variable a must be bound on both sides of this or-pattern
 >   fn(x) { match x { (a | Foo) => 1 } }
->                      ^^^^^^^
+>                     ^^^^^^^^^
 
 fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
-> fn (x) { match (A(1, 2)) { A(x, C) => 1 } }
+> fn (x) { match A(1, 2) { A(x, C) => 1 } }
 > test:1: Type error
 >   fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
 >                 ^^^^^^^^^
@@ -199,13 +199,13 @@ fn(x) {
   }
 }
 > fn (x) { match x { A(_, b) => b | B{foo: (C | D), bar: x} => x } }
->   fn [A, B](x: 'A(any, A) | 'B{foo: 'C | 'D, bar: B}) -> A | B {
+>   fn [A, B](x: 'A(any, A) | 'B{foo: ('C | 'D), bar: B}) -> A | B {
 >     match x {
 >       | A(_, b) => b
 >       | B{foo: (C | D), bar: x} => x
 >     }
 >   }
-> [A, B] ('A(any, A) | 'B{foo: 'C | 'D, bar: B}) -> A | B
+> [A, B] ('A(any, A) | 'B{foo: ('C | 'D), bar: B}) -> A | B
 > let  = %yield(0: fun (x) ret {
 >   match x {
 >     A(0: v0,
@@ -292,8 +292,8 @@ fn() {
 #
 
 fn((a @ b @ c @ (d,e), f)){(a,b,c,d,e,f)}
-> fn ((a @ b @ c @ (d, e), f)) { (a, b, c, d, e, f) }
->   fn [A, B, C <: (A, B), D]((a @ b @ c @ (d, e), f): (C, D)) ->
+> fn (((a @ b @ c @ (d, e)), f)) { (a, b, c, d, e, f) }
+>   fn [A, B, C <: (A, B), D](((a @ b @ c @ (d, e)), f): (C, D)) ->
 >     (C, C, C, A, B, D) {
 >     (a, b, c, d, e, f)
 >   }
@@ -302,6 +302,22 @@ fn((a @ b @ c @ (d,e), f)){(a,b,c,d,e,f)}
 >   let v0, v1 = 0.(0, 1);
 >   let v02, v12 = v0.(0, 1);
 >   ret((0: v0, 1: v0, 2: v0, 3: v02, 4: v12, 5: v1))
+> });
+> done
+
+fn(x) { match x { (z @ (A | B)) => z } }
+> fn (x) { match x { (z @ A | B) => z } }
+>   fn [A <: 'A | 'B](x: A) -> A { match x { (z @ A | B) => z } }
+> [A <: 'A | 'B] (A) -> A
+> let  = %yield(0: fun (x) ret {
+>   match x {
+>     A() -> {
+>       ret(x)
+>     };
+>     B() -> {
+>       ret(x)
+>     }
+>   }
 > });
 > done
 
@@ -473,8 +489,9 @@ fn (x) { use(make(x)) }
 > fn (x) {
 >   use(make(x))
 > }
->   let make : [A, B] ({good: bool, bar: A, foo: B, ...}) ->
->   'Good{foo: B, bar: A} | 'Bad{foo: B} =
+>   let make :
+>     [A, B] ({good: bool, bar: A, foo: B, ...}) ->
+>     'Good{foo: B, bar: A} | 'Bad{foo: B} =
 >   fn [A, B](x: {good: bool, bar: A, foo: B, ...}) ->
 >     'Good{foo: B, bar: A} | 'Bad{foo: B} {
 >     if x.good {
@@ -539,7 +556,7 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
   | (F, _, F) => false
   }
 }
-> fn (a: ('T | 'F), b: 'T | 'F, c: 'T | 'F) {
+> fn (a: 'T | 'F, b: 'T | 'F, c: 'T | 'F) {
 >   match (a, b, c) {
 >     | (T, T, _)
 >     | (_, T, T)
@@ -624,7 +641,7 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
   | (F, _, F) => false
   }
 }
-> fn (a: ('T | 'F), b: 'T | 'F, c: 'T | 'F) {
+> fn (a: 'T | 'F, b: 'T | 'F, c: 'T | 'F) {
 >   match (a, b, c) {
 >     | (T, T, _)
 >     | (T, _, T) => true
@@ -644,7 +661,7 @@ fn(x : ('A|'B|'C), y : ('A|'B|'C)) {
     A, A => 1
   }
 }
-> fn (x: ('A | 'B | 'C), y: ('A | 'B | 'C)) { match x, y { A, A => 1 } }
+> fn (x: 'A | 'B | 'C, y: 'A | 'B | 'C) { match x, y { A, A => 1 } }
 > test:2: Some cases of this pattern-match are missing:
 >     match x, y {
 >           ^^^^
@@ -659,9 +676,9 @@ fn (x : (('A(int,int)|'B{x:string,y:string}|'C|'D|'E), 'B|'C|'D)) {
   | (D, C) => 1
   }
 }
-> fn (x: (('A(int, int) | 'B{x: string, y: string} | 'C | 'D | 'E), 'B | 'C | 'D)) {
+> fn (x: ('A(int, int) | 'B{x: string, y: string} | 'C | 'D | 'E, 'B | 'C | 'D)) {
 >   match x {
->     | (A(_, _) | B(...), C | D)
+>     | ((A(_, _) | B(...)), (C | D))
 >     | (C, C)
 >     | (D, C) => 1
 >   }
@@ -672,8 +689,8 @@ fn (x : (('A(int,int)|'B{x:string,y:string}|'C|'D|'E), 'B|'C|'D)) {
 > The following cases are unhandled:
 > | (A(_, _), B)
 > | (B{x: _, y: _}, B)
-> | (C, B | D)
-> | (D, B | D)
+> | (C, (B | D))
+> | (D, (B | D))
 > | (E, _)
 
 fn(x : 'A(int, 'P|'Q|'R) | 'B(int, 'P|'Q|'R)) {
@@ -682,13 +699,13 @@ fn(x : 'A(int, 'P|'Q|'R) | 'B(int, 'P|'Q|'R)) {
   | B(x, P|Q), y => 1
   }
 }
-> fn (x: 'A(int, 'P | 'Q | 'R) | 'B(int, 'P | 'Q | 'R)) {
+> fn (x: 'A(int, ('P | 'Q | 'R)) | 'B(int, ('P | 'Q | 'R))) {
 >   match
 >     {averylongnameinanexpression: {averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression,
 >     {x: 0, y: 5}.y
 >   {
->     | A(x, P | Q), y => 1
->     | B(x, P | Q), y => 1
+>     | A(x, (P | Q)), y => 1
+>     | B(x, (P | Q)), y => 1
 >   }
 > }
 > test:2: Some cases of this pattern-match are missing:
@@ -733,10 +750,10 @@ fn(x) {
     (c2, b, a)
   }
 }
-> fn (x) { match x { (a, b, c) => let c2 = match c { y => y }; (c2, b, a) } }
+> fn (x) { match x { (a, b, c) => (let c2 = match c { y => y }; (c2, b, a)) } }
 >   fn [A, B, C](x: (A, B, C)) -> (C, B, A) {
 >     match x {
->       | (a, b, c) => let c2 : C = match c { y => y }; (c2, b, a)
+>       | (a, b, c) => (let c2 : C = match c { y => y }; (c2, b, a))
 >     }
 >   }
 > [A, B, C] ((A, B, C)) -> (C, B, A)
@@ -847,7 +864,7 @@ fn (x : 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
 > fn (x: 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
 >   match x, y {
 >     | A, (A | B) => 1
->     | _, (A) => 2
+>     | _, A => 2
 >   }
 > }
 > test:2: Some cases of this pattern-match are missing:
@@ -858,4 +875,4 @@ fn (x : 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
 
 
 # end
-> STATS: fix: 2, flex: 193
+> STATS: fix: 2, flex: 199

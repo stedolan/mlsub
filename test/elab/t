@@ -1,5 +1,5 @@
 fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let f = fn(a){x(a)}; wid(f) }
-> fn (x, wid: (([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int)) {
+> fn (x, wid: ([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int) {
 >   let f = fn (a) { x(a) };
 >   wid(f)
 > }

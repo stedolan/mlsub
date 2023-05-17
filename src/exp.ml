@@ -37,8 +37,6 @@ type exp = exp' mayloc and exp' =
   | Match of exp list loc * case list
   (* (e : A) *)
   | Typed of exp * tyexp
-  (* (e) *)
-  | Parens of exp
   (* @foo *)
   | Pragma of string
 
@@ -55,7 +53,6 @@ and pat = pat' mayloc and pat' =
   | Pbind of symbol * pat
   | Ptuple of tuple_tag option * pat tuple_fields
   | Por of pat * pat
-  | Pparens of pat
 
 (* Type expressions *)
 
@@ -64,7 +61,6 @@ and tyexp = tyexp' mayloc and tyexp' =
   | Tforall of typolybounds * tyexp
   | Trecord of tuple_tag option * tyexp tuple_fields
   | Tfunc of tyexp tuple_fields * tyexp
-  | Tparen of tyexp
   | Tjoin of tyexp * tyexp
 
 and typolybounds =
@@ -124,8 +120,6 @@ let mapper =
        Typed (r.exp r e, r.tyexp r t)
     | Match ((e, eloc), cases) ->
        Match ((List.map (r.exp r) e, r.loc r eloc), List.map (case r) cases)
-    | Parens e ->
-       Parens (r.exp r e)
     | Pragma s ->
        Pragma s
   in
@@ -136,7 +130,6 @@ let mapper =
     | Ptuple (tag, ps) ->
        Ptuple (Option.map (sym r) tag, map_fields (fun _fn x -> r.pat r x) ps)
     | Por (p, q) -> Por (r.pat r p, r.pat r q)
-    | Pparens p -> Pparens (r.pat r p)
   in
 
   let tyexp = mayloc @@ fun r t -> match t with
@@ -150,8 +143,6 @@ let mapper =
        Trecord (Option.map (sym r) tag, map_fields (fun _fn t -> r.tyexp r t) ts)
     | Tfunc (args, ret) ->
        Tfunc (map_fields  (fun _fn t -> r.tyexp r t) args, r.tyexp r ret)
-    | Tparen t ->
-       Tparen (r.tyexp r t)
     | Tjoin (s, t) ->
        Tjoin (r.tyexp r s, r.tyexp r t)
   in
@@ -161,23 +152,4 @@ let strip_locations =
   { mapper with loc = fun _ _ -> noloc }
 
 let equal e1 e2 = map_exp strip_locations e1 = map_exp strip_locations e2
-
-let self_delimiting_tyexp = function
-  | Tparen _ | Tnamed _ | Trecord _ -> true
-  | _ -> false
-
-let normalise =
-  let tyexp r = function
-    | Some (Tjoin (s, t)), loc ->
-       let s =
-         match r.tyexp r s with
-         | Some (Tparen _ | Tnamed _ | Trecord _ | Tjoin _), _ -> s
-         | _, loc -> Some (Tparen s), loc in
-       let t =
-         match r.tyexp r t with
-         | Some (Tnamed _ | Trecord _ | Tjoin _), _ -> t
-         | _, loc -> Some (Tparen t), loc in
-       Some (Tjoin (s, t)), loc
-    | t -> mapper.tyexp r t in
-  { mapper with tyexp }
   

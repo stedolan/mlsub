@@ -84,8 +84,6 @@ let rec split_head_row :
      Error.fail loc Syntax
   | ((Some p,head_loc) :: ps), act ->
      match p with
-     | Pparens p ->
-        split_head_row head_typ ((p :: ps), act) acc
      | Por (p, q) ->
         let acc = split_head_row head_typ ((q :: ps), act) acc in
         let acc = split_head_row head_typ ((p :: ps), act) acc in
@@ -415,8 +413,6 @@ and check_fvs' ploc = function
      SymMap.add v ploc p
   | Ptuple (_, fs) ->
      check_fvs_list (List.map snd (list_fields fs))
-  | Pparens p ->
-     check_fvs p
   | Por (p, q) ->
      let p = check_fvs p in
      let q = check_fvs q in

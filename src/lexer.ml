@@ -37,7 +37,6 @@ let rec lex buf =
   | "if" -> IF
   | "else" -> ELSE
   | "$outer" -> SHIFT
-  | "as" -> AS
   | "match" -> MATCH
 
   | Plus('0'..'9') -> INT (int_of_string (lexeme buf))

@@ -1037,7 +1037,6 @@ let pp_doc ppf doc =
   Format.fprintf ppf "%s" (Buffer.to_bytes buf |> Bytes.to_string)
 
 let pp_tyexp ppf ty =
-  let ty = Exp.map_tyexp Exp.normalise ty in
   pp_doc ppf (Print.tyexp ty)
 
 let pp_exp ppf e =
@@ -1050,7 +1049,7 @@ let pp_flexlb ppf t =
 let pp_styp_neg ppf t =
   let env = Env_nil, [] in
   let tys = List.map (unparse_styp_neg ~env ~flexvar:ignore) t in
-  let docs = List.map (fun t -> Print.tyexp (Exp.map_tyexp Exp.normalise t)) tys in
+  let docs = List.map Print.tyexp tys in
   pp_doc ppf (PPrint.(separate (comma ^^ space) docs))
 
 let pp_flexvar ppf v =

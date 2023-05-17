@@ -62,7 +62,6 @@ let run_cmd s =
      | t, elab, _, bcomp ->
         begin
         let poly, _ty, elab = Elab.elaborate Env_nil elab in
-        let elab = Exp.(map_exp normalise elab) in
         poly |> Option.iter (fun poly ->
           pprintln PPrint.(string "WEAKPOLY" ^^ Print.typolybounds poly));
         pprintln ~width:80 (PPrint.(nest 2 (blank 2 ^^ Print.exp elab)));
@@ -77,7 +76,7 @@ let run_cmd s =
 
         let env0 = Env_nil in
         let te = Typedefs.unparse_ptyp ~flexvar:ignore (*Env_nil*) t in
-        pprintln (Print.tyexp (Exp.(map_tyexp normalise te)));
+        pprintln (Print.tyexp te);
         begin try
           wf_ptyp env0 t;
           let t = Check.typ_of_tyexp env0 te in

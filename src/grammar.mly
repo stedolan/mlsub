@@ -8,7 +8,7 @@
 %token EOF WS COMMENT NL ERROR
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
 %token COLON EQUALS DOT DOTS COMMA SEMI UNDER QUESTION ARROW FATARROW AMPER VBAR
-%token FN LET TRUE FALSE IF ELSE AS TILDE
+%token FN LET TRUE FALSE IF ELSE TILDE
 %token SUBTYPE SUPTYPE AT
 %token MATCH
 
@@ -16,7 +16,6 @@
 %nonassoc ARROW
 %nonassoc LPAR LBRACE
 %left VBAR                      (* FIXME VBAR vs AT precedence? *)
-%right AS
 %right SEMI
 (*%nonassoc high_priority*)
 
@@ -79,7 +78,9 @@ literal_:
 | FALSE
   { Bool false }
 
-exp: e = mayloc(exp_) { e }
+exp:
+| e = mayloc(exp_) { e }
+| LPAR; ERROR; RPAR { None, [{ loc_start = $startpos; loc_end = $endpos }] }
 exp_:
 | FN; def = fndef
   { Fn def }
@@ -122,8 +123,8 @@ term_:
   { Tuple (Some tag, parse_fields []) }
 | tag = ioption(usymbol); LPAR; RPAR
   { Tuple (tag, parse_fields []) }
-| LPAR; e = exp; RPAR
-  { Parens e }
+| LPAR; e = exp_; RPAR
+  { e }
 | LPAR; e = exp; COLON; t = tyexp; RPAR
   { Typed (e, t) }
 | tag = usymbol; LPAR; e = exp; RPAR
@@ -207,8 +208,8 @@ onepat_:
   { Ptuple (tag, parse_fields []) }
 | tag = ioption(usymbol); LPAR; DOTS; RPAR
   { Ptuple (tag, parse_fields [Fdots]) }
-| LPAR; p = pat; RPAR
-  { Pparens p }
+| LPAR; p = pat_; RPAR
+  { p }
 | tag = usymbol; LPAR; p = pat; RPAR
   { Ptuple (Some tag, parse_fields [Fpos p]) }
 | tag = ioption(usymbol); LPAR; p = pat; COMMA; ps = separated_list(COMMA, pat_or_dots); RPAR
@@ -242,7 +243,7 @@ tyexp_:
   { Trecord(Some tag, parse_tyfields []) }
 | tag = ioption(qusymbol); LPAR; t = tyfields; RPAR
   { match tag, t with
-    | None, [Fpos t] -> Tparen t
+    | None, [Fpos (Some t, _)] -> t
     | tag, fs -> Trecord (tag, parse_tyfields fs) }
 | tag = ioption(qusymbol);
   LBRACE; ts = separated_nonempty_list(COMMA, named_field_typ); RBRACE
@@ -253,7 +254,7 @@ tyexp_:
   { Tfunc (parse_tyfields t, r) }
 | t1 = tyexp; VBAR; t2 = tyexp
   { Tjoin(t1, t2) }
-| t = typolybounds; b = tyexp %prec AS (* kinda hack *)
+| t = typolybounds; b = tyexp %prec ARROW (* kinda hack *)
   { Tforall(t, b) }
 
 named_field_typ:

@@ -1,5 +1,5 @@
 let f = fn (x) { x, x }; f
-> let f = fn (x) { <err> }; f
+> let f = fn (x) { (<err>) }; f
 > test:1: syntax error
 >   let f = fn (x) { x, x }; f
 >                     ^
@@ -50,7 +50,7 @@ fn(a) { { foo: if true { fn(x) { x } } else { a } } }
 > done
 
 fn[A,B](x:A) -> A | (A) -> B { x }
-> fn [A, B](x: A) -> A | (A) -> B { x }
+> fn [A, B](x: A) -> A | ((A) -> B) { x }
 >   fn [A, B](x: A) -> ((A) -> B) | A { x }
 > [A, B] (A) -> ((A) -> B) | A
 > let  = %yield(0: fun (x) ret { ret(x) }); done
