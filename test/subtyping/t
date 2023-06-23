@@ -3,7 +3,7 @@
 
 : int <: bool
 > _:0: Type error
->   
+> 
 >      found: int
 >   expected: bool
 > This int comes from test:1:
@@ -18,7 +18,7 @@
 
 : (int) -> int <: [A] (A) -> A
 > _:0: Type error
->   
+> 
 >      found: (int) -> _
 >   expected: (A) -> _
 > This A comes from test:1:
@@ -42,7 +42,7 @@
 
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
 > _:0: Type error
->   
+> 
 >      found: () -> {foo: (string) -> _, bar: _}
 >   expected: () -> {foo: (int) -> _, bar: _}
 > This int comes from test:1:
@@ -54,7 +54,7 @@
 
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 > _:0: Type error
->   
+> 
 >      found: () -> {foo: (Y) -> _, bar: _}
 >   expected: () -> {foo: (X) -> _, bar: _}
 > This X comes from test:1:
@@ -78,7 +78,7 @@
 > ok
 : (int) -> int <: [X <: int] (X) -> X
 > _:0: Type error
->   
+> 
 >      found: (_) -> int
 >   expected: (_) -> X
 > This int comes from test:1:
@@ -92,7 +92,7 @@
 > ok
 : (int) -> int <: [X] (X) -> (X|int)
 > _:0: Type error
->   
+> 
 >      found: (int) -> _
 >   expected: (X) -> _
 > This X comes from test:1:
@@ -106,7 +106,7 @@
 > ok
 : (int) -> int <: [X] (X) -> (X)
 > _:0: Type error
->   
+> 
 >      found: (int) -> _
 >   expected: (X) -> _
 > This X comes from test:1:
@@ -120,7 +120,7 @@
 
 : [X <: int] (X) -> (X|bool) <: (int) -> bool
 > _:0: Type error
->   
+> 
 >      found: (_) -> int
 >   expected: (_) -> nothing
 > This int comes from test:1:
@@ -146,7 +146,7 @@
 
 : [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
 > _:0: Type error
->   
+> 
 >      found: (_) -> (_, (_) -> int)
 >   expected: (_) -> (_, (_) -> nothing)
 > This int comes from test:1:
@@ -173,7 +173,7 @@
 # FIXME: error message isn't good here
 : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
 > _:0: Type error
->   
+> 
 >      found: ((A) -> _) -> _
 >   expected: ((A) -> _) -> _
 > This A comes from test:1:
@@ -188,7 +188,7 @@
 # scope escape check
 : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
 > _:0: Type error
->   
+> 
 >      found: (_) -> (_) -> any
 >   expected: (_) -> (_) -> nothing
 > This any comes from test:1:

@@ -213,8 +213,9 @@ module IRB = IR_Builder
 
 open Elab
 
-type 'e check_output =
-  { elab: 'e elab;
+type ('e,'t) check_output =
+  { typed: 't;
+    elab: 'e elab;
     comp: IRB.exp }
 
 
@@ -233,14 +234,14 @@ let mark_var_use_at_level ~(mode : generalisation_mode) lvl =
        Some (Env_level.min l1 l2)
 
 
-let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _ * 'rest) : ptyp * (typolybounds option * tyexp * 'a) elab * bool * 'rest =
+let elab_gen (env:env) ~mode poly (fn : env -> ptyp * typed_exp * exp elab * env_level option * 'rest) : ptyp * (typed_polybounds option * typed_exp) * (typolybounds option * tyexp * exp) elab * bool * 'rest =
   let rigvars', rig_names =
     match poly with
     | None -> IArray.empty, SymMap.empty
     | Some poly -> enter_polybounds env poly in
 
   let env', _rigvars = enter_rigid env rigvars' rig_names in
-  let orig_ty, Elab (erq, ek), gen_level, rest = fn env' in
+  let orig_ty, typed_exp, Elab (erq, ek), gen_level, rest = fn env' in
   wf_ptyp env' orig_ty;
   let can_generalise =
     match gen_level with
@@ -250,18 +251,22 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _ * 'rest) : pty
        mark_var_use_at_level ~mode lvl;
        false
   in
-  let map ~neg ~pos (ty, erq) =
+  let map ~neg ~pos (ty, typed_exp, erq) =
     let ty = pos ~mode:`Poly ~index:0 ty in
     let erq = elabreq_map_typs erq ~index:0
                 ~neg:(neg ~mode:`Elab)
                 ~pos:(pos ~mode:`Elab)
     in
-    (ty, erq)
+    let typed_exp = typed_map_typs_exp typed_exp ~index:0
+                ~neg:(neg ~mode:`Elab)
+                ~pos:(pos ~mode:`Elab)
+    in
+    (ty, typed_exp, erq)
   in
   let policy = if can_generalise then `Generalise else `Hoist env in
-  let bvars, (ty, erq) = promote ~policy ~rigvars:rigvars' ~env:env' ~map (orig_ty, erq) in
+  let bvars, (ty, typed_exp, erq) = promote ~policy ~rigvars:rigvars' ~env:env' ~map (orig_ty, typed_exp, erq) in
   if Vector.length bvars = 0 then
-    ty, Elab (Pair(Ptyp ty, erq), fun (t,e) -> None, t, ek e), can_generalise, rest
+    ty, (None, typed_exp), Elab (Pair(Ptyp ty, erq), fun (t,e) -> None, t, ek e), can_generalise, rest
   else
     let next_name = ref 0 in
     let rec mkname () =
@@ -278,6 +283,7 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * 'a elab * _ * 'rest) : pty
     let tpoly = Tpoly { vars = bounds; body = ty } in
     wf_ptyp env tpoly;
     tpoly,
+    (Some bounds, typed_exp),
     Elab (Gen{bounds; body=Pair(Ptyp ty, erq)}, fun (poly, (t,e)) -> Some poly, t, ek e),
     can_generalise,
     rest
@@ -292,6 +298,15 @@ let elab_ptyp = function
       | _ -> Elab (Ptyp ty, fun x -> x))
   | ty ->
      Elab (Ptyp ty, fun x -> x)
+
+(* FIXME rename *)
+let elab_ptyp_2 = function
+  | Tsimple (Lower(fv, ctor)) as ty when is_bottom (Lower(Fvset.empty,ctor)) ->
+     (match (fv :> flexvar list) with
+      | [fv] -> Elab_ntyp (Tsimple fv)
+      | _ -> Elab_ptyp ty)
+  | ty ->
+     Elab_ptyp ty
 
 let pat_name = function
   | Some (Pbind (v,_)), _ -> Some (fst v : string)
@@ -325,7 +340,7 @@ let inspect_cons cons = function
      (match Cons.get_single_sub cons c with Some c -> Imatches c | _ -> Iother)
   | Checking (Ttop _ | Tvar _ | Tjoin _) | Inference _ -> Iother
 
-let rec check env ~(mode : generalisation_mode) e (ty : ty_mode) : exp check_output =
+let rec check env ~(mode : generalisation_mode) e (ty : ty_mode) : (exp, typed_exp) check_output =
   (match ty with
    | Checking ty -> wf_ntyp env ty
    | Inference _ -> ());
@@ -333,13 +348,14 @@ let rec check env ~(mode : generalisation_mode) e (ty : ty_mode) : exp check_out
   | None, loc -> fail loc Syntax
   | Some e, loc ->
      let e = check' env ~mode loc e ty in
-     { elab = (let* e = e.elab in Some e, loc);
+     { typed = Some e.typed, loc;
+       elab = (let* e = e.elab in Some e, loc);
        comp = e.comp }
 
 (* FIXME: default is to infer & subtype, but we probably shouldn't
    even attempt this on intro forms at the wrong type. e.g. checking
    (1,2) against int *)
-and check' env ~mode eloc e ty : exp' check_output =
+and check' env ~mode eloc (e : exp') ty : (exp', typed_exp') check_output =
   let inferred inf =
     match ty with
     | Checking ty ->
@@ -358,7 +374,8 @@ and check' env ~mode eloc e ty : exp' check_output =
      | Ok v ->
         mark_var_use_at_level ~mode v.gen_level;
         inferred v.typ;
-        { elab = elab_pure e;
+        { typed = Var ((id,loc), v);
+          elab = elab_pure e;
           comp = IRB.var v.comp_var }
      | Error e -> fail loc e
      end
@@ -367,14 +384,16 @@ and check' env ~mode eloc e ty : exp' check_output =
      let t = typ_of_tyexp env ty in
      inferred t;
      let e = check env ~mode e (Checking t) in
-     { elab = (let* e = e.elab in Typed (e, ty));
+     { typed = Typed (e.typed, elab_ptyp_2 t);
+       elab = (let* e = e.elab in Exp.Typed (e, ty));
        comp = e.comp }
 
   | If (e, ifso, ifnot) ->
      let e = check env ~mode e (Checking (tcons (snd e) Bool)) in
      let ifso = check env ~mode ifso ty in
      let ifnot = check env ~mode ifnot ty in
-     { elab = (let* e = e.elab and* ifso = ifso.elab and* ifnot = ifnot.elab in
+     { typed = If (e.typed, ifso.typed, ifnot.typed);
+       elab = Exp.(let* e = e.elab and* ifso = ifso.elab and* ifnot = ifnot.elab in
                If (e, ifso, ifnot));
        comp = fun k ->
          IRB.name_cont k @@ fun k ->
@@ -393,9 +412,10 @@ and check' env ~mode eloc e ty : exp' check_output =
        | Imatches (Record (_, tf)) ->
           let infer_typed env ((_,loc) as e) =
             let ty, e = infer env ~mode e in
-            { elab =
+            { typed = Some (Typed (e.typed, elab_ptyp_2 ty)), loc;
+              elab =
                 (let* e = e.elab and* ty = elab_ptyp ty in
-                 Some (Typed (e, ty)), loc);
+                 Some (Exp.Typed (e, ty)), loc);
               comp = e.comp }
           in
           merge_fields fields tf
@@ -413,9 +433,10 @@ and check' env ~mode eloc e ty : exp' check_output =
                                         map_fields (fun _ (ty, _e) -> ty) fields)));
           map_fields (fun _fn (_ty, e) -> e) fields
      in
-     { elab =
+     { typed = Tuple(tag, map_fields (fun _fn e -> e.typed) fields);
+       elab =
          (let* ef = elab_fields (map_fields (fun _fn e -> e.elab) fields) in
-          Tuple (tag, ef));
+          Exp.Tuple (tag, ef));
        comp =
          (let tag = Option.map (fun (t,_) -> IR.Symbol.of_string t) tag in
           IRB.tuple tag (map_fields (fun _fn e -> e.comp) fields)) }
@@ -434,8 +455,9 @@ and check' env ~mode eloc e ty : exp' check_output =
        | Ok _ -> assert false
        | Error c -> fail eloc (Conflict (`Expr, c)) in
      inferred tyf;
-     { elab =
-         (let* e = e.elab in Proj (e, (field, loc)));
+     { typed = Proj (e.typed, (field, loc));
+       elab =
+         (let* e = e.elab in Exp.Proj (e, (field, loc)));
        comp = IRB.project e.comp field }
 
   | Let (p, pty, rhs, body) ->
@@ -446,9 +468,10 @@ and check' env ~mode eloc e ty : exp' check_output =
      let act = Util.as_singleton act in
      let env = extend_env env act in
      let body = check env ~mode body ty in
-     { elab =
+     { typed = Let (p, elab_ptyp_2 pty, e.typed, body.typed);
+       elab =
          (let* e = e.elab and* pty = elab_ptyp pty and* body = body.elab in
-          Let(p, Some pty, e, body));
+          Exp.Let(p, Some pty, e, body));
        comp = fun k ->
          let actions = [| { act with Check_pat.rhs = body.comp } |] in
          IRB.eval_cont e.comp @@ fun e ->
@@ -458,7 +481,8 @@ and check' env ~mode eloc e ty : exp' check_output =
   | Seq (e1, e2) ->
      let e1 = check env ~mode e1 (Checking (unit eloc)) in
      let e2 = check env ~mode e2 ty in
-     { elab = (let* e1 = e1.elab and* e2 = e2.elab in Seq (e1, e2));
+     { typed = Seq (e1.typed, e2.typed);
+       elab = (let* e1 = e1.elab and* e2 = e2.elab in Exp.Seq (e1, e2));
        comp = fun k ->
          IRB.eval_cont e1.comp @@ fun _v ->
          e2.comp k }
@@ -502,11 +526,23 @@ and check' env ~mode eloc e ty : exp' check_output =
           let act = Util.as_singleton act in
 
           let env' = extend_env env act in
-          let body = check env' ~mode body (check_annot env' ret rtype) in
-          { elab =
+          let ret_type =
+            match ret with
+            | None -> rtype
+            | Some ty' ->
+               let t = typ_of_tyexp env' ty' in
+               subtype env' t rtype |> or_raise `Subtype (snd ty');
+               t
+          in
+          let body = check env' ~mode body (Checking ret_type) in
+          { typed =
+              (* FIXME: insert / keep type annotations? *)
+              Fn (None, map_fields (fun _ (p, _) -> p, None) params, None (*FIXME ret_type?*), body.typed);
+            elab =
               (let* body = body.elab in
+               (* FIXME: is this wrong? What if the annotations names have changed? *)
                (* No elaboration. Arguably we could *delete* annotations here! *)
-               Fn (None, params, ret, body));
+               Exp.Fn (None, params, ret, body));
             comp = fun k ->
               let params = map_fields (fun _fn (p,_ty) -> IR.Binder.fresh ?name:(pat_name p) ()) params in
               let return = IR.Binder.fresh () in
@@ -526,23 +562,25 @@ and check' env ~mode eloc e ty : exp' check_output =
               in
               IRB.apply_cont k cps }
        | _ ->
-          let ty, fndef, compfn = infer_func_def env ~mode eloc fndef in
+          let ty, tfndef, fndef, compfn = infer_func_def env ~mode eloc fndef in
           inferred ty;
-          { elab = (let* fndef = fndef in Fn fndef);
+          { typed = Fn tfndef;
+            elab = (let* fndef = fndef in Exp.Fn fndef);
             comp = fun k -> IRB.apply_cont k compfn }
      end
 
   | FnDef ((s, sloc), fndef, body) ->
      let fmode = fresh_gen_mode () in
-     let fty, fndef, compfn = infer_func_def env ~mode:fmode eloc fndef in
+     let fty, tfndef, fndef, compfn = infer_func_def env ~mode:fmode eloc fndef in
      mark_var_use_at_level ~mode fmode.gen_level_acc;
      let cvar = IR.Binder.fresh ~name:s () in
      let binding = {typ = fty; gen_level = fmode.gen_level_acc; comp_var = IR.Binder.ref cvar} in
      let env = Env_vals { vals = SymMap.singleton s binding; rest = env } in
      let body = check env ~mode body ty in
-     { elab =
+     { typed = FnDef((s,sloc), tfndef, body.typed);
+       elab =
          (let* fndef = fndef and* body = body.elab in
-          FnDef((s,sloc), fndef, body));
+          Exp.FnDef((s,sloc), fndef, body));
        comp = fun k -> LetVal(cvar, compfn, body.comp k) }
 
   | App (f, args) ->
@@ -556,9 +594,10 @@ and check' env ~mode eloc e ty : exp' check_output =
        | Error e -> fail eloc (Conflict (`Expr, e)) in
      let args = map_fields (fun _fn (e, t) -> check env ~mode e (Checking t)) tyargs in
      inferred tyret;
-     { elab =
+     { typed = App (f.typed, map_fields (fun _fn f -> f.typed) args);
+       elab =
          (let* f = f.elab and* args = elab_fields (map_fields (fun _fn f -> f.elab) args) in
-          App(f, args));
+          Exp.App(f, args));
        comp = IRB.apply f.comp (map_fields (fun _fn a -> a.comp) args)}
 
   | Match ((es, matchloc), cases) ->
@@ -573,10 +612,13 @@ and check' env ~mode eloc e ty : exp' check_output =
          check env ~mode exp ty)
          orig_actions cases
      in
-     { elab =
+     { typed =
+         Match ((List.map (fun x -> x.typed) es, matchloc),
+                List.map2 (fun (ps,_) e -> ps, e.typed) cases actions);
+       elab =
          (let* es = elab_list (List.map (fun e -> e.elab) es)
           and* actions = elab_list (List.map (fun e -> e.elab) actions) in
-          Match((es, matchloc), List.map2 (fun (ps,_) e -> ps, e) cases actions));
+          Exp.Match((es, matchloc), List.map2 (fun (ps,_) e -> ps, e) cases actions));
        comp = fun k ->
          let actions = List.map2 (fun act act' -> {act with Check_pat.rhs = act'.comp}) orig_actions actions in
          let actions = Array.of_list actions in
@@ -586,24 +628,26 @@ and check' env ~mode eloc e ty : exp' check_output =
      }
 
   | Pragma ("true"|"false" as b) when match inspect_cons Bool ty with Imatches Bool -> true | _ -> false ->
-     { elab = elab_pure e;
+     { typed = Pragma b;
+       elab = elab_pure e;
        comp = IRB.literal (Bool (String.equal b "true")) }
   | Pragma "bot" ->
      inferred (Tcons (Cons.bottom_loc eloc));
-     { elab = elab_pure e;
+     { typed = Pragma "bot";
+       elab = elab_pure e;
        comp = IRB.trap "@bot" }
   | Pragma s -> failwith ("pragma: " ^ s)
 
 
-and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * exp check_output =
+and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * (exp,typed_exp) check_output =
   let ty = ref (Tcons Cons.bottom) in
   let e = check env ~mode e (Inference ty) in
   wf_ptyp env !ty;
   !ty, e
 
-and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def elab * IR.value =
+and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * typed_func_def * func_def elab * IR.value =
    if params.fopen = `Open then failwith "invalid ... in params";
-   let ty, elab, _generalised, (ecomp, (act, split)) =
+   let ty, (typed_poly, typed_fn), elab, _generalised, (ecomp, (act, split)) =
      elab_gen env ~mode poly (fun env ->
        let params = map_fields (fun _fn (p, ty) ->
          match ty with
@@ -634,8 +678,29 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
        let _ = map_fields (fun _fn ((tn,tp),_,_) -> wf_ntyp env tn; wf_ptyp env tp) params in
        (* FIXME params or ptys? What happens if they disagree? *)
        tcons eloc (Func (map_fields (fun _fn ((tn,_tp),_,_) -> tn) params, res)),
+       body.typed,
        body.elab, bmode.gen_level_acc,
        (body.comp, (act, split))) in
+   let tfndef : typed_func_def =
+     let tparams, tret =
+       (* FIXME awful hack *)
+       match ty with
+       | Tcons {conses=[Func (t,r)];_}
+       | Tpoly { body = Tcons {conses=[Func (t,r)];_}; _ } -> t,r
+       | _ -> intfail "wuh?"
+     in
+     let params =
+       merge_fields params tparams
+         ~left:(fun _ _ -> assert false)
+         ~right:(fun _ _ -> assert false)
+         ~both:(fun _fn (p, _) t -> Some (p, Some t))
+         ~extra:(fun ((c,_),_) -> c)
+     in
+     typed_poly,
+     params,
+     Some tret,
+     typed_fn
+   in
    let fndef =
      let* poly, ty, body = elab in
      let tparams, tret =
@@ -663,7 +728,7 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * func_def el
             ret,
             Check_pat.compile ~cont:(IRB.Named_cont (IR.Binder.ref ret)) ~actions (list_fields params |> List.map (fun (_,v) -> IR.var v)) split)
    in
-   ty, fndef, cps
+   ty, tfndef, fndef, cps
  
 and extend_env env act =
   let vals = (Option.get act.Check_pat.bindings).bindings in
@@ -672,7 +737,8 @@ and extend_env env act =
 and infer_lit = function
   | l, loc ->
      infer_lit' loc l,
-     { elab = elab_pure (Lit (l, loc));
+     { typed = Lit (l, loc);
+       elab = elab_pure (Exp.Lit (l, loc));
        comp = IRB.literal l }
 and infer_lit' loc = function
   | Bool _ -> tcons loc Bool
@@ -689,12 +755,3 @@ and check_rhs env ~mode pty e =
   | Some ty ->
      let t = typ_of_tyexp env ty in
      t, check env ~mode e (Checking t), None
-
-and check_annot env annot ty =
-  wf_ntyp env ty;
-  match annot with
-  | None -> Checking ty
-  | Some ty' ->
-     let t = typ_of_tyexp env ty' in
-     subtype env t ty |> or_raise `Subtype (snd ty');
-     Checking t

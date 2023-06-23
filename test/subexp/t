@@ -1212,4 +1212,4 @@ fn [A,C,B <: int](x) -> (A|C,int|B|C) { (x,x) }
 > [A, C, B <: int] (C) -> (A | C, int | B | C)
 > let  = %yield(0: fun (x) ret { ret((0: x, 1: x)) }); done
 
-> STATS: fix: 58, flex: 1885
+> STATS: fix: 58, flex: 1899

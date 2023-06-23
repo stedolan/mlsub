@@ -66,7 +66,6 @@ and tyexp = tyexp' mayloc and tyexp' =
 and typolybounds =
   (symbol * tyexp option) list
 
-
 type mapper = {
   loc : mapper -> location -> location;
   exp : mapper -> exp -> exp;
