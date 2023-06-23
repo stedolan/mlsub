@@ -121,4 +121,4 @@ fn() { twice(id, id)(id) }
 >   ret(x2)
 > });
 > done
-> STATS: fix: 14, flex: 270
+> STATS: fix: 14, flex: 262
