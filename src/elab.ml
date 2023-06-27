@@ -12,21 +12,21 @@ type typed_exp = typed_exp' mayloc and typed_exp' =
   | Lit of literal loc
   | Var of ident * value_binding (* Is this right? *)
   | Fn of typed_func_def
-  | FnDef of symbol * typed_func_def * typed_exp
+  | FnDef of symbol * IR.value IR.Binder.t * typed_func_def * typed_exp
   | App of typed_exp * typed_exp tuple_fields
   | Tuple of tuple_tag option * typed_exp tuple_fields
-  | Let of typed_pat * elab_typ * typed_exp * typed_exp
+  | Let of typed_pat * Check_pat.ex_split * elab_typ * typed_exp * typed_exp Check_pat.action
   | Seq of typed_exp * typed_exp
   | Proj of typed_exp * symbol
   | If of typed_exp * typed_exp * typed_exp
-  | Match of typed_exp list loc * typed_case list
+  | Match of typed_exp list loc * Check_pat.ex_split * typed_case list
   | Typed of typed_exp * elab_typ
   | Pragma of string
 
-and typed_case = typed_pat list list loc * typed_exp
+and typed_case = typed_pat list list loc * typed_exp Check_pat.action
 
 and typed_func_def =
-  typed_polybounds option * typed_parameters * ptyp option * typed_exp
+  typed_polybounds option * typed_parameters * Check_pat.ex_split * ptyp option * typed_exp Check_pat.action
 
 and typed_parameters =
   (typed_pat * ntyp option) tuple_fields
@@ -50,16 +50,16 @@ and typed_map_typs_exp' ~neg ~pos ~index = function
   | Var _ as e -> e (* FIXME value_binding? *)
   | Fn fndef ->
      Fn (typed_map_func_def ~neg ~pos ~index fndef)
-  | FnDef (s, fndef, body) ->
-     FnDef (s, typed_map_func_def ~neg ~pos ~index fndef, typed_map_typs_exp ~neg ~pos ~index body)
+  | FnDef (s, vb, fndef, body) ->
+     FnDef (s, vb, typed_map_func_def ~neg ~pos ~index fndef, typed_map_typs_exp ~neg ~pos ~index body)
   | App (f, args) ->
      App (typed_map_typs_exp ~neg ~pos ~index f,
           Tuple_fields.map_fields (fun _fn x -> typed_map_typs_exp ~neg ~pos ~index x) args)
   | Tuple (tag, fs) ->
      Tuple (tag, Tuple_fields.map_fields (fun _fn x -> typed_map_typs_exp ~neg ~pos ~index x) fs)
-  | Let (p, ty, e, body) ->
+  | Let (p, split, ty, e, body) ->
      (* FIXME binding? *)
-     Let (p, map_elab_typ ~neg ~pos ~index ty, typed_map_typs_exp ~neg ~pos ~index e, typed_map_typs_exp ~neg ~pos ~index body)
+     Let (p, split, map_elab_typ ~neg ~pos ~index ty, typed_map_typs_exp ~neg ~pos ~index e, typed_map_typs_action ~neg ~pos ~index body)
   | Seq (e1, e2) ->
      Seq (typed_map_typs_exp ~neg ~pos ~index e1,
           typed_map_typs_exp ~neg ~pos ~index e2)
@@ -69,14 +69,23 @@ and typed_map_typs_exp' ~neg ~pos ~index = function
      If (typed_map_typs_exp ~neg ~pos ~index cond,
          typed_map_typs_exp ~neg ~pos ~index ifso,
          typed_map_typs_exp ~neg ~pos ~index ifnot)
-  | Match ((es,matchloc), cases) ->
+  | Match ((es,matchloc), split, cases) ->
      Match ((List.map (typed_map_typs_exp ~neg ~pos ~index) es, matchloc),
-            List.map (fun (pats, e) -> pats, typed_map_typs_exp ~neg ~pos ~index e) cases)
+            split,
+            List.map (fun (pats, e) -> pats, typed_map_typs_action ~neg ~pos ~index e) cases)
   | Typed (e, ty) ->
      Typed (typed_map_typs_exp ~neg ~pos ~index e, map_elab_typ ~neg ~pos ~index ty)
   | Pragma _ as e -> e
 
-and typed_map_func_def ~neg ~pos ~index (poly, params, ret, body) =
+and typed_map_typs_action ~neg ~pos ~index { rhs; id; pat_loc; bindings } =
+  let rhs = typed_map_typs_exp ~neg ~pos ~index rhs in
+  let map_binding (vb : value_binding) =
+    (* FIXME what's wrong with this? *)
+    (*{ vb with typ = pos ~index vb.typ }*) vb in
+  let bindings = Option.map (fun (b : Check_pat.act_bindings) -> { b with bindings = SymMap.map map_binding b.Check_pat.bindings }) bindings in
+  { rhs; id; pat_loc; bindings }
+
+and typed_map_func_def ~neg ~pos ~index (poly, params, psplit, ret, body) =
   let poly, index =
     match poly with
     | None -> None, index
@@ -86,8 +95,8 @@ and typed_map_func_def ~neg ~pos ~index (poly, params, ret, body) =
   in
   let params = Tuple_fields.map_fields (fun _fn (p, ty) -> p, Option.map (neg ~index) ty) params in
   let ret = Option.map (pos ~index) ret in
-  let body = typed_map_typs_exp ~neg ~pos ~index body in
-  poly, params, ret, body
+  let body = typed_map_typs_action ~neg ~pos ~index body in
+  poly, params, psplit, ret, body
 
 module Elaborate = struct
   let rec exp env (e : typed_exp) : exp =
@@ -99,34 +108,34 @@ module Elaborate = struct
     | Lit l -> Lit l
     | Var ((id,loc),_v) -> Var (id, loc)
     | Fn fn -> Fn (fndef env fn)
-    | FnDef (s, fn, body) ->
+    | FnDef (s, _vb, fn, body) ->
        FnDef (s, fndef env fn, exp env body)
     | App (f, args) ->
        App (exp env f, map_fields (fun _fn e -> exp env e) args)
     | Tuple (tag, fs) ->
        Tuple (tag, map_fields (fun _fn e -> exp env e) fs)
-    | Let (p, ty, e, body) ->
-       Let (p, Some (typ env ty), exp env e, exp env body)
+    | Let (p, _split, ty, e, body) ->
+       Let (p, Some (typ env ty), exp env e, exp env body.rhs)
     | Seq (e1, e2) ->
        Seq (exp env e1, exp env e2)
     | Proj (e, s) ->
        Proj (exp env e, s)
     | If (cond, ifso, ifnot) ->
        If (exp env cond, exp env ifso, exp env ifnot)
-    | Match ((es,loc), cases) ->
+    | Match ((es,loc), _split, cases) ->
        Match ((List.map (exp env) es,loc), List.map (case env) cases)
     | Typed (e, ty) ->
        Typed (exp env e, typ env ty)
     | Pragma s ->
        Pragma s
 
-  and case env (ps, e) = (ps, exp env e)
+  and case env (ps, e) = (ps, exp env e.rhs)
 
   and typ env = function
     | Elab_ptyp t -> unparse_ptyp ~flexvar:ignore ~env t
     | Elab_ntyp t -> unparse_ntyp ~flexvar:ignore ~env t
 
-  and fndef env (poly, params, ret, body) =
+  and fndef env (poly, params, _psplit, ret, body) =
     let env, poly =
       match poly with
       | None ->
@@ -140,6 +149,175 @@ module Elaborate = struct
     poly,
     map_fields (fun _fn (p, t) -> p, Option.map (unparse_ntyp ~flexvar:ignore ~env) t) params,
     Option.map (unparse_ptyp ~flexvar:ignore ~env) ret,
-    exp env body
-         
+    exp env body.rhs
+
+end
+
+
+module IR_Builder = struct
+
+type syn_cont =
+  | Named_cont of IR.cont IR.Binder.ref
+  | Gen_cont of (IR.value -> IR.comp)
+
+(* Can be used more than once *)
+let name_cont cont f : IR.comp =
+  match cont with
+  | Named_cont k -> f k
+  | Gen_cont g ->
+     let x = IR.Binder.fresh ~name:"x" () in
+     let k = IR.Binder.fresh ~name:"k" () in
+     LetCont(k, [x], g (IR.var x),
+             f (IR.Binder.ref k))
+
+let maybe_dup_cont ~uses cont f =
+  if uses <= 1 then f cont
+  else name_cont cont (fun k -> f (Named_cont k))
+
+let apply_cont cont v : IR.comp =
+  match cont with
+  | Named_cont k -> Jump(k, [v])
+  | Gen_cont f -> f v
+
+type exp = syn_cont -> IR.comp
+type pat = IR.value -> IR.comp -> IR.comp
+
+let eval_cont (e : exp) (cont : IR.value -> IR.comp) =
+  e (Gen_cont cont)
+
+let eval_cont_fields (fs : exp tuple_fields) (cont : IR.value tuple_fields -> IR.comp) =
+  let final : IR.value FieldMap.t -> IR.comp =
+    fun valmap ->
+    cont (map_fields (fun fn _ -> FieldMap.find fn valmap) fs) in
+  let add_field (acc : IR.value FieldMap.t -> IR.comp) fn e =
+    fun valmap ->
+    eval_cont e @@ fun v ->
+    acc (FieldMap.add fn v valmap)
+  in
+  (Tuple_fields.fold_fields add_field final fs) FieldMap.empty
+
+let eval_cont_list (es : exp list) (cont : IR.value list -> IR.comp) =
+  let add_exp (acc : IR.value list -> IR.comp) exp =
+    fun vals ->
+    eval_cont exp @@ fun v ->
+    acc (v :: vals)
+  in
+  List.fold_left add_exp cont es []
+
+let apply_pat (p : pat) (v : IR.value) (body : IR.comp) =
+  p v body
+
+
+let literal lit : exp =
+  fun k -> apply_cont k (Literal lit)
+
+let var v =
+  fun k -> apply_cont k (Var v)
+
+let tuple tag fields =
+  fun k ->
+  eval_cont_fields fields @@ fun fs ->
+  apply_cont k (Tuple (tag, fs))
+
+(* FIXME lambda *)
+
+let project e field =
+  fun k ->
+  eval_cont e @@ fun v ->
+  let vfield = IR.Binder.fresh ~name:field () in
+  Project (v, ([Field_named field, vfield],
+               apply_cont k (IR.var vfield)))
+
+let apply fn args =
+  fun k ->
+  eval_cont fn @@ fun fn ->
+  eval_cont_fields args @@ fun args ->
+  let vret = IR.Binder.fresh ~name:"x" () in
+  Apply (Func fn, args, [vret],
+         apply_cont k (IR.var vret))
+
+let trap s : exp =
+  fun _k ->
+  Trap s
+
+end
+
+
+module Compile = struct
+  module IRB = IR_Builder
+
+  let pat_name = function
+    | Some (Pbind (v,_)), _ -> Some (fst v : string)
+    | _ -> None
+
+  let rec exp (e : typed_exp) : IRB.exp =
+    match e with
+    | None, _loc -> IRB.trap "type error?"
+    | Some e, _loc ->
+       exp' e
+
+  and exp' : typed_exp' -> IRB.exp = function
+    | Lit (l, _) -> IRB.literal l
+    | Var (_, v) -> IRB.var v.comp_var
+    | Typed (e, _ty) -> exp e
+    | If (cond, ifso, ifnot) ->
+       fun k ->
+       IRB.name_cont k @@ fun k ->
+       IRB.eval_cont (exp cond) @@ fun cond ->
+       Match (cond, [
+         (IR.Symbol.of_string "true", ([], exp ifso (Named_cont k)));
+         (IR.Symbol.of_string "false", ([], exp ifnot (Named_cont k)))], None)
+
+    | App (f, args) ->
+       IRB.apply (exp f) (map_fields (fun _fn a -> exp a) args)
+
+    | Tuple (tag, fields) ->
+       (let tag = Option.map (fun (t,_) -> IR.Symbol.of_string t) tag in
+        IRB.tuple tag (map_fields (fun _fn e -> exp e) fields))
+
+    | Proj (e, (field, _loc)) ->
+       IRB.project (exp e) field
+
+    | Seq (e1, e2) ->
+       fun k ->
+       IRB.eval_cont (exp e1) @@ fun _v ->
+       exp e2 k
+
+    | Match ((es,_loc), split, cases) ->
+       fun k ->
+         let actions = List.map (fun (_pats, act) ->
+                           {act with Check_pat.rhs = exp act.Check_pat.rhs}) cases in
+         let actions = Array.of_list actions in
+         IRB.maybe_dup_cont ~uses:(Array.length actions) k @@ fun k ->
+         IRB.eval_cont_list (List.map (fun e -> exp e) es) @@ fun vals ->
+         Check_pat.compile ~cont:k ~actions vals split
+
+    | Let (_p, split, _ty, e, act) ->
+       fun k ->
+         let actions = [| { act with Check_pat.rhs = exp act.Check_pat.rhs } |] in
+         IRB.eval_cont (exp e) @@ fun e ->
+         Check_pat.compile ~cont:k ~actions [e] split
+
+    | Fn def ->
+       fun k -> IRB.apply_cont k (func_def def)
+
+    | FnDef (_sym, vb, fndef, body) ->
+       fun k -> LetVal(vb, func_def fndef, exp body k)
+
+    | Pragma "true" ->
+       IRB.literal (Bool true)
+    | Pragma "false" ->
+       IRB.literal (Bool false)
+    | Pragma "bot" ->
+       IRB.trap "@bot"
+    | Pragma _ ->
+       intfail "unknown pragma"
+
+  and func_def ((_poly,params,psplit,_ret,body) : typed_func_def) : IR.value =
+    let actions = [| { body with rhs = exp body.rhs } |] in
+    let params = map_fields (fun fn _ -> IR.Binder.fresh ?name:(pat_name (fst (get_field params fn))) ()) params in
+    let ret = IR.Binder.fresh () in
+    Lambda(map_fields (fun _fn v -> v) params,
+           ret,
+           Check_pat.compile ~cont:(IRB.Named_cont (IR.Binder.ref ret)) ~actions (list_fields params |> List.map (fun (_,v) -> IR.var v)) psplit)
 end
