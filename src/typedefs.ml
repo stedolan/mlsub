@@ -101,16 +101,16 @@ module Cons = struct
 
   (* FIXME: can intern these if it turns out to be slow *)
   type cons_loc = cons_head * Location.t
-  module Locs = UniqList.Make (struct
-    type nonrec t = cons_loc
-    let equal (a, _) (b, _) = equal_lists (equal_one ~neg:(fun () () -> true) ~pos:(fun () () -> true)) a b
+  module Locs = AssocList.Make (struct
+    type nonrec t = cons_head
+    let equal a b = equal_lists (equal_one ~neg:(fun () () -> true) ~pos:(fun () () -> true)) a b
   end)
 
 
   type ('n,'p) conses = {
     (* FIXME: enforce *)
     conses: ('n, 'p) t list; (* pairwise incompatible - FIXME enforce *)
-    locs: Locs.t
+    locs: Location.t Locs.t
    }
 
   let equal ~neg ~pos a b = equal_lists (equal_one ~neg ~pos) a.conses b.conses
@@ -255,14 +255,14 @@ module Cons = struct
   let meet a b = { conses = meet a.conses b.conses; locs = Locs.append a.locs b.locs ~merge:(fun a _ -> a) }
 
   let bottom = { conses = []; locs = Locs.empty }
-  let bottom_loc loc = { conses = []; locs = Locs.single ([], loc) }
+  let bottom_loc loc = { conses = []; locs = Locs.single [] loc }
   let is_bottom = function { conses = []; _ } -> true | _ -> false
 
   let get_single_exn = function { conses = [c]; _ } -> c | _ -> assert false
 
-  let make ~loc c = { conses = [c]; locs = Locs.single ([map_one ~pos:ignore ~neg:ignore c], loc) }
+  let make ~loc c = { conses = [c]; locs = Locs.single [map_one ~pos:ignore ~neg:ignore c] loc }
 
-  let make' ~loc conses = { conses; locs = Locs.single (List.map (map_one ~pos:ignore ~neg:ignore) conses, loc) }
+  let make' ~loc conses = { conses; locs = Locs.single (List.map (map_one ~pos:ignore ~neg:ignore) conses) loc }
 
   type ('neg, 'pos) subfield =
     | S_neg of field_neg * 'neg
@@ -449,14 +449,14 @@ module Rvset = UniqList.Make (struct
 end)
 
 (* A ctor_ty is a join of a constructed type and some rigid variables *)
-type (+'neg,+'pos) ctor_ty =
-  { cons: ('neg,'pos) Cons.conses;
-    rigvars: Rvset.t }
+type (+'neg,+'pos) ctor_ty_neg =
+  { cons_n: ('neg, 'pos) Cons.conses;
+    rigvars_n: Rvset.t }
 
 (* Flexvars are mutable but only in one direction.
      - level may decrease
      - bounds may become tighter (upper decreases, lower increases) *)
-type flexvar =
+and flexvar =
   { level: env_level;
     id: int;    (* for printing/sorting *)
     mutable upper: styp_neg list; (* strictly covariant parts are matchable *)
@@ -471,14 +471,14 @@ type flexvar =
 and styp_neg =
   | UBvar of flexvar
     (* Only one allowed per set of rigid variables *)
-  | UBcons of (flex_lower_bound, flexvar) ctor_ty
+  | UBcons of (flex_lower_bound, flexvar) ctor_ty_neg
 
 (* Matchability constraint: the contravariant parts of a flexible variable's lower bound must be flexible variables.
    Flexible variables appearing in vars must not have UBvar upper bounds, as they are also constrained above here.
    Flexible variables appearing negatively in ctor might well have UBvar upper bounds.
  *)
 and flex_lower_bound =
-  | Lower of flexvar UniqList.t * (flexvar, flex_lower_bound) ctor_ty
+  | Lower of flexvar UniqList.t * Rvset.t * (flexvar, flex_lower_bound) Cons.conses
   | Ltop of Location.t option
 
 (* Variables in typs *)
@@ -505,7 +505,7 @@ and flexvar_gen =
     }
 
 
-module Fvset = UniqList.Make(struct type t = flexvar let equal = (==) end)
+module Fvset = UniqList.Make (struct type t = flexvar let equal = (==) end)
 
 (* FIXME: enforce tjoin invariants, especially in neg types *)
 type (+'neg, +'pos) typ =
@@ -564,23 +564,23 @@ let equal_flexvar (p : flexvar) (q : flexvar) =
 let rec equal_flex_lower_bound (p : flex_lower_bound) (q : flex_lower_bound) =
   match p, q with
   | Ltop _, Ltop _ -> true
-  | Lower (pflex, pctor), Lower (qflex, qctor) ->
+  | Lower (pflex, prigvars, pcons), Lower (qflex, qrigvars, qcons) ->
      Fvset.equal pflex qflex &&
-     Rvset.equal pctor.rigvars qctor.rigvars &&
-     Cons.equal ~neg:equal_flexvar ~pos:equal_flex_lower_bound pctor.cons qctor.cons
+     Rvset.equal prigvars qrigvars &&
+     Cons.equal ~neg:equal_flexvar ~pos:equal_flex_lower_bound pcons qcons
   | _, _ -> false
 let equal_styp_neg (p : styp_neg) (q : styp_neg) =
   match p, q with
   | UBvar pv, UBvar qv -> equal_flexvar pv qv
   | UBcons cp, UBcons cq ->
-     Rvset.equal cp.rigvars cq.rigvars &&
-     Cons.equal ~neg:equal_flex_lower_bound ~pos:equal_flexvar cp.cons cq.cons
+     Rvset.equal cp.rigvars_n cq.rigvars_n &&
+     Cons.equal ~neg:equal_flex_lower_bound ~pos:equal_flexvar cp.cons_n cq.cons_n
   | (UBvar _|UBcons _), _ -> false
 
-let bottom = Lower(Fvset.empty, {cons=Cons.bottom;rigvars=Rvset.empty})
-let of_flexvars fvs = Lower(fvs, {cons=Cons.bottom;rigvars=Rvset.empty})
+let bottom = Lower(Fvset.empty, Rvset.empty, Cons.bottom)
+let of_flexvars fvs = Lower(fvs, Rvset.empty, Cons.bottom)
 let of_flexvar fv = of_flexvars (Fvset.single fv)
-let of_rigvars rigvars = Lower(Fvset.empty, {cons=Cons.bottom;rigvars})
+let of_rigvars rigvars = Lower(Fvset.empty, rigvars, Cons.bottom)
 let of_rigvar rv = of_rigvars (Rvset.single rv)
 let is_bottom t = equal_flex_lower_bound bottom t
 
@@ -603,7 +603,7 @@ let fv_set_upper ~changes fv upper =
   fv.upper <- upper
 
 let fv_set_lower ~changes fv lower =
-  begin match lower with Lower (fvs, _) -> assert (not (Fvset.mem fv fvs)) | Ltop _ -> () end;
+  begin match lower with Lower (fvs, _, _) -> assert (not (Fvset.mem fv fvs)) | Ltop _ -> () end;
   changes := Change_lower (fv, fv.lower) :: !changes;
   fv.lower <- lower
 
@@ -827,19 +827,19 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   if not (Env_level.equal fv.level Env_level.initial) then
     ignore (env_rigid_vars env fv.level);
   (* FIXME rectypes *)
-  begin match fv.lower with Lower (fvs, _) -> assert (not (Fvset.mem fv fvs)) | Ltop _ -> () end;
+  begin match fv.lower with Lower (fvs, _, _) -> assert (not (Fvset.mem fv fvs)) | Ltop _ -> () end;
   wf_flex_lower_bound ~seen env fv.level fv.lower;
   (* Rigvar sets must be distinct *)
-  let rvsets = List.filter_map (function UBvar _ -> None | UBcons c -> Some c.rigvars) fv.upper in
+  let rvsets = List.filter_map (function UBvar _ -> None | UBcons c -> Some c.rigvars_n) fv.upper in
   assert (List.length rvsets =
          List.length (rvsets |> List.concat_map (fun rv1 -> rvsets |> List.filter (Rvset.equal rv1))));
   fv.upper |> List.iter (function
   | UBvar v ->
      if fv.rotated then assert (not (Env_level.equal fv.level v.level));
      wf_flexvar ~seen env fv.level v
-  | UBcons {cons;rigvars} ->
-     rigvars |> Rvset.to_list |> List.iter (fun rv -> wf_rigvar env lvl rv);
-     Cons.map ~neg:(wf_flex_lower_bound ~seen env fv.level) ~pos:(wf_flexvar ~seen env fv.level) cons |> ignore)
+  | UBcons {cons_n;rigvars_n} ->
+     rigvars_n |> Rvset.to_list |> List.iter (fun rv -> wf_rigvar env lvl rv);
+     Cons.map ~neg:(wf_flex_lower_bound ~seen env fv.level) ~pos:(wf_flexvar ~seen env fv.level) cons_n |> ignore)
   end
 
 and wf_rigvar env lvl (rv : rigvar) =
@@ -850,7 +850,7 @@ and wf_rigvar env lvl (rv : rigvar) =
 and wf_flex_lower_bound ~seen env lvl l =
   match l with
   | Ltop _ -> ()
-  | Lower (flexvars, {cons;rigvars}) ->
+  | Lower (flexvars, rigvars, cons) ->
      Fvset.iter ~f:(wf_flexvar ~seen env lvl) flexvars;
      List.iter (wf_rigvar env lvl) (Rvset.to_list rigvars);
      (* FIXME check distinctness of conses joined *)
@@ -1005,7 +1005,7 @@ let unparse_join = function
 let rec unparse_flex_lower_bound ~env ~flexvar = function
   | Ltop _ ->
      mktyexp (named_type "any")
-  | Lower(flexvars, {cons; rigvars}) ->
+  | Lower(flexvars, rigvars, cons) ->
      let ts =
        List.map (unparse_flexvar ~env ~flexvar) (flexvars :> flexvar list)
        @
@@ -1017,7 +1017,7 @@ let rec unparse_flex_lower_bound ~env ~flexvar = function
 
 let unparse_styp_neg ~env ~flexvar = function
   | UBvar v -> unparse_flexvar ~env ~flexvar v
-  | UBcons {cons;rigvars} ->
+  | UBcons {cons_n=cons;rigvars_n=rigvars} ->
      unparse_join
        (List.map (unparse_cons ~neg:(unparse_flex_lower_bound ~env ~flexvar) ~pos:(unparse_flexvar ~env ~flexvar)) cons.conses
         @

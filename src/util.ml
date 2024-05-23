@@ -77,70 +77,71 @@ end
 type 'a iarray = 'a IArray.t
 
 
-module UniqList : sig
-  type +'a t = private 'a list
-  module Make (El : sig type t val equal : t -> t -> bool end) : sig
+module type EQ = sig type t val equal : t -> t -> bool end
+module AssocList : sig
+  type (+'a,+'b) t = private ('a * 'b) list
+  module Make (El : EQ) : sig
     type el = El.t
-    type nonrec t = el t
+    type nonrec 'a t = (el, 'a)  t
 
-    val empty : t
-    val single : el -> t
-    val add : t -> el -> merge:(el -> el -> el) -> t
-    val append : t -> t -> merge:(el -> el -> el) -> t
-    val append' : t -> el list -> merge:(el -> el -> el) -> t
+    val empty : 'a t
+    val single : el -> 'a -> 'a t
+    val add : 'a t -> el -> 'a -> merge:('a -> 'a -> 'a) -> 'a t
+    val append : 'a t -> 'a t -> merge:('a -> 'a -> 'a) -> 'a t
+    val append' : 'a t -> (el * 'a) list -> merge:('a -> 'a -> 'a) -> 'a t
   
-    val filter : t -> f:(el -> bool) -> t
-    val partition : t -> f:(el -> bool) -> t * t
-    val mem : el -> t -> bool
-    val is_empty : t -> bool
+    val filter : 'a t -> f:(el -> bool) -> 'a t
+    val partition : 'a t -> f:(el -> bool) -> 'a t * 'a t
+    val mem : el -> 'a t -> bool
+    val is_empty : 'a t -> bool
 
-    val pick : t -> el option
+    val pick : 'a t -> (el * 'a) option
 
     (* equality as ordered lists *)
-    val equal : ?eq:(el -> el -> bool) -> t -> t -> bool
+    val equal : eq:('a -> 'a -> bool) -> 'a t -> 'a t -> bool
 
-    val iter : t -> f:(el -> unit) -> unit
-    val to_list : t -> el list
-    val of_list : merge:(el -> el -> el) -> el list -> t
+    val iter : 'a t -> f:(el * 'a -> unit) -> unit
+    val to_list : 'a t -> (el * 'a) list
+    val of_list : merge:('a -> 'a -> 'a) -> (el * 'a) list -> 'a t
   end
 end = struct
-  type 'a t = 'a list
+  type ('a,'b) t = ('a * 'b) list
   module Make (El : sig type t val equal : t -> t -> bool end) = struct
     type el = El.t
-    type t = el list
+    type 'a t = (el * 'a) list
   
     let empty = []
-    let single x = [x]
+    let single k v = [k, v]
   
-    let rec add xs x ~merge =
+    let rec add xs k' v' ~merge =
       match xs with
-      | [] -> [x]
-      | x' :: xs ->
-         if El.equal x x' then
-           merge x' x :: xs
+      | [] -> [k', v']
+      | (k, v) :: xs ->
+         if El.equal k k' then
+           (k, merge v v') :: xs
          else
-           x' :: add xs x ~merge
+           (k, v) :: add xs k' v' ~merge
 
     (* slow, but eh these are short lists *)
     let rec append xs ys ~merge =
       match ys with
       | [] -> xs
-      | y :: ys -> append (add xs y ~merge) ys ~merge
+      | (k, v) :: ys -> append (add xs k v ~merge) ys ~merge
 
     let append' = append
   
-    let filter xs ~f = List.filter f xs
+    let filter xs ~f = List.filter (fun (k,_) -> f k) xs
 
-    let partition xs ~f = List.partition f xs
+    let partition xs ~f = List.partition (fun (k, _) -> f k) xs
   
-    let mem x xs = List.exists (El.equal x) xs
+    let mem x xs = List.exists (fun (k, _) -> El.equal k x) xs
 
     let is_empty = function [] -> true | _ :: _ -> false
 
     let pick = function [] -> None | x :: _ -> Some x
 
-    let equal ?(eq = El.equal) a b =
-      try List.for_all2 eq a b
+    let equal ~eq a b =
+      try List.for_all2 (fun (ka, va) (kb, vb) -> El.equal ka kb && eq va vb) a b
       with Invalid_argument _ -> false
 
     let iter xs ~f = List.iter f xs
@@ -149,6 +150,62 @@ end = struct
 
     let of_list ~merge x = append' ~merge empty x
   end
+end
+
+module UniqList : sig
+type 'a t = private 'a list
+module Make (El : EQ) : sig
+  type el = El.t
+  type nonrec t = el t
+
+  val empty : t
+  val single : el -> t
+  val add : t -> el -> t
+  val append : t -> t -> t
+  val append' : t -> el list -> t
+
+  val filter : t -> f:(el -> bool) -> t
+  val partition : t -> f:(el -> bool) -> t * t
+  val mem : el -> t -> bool
+  val is_empty : t -> bool
+
+  val pick : t -> el option
+
+  (* equality as ordered lists *)
+  val equal : t -> t -> bool
+
+  val iter : t -> f:(el -> unit) -> unit
+  val to_list : t -> el list
+  val of_list : el list -> t
+end
+end = struct
+type 'a t = 'a list
+module Make (El : EQ) = struct
+  module L = AssocList.Make (El)
+  type el = El.t
+  type t = El.t list
+  let empty = []
+  let single x = [x]
+  let rec add xs y =
+    match xs with
+    | [] -> [y]
+    | x :: _ when El.equal x y -> xs
+    | x :: xs -> x :: add xs y
+  let rec append xs (ys : t) =
+    match ys with
+    | [] -> xs
+    | k :: ys -> append (add xs k) ys
+  let append' = append
+  let filter xs ~f = List.filter f xs
+  let partition xs ~f = List.partition f xs
+  let mem x xs = List.exists (El.equal x) xs
+  let is_empty = function [] -> true | _ :: _ -> false
+  let pick = function [] -> None | x :: _ -> Some x
+  let equal xs ys = List.equal El.equal xs ys
+  let iter xs ~f = List.iter f xs
+  let to_list xs = xs
+  let of_list xs = append' empty xs
+end
 end
 
 module Vector : sig

@@ -191,7 +191,7 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * typed_exp * env_level opti
    This improves elaborations but is a bit of a hack.
    Decide whether to keep it! *)
 let elab_ptyp = function
-  | Tsimple (Lower(fv, ctor)) as ty when is_bottom (Lower(Fvset.empty,ctor)) ->
+  | Tsimple (Lower(fv, rvs, cons)) as ty when is_bottom (Lower(Fvset.empty,rvs,cons)) ->
      (match (fv :> flexvar list) with
       | [fv] -> Elab_ntyp (Tsimple fv)
       | _ -> Elab_ptyp ty)
