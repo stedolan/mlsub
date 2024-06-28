@@ -175,6 +175,8 @@ let rec match_sub ~changes env (p : flex_lower_bound) (cn : (flex_lower_bound, f
          let pvcons = Cons.meet pvcons cn.cons_n in
          let m ~neg ~pos = Cons.map ~neg ~pos pvcons in
          m
+           (* FIXME test this once user-defined types exist
+              (to allow meets of types with different neg arities) *)
            ~neg:(function
              | L x -> x
              | R r -> join_lower ~changes env pv.level bottom r
@@ -205,11 +207,7 @@ let rec match_sub ~changes env (p : flex_lower_bound) (cn : (flex_lower_bound, f
          fv_set_upper ~changes pv (newbound :: up_rest);
          rotate_flex ~changes env pv; (* improves sharing between match vars *)
          subtype_lu ~changes env pv.lower newbound;
-       end;
-       subtype_conses env cbnew cn
-         ~neg:(fun _ _ -> (* already done above *) ())
-         ~pos:(fun p r -> r := join_lower ~changes env (env_level env) !r (of_flexvar p))
-     )
+       end)
 
 and subtype_lu ~changes env (p : flex_lower_bound) (n : styp_neg) =
   match n with
