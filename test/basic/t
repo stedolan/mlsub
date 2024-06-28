@@ -6,25 +6,25 @@
 > 0
 >   0
 > int
-> let  = %yield(0: 0); done
+> let  = %yield(0); done
 
 5
 > 5
 >   5
 > int
-> let  = %yield(0: 5); done
+> let  = %yield(5); done
 
 true
 > true
 >   true
 > bool
-> let  = %yield(0: <true>); done
+> let  = %yield(<true>); done
 
 false
 > false
 >   false
 > bool
-> let  = %yield(0: <false>); done
+> let  = %yield(<false>); done
 
 # FIXME: string syntax
 # FIXME: interesting numeric literals (negative, hex, float, etc.)
@@ -35,13 +35,13 @@ false
 > (42 : int)
 >   (42 : int)
 > int
-> let  = %yield(0: 42); done
+> let  = %yield(42); done
 
 (true : bool)
 > (true : bool)
 >   (true : bool)
 > bool
-> let  = %yield(0: <true>); done
+> let  = %yield(<true>); done
 
 (42 : string)
 > (42 : string)
@@ -63,7 +63,7 @@ if (true) { 1 } else { 2 }
 >   if true { 1 } else { 2 }
 > int
 > let k(x) = {
->   let  = %yield(0: x);
+>   let  = %yield(x);
 >   done
 > };
 > match <true> {
@@ -80,7 +80,7 @@ if (false) { 1 } else { false }
 >   if false { 1 } else { false }
 > int | bool
 > let k(x) = {
->   let  = %yield(0: x);
+>   let  = %yield(x);
 >   done
 > };
 > match <false> {
@@ -100,40 +100,40 @@ if (false) { 1 } else { false }
 > (1, 2)
 >   (1, 2)
 > (int, int)
-> let  = %yield(0: (0: 1, 1: 2)); done
+> let  = %yield((0: 1, 1: 2)); done
 
 (true, 3, 4)
 > (true, 3, 4)
 >   (true, 3, 4)
 > (bool, int, int)
-> let  = %yield(0: (0: <true>, 1: 3, 2: 4)); done
+> let  = %yield((0: <true>, 1: 3, 2: 4)); done
 
 # python-style singleton tuples
 (4,)
 > (4,)
 >   (4,)
 > (int,)
-> let  = %yield(0: (0: 4)); done
+> let  = %yield((0: 4)); done
 
 {foo:1}
 > {foo: 1}
 >   {foo: 1}
 > {foo: int}
-> let  = %yield(0: (foo: 1)); done
+> let  = %yield((foo: 1)); done
 
 # not a singleton tuple
 (1)
 > 1
 >   1
 > int
-> let  = %yield(0: 1); done
+> let  = %yield(1); done
 
 # arity
 ((1,),(2,3),(4,5,6),(7,8,9,10))
 > ((1,), (2, 3), (4, 5, 6), (7, 8, 9, 10))
 >   ((1,), (2, 3), (4, 5, 6), (7, 8, 9, 10))
 > ((int,), (int, int), (int, int, int), (int, int, int, int))
-> let  = %yield(0: 
+> let  = %yield(
 > (0: (0: 1),
 > 1: (0: 2, 1: 3),
 > 2: (0: 4, 1: 5, 2: 6),
@@ -145,14 +145,14 @@ if (false) { 1 } else { false }
 > ()
 >   ()
 > ()
-> let  = %yield(0: ()); done
+> let  = %yield(()); done
 
 # trailing comma in types, too
 ((1,) : (int,))
 > ((1,) : (int,))
 >   ((1,) : (int,))
 > (int,)
-> let  = %yield(0: (0: 1)); done
+> let  = %yield((0: 1)); done
 
 ((1,) : (int))
 > ((1,) : int)
@@ -170,20 +170,20 @@ let (x,) = (1,); {x}
 > let (x,) = (1,); {x}
 >   let (x,) : (int,) = (1,); {x}
 > {x: int}
-> let v0 = (0: 1).(0); let  = %yield(0: (x: v0)); done
+> let v0 = (0: 1).(0); let  = %yield((x: v0)); done
 
 let (x) = (1,); {x}
 > let x = (1,); {x}
 >   let x : (int,) = (1,); {x}
 > {x: (int,)}
-> let x = (0: 1); let  = %yield(0: (x: x)); done
+> let x = (0: 1); let  = %yield((x: x)); done
 
 # named fields
 ({foo:20, bar:17}, {baz:1})
 > ({foo: 20, bar: 17}, {baz: 1})
 >   ({foo: 20, bar: 17}, {baz: 1})
 > ({foo: int, bar: int}, {baz: int})
-> let  = %yield(0: (0: (foo: 20, bar: 17), 1: (baz: 1))); done
+> let  = %yield((0: (foo: 20, bar: 17), 1: (baz: 1))); done
 
 # joins
 if (true) { (1, 2) } else { (1, true, 3) }
@@ -191,7 +191,7 @@ if (true) { (1, 2) } else { (1, true, 3) }
 >   if true { (1, 2) } else { (1, true, 3) }
 > (int, int) | (int, bool, int)
 > let k(x) = {
->   let  = %yield(0: x);
+>   let  = %yield(x);
 >   done
 > };
 > match <true> {
@@ -208,7 +208,7 @@ if (false) { {foo:1,bar:2} } else { {foo:1,baz:()} }
 >   if false { {foo: 1, bar: 2} } else { {foo: 1, baz: ()} }
 > {foo: int, bar: int} | {foo: int, baz: ()}
 > let k(x) = {
->   let  = %yield(0: x);
+>   let  = %yield(x);
 >   done
 > };
 > match <false> {
@@ -241,7 +241,7 @@ if (false) { {foo:1,bar:2} } else { {foo:1,baz:()} }
 > ((1, 2, 3) : (int, int, ...))
 >   ((1, 2, (3 : int)) : (int, int, ...))
 > (int, int, ...)
-> let  = %yield(0: (0: 1, 1: 2, 2: 3)); done
+> let  = %yield((0: 1, 1: 2, 2: 3)); done
 
 
 true.foo
@@ -263,20 +263,20 @@ true.foo
 > @bot
 
 # checking join of functions and meet of records
-if true { (@bot : (~foo:(int,int), ~bar:any) -> string) } else { (@bot : (~foo:(int,int), ~bar:any) -> string) }
+if true { (@bot : ((int,int), any) -> string) } else { (@bot : ((int,int), any) -> string) }
 > if true {
->   (@bot : (~foo: (int, int), ~bar: any) -> string)
+>   (@bot : ((int, int), any) -> string)
 > } else {
->   (@bot : (~foo: (int, int), ~bar: any) -> string)
+>   (@bot : ((int, int), any) -> string)
 > }
 >   if true {
->     (@bot : (~foo: (int, int), ~bar: any) -> string)
+>     (@bot : ((int, int), any) -> string)
 >   } else {
->     (@bot : (~foo: (int, int), ~bar: any) -> string)
+>     (@bot : ((int, int), any) -> string)
 >   }
-> (~foo: (int, int), ~bar: any) -> string
+> ((int, int), any) -> string
 > let k(x) = {
->   let  = %yield(0: x);
+>   let  = %yield(x);
 >   done
 > };
 > match <true> {
@@ -288,20 +288,20 @@ if true { (@bot : (~foo:(int,int), ~bar:any) -> string) } else { (@bot : (~foo:(
 >   }
 > }
 
-if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot : ((any,string), ~bar:string, ~foo:(string,any)) -> nothing)}
+if true { (@bot : ((int,any), (int,int), any) -> string) } else {(@bot : ((any,string), string, (string,any)) -> nothing)}
 > if true {
->   (@bot : ((int, any), ~foo: (int, int), ~bar: any) -> string)
+>   (@bot : ((int, any), (int, int), any) -> string)
 > } else {
->   (@bot : ((any, string), ~bar: string, ~foo: (string, any)) -> nothing)
+>   (@bot : ((any, string), string, (string, any)) -> nothing)
 > }
 >   if true {
->     (@bot : ((int, any), ~foo: (int, int), ~bar: any) -> string)
+>     (@bot : ((int, any), (int, int), any) -> string)
 >   } else {
->     (@bot : ((any, string), ~bar: string, ~foo: (string, any)) -> nothing)
+>     (@bot : ((any, string), string, (string, any)) -> nothing)
 >   }
-> ((int, string), ~foo: (nothing, int), ~bar: string) -> string
+> ((int, string), nothing, (string, any)) -> string
 > let k(x) = {
->   let  = %yield(0: x);
+>   let  = %yield(x);
 >   done
 > };
 > match <true> {
@@ -326,13 +326,13 @@ if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot
 > (@true : bool)
 >   (@true : bool)
 > bool
-> let  = %yield(0: <true>); done
+> let  = %yield(<true>); done
 
 ((@true, @false) : (bool, bool))
 > ((@true, @false) : (bool, bool))
 >   ((@true, @false) : (bool, bool))
 > (bool, bool)
-> let  = %yield(0: (0: <true>, 1: <false>)); done
+> let  = %yield((0: <true>, 1: <false>)); done
 
 ((1, 2) : (int, int, int))
 > ((1, 2) : (int, int, int))
@@ -364,13 +364,13 @@ if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot
 > ((1, 2) : (int, int, ...))
 >   ((1, 2) : (int, int, ...))
 > (int, int, ...)
-> let  = %yield(0: (0: 1, 1: 2)); done
+> let  = %yield((0: 1, 1: 2)); done
 
 ((1, 2, 3) : (int, int, ...))
 > ((1, 2, 3) : (int, int, ...))
 >   ((1, 2, (3 : int)) : (int, int, ...))
 > (int, int, ...)
-> let  = %yield(0: (0: 1, 1: 2, 2: 3)); done
+> let  = %yield((0: 1, 1: 2, 2: 3)); done
 
 
 # # A checking form for projections! Isn't subtyping great?
@@ -396,8 +396,8 @@ if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot
 >       ret(2)
 >     }
 >   }
-> }(0: (cond: <true>));
-> let  = %yield(0: x);
+> }((cond: <true>));
+> let  = %yield(x);
 > done
 
 (fn(g) { if g () {1} else {2}})(fn() { @true })
@@ -414,8 +414,8 @@ if true { (@bot : ((int,any), ~foo:(int,int), ~bar:any) -> string) } else {(@bot
 >       ret(2)
 >     }
 >   }
-> }(0: fun () ret { ret(<true>) });
-> let  = %yield(0: x);
+> }(fun () ret { ret(<true>) });
+> let  = %yield(x);
 > done
 
 #
@@ -426,7 +426,7 @@ let x = 1; x
 > let x = 1; x
 >   let x : int = 1; x
 > int
-> let  = %yield(0: 1); done
+> let  = %yield(1); done
 
 (let x = @true; x : bool)
 > ((let x = @true; x) : bool)
@@ -436,13 +436,13 @@ let x = 1; x
 > ((let x : bool = @true; (x, @false)) : (bool, bool))
 >   ((let x : bool = @true; (x, @false)) : (bool, bool))
 > (bool, bool)
-> let  = %yield(0: (0: <true>, 1: <false>)); done
+> let  = %yield((0: <true>, 1: <false>)); done
 
 let x = (1, 2); x
 > let x = (1, 2); x
 >   let x : (int, int) = (1, 2); x
 > (int, int)
-> let x = (0: 1, 1: 2); let  = %yield(0: x); done
+> let x = (0: 1, 1: 2); let  = %yield(x); done
 
 let x : int = (1, 2); x
 > let x : int = (1, 2); x
@@ -459,7 +459,7 @@ let x : bool = true; x
 > let x : bool = true; x
 >   let x : bool = true; x
 > bool
-> let  = %yield(0: <true>); done
+> let  = %yield(<true>); done
 
 let x : bool = 5; x
 > let x : bool = 5; x
@@ -476,7 +476,7 @@ let {x: foo, y: bar} = {x: 10, y: true}; (foo, bar)
 > let {x: foo, y: bar} = {x: 10, y: true}; (foo, bar)
 >   let {x: foo, y: bar} : {x: int, y: bool} = {x: 10, y: true}; (foo, bar)
 > (int, bool)
-> let x, y = (x: 10, y: <true>).(x, y); let  = %yield(0: (0: x, 1: y)); done
+> let x, y = (x: 10, y: <true>).(x, y); let  = %yield((0: x, 1: y)); done
 
 let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
 > let {x: foo, y: bar} = {x: 10, y: true, z: 42}; (foo, bar)
@@ -496,9 +496,7 @@ let {x: foo, y: bar, ...} = {x: 10, y: true, z: 42}; (foo, bar)
 >   {x: 10, y: true, z: 42};
 >   (foo, bar)
 > (int, bool)
-> let x, y = (x: 10, y: <true>, z: 42).(x, y);
-> let  = %yield(0: (0: x, 1: y));
-> done
+> let x, y = (x: 10, y: <true>, z: 42).(x, y); let  = %yield((0: x, 1: y)); done
 
 
 # Tuple bindings
@@ -507,14 +505,14 @@ let (x, y) = (1, true); (y, x)
 > let (x, y) = (1, true); (y, x)
 >   let (x, y) : (int, bool) = (1, true); (y, x)
 > (bool, int)
-> let v0, v1 = (0: 1, 1: <true>).(0, 1); let  = %yield(0: (0: v1, 1: v0)); done
+> let v0, v1 = (0: 1, 1: <true>).(0, 1); let  = %yield((0: v1, 1: v0)); done
 
 let (x, y, ...) = (false, (), 3); {x,y}
 > let (x, y, ...) = (false, (), 3); {x, y}
 >   let (x, y, ...) : (bool, (), int) = (false, (), 3); {x, y}
 > {x: bool, y: ()}
 > let v0, v1 = (0: <false>, 1: (), 2: 3).(0, 1);
-> let  = %yield(0: (x: v0, y: v1));
+> let  = %yield((x: v0, y: v1));
 > done
 
 
@@ -522,7 +520,7 @@ let {x: foo, y: bar} : {x:int, y:bool} = {x:1, y:true}; foo
 > let {x: foo, y: bar} : {x: int, y: bool} = {x: 1, y: true}; foo
 >   let {x: foo, y: bar} : {x: int, y: bool} = {x: 1, y: true}; foo
 > int
-> let x, y = (x: 1, y: <true>).(x, y); let  = %yield(0: x); done
+> let x, y = (x: 1, y: <true>).(x, y); let  = %yield(x); done
 let {x: foo, y: bar} : {x:int} = {x:1, y:true}; foo
 > let {x: foo, y: bar} : {x: int} = {x: 1, y: true}; foo
 > test:1: A surplus field 'y' is present.
@@ -560,26 +558,26 @@ let {x, y} : {x:int, y:bool} = {x:1, y:true}; (y,x)
 > let {x, y} : {x: int, y: bool} = {x: 1, y: true}; (y, x)
 >   let {x, y} : {x: int, y: bool} = {x: 1, y: true}; (y, x)
 > (bool, int)
-> let x, y = (x: 1, y: <true>).(x, y); let  = %yield(0: (0: y, 1: x)); done
+> let x, y = (x: 1, y: <true>).(x, y); let  = %yield((0: y, 1: x)); done
 
 let {x, y} = {x:1, y:true}; (y,x)
 > let {x, y} = {x: 1, y: true}; (y, x)
 >   let {x, y} : {x: int, y: bool} = {x: 1, y: true}; (y, x)
 > (bool, int)
-> let x, y = (x: 1, y: <true>).(x, y); let  = %yield(0: (0: y, 1: x)); done
+> let x, y = (x: 1, y: <true>).(x, y); let  = %yield((0: y, 1: x)); done
 
 let {x, y} = {x:1, y:true}; {y,x,z:3}
 > let {x, y} = {x: 1, y: true}; {y, x, z: 3}
 >   let {x, y} : {x: int, y: bool} = {x: 1, y: true}; {y, x, z: 3}
 > {y: bool, x: int, z: int}
-> let x, y = (x: 1, y: <true>).(x, y); let  = %yield(0: (y: y, x: x, z: 3)); done
+> let x, y = (x: 1, y: <true>).(x, y); let  = %yield((y: y, x: x, z: 3)); done
 
 let {x, y} = {x:1, y:true}; ({y,x,z:3} : {y: bool, x: int, z: int})
 > let {x, y} = {x: 1, y: true}; ({y, x, z: 3} : {y: bool, x: int, z: int})
 >   let {x, y} : {x: int, y: bool} = {x: 1, y: true};
 >   ({y, x, z: 3} : {y: bool, x: int, z: int})
 > {y: bool, x: int, z: int}
-> let x, y = (x: 1, y: <true>).(x, y); let  = %yield(0: (y: y, x: x, z: 3)); done
+> let x, y = (x: 1, y: <true>).(x, y); let  = %yield((y: y, x: x, z: 3)); done
 
 
 # subtyping checks
@@ -589,7 +587,7 @@ let a = {foo: 1, bar: 2}; let b : {foo: int, bar: int} = a; b
 >   let b : {foo: int, bar: int} = a;
 >   b
 > {foo: int, bar: int}
-> let a = (foo: 1, bar: 2); let  = %yield(0: a); done
+> let a = (foo: 1, bar: 2); let  = %yield(a); done
 
 let a = {foo: 1, bar: 2}; let b : {bar: int} = a; b
 > let a = {foo: 1, bar: 2}; let b : {bar: int} = a; b
@@ -611,7 +609,7 @@ let a = {foo: 1, bar: 2}; let b : {bar: any, ...} = a; b
 >   let b : {bar: any, ...} = a;
 >   b
 > {bar: any, ...}
-> let a = (foo: 1, bar: 2); let  = %yield(0: a); done
+> let a = (foo: 1, bar: 2); let  = %yield(a); done
 
 let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
 > let a = {foo: 1, bar: 2}; let b : {bar: nothing, ...} = a; b
@@ -632,37 +630,11 @@ fn (f: (int,int) -> int) { f(1,2) }
 > fn (f: (int, int) -> int) { f(1, 2) }
 >   fn (f: (int, int) -> int) -> int { f(1, 2) }
 > ((int, int) -> int) -> int
-> let  = %yield(0: fun (f) ret { let x = f(0: 1, 1: 2); ret(x) }); done
-
-fn (f: (~x:int,~y:int) -> int) { f(~x:1, ~y:2) }
-> fn (f: (~x: int, ~y: int) -> int) { f(~x: 1, ~y: 2) }
->   fn (f: (~x: int, ~y: int) -> int) -> int { f(~x: 1, ~y: 2) }
-> ((~x: int, ~y: int) -> int) -> int
-> let  = %yield(0: fun (f) ret { let x = f(x: 1, y: 2); ret(x) }); done
-
-fn (f: (~x:int,~y:int) -> int) { let x = 1; f(~x, ~y:2) }
-> fn (f: (~x: int, ~y: int) -> int) { let x = 1; f(~x, ~y: 2) }
->   fn (f: (~x: int, ~y: int) -> int) -> int { let x : int = 1; f(~x, ~y: 2) }
-> ((~x: int, ~y: int) -> int) -> int
-> let  = %yield(0: fun (f) ret { let x = f(x: 1, y: 2); ret(x) }); done
-
-fn () { (fn (~x, ~y) { {x,y} }) (~y:1, ~x:()) }
-> fn () { (fn (~x, ~y) { {x, y} })(~y: 1, ~x: ()) }
->   fn () -> {x: (), y: int} {
->     (fn [A, B](~x : A, ~y : B) -> {x: A, y: B} { {x, y} })(~y: 1, ~x: ())
->   }
-> () -> {x: (), y: int}
-> let  = %yield(0: fun () ret {
->   let x = fun (x, y) ret2 {
->     ret2((x: x, y: y))
->   }(y: 1, x: ());
->   ret(x)
-> });
-> done
+> let  = %yield(fun (f) ret { let x = f(1, 2); ret(x) }); done
 
 (fn (x) { x } : (int,int) -> int)
 > ((fn (x) { x }) : (int, int) -> int)
-> test:1: A surplus argument '.1' is present.
+> test:1: Too many arguments.
 >   (fn (x) { x } : (int,int) -> int)
 >    ^^^^^^^^^^^^
 >      found: (_) -> _
@@ -673,7 +645,7 @@ fn () { (fn (~x, ~y) { {x,y} }) (~y:1, ~x:()) }
 
 (fn (x,y) { x } : (int) -> int)
 > ((fn (x, y) { x }) : (int) -> int)
-> test:1: The argument '.1' is missing.
+> test:1: Too few arguments.
 >   (fn (x,y) { x } : (int) -> int)
 >    ^^^^^^^^^^^^^^
 >      found: (_, _) -> _
@@ -681,6 +653,30 @@ fn () { (fn (~x, ~y) { {x,y} }) (~y:1, ~x:()) }
 > This (_, _) -> _ is used as (_) -> _ at test:1:
 >   (fn (x,y) { x } : (int) -> int)
 >                     ^^^^^^^^^^^^
+
+(fn (f : (int,int) -> int) { f (1) })
+> fn (f: (int, int) -> int) { f(1) }
+> test:1: Too few arguments.
+>   (fn (f : (int,int) -> int) { f (1) })
+>                                ^^^^^
+>      found: (_, _) -> _
+>   expected: (_) -> _
+> This (_, _) -> _ comes from test:1:
+>   (fn (f : (int,int) -> int) { f (1) })
+>            ^^^^^^^^^^^^^^^^
+> but is used as (_) -> _
+
+(fn (f : (int, int) -> int) { f(1,2,3) })
+> fn (f: (int, int) -> int) { f(1, 2, 3) }
+> test:1: Too many arguments.
+>   (fn (f : (int, int) -> int) { f(1,2,3) })
+>                                 ^^^^^^^^
+>      found: (_, _) -> _
+>   expected: (_, _, _) -> _
+> This (_, _) -> _ comes from test:1:
+>   (fn (f : (int, int) -> int) { f(1,2,3) })
+>            ^^^^^^^^^^^^^^^^^
+> but is used as (_, _, _) -> _
 
 #
 # Lambda
@@ -690,26 +686,25 @@ fn (a, b) { (b, a.foo) }
 > fn (a, b) { (b, a.foo) }
 >   fn [A, B](a: {foo: A, ...}, b: B) -> (B, A) { (b, a.foo) }
 > [A, B] ({foo: A, ...}, B) -> (B, A)
-> let  = %yield(0: fun (a, b) ret { let foo = a.(foo); ret((0: b, 1: foo)) });
-> done
+> let  = %yield(fun (a, b) ret { let foo = a.(foo); ret((0: b, 1: foo)) }); done
 
 fn (a, b) -> int { b }
 > fn (a, b) -> int { b }
 >   fn (a: any, b: int) -> int { b }
 > (any, int) -> int
-> let  = %yield(0: fun (a, b) ret { ret(b) }); done
+> let  = %yield(fun (a, b) ret { ret(b) }); done
 
 fn (a : int, b) -> (int, int) { (a, b) }
 > fn (a: int, b) -> (int, int) { (a, b) }
 >   fn (a: int, b: int) -> (int, int) { (a, b) }
 > (int, int) -> (int, int)
-> let  = %yield(0: fun (a, b) ret { ret((0: a, 1: b)) }); done
+> let  = %yield(fun (a, b) ret { ret((0: a, 1: b)) }); done
 
 (fn (a) { (a, @true) } : (int) -> (int, bool))
 > ((fn (a) { (a, @true) }) : (int) -> (int, bool))
 >   ((fn (a) { (a, @true) }) : (int) -> (int, bool))
 > (int) -> (int, bool)
-> let  = %yield(0: fun (a) ret { ret((0: a, 1: <true>)) }); done
+> let  = %yield(fun (a) ret { ret((0: a, 1: <true>)) }); done
 
 fn (a) { if (a.foo) { {bar: a.bar} } else { a } }
 > fn (a) { if a.foo { {bar: a.bar} } else { a } }
@@ -721,7 +716,7 @@ fn (a) { if (a.foo) { {bar: a.bar} } else { a } }
 >     }
 >   }
 > [A, B <: {foo: bool, bar: A, ...}] (B) -> {bar: A} | B
-> let  = %yield(0: fun (a) ret {
+> let  = %yield(fun (a) ret {
 >   let foo = a.(foo);
 >   match foo {
 >     true() -> {
@@ -739,14 +734,14 @@ fn (a) { if (a.foo) { {bar: a.bar} } else { a } }
 > (fn (a) { a })(5)
 >   (fn [A](a: A) -> A { a })(5)
 > int
-> let x = fun (a) ret { ret(a) }(0: 5); let  = %yield(0: x); done
+> let x = fun (a) ret { ret(a) }(5); let  = %yield(x); done
 
 # tricky: the second 5 should be checked against Top (i.e. inferred)
 (fn (a,b) { a })(5,5)
 > (fn (a, b) { a })(5, 5)
 >   (fn [A](a: A, b: any) -> A { a })(5, 5)
 > int
-> let x = fun (a, b) ret { ret(a) }(0: 5, 1: 5); let  = %yield(0: x); done
+> let x = fun (a, b) ret { ret(a) }(5, 5); let  = %yield(x); done
 
 (fn (a,b) { a })(5,if 5 { 5 } else { 5 })
 > (fn (a, b) { a })(5, if 5 { 5 } else { 5 })
@@ -763,9 +758,9 @@ fn (f) { (f({x:1,y:2}), f({x:1,z:2})) }
 >     (f({x: 1, y: 2}), f({x: 1, z: 2}))
 >   }
 > [A] (({x: int, y: int} | {x: int, z: int}) -> A) -> (A, A)
-> let  = %yield(0: fun (f) ret {
->   let x = f(0: (x: 1, z: 2));
->   let x2 = f(0: (x: 1, y: 2));
+> let  = %yield(fun (f) ret {
+>   let x = f((x: 1, z: 2));
+>   let x2 = f((x: 1, y: 2));
 >   ret((0: x2, 1: x))
 > });
 > done
@@ -780,7 +775,7 @@ fn (x) { if x.cond { {p:1} } else { {p:2,q:1} } }
 >     }
 >   }
 > ({cond: bool, ...}) -> {p: int} | {p: int, q: int}
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let cond = x.(cond);
 >   match cond {
 >     true() -> {
@@ -803,7 +798,7 @@ fn (x) { if x.cond { {q:2,p:1} } else { {p:2,q:1} } }
 >     }
 >   }
 > ({cond: bool, ...}) -> {q: int, p: int}
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let cond = x.(cond);
 >   match cond {
 >     true() -> {
@@ -820,7 +815,7 @@ fn (x) { let {p,q,...}=x; x }
 > fn (x) { let {p, q, ...} = x; x }
 >   fn [A <: {p: any, q: any, ...}](x: A) -> A { let {p, q, ...} : A = x; x }
 > [A <: {p: any, q: any, ...}] (A) -> A
-> let  = %yield(0: fun (x) ret { let p, q = x.(p, q); ret(x) }); done
+> let  = %yield(fun (x) ret { let p, q = x.(p, q); ret(x) }); done
 
 fn (x) { let {p,q} = x; let {p,q,r} = x; {p,q} }
 > fn (x) { let {p, q} = x; let {p, q, r} = x; {p, q} }
@@ -830,7 +825,7 @@ fn (x) { let {p,q} = x; let {p,q,r} = x; {p,q} }
 >     {p, q}
 >   }
 > (nothing) -> {p: nothing, q: nothing}
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let p, q = x.(p, q);
 >   let p2, q2, r = x.(p, q, r);
 >   ret((p: p2, q: q2))
@@ -845,7 +840,7 @@ fn (x) { let {p,q,...} = x; let {p,q,r} = x; {p,q} }
 >     {p, q}
 >   }
 > [A, B] ({p: A, q: B, r: any}) -> {p: A, q: B}
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let p, q = x.(p, q);
 >   let p2, q2, r = x.(p, q, r);
 >   ret((p: p2, q: q2))
@@ -860,7 +855,7 @@ fn (x) { let {p,q} = x; let {p,q,r,...} = x; {p,q} }
 >     {p, q}
 >   }
 > (nothing) -> {p: nothing, q: nothing}
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let p, q = x.(p, q);
 >   let p2, q2, r = x.(p, q, r);
 >   ret((p: p2, q: q2))
@@ -875,7 +870,7 @@ fn (x) { let {p,q,...} = x; let {p,q,r,...} = x; {p,q} }
 >     {p, q}
 >   }
 > [A, B] ({p: A, q: B, r: any, ...}) -> {p: A, q: B}
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let p, q = x.(p, q);
 >   let p2, q2, r = x.(p, q, r);
 >   ret((p: p2, q: q2))
@@ -895,7 +890,7 @@ fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { {foo: 1, 
 >     )
 >   }
 > [A <: {cond: bool, ...}] (A) -> {foo: int, cond: bool} | A
-> let  = %yield(0: fun (b) ret {
+> let  = %yield(fun (b) ret {
 >   let k(x) = {
 >     let x2 = fun (a) ret2 {
 >       let cond = a.(cond);
@@ -907,7 +902,7 @@ fn(b) { (fn (a) { if (a.cond) { a } else { a } })(if true { b } else { {foo: 1, 
 >           ret2(a)
 >         }
 >       }
->     }(0: x);
+>     }(x);
 >     ret(x2)
 >   };
 >   match <true> {
@@ -931,7 +926,7 @@ fn(b) { if (b.cond) { b } else { {foo: 1, cond: false} } }
 >     }
 >   }
 > [A <: {cond: bool, ...}] (A) -> {foo: int, cond: bool} | A
-> let  = %yield(0: fun (b) ret {
+> let  = %yield(fun (b) ret {
 >   let cond = b.(cond);
 >   match cond {
 >     true() -> {
@@ -954,7 +949,7 @@ fn(b) { if (b.cond) { b } else { {foo: 1, cond: 4} } }
 >     }
 >   }
 > [A <: {cond: bool, ...}] (A) -> {foo: int, cond: int} | A
-> let  = %yield(0: fun (b) ret {
+> let  = %yield(fun (b) ret {
 >   let cond = b.(cond);
 >   match cond {
 >     true() -> {
@@ -971,7 +966,7 @@ fn (x) { (x.foo, x.bar, x.foo) }
 > fn (x) { (x.foo, x.bar, x.foo) }
 >   fn [A, B](x: {foo: B, bar: A, ...}) -> (B, A, B) { (x.foo, x.bar, x.foo) }
 > [A, B] ({foo: B, bar: A, ...}) -> (B, A, B)
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let foo = x.(foo);
 >   let bar = x.(bar);
 >   let foo2 = x.(foo);
@@ -989,7 +984,7 @@ fn (x) { if (x.cond) { (x.foo, x.bar) } else { (x.foo, x.foo) } }
 >     }
 >   }
 > [A, B] ({cond: bool, foo: B, bar: A, ...}) -> (B, A | B)
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let cond = x.(cond);
 >   match cond {
 >     true() -> {
@@ -1015,15 +1010,15 @@ fn (x) { ((fn(x){x.foo})(x), (fn(x){x.foo})(x))  }
 >     )
 >   }
 > [A] ({foo: A, ...}) -> (A, A)
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let x2 = fun (x2) ret2 {
 >     let foo = x2.(foo);
 >     ret2(foo)
->   }(0: x);
+>   }(x);
 >   let x3 = fun (x3) ret2 {
 >     let foo = x3.(foo);
 >     ret2(foo)
->   }(0: x);
+>   }(x);
 >   ret((0: x3, 1: x2))
 > });
 > done
@@ -1037,12 +1032,12 @@ fn (x) { (fn(y) { y.foo.bar })({foo:{bar:x}}) }
 >     )
 >   }
 > [A] (A) -> A
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let x2 = fun (y) ret2 {
 >     let foo = y.(foo);
 >     let bar = foo.(bar);
 >     ret2(bar)
->   }(0: (foo: (bar: x)));
+>   }((foo: (bar: x)));
 >   ret(x2)
 > });
 > done
@@ -1054,11 +1049,11 @@ fn (x, f, g) { ( f(x.foo), g(x.foo) ) }
 >     (f(x.foo), g(x.foo))
 >   }
 > [A, B, C] ({foo: A, ...}, (A) -> B, (A) -> C) -> (B, C)
-> let  = %yield(0: fun (x, f, g) ret {
+> let  = %yield(fun (x, f, g) ret {
 >   let foo = x.(foo);
->   let x2 = g(0: foo);
+>   let x2 = g(foo);
 >   let foo2 = x.(foo);
->   let x3 = f(0: foo2);
+>   let x3 = f(foo2);
 >   ret((0: x3, 1: x2))
 > });
 > done
@@ -1074,14 +1069,14 @@ fn (x, f, g) { ( f(x.foo), g(x.foo) ) }
 > int
 > let x = fun (x) ret {
 >   ret(5)
-> }(0: fun (x, f, g) ret {
+> }(fun (x, f, g) ret {
 >   let foo = x.(foo);
->   let x2 = g(0: foo);
+>   let x2 = g(foo);
 >   let foo2 = x.(foo);
->   let x3 = f(0: foo2);
+>   let x3 = f(foo2);
 >   ret((0: x3, 1: x2))
 > });
-> let  = %yield(0: x);
+> let  = %yield(x);
 > done
 
 # garbage
@@ -1091,11 +1086,11 @@ fn (x) { (fn (y) { 5 })(if (x.cond) { (x.a, x.b) } else { (x.b, x.a) }) }
 >     (fn (y: any) -> int { 5 })(if x.cond { (x.a, x.b) } else { (x.b, x.a) })
 >   }
 > ({cond: bool, a: any, b: any, ...}) -> int
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let k(x2) = {
 >     let x3 = fun (y) ret2 {
 >       ret2(5)
->     }(0: x2);
+>     }(x2);
 >     ret(x3)
 >   };
 >   let cond = x.(cond);
@@ -1125,7 +1120,7 @@ fn (x) { if (x.cond) { (x.a, x.b) } else { (x.b, x.a) } }
 >     }
 >   }
 > [A, B] ({cond: bool, a: A, b: B, ...}) -> (A | B, A | B)
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let cond = x.(cond);
 >   match cond {
 >     true() -> {
@@ -1152,7 +1147,7 @@ fn (x) { if (x.cond) { (x, 5) } else { (x, x) } }
 >     }
 >   }
 > [A <: {cond: bool, ...}] (A) -> (A, int | A)
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let cond = x.(cond);
 >   match cond {
 >     true() -> {
@@ -1175,7 +1170,7 @@ fn (x) { if (x.cond) { (x, 5) } else { (x, x.n) } }
 >     }
 >   }
 > [A, B <: {cond: bool, n: A, ...}] (B) -> (B, int | A)
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let cond = x.(cond);
 >   match cond {
 >     true() -> {
@@ -1194,23 +1189,22 @@ fn (f, x) { f(x) }
 > fn (f, x) { f(x) }
 >   fn [A, B](f: (A) -> B, x: A) -> B { f(x) }
 > [A, B] ((A) -> B, A) -> B
-> let  = %yield(0: fun (f, x) ret { let x2 = f(0: x); ret(x2) }); done
+> let  = %yield(fun (f, x) ret { let x2 = f(x); ret(x2) }); done
 
 # twice!
 fn (f, x) { f(f(x)) }
 > fn (f, x) { f(f(x)) }
 >   fn [A, B](f: (A | B) -> B, x: A) -> B { f(f(x)) }
 > [A, B] ((A | B) -> B, A) -> B
-> let  = %yield(0: fun (f, x) ret { let x2 = f(0: x); let x3 = f(0: x2); ret(x3) });
-> done
+> let  = %yield(fun (f, x) ret { let x2 = f(x); let x3 = f(x2); ret(x3) }); done
 
 # can I hit approx with nested lambda-generalisations? trickier than I thought.
 fn (f) { fn(x) { (f(x), x) } }
 > fn (f) { fn (x) { (f(x), x) } }
 >   fn [A, B](f: (A) -> B) -> (A) -> (B, A) { fn (x: A) -> (B, A) { (f(x), x) } }
 > [A, B] ((A) -> B) -> (A) -> (B, A)
-> let  = %yield(0: fun (f) ret {
->   ret(fun (x) ret2 { let x2 = f(0: x); ret2((0: x2, 1: x)) })
+> let  = %yield(fun (f) ret {
+>   ret(fun (x) ret2 { let x2 = f(x); ret2((0: x2, 1: x)) })
 > });
 > done
 
@@ -1225,7 +1219,7 @@ fn(x) { id(x) }
 >   let id : [A] (A) -> A = fn [A](x: A) -> A { x }; fn [A](x: A) -> A { id(x) }
 > [A] (A) -> A
 > let id = fun (x) ret { ret(x) };
-> let  = %yield(0: fun (x) ret { let x2 = id(0: x); ret(x2) });
+> let  = %yield(fun (x) ret { let x2 = id(x); ret(x2) });
 > done
 
 # This one does not generalise (internally), because it has a free inferred var
@@ -1241,9 +1235,7 @@ fn(id) {
 >     }
 >   }
 > [A, B] ((A) -> B) -> (A) -> B
-> let  = %yield(0: fun (id) ret {
->   ret(fun (x) ret2 { let x2 = id(0: x); ret2(x2) })
-> });
+> let  = %yield(fun (id) ret { ret(fun (x) ret2 { let x2 = id(x); ret2(x2) }) });
 > done
 
 # This one does generalise internally, because its free var is not inferred
@@ -1259,9 +1251,7 @@ fn(id : [A] (A) -> A) {
 >     }
 >   }
 > ([A] (A) -> A) -> [A] (A) -> A
-> let  = %yield(0: fun (id) ret {
->   ret(fun (x) ret2 { let x2 = id(0: x); ret2(x2) })
-> });
+> let  = %yield(fun (id) ret { ret(fun (x) ret2 { let x2 = id(x); ret2(x2) }) });
 > done
 
 
@@ -1271,9 +1261,9 @@ fn (f) { (f(1), f(true)) }
 > fn (f) { (f(1), f(true)) }
 >   fn [A](f: (int | bool) -> A) -> (A, A) { (f(1), f(true)) }
 > [A] ((int | bool) -> A) -> (A, A)
-> let  = %yield(0: fun (f) ret {
->   let x = f(0: <true>);
->   let x2 = f(0: 1);
+> let  = %yield(fun (f) ret {
+>   let x = f(<true>);
+>   let x2 = f(1);
 >   ret((0: x2, 1: x))
 > });
 > done
@@ -1282,9 +1272,9 @@ fn (f : [A] (A) -> A) { (f(1), f(true)) }
 > fn (f: [A] (A) -> A) { (f(1), f(true)) }
 >   fn (f: [A] (A) -> A) -> (int, bool) { (f(1), f(true)) }
 > ([A] (A) -> A) -> (int, bool)
-> let  = %yield(0: fun (f) ret {
->   let x = f(0: <true>);
->   let x2 = f(0: 1);
+> let  = %yield(fun (f) ret {
+>   let x = f(<true>);
+>   let x2 = f(1);
 >   ret((0: x2, 1: x))
 > });
 > done
@@ -1316,9 +1306,9 @@ fn (x : (any)->(), wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 >     wid(fn (a) { {x: x(a), y: a}.y })
 >   }
 > ((any) -> (), ([A] (A) -> A) -> int) -> int
-> let  = %yield(0: fun (x, wid) ret {
->   let x2 = wid(0: fun (a) ret2 {
->     let x2 = x(0: a);
+> let  = %yield(fun (x, wid) ret {
+>   let x2 = wid(fun (a) ret2 {
+>     let x2 = x(a);
 >     let y = (x: x2, y: a).(y);
 >     ret2(y)
 >   });
@@ -1333,9 +1323,9 @@ fn (x, wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 >     wid(fn (a) { {x: x(a), y: a}.y })
 >   }
 > ((any) -> any, ([A] (A) -> A) -> int) -> int
-> let  = %yield(0: fun (x, wid) ret {
->   let x2 = wid(0: fun (a) ret2 {
->     let x2 = x(0: a);
+> let  = %yield(fun (x, wid) ret {
+>   let x2 = wid(fun (a) ret2 {
+>     let x2 = x(a);
 >     let y = (x: x2, y: a).(y);
 >     ret2(y)
 >   });
@@ -1360,9 +1350,9 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let 
 >   ({foo: int} | A) -> B,
 >   ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) -> int
 > ) -> int
-> let  = %yield(0: fun (x, wid) ret {
->   let f = fun (a) ret2 { let x2 = x(0: a); ret2(x2) };
->   let x2 = wid(0: f);
+> let  = %yield(fun (x, wid) ret {
+>   let f = fun (a) ret2 { let x2 = x(a); ret2(x2) };
+>   let x2 = wid(f);
 >   ret(x2)
 > });
 > done
@@ -1378,8 +1368,8 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(
 >     wid(fn (a) { x(a) })
 >   }
 > (({foo: int}) -> {foo: int, bar: string}, ([A <: {foo: int}] (A) -> {foo: int, bar: string} | A) -> int) -> int
-> let  = %yield(0: fun (x, wid) ret {
->   let x2 = wid(0: fun (a) ret2 { let x2 = x(0: a); ret2(x2) });
+> let  = %yield(fun (x, wid) ret {
+>   let x2 = wid(fun (a) ret2 { let x2 = x(a); ret2(x2) });
 >   ret(x2)
 > });
 > done
@@ -1395,17 +1385,17 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(
 >     wid(x)
 >   }
 > (({foo: int}) -> {foo: int, bar: string}, ([A <: {foo: int}] (A) -> {foo: int, bar: string} | A) -> int) -> int
-> let  = %yield(0: fun (x, wid) ret { let x2 = wid(0: x); ret(x2) }); done
+> let  = %yield(fun (x, wid) ret { let x2 = wid(x); ret(x2) }); done
 
 fn(f) { (fn(x) { 5 })(f(10)) }
 > fn (f) { (fn (x) { 5 })(f(10)) }
 >   fn (f: (int) -> any) -> int { (fn (x: any) -> int { 5 })(f(10)) }
 > ((int) -> any) -> int
-> let  = %yield(0: fun (f) ret {
->   let x = f(0: 10);
+> let  = %yield(fun (f) ret {
+>   let x = f(10);
 >   let x2 = fun (x2) ret2 {
 >     ret2(5)
->   }(0: x);
+>   }(x);
 >   ret(x2)
 > });
 > done
@@ -1425,10 +1415,10 @@ fn() { (fn (x) { x })(fn (x) { x }) }
 >     (fn [A_2](x: A_2) -> A_2 { x })(fn [A_2](x: A_2) -> A_2 { x })
 >   }
 > [A] () -> (A) -> A
-> let  = %yield(0: fun () ret {
+> let  = %yield(fun () ret {
 >   let x = fun (x) ret2 {
 >     ret2(x)
->   }(0: fun (x) ret2 { ret2(x) });
+>   }(fun (x) ret2 { ret2(x) });
 >   ret(x)
 > });
 > done
@@ -1450,9 +1440,9 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:b} } else { a } } }
 >     }
 >   }
 > [A, B] ((A) -> any) -> (B, A) -> {foo: A} | B
-> let  = %yield(0: fun (f) ret {
+> let  = %yield(fun (f) ret {
 >   ret(fun (a, b) ret2 {
->     let x = f(0: b);
+>     let x = f(b);
 >     match <true> {
 >       true() -> {
 >         ret2((foo: b))
@@ -1480,9 +1470,9 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:a} } else { b } } }
 >     }
 >   }
 > [A, B] ((A) -> any) -> (B, A) -> {foo: B} | A
-> let  = %yield(0: fun (f) ret {
+> let  = %yield(fun (f) ret {
 >   ret(fun (a, b) ret2 {
->     let x = f(0: b);
+>     let x = f(b);
 >     match <true> {
 >       true() -> {
 >         ret2((foo: a))
@@ -1509,9 +1499,9 @@ fn(f) { fn(a,b) { let z = f(b); if true { b } else { a } } }
 >     }
 >   }
 > [A, B] ((A) -> any) -> (B, A) -> A | B
-> let  = %yield(0: fun (f) ret {
+> let  = %yield(fun (f) ret {
 >   ret(fun (a, b) ret2 {
->     let x = f(0: b);
+>     let x = f(b);
 >     match <true> {
 >       true() -> {
 >         ret2(b)
@@ -1537,9 +1527,9 @@ fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
 >     }
 >   }
 > [A, B] ((A) -> any) -> (B, A) -> A | B
-> let  = %yield(0: fun (f) ret {
+> let  = %yield(fun (f) ret {
 >   ret(fun (a, b) ret2 {
->     let x = f(0: b);
+>     let x = f(b);
 >     match <true> {
 >       true() -> {
 >         ret2(a)
@@ -1578,7 +1568,7 @@ fn (a) { fn(b) { if true { a } else { b } } }
 >     }
 >   }
 > [A, B] (A) -> (B) -> A | B
-> let  = %yield(0: fun (a) ret {
+> let  = %yield(fun (a) ret {
 >   ret(fun (b) ret2 {
 >     match <true> {
 >       true() -> {
@@ -1603,7 +1593,7 @@ fn (a) { fn(b) { if true { {foo:a} } else { b } } }
 >     }
 >   }
 > [A, B] (A) -> (B) -> {foo: A} | B
-> let  = %yield(0: fun (a) ret {
+> let  = %yield(fun (a) ret {
 >   ret(fun (b) ret2 {
 >     match <true> {
 >       true() -> {
@@ -1628,7 +1618,7 @@ fn (a) { fn(b) { if true { a } else { {bar:b} } } }
 >     }
 >   }
 > [A, B] (A) -> (B) -> {bar: B} | A
-> let  = %yield(0: fun (a) ret {
+> let  = %yield(fun (a) ret {
 >   ret(fun (b) ret2 {
 >     match <true> {
 >       true() -> {
@@ -1653,11 +1643,11 @@ fn (a) { fn(b) { fn (k) { k(if true { a } else { b }) } } }
 >     }
 >   }
 > [A, B, C] (A) -> (B) -> ((A | B) -> C) -> C
-> let  = %yield(0: fun (a) ret {
+> let  = %yield(fun (a) ret {
 >   ret(fun (b) ret2 {
 >     ret2(fun (k) ret3 {
 >       let k2(x) = {
->         let x2 = k(0: x);
+>         let x2 = k(x);
 >         ret3(x2)
 >       };
 >       match <true> {
@@ -1682,11 +1672,11 @@ fn (a) { fn(b) { fn (k) { k(if true { {foo:a} } else { b }) } } }
 >     }
 >   }
 > [A, B, C] (A) -> (B) -> (({foo: A} | B) -> C) -> C
-> let  = %yield(0: fun (a) ret {
+> let  = %yield(fun (a) ret {
 >   ret(fun (b) ret2 {
 >     ret2(fun (k) ret3 {
 >       let k2(x) = {
->         let x2 = k(0: x);
+>         let x2 = k(x);
 >         ret3(x2)
 >       };
 >       match <true> {
@@ -1711,11 +1701,11 @@ fn (a) { fn(b) { fn (k) { k(if true { a } else { {foo:b} }) } } }
 >     }
 >   }
 > [A, B, C] (A) -> (B) -> (({foo: B} | A) -> C) -> C
-> let  = %yield(0: fun (a) ret {
+> let  = %yield(fun (a) ret {
 >   ret(fun (b) ret2 {
 >     ret2(fun (k) ret3 {
 >       let k2(x) = {
->         let x2 = k(0: x);
+>         let x2 = k(x);
 >         ret3(x2)
 >       };
 >       match <true> {
@@ -1746,16 +1736,16 @@ fn (a) { fn(b) { fn (k) { if true { k(a) } else { k(b) } } } }
 >     }
 >   }
 > [A, B, C] (A) -> (B) -> ((A | B) -> C) -> C
-> let  = %yield(0: fun (a) ret {
+> let  = %yield(fun (a) ret {
 >   ret(fun (b) ret2 {
 >     ret2(fun (k) ret3 {
 >       match <true> {
 >         true() -> {
->           let x = k(0: a);
+>           let x = k(a);
 >           ret3(x)
 >         };
 >         false() -> {
->           let x = k(0: b);
+>           let x = k(b);
 >           ret3(x)
 >         }
 >       }
@@ -1777,16 +1767,16 @@ fn (a) { fn(b) { fn (k) { if true { k({foo:a}) } else { k(b) } } } }
 >     }
 >   }
 > [A, B, C] (A) -> (B) -> (({foo: A} | B) -> C) -> C
-> let  = %yield(0: fun (a) ret {
+> let  = %yield(fun (a) ret {
 >   ret(fun (b) ret2 {
 >     ret2(fun (k) ret3 {
 >       match <true> {
 >         true() -> {
->           let x = k(0: (foo: a));
+>           let x = k((foo: a));
 >           ret3(x)
 >         };
 >         false() -> {
->           let x = k(0: b);
+>           let x = k(b);
 >           ret3(x)
 >         }
 >       }
@@ -1808,16 +1798,16 @@ fn (a) { fn(b) { fn (k) { if true { k(a) } else { k({foo:b}) } } } }
 >     }
 >   }
 > [A, B, C] (A) -> (B) -> (({foo: B} | A) -> C) -> C
-> let  = %yield(0: fun (a) ret {
+> let  = %yield(fun (a) ret {
 >   ret(fun (b) ret2 {
 >     ret2(fun (k) ret3 {
 >       match <true> {
 >         true() -> {
->           let x = k(0: a);
+>           let x = k(a);
 >           ret3(x)
 >         };
 >         false() -> {
->           let x = k(0: (foo: b));
+>           let x = k((foo: b));
 >           ret3(x)
 >         }
 >       }
@@ -1837,13 +1827,9 @@ fn (f) { fn(g) { fn(x) { (f(x), g(x)) } } }
 >     }
 >   }
 > [A, B, C] ((A) -> B) -> ((A) -> C) -> (A) -> (B, C)
-> let  = %yield(0: fun (f) ret {
+> let  = %yield(fun (f) ret {
 >   ret(fun (g) ret2 {
->     ret2(fun (x) ret3 {
->       let x2 = g(0: x);
->       let x3 = f(0: x);
->       ret3((0: x3, 1: x2))
->     })
+>     ret2(fun (x) ret3 { let x2 = g(x); let x3 = f(x); ret3((0: x3, 1: x2)) })
 >   })
 > });
 > done
@@ -1857,12 +1843,12 @@ fn (f) { fn(g) { fn(x) { (f(x.foo), g(x)) } } }
 >     }
 >   }
 > [A, B, C <: {foo: A, ...}, D] ((A) -> B) -> ((C) -> D) -> (C) -> (B, D)
-> let  = %yield(0: fun (f) ret {
+> let  = %yield(fun (f) ret {
 >   ret(fun (g) ret2 {
 >     ret2(fun (x) ret3 {
->       let x2 = g(0: x);
+>       let x2 = g(x);
 >       let foo = x.(foo);
->       let x3 = f(0: foo);
+>       let x3 = f(foo);
 >       ret3((0: x3, 1: x2))
 >     })
 >   })
@@ -1878,12 +1864,12 @@ fn (f) { fn(g) { fn(x) { (f(x), g(x.foo)) } } }
 >     }
 >   }
 > [A, B <: {foo: A, ...}, C, D] ((B) -> C) -> ((A) -> D) -> (B) -> (C, D)
-> let  = %yield(0: fun (f) ret {
+> let  = %yield(fun (f) ret {
 >   ret(fun (g) ret2 {
 >     ret2(fun (x) ret3 {
 >       let foo = x.(foo);
->       let x2 = g(0: foo);
->       let x3 = f(0: x);
+>       let x2 = g(foo);
+>       let x3 = f(x);
 >       ret3((0: x3, 1: x2))
 >     })
 >   })
@@ -1899,13 +1885,13 @@ fn (f) { fn(g) { fn(x) { (f(x.foo), g(x.foo)) } } }
 >     }
 >   }
 > [A, B, C] ((A) -> B) -> ((A) -> C) -> ({foo: A, ...}) -> (B, C)
-> let  = %yield(0: fun (f) ret {
+> let  = %yield(fun (f) ret {
 >   ret(fun (g) ret2 {
 >     ret2(fun (x) ret3 {
 >       let foo = x.(foo);
->       let x2 = g(0: foo);
+>       let x2 = g(foo);
 >       let foo2 = x.(foo);
->       let x3 = f(0: foo2);
+>       let x3 = f(foo2);
 >       ret3((0: x3, 1: x2))
 >     })
 >   })
@@ -1925,7 +1911,7 @@ fn (x) { if x.cond { x } else { {cond: false} } }
 >     }
 >   }
 > [A <: {cond: bool, ...}] (A) -> {cond: bool} | A
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let cond = x.(cond);
 >   match cond {
 >     true() -> {
@@ -1942,7 +1928,7 @@ fn (x) { if x.cond { x.cond } else { true } }
 > fn (x) { if x.cond { x.cond } else { true } }
 >   fn (x: {cond: bool, ...}) -> bool { if x.cond { x.cond } else { true } }
 > ({cond: bool, ...}) -> bool
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let cond = x.(cond);
 >   match cond {
 >     true() -> {
@@ -1960,7 +1946,7 @@ fn (f) { f(1); 42 }
 > fn (f) { f(1); 42 }
 >   fn (f: (int) -> ()) -> int { f(1); 42 }
 > ((int) -> ()) -> int
-> let  = %yield(0: fun (f) ret { let x = f(0: 1); ret(42) }); done
+> let  = %yield(fun (f) ret { let x = f(1); ret(42) }); done
 
 # even this one, with A used at both variances, could maybe delete the var?
 # (relying on some nonextensible logic about atomic types covering bottom)
@@ -1970,8 +1956,7 @@ fn (f) { f(1); f(2) }
 > fn (f) { f(1); f(2) }
 >   fn [A <: ()](f: (int) -> A) -> A { f(1); f(2) }
 > [A <: ()] ((int) -> A) -> A
-> let  = %yield(0: fun (f) ret { let x = f(0: 1); let x2 = f(0: 2); ret(x2) });
-> done
+> let  = %yield(fun (f) ret { let x = f(1); let x2 = f(2); ret(x2) }); done
 
 # fixing the above example will break this one (seems fine though?)
 ((fn (f) { f(1); f(2) })(fn(x){@bot}) : int)
@@ -1979,19 +1964,19 @@ fn (f) { f(1); f(2) }
 >   ((fn [A <: ()](f: (int) -> A) -> A { f(1); f(2) })(fn (x) { @bot }) : int)
 > int
 > let x = fun (f) ret {
->   let x = f(0: 1);
->   let x2 = f(0: 2);
+>   let x = f(1);
+>   let x2 = f(2);
 >   ret(x2)
-> }(0: fun (x) ret { @bot });
-> let  = %yield(0: x);
+> }(fun (x) ret { @bot });
+> let  = %yield(x);
 > done
 
 fn(f) { fn(x) { (x, f(x)) } }
 > fn (f) { fn (x) { (x, f(x)) } }
 >   fn [A, B](f: (A) -> B) -> (A) -> (A, B) { fn (x: A) -> (A, B) { (x, f(x)) } }
 > [A, B] ((A) -> B) -> (A) -> (A, B)
-> let  = %yield(0: fun (f) ret {
->   ret(fun (x) ret2 { let x2 = f(0: x); ret2((0: x, 1: x2)) })
+> let  = %yield(fun (f) ret {
+>   ret(fun (x) ret2 { let x2 = f(x); ret2((0: x, 1: x2)) })
 > });
 > done
 
@@ -2004,10 +1989,10 @@ fn(x) { let y = (fn(x){x})(x); (x.foo.bar.a.b.c, y.foo.bar.a.b.c) }
 >     (x.foo.bar.a.b.c, y.foo.bar.a.b.c)
 >   }
 > [A, B] ({foo: {bar: {a: {b: {c: A, ...}, ...}, ...}, ...}, ...}) -> (A, A | B)
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let x2 = fun (x2) ret2 {
 >     ret2(x2)
->   }(0: x);
+>   }(x);
 >   let foo = x2.(foo);
 >   let bar = foo.(bar);
 >   let a = bar.(a);
@@ -2040,7 +2025,7 @@ fn(x) {
 >     idf(choose(x, {foo: 5}))
 >   }
 > [A <: {foo: any, ...}] (A) -> {foo: int} | A
-> let  = %yield(0: fun (x) ret {
+> let  = %yield(fun (x) ret {
 >   let idf = fun (x2) ret2 { let foo = x2.(foo); ret2(x2) };
 >   let choose =
 >     fun (x2, y) ret2 {
@@ -2053,8 +2038,8 @@ fn(x) {
 >         }
 >       }
 >     };
->   let x2 = choose(0: x, 1: (foo: 5));
->   let x3 = idf(0: x2);
+>   let x2 = choose(x, (foo: 5));
+>   let x3 = idf(x2);
 >   ret(x3)
 > });
 > done
@@ -2118,7 +2103,7 @@ fn(x) {
 >     }
 >   }
 > {fst: [A <: {foo: bool}] (A) -> {foo: int} | A, snd: ({foo: int}) -> {foo: int}}
-> let  = %yield(0: 
+> let  = %yield(
 > (fst: fun (x) ret {
 >   match <true> {
 >     true() -> {
@@ -2144,4 +2129,4 @@ fn(x) {
 > done
 
 
-> STATS: fix: 66, flex: 1562
+> STATS: fix: 65, flex: 1550

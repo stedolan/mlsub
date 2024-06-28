@@ -9,7 +9,7 @@ let () = Printexc.record_backtrace true
 let dump (t : ptyp) =
   Format.printf "%a%!" dump_ptyp t
 
-let func a b = Cons.Func (Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) a)), b)
+let func a b = Cons.Func (a, b)
 
 let tuple xs = Cons.Record (None, Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) xs)))
 
@@ -38,7 +38,7 @@ let fresh_flow lvl =
 let match_as_fn env f =
   let ((), arg), ((), res) =
     match_typ env f Location.noloc (func [()] ())
-    |> function Ok (Func (a, r)) -> Tuple_fields.(FieldMap.find (Field_positional 0) a.fields), r 
+    |> function Ok (Func (a, r)) -> List.hd a, r 
               | _ -> assert false in
   arg, res
 

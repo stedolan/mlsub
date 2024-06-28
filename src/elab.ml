@@ -13,7 +13,7 @@ type typed_exp = typed_exp' mayloc and typed_exp' =
   | Var of ident * value_binding (* Is this right? *)
   | Fn of typed_func_def
   | FnDef of symbol * IR.value IR.Binder.t * typed_func_def * typed_exp
-  | App of typed_exp * typed_exp tuple_fields
+  | App of typed_exp * typed_exp list (* FIXME: restore/preserve parameter names? *)
   | Tuple of tuple_tag option * typed_exp tuple_fields
   | Let of typed_pat * Check_pat.ex_split * elab_typ * typed_exp * typed_exp Check_pat.action
   | Seq of typed_exp * typed_exp
@@ -29,7 +29,7 @@ and typed_func_def =
   typed_polybounds option * typed_parameters * Check_pat.ex_split * ptyp option * typed_exp Check_pat.action
 
 and typed_parameters =
-  (typed_pat * ntyp option) tuple_fields
+  (typed_pat * ntyp option) list
 
 and typed_pat = pat
 
@@ -54,7 +54,7 @@ and typed_map_typs_exp' ~neg ~pos ~index = function
      FnDef (s, vb, typed_map_func_def ~neg ~pos ~index fndef, typed_map_typs_exp ~neg ~pos ~index body)
   | App (f, args) ->
      App (typed_map_typs_exp ~neg ~pos ~index f,
-          Tuple_fields.map_fields (fun _fn x -> typed_map_typs_exp ~neg ~pos ~index x) args)
+          List.map (fun x -> typed_map_typs_exp ~neg ~pos ~index x) args)
   | Tuple (tag, fs) ->
      Tuple (tag, Tuple_fields.map_fields (fun _fn x -> typed_map_typs_exp ~neg ~pos ~index x) fs)
   | Let (p, split, ty, e, body) ->
@@ -93,7 +93,7 @@ and typed_map_func_def ~neg ~pos ~index (poly, params, psplit, ret, body) =
        let index = index + 1 in
        Some (IArray.map (fun (n, b) -> n, Option.map (neg ~index) b) bounds), index
   in
-  let params = Tuple_fields.map_fields (fun _fn (p, ty) -> p, Option.map (neg ~index) ty) params in
+  let params = List.map (fun (p, ty) -> p, Option.map (neg ~index) ty) params in
   let ret = Option.map (pos ~index) ret in
   let body = typed_map_typs_action ~neg ~pos ~index body in
   poly, params, psplit, ret, body
@@ -111,7 +111,7 @@ module Elaborate = struct
     | FnDef (s, _vb, fn, body) ->
        FnDef (s, fndef env fn, exp env body)
     | App (f, args) ->
-       App (exp env f, map_fields (fun _fn e -> exp env e) args)
+       App (exp env f, List.map (fun e -> None (*FIXME*), exp env e) args)
     | Tuple (tag, fs) ->
        Tuple (tag, map_fields (fun _fn e -> exp env e) fs)
     | Let (p, _split, ty, e, body) ->
@@ -147,7 +147,7 @@ module Elaborate = struct
          env, Some poly
     in
     poly,
-    map_fields (fun _fn (p, t) -> p, Option.map (unparse_ntyp ~flexvar:ignore ~env) t) params,
+    List.map (fun (p, t) -> p, Option.map (unparse_ntyp ~flexvar:ignore ~env) t) params,
     Option.map (unparse_ptyp ~flexvar:ignore ~env) ret,
     exp env body.rhs
 
@@ -231,7 +231,7 @@ let project e field =
 let apply fn args =
   fun k ->
   eval_cont fn @@ fun fn ->
-  eval_cont_fields args @@ fun args ->
+  eval_cont_list args @@ fun args ->
   let vret = IR.Binder.fresh ~name:"x" () in
   Apply (Func fn, args, [vret],
          apply_cont k (IR.var vret))
@@ -269,7 +269,7 @@ module Compile = struct
          (IR.Symbol.of_string "false", ([], exp ifnot (Named_cont k)))], None)
 
     | App (f, args) ->
-       IRB.apply (exp f) (map_fields (fun _fn a -> exp a) args)
+       IRB.apply (exp f) (List.map exp args)
 
     | Tuple (tag, fields) ->
        (let tag = Option.map (fun (t,_) -> IR.Symbol.of_string t) tag in
@@ -315,9 +315,12 @@ module Compile = struct
 
   and func_def ((_poly,params,psplit,_ret,body) : typed_func_def) : IR.value =
     let actions = [| { body with rhs = exp body.rhs } |] in
-    let params = map_fields (fun fn _ -> IR.Binder.fresh ?name:(pat_name (fst (get_field params fn))) ()) params in
+    let params =
+      List.map (fun (pat, _) ->
+        IR.Binder.fresh ?name:(pat_name pat) ()) params
+    in
     let ret = IR.Binder.fresh () in
-    Lambda(map_fields (fun _fn v -> v) params,
+    Lambda(params,
            ret,
-           Check_pat.compile ~cont:(IRB.Named_cont (IR.Binder.ref ret)) ~actions (list_fields params |> List.map (fun (_,v) -> IR.var v)) psplit)
+           Check_pat.compile ~cont:(IRB.Named_cont (IR.Binder.ref ret)) ~actions (List.map IR.var params) psplit)
 end

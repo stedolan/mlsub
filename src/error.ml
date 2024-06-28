@@ -86,12 +86,10 @@ let pp_err input loc err : PPrint.document =
         | Tags (tag, tags') ->
            let tag = match tag with None -> "no tag" | Some s -> "tag " ^ s in
            pp "The tag should be " ^^ separate_map (pp "|") (pp "%s") tags' ^^ pp ", but %s is present." tag
-        | Args (`Missing name) ->
-           pp "The argument '%s' is missing." (Tuple_fields.string_of_field_name name)
-        | Args (`Extra (Some name)) ->
-           pp "A surplus argument '%s' is present." (Tuple_fields.string_of_field_name name)
-        | Args (`Extra None) ->
-           pp "Surplus arguments are present."
+        | Args `Too_few ->
+           pp "Too few arguments."
+        | Args `Too_many ->
+           pp "Too many arguments."
      in
      conflict ^^
      nest 2 (hardline ^^ pp_context loc) ^^

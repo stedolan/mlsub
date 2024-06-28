@@ -101,8 +101,10 @@ and exp_ e =
   | Tuple (Some tag, t) when Tuple_fields.is_empty t -> symbol tag
   | Tuple (Some tag, t) -> symbol tag ^^ record ~tcomma:false ~pun:exp_pun (exp ~prec:Exp) t
   | App (f, args) ->
-     exp ~prec f ^^
-     parens (fields argument args)
+     let args = List.map (function
+       | (Some s, x) -> string s ^^ string ":" ^^ space ^^ exp ~prec x
+       | (None, x) -> exp ~prec:Max x) args in
+     exp ~prec f ^^ parens (sep comma args)
   | Proj (e, f) -> exp ~prec e ^^ char '.' ^^ field_name (Field_named (fst f))
   | If (e, t, f) ->
      string "if" ^^ blank 1 ^^ exp ~prec e ^^ block t ^^ blank 1 ^^ string "else" ^^ block f
@@ -120,7 +122,7 @@ and fndef ~name (poly, params, ty, body) =
       (match poly with
       | None -> empty
       | Some poly -> typolybounds poly) ^^
-     parens (fields parameter params) ^^
+     parens (sep comma (List.map parameter params)) ^^
      (match ty with
       | None -> empty
       | Some ty ->
@@ -171,15 +173,8 @@ and argument ~pos fn arg =
   | fn, arg ->
      string "~" ^^ field_name fn ^^ colon ^^ space ^^ exp ~prec:Max arg
 
-and parameter ~pos fn (p,ty) =
-  match fn, p with
-  | _ when pos -> pat ~prec:Term p ^^ opt_type_annotation ~prespace:false ty
-  | Field_named s, (Some (Pbind ((s', _), (Some Pany, _))), _) when s = s' ->
-     string "~" ^^ field_name fn ^^
-       opt_type_annotation ty
-  | _ ->
-     string "~" ^^ field_name fn ^^ space ^^ pat ~prec:Term p ^^
-       opt_type_annotation ty
+and parameter (p, ty) =
+  pat ~prec:Term p ^^ opt_type_annotation ~prespace:false ty
 
 and opt_type_annotation ?(prespace=true) = function
   | Some ty -> (if prespace then blank 1 else empty) ^^ string ":" ^^ nest 2 (break 1 ^^ group (tyexp ~prec:Exp ty))
@@ -225,7 +220,7 @@ and tyexp_ t =
   | Trecord (Some tag, fields) ->
      qsymbol tag ^^ record ~tcomma:false ~pun:(fun _ -> false) (tyexp ~prec:Term) fields
   | Tfunc (args, ret) ->
-     parens (fields argtype args) ^^
+     parens (sep comma (List.map (tyexp ~prec:Exp) args)) ^^
        space ^^ group (string "->" ^^ break 1 ^^ group (tyexp ~prec:Exp ret))
   | Tforall (bounds, body) ->
       typolybounds bounds ^^ space ^^ tyexp ~prec:Exp body

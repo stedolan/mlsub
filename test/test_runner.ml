@@ -70,7 +70,7 @@ let run_cmd s =
 
         let elab_rendered = to_string (Print.exp elab) in
         begin match Parse.parse_string elab_rendered with
-        | exception e -> println "MISMATCH_ELAB: %s" (Printexc.to_string e)
+        | exception e -> println "MISMATCH_ELAB: %s %s" (Printexc.to_string e) elab_rendered
         | Ok (`Exp elab') when Exp.equal elab elab' -> ()
         | Ok (`Exp elab') -> println "MISMATCH_ELAB: %s" (to_string ~width:100 (Print.exp elab'))
         | _ -> println "MISMATCH_ELAB"
@@ -107,7 +107,7 @@ let run_cmd s =
         begin
           let bcomp = Elab.Compile.exp etyped in
           let comp : IR.comp =
-            Elab.IR_Builder.eval_cont bcomp (fun v -> Apply (Prim "yield", (Tuple_fields.collect_fields [Fpos v]), [], Trap "done"))
+            Elab.IR_Builder.eval_cont bcomp (fun v -> Apply (Prim "yield", [v], [], Trap "done"))
           in
           IR.wf comp;
           let comp = IR.subst_aliases comp in

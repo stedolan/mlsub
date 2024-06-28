@@ -77,7 +77,7 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
   | Trecord (tag, fields) ->
      tcons loc (Record (Option.map fst tag, typs_of_tuple_tyexp env lvl fields))
   | Tfunc (args, res) ->
-     tcons loc (Func (typs_of_tuple_tyexp env lvl args, typ_of_tyexp env lvl res))
+     tcons loc (Func (List.map (typ_of_tyexp env lvl) args, typ_of_tyexp env lvl res))
   | Tjoin (a, b) ->
      syn_tjoin loc (typ_of_tyexp env lvl a) (typ_of_tyexp env lvl b)
   | Tforall (vars, body) ->
@@ -344,15 +344,13 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
         check' env' ~mode eloc e (Checking body)
         (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
      | None ->
-        let target_ty = Cons.Func (map_fields (fun _ _ -> ()) params, ()) in
+        let target_ty = Cons.Func (List.map (fun (k,_) -> k,()) params, ()) in
         match poly, inspect_cons target_ty ty with
        | None, Imatches (Func (ptypes, rtype)) ->
           (* If poly <> None, then we should infer & subtype *)
           (* FIXME: do we need another level here? Does hoisting break things? *)
-          let param_list = Tuple_fields.list_fields params in
           let param_list =
-            param_list |> List.map (fun (fn, (pat, pty)) ->
-              let ty = Tuple_fields.get_field ptypes fn in
+            List.map2 (fun (pat, pty) ty ->
               let ty_level =
                 match pty with
                 | None -> ty, Some (env_level env)
@@ -361,12 +359,12 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
                    subtype env ty t |> or_raise `Pat (snd pty);
                    t, None
               in
-              fn, pat, ty_level
-            )
+              pat, ty_level
+            ) params ptypes
           in
-          let param_ptyps = List.map (fun (_fn, _p, tl) -> tl) param_list in
+          let param_ptyps = List.map (fun (_p, tl) -> tl) param_list in
           let case : case =
-            ([List.map (fun (_fn, p, _tl) -> p) param_list], eloc), body
+            ([List.map (fun (p, _tl) -> p) param_list], eloc), body
           in
           let act, split =
             Check_pat.split_cases ~matchloc:eloc env param_ptyps [case] in
@@ -384,7 +382,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
           let body = check env' ~mode body (Checking ret_type) in
           (* FIXME: is this wrong? What if the annotations names have changed? *)
           (* FIXME: insert / keep type annotations? *)
-          Fn (None, map_fields (fun _ (p, _) -> p, None) params, split, None (*FIXME ret_type?*), {act with rhs = body })
+          Fn (None, List.map (fun (p, _) -> p, None) params, split, None (*FIXME ret_type?*), {act with rhs = body })
        | _ ->
           let ty, tfndef = infer_func_def env ~mode eloc fndef in
           inferred ty;
@@ -410,7 +408,8 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
        | Ok (Func (a, r)) -> a, r
        | Ok _ -> assert false
        | Error e -> fail eloc (Conflict (`Expr, e)) in
-     let args = map_fields (fun _fn (e, t) -> check env ~mode e (Checking t)) tyargs in
+     (* FIXME: don't ignore param names *)
+     let args = List.map (fun ((_,e), t) -> check env ~mode e (Checking t)) tyargs in
      inferred tyret;
      App (f, args)
 
@@ -445,10 +444,9 @@ and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * typed_exp =
   !ty, e
 
 and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * typed_func_def =
-   if params.fopen = `Open then failwith "invalid ... in params";
    let ty, (typed_poly, typed_fn), _generalised, (act, split) =
      elab_gen env ~mode poly (fun env ->
-       let params = map_fields (fun _fn (p, ty) ->
+       let params = List.map (fun (p, ty) ->
          match ty with
          | Some ty ->
             let ty = typ_of_tyexp env ty in
@@ -457,10 +455,9 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * typed_func_
             (ty,ty), p, None
          | None ->
             fresh_flow env, p, Some (env_level env)) params in
-       let param_list = Tuple_fields.list_fields params in
-       let param_ptyps = List.map (fun (_fn, ((_tn, tp), _p, gen_level)) -> tp, gen_level) param_list in
+       let param_ptyps = List.map (fun (((_tn, tp), _p, gen_level)) -> tp, gen_level) params in
        let case : case =
-         ([List.map (fun (_fn, (_ty, p, _lvl)) -> p) param_list], eloc), body in
+         ([List.map (fun ((_ty, p, _lvl)) -> p) params], eloc), body in
        let act, split = Check_pat.split_cases ~matchloc:eloc env param_ptyps [case] in
        let act = Util.as_singleton act in
        let env' = extend_env env act in
@@ -474,9 +471,9 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * typed_func_
             ty, check env' ~mode:bmode body (Checking ty)
          | None ->
             infer env' ~mode:bmode body in
-       let _ = map_fields (fun _fn ((tn,tp),_,_) -> wf_ntyp env tn; wf_ptyp env tp) params in
+       let _ = List.map (fun ((tn,tp),_,_) -> wf_ntyp env tn; wf_ptyp env tp) params in
        (* FIXME params or ptys? What happens if they disagree? *)
-       tcons eloc (Func (map_fields (fun _fn ((tn,_tp),_,_) -> tn) params, res)),
+       tcons eloc (Func (List.map (fun ((tn,_tp),_,_) -> tn) params, res)),
        body,
        bmode.gen_level_acc,
        (act, split)) in
@@ -487,13 +484,7 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * typed_func_
      | Tpoly { body = Tcons {conses=[Func (t,r)];_}; _ } -> t,r
      | _ -> intfail "wuh?"
    in
-   let params =
-     merge_fields params tparams
-       ~left:(fun _ _ -> assert false)
-       ~right:(fun _ _ -> assert false)
-       ~both:(fun _fn (p, _) t -> Some (p, Some t))
-       ~extra:(fun ((c,_),_) -> c)
-   in
+   let params = List.map2 (fun (p, _) t -> (p, Some t)) params tparams in
    ty,
    (typed_poly,
     params,

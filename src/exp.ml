@@ -22,7 +22,7 @@ type exp = exp' mayloc and exp' =
   (* fn f(a, b, c) { .... }; ... *)
   | FnDef of symbol * func_def * exp
   (* f(...) *)
-  | App of exp * exp tuple_fields
+  | App of exp * (string option * exp) list
   (* (a, b, c) or {x: a, y, z: c}*)
   | Tuple of tuple_tag option * exp tuple_fields
   (* let a : t = ...; ... *)
@@ -44,7 +44,7 @@ and case = pat list list loc * exp
 
 and func_def = typolybounds option * parameters * tyexp option * exp
 
-and parameters = (pat * tyexp option) tuple_fields
+and parameters = (pat * tyexp option) list
 
 (* Patterns *)
 
@@ -60,7 +60,7 @@ and tyexp = tyexp' mayloc and tyexp' =
   | Tnamed of ident
   | Tforall of typolybounds * tyexp
   | Trecord of tuple_tag option * tyexp tuple_fields
-  | Tfunc of tyexp tuple_fields * tyexp
+  | Tfunc of tyexp list * tyexp
   | Tjoin of tyexp * tyexp
 
 and typolybounds =
@@ -86,7 +86,7 @@ let mapper =
 
   let fndef r (poly, args, ret, body) =
     let poly = Option.map (List.map (fun (s, t) -> (sym r s, Option.map (r.tyexp r) t))) poly in
-    let args = map_fields (fun _fn (p, t) -> (r.pat r p, Option.map (r.tyexp r) t)) args in
+    let args = List.map (fun (p, t) -> (r.pat r p, Option.map (r.tyexp r) t)) args in
     let ret = Option.map (r.tyexp r) ret in
     let body = r.exp r body in
     (poly, args, ret, body)
@@ -104,7 +104,7 @@ let mapper =
     | FnDef (s, def, body) ->
        FnDef (sym r s, fndef r def, r.exp r body)
     | App (f, args) ->
-       App (r.exp r f, map_fields (fun _fn e -> r.exp r e) args)
+       App (r.exp r f, List.map (fun (k, x) -> k, r.exp r x) args)
     | Tuple (tag, es) ->
        Tuple (Option.map (sym r) tag, map_fields (fun _fn e -> r.exp r e) es)
     | Let (p, ty, e, body) ->
@@ -141,7 +141,7 @@ let mapper =
     | Trecord (tag, ts) ->
        Trecord (Option.map (sym r) tag, map_fields (fun _fn t -> r.tyexp r t) ts)
     | Tfunc (args, ret) ->
-       Tfunc (map_fields  (fun _fn t -> r.tyexp r t) args, r.tyexp r ret)
+       Tfunc (List.map (r.tyexp r) args, r.tyexp r ret)
     | Tjoin (s, t) ->
        Tjoin (r.tyexp r s, r.tyexp r t)
   in

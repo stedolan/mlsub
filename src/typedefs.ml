@@ -32,7 +32,7 @@ module Cons = struct
     | Int
     | String
     | Record of tuple_tag option * 'pos tuple_fields
-    | Func of 'neg tuple_fields * 'pos
+    | Func of 'neg list * 'pos
 
 
   let equal_one ~neg ~pos p q =
@@ -44,7 +44,8 @@ module Cons = struct
        Option.equal (String.equal) pt qt &&
        equal_fields pos p q
     | Func (pa, pr), Func (qa, qr) ->
-       equal_fields neg pa qa && pos pr qr
+       List.equal neg pa qa &&
+       pos pr qr
     | (Bool|Int|String|Record _|Func _), _ -> false
 
   let map_one ~neg ~pos = function
@@ -55,12 +56,12 @@ module Cons = struct
     | Record (tag,fields) ->
        Record (tag,map_fields (fun _fn x -> pos x) fields)
     | Func (args, res) ->
-       let args = map_fields (fun _fn x -> neg x) args in
+       let args = List.map neg args in
        let res = pos res in
        Func (args, res)
 
   type field_neg =
-    | Func_arg of Tuple_fields.field_name
+    | Func_arg of int
 
   type field_pos =
     | Record_field of Tuple_fields.field_name
@@ -92,7 +93,7 @@ module Cons = struct
     | Record (tag, fields) ->
        Record (tag, map_fields (fun fn x -> pos (Record_field fn) x) fields)
     | Func (args, res) ->
-       let args = map_fields (fun fn x -> neg (Func_arg fn) x) args in
+       let args = List.mapi (fun fn x -> neg (Func_arg fn) x) args in
        let res = pos Func_res res in
        Func (args, res)
 
@@ -129,9 +130,9 @@ module Cons = struct
     match p, q with
     | Bool, Bool
     | Int, Int
-    | String, String
-    | Func _, Func _ ->
-       true
+    | String, String -> true
+    | Func (pa,_), Func (qa,_) ->
+       List.length pa = List.length qa
     | Record (Some pt, p), Record (Some qt, q) ->
        String.equal pt qt && compat_fields p q
     | Record (_, p), Record (_, q) ->
@@ -186,7 +187,7 @@ module Cons = struct
        (* FIXME: fail here rather than assuming variadic functions?
           Could/should enforce that functions are always `Closed *)
        let open One_or_two in
-       let args = Tuple_fields.inter args args' ~both in
+       let args = List.map2 both args args' in
        Func (args, both res res')
 
     | Record _, Func _ | Func _, Record _ -> assert false
@@ -209,10 +210,8 @@ module Cons = struct
        Record (t, fields)
   
     | Func (args, res), Func (args', res') ->
-       let args =
-         Tuple_fields.union args args' ~left:id ~right:id ~both:TwoLists.join
-       in
-       Func(Option.get args, TwoLists.join res res')
+       let args = List.map2 TwoLists.join args args' in
+       Func(args, TwoLists.join res res')
   
     | Record _, Func _ | Func _, Record _ -> assert false
 
@@ -271,8 +270,8 @@ module Cons = struct
   type field_conflict = [`Missing of field_name | `Extra of field_name option]
   type conflict =
     | Fields of field_conflict
-    | Args of field_conflict
     | Tags of (tuple_tag option * tuple_tag list)
+    | Args of [`Too_few | `Too_many]
     | Incompatible
 
 
@@ -304,9 +303,12 @@ module Cons = struct
     | Int, Int
     | String, String -> Ok []
     | Func (args, res), Func (args', res') ->
-       begin match subtype_fields ~sub:(fun k s -> S_neg (Func_arg k, s)) args' args with
-       | sub -> Ok (sub @ [S_pos (Func_res, (res, res'))])
-       | exception FieldError con -> Error (Args con)
+       begin match List.compare_lengths args args' with
+       | 0 ->
+          let pairs = List.combine args' args in
+          Ok (List.mapi (fun i p -> S_neg (Func_arg i, p)) pairs
+              @ [S_pos (Func_res, (res, res'))])
+       | n -> Error (Args (if n > 0 then `Too_few else `Too_many))
        end
     | Record (tag, fs), Record (tag', fs') ->
        let tag_err =
@@ -913,8 +915,8 @@ let unparse_cons ~neg ~pos ty =
        Trecord (Option.map (fun t -> t, noloc) tag,
                 Tuple_fields.map_fields (fun _ t -> pos t) fs)
     | Func (args, ret) ->
-       Tfunc (Tuple_fields.map_fields (fun _ t -> neg t) args,
-              pos ret) in
+       Tfunc (List.map neg args, pos ret)
+  in
   mktyexp ty
 
 let unparse_bound_var ~env:(_,ext) index var =

@@ -106,7 +106,7 @@ fndef:
   LPAR; params = separated_list(COMMA, parameter); RPAR;
   ty = ioption(ARROW; t = tyexp {t});
   LBRACE; body = exp; RBRACE
-  { (poly, parse_fields params, ty, body) }
+  { (poly, params, ty, body) }
 
 term: e = mayloc(term_) { e }
 term_:
@@ -115,10 +115,9 @@ term_:
 | k = literal
   { Lit k }
 | fn = term; LPAR; args = separated_list(COMMA, argument); RPAR
-  { App (fn, parse_fields args) }
+  { App (fn, args) }
 | e = term; DOT; f = symbol
   { Proj (e, f) }
-
 | tag = usymbol %prec low_priority
   { Tuple (Some tag, parse_fields []) }
 | tag = ioption(usymbol); LPAR; RPAR
@@ -142,19 +141,12 @@ named_field:
 
 argument:
 | e = exp
-  { Fpos e }
-| TILDE; f = ident
-  { Fnamed ((fst f).label, (Some (Var f), snd f)) }
-| TILDE; f = SYMBOL; COLON; e = exp
-  { Fnamed (f, e) }
+  { None, e }
+| s=SYMBOL; COLON; e = exp
+  { Some s, e }
 
 parameter:
-| p = pat; ty = opt_type_annotation
-  { Fpos (p, ty) }
-| TILDE; f = symbol; ty = opt_type_annotation
-  { Fnamed (fst f, ((Some (pvar f), snd f), ty)) }
-| TILDE; f = SYMBOL; p = pat; ty = opt_type_annotation
-  { Fnamed (f, (p, ty)) }
+| p = pat; ty = opt_type_annotation { p, ty }
 
 opt_type_annotation:
 | 
@@ -251,7 +243,8 @@ tyexp_:
   { Trecord (tag, parse_tyfields ts) }
 (* FIXME: what does (...) -> a | b mean? (prec of -> and |) *)
 | LPAR; t = tyfields; RPAR; ARROW; r = tyexp
-  { Tfunc (parse_tyfields t, r) }
+  { let t = List.concat_map (function Fpos t -> [t] | Fempty -> [] | _ -> failwith "syntax FIXME") t in
+    Tfunc (t, r) }
 | t1 = tyexp; VBAR; t2 = tyexp
   { Tjoin(t1, t2) }
 | t = typolybounds; b = tyexp %prec ARROW (* kinda hack *)

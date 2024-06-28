@@ -16,13 +16,6 @@ fn (id : [A]. A -> A) { id(42) }
 >   fn (id : [A]. A -> A) { id(42) }
 >               ^
 
-fn(x, y, ~k: int) { (x:int,k,y) }
-> fn (x, y, ~k : int) { (<err>) }
-> test:1: syntax error
->   fn(x, y, ~k: int) { (x:int,k,y) }
->                             ^
-
-
 fn (x)
 > parser failure: bad parse
 
@@ -34,7 +27,7 @@ fn(a) { { foo: if true { fn(x) { x } } else { a } } }
 >     {foo: if true { fn [A_2](x: A_2) -> A_2 { x } } else { a }}
 >   }
 > [A, B] (A) -> {foo: ((B) -> B) | A}
-> let  = %yield(0: fun (a) ret {
+> let  = %yield(fun (a) ret {
 >   let k(x) = {
 >     ret((foo: x))
 >   };
@@ -53,10 +46,10 @@ fn[A,B](x:A) -> A | (A) -> B { x }
 > fn [A, B](x: A) -> A | ((A) -> B) { x }
 >   fn [A, B](x: A) -> ((A) -> B) | A { x }
 > [A, B] (A) -> ((A) -> B) | A
-> let  = %yield(0: fun (x) ret { ret(x) }); done
+> let  = %yield(fun (x) ret { ret(x) }); done
 
 : [A <: ([] int) -> int ] A <: int
 > test:1: Bounds must be simple types
 >   : [A <: ([] int) -> int ] A <: int
 >           ^^^^^^^^^^^^^^^
-> STATS: fix: 0, flex: 63
+> STATS: fix: 0, flex: 61
