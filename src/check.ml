@@ -25,38 +25,30 @@ let env_lookup_type_var env lvl loc name =
   | None -> Error (Bad_name (`Unknown, `Type, name))
 
 let syn_tjoin loc (a : (_, _) typ) (b : (_, _) typ) =
-  let rec join conses keep = function
-    | Ttop l :: _ -> Ttop l
-    | Tjoin (a, b) :: rest -> join conses keep (a :: b :: rest)
-    | (Tsimple _ | Tvar _) as k :: rest -> join conses (k :: keep) rest
-    | Tcons c :: rest when Cons.is_bottom c -> join conses keep rest
-    | Tcons c :: rest -> join (c :: conses) keep rest
-    | Tpoly _ :: _ -> fail loc (Illformed_type `Join_poly)
-    | [] ->
-       let conses = List.rev conses in
-       let keep = List.rev keep in
-       let joinands =
-         match conses with
-         | [] -> keep
-         | [c] -> Tcons c :: keep
-         | c :: cs ->
-            let c =
-              List.fold_left (fun c1 c2 ->
-                let c = Cons.join c1 c2 in
-                let either = function
-                  | [x],[] | [],[x] -> x
-                  | _ ->
-                     fail loc (Illformed_type `Join_multi_cons)
-                in
-                Cons.map ~pos:either ~neg:either c) c cs
-            in
-            Tcons c :: keep
-       in
-       List.fold_left tjoin (List.hd joinands) (List.tl joinands)
+  let rec check_cons cons = function
+    | Tjoin (a, b, _loc) -> check_cons cons a; check_cons cons b
+    | Tsimple _ -> intfail "syn_tjoin: Tsimple"
+    | Tvar _ -> ()
+    | Tbot _ -> fail loc (Illformed_type `Join_multi_cons)
+    | Tcons (c, _) ->
+       if not (Cons1.incomparable_head c cons) then
+         fail loc (Illformed_type `Join_multi_cons)
+    | Tpoly _ ->
+       fail loc (Illformed_type `Join_poly)
   in
-  join [] [] [a;b]
+  let rec check_join p = function
+    | Tjoin (a, b, _) -> check_join p a; check_join p b
+    | Tsimple _ -> intfail "syn_tjoin: Tsimple"
+    | Tvar _ -> ()
+    | Tbot _ -> fail loc (Illformed_type `Join_multi_cons)
+    | Tcons (c, _) -> check_cons c p
+    | Tpoly _ ->
+       fail loc (Illformed_type `Join_poly)
+  in
+  check_join a b;
+  Tjoin (a, b, Some loc)
 
-let tcons loc cons = Tcons (Cons.make ~loc cons)
+let tcons loc cons = Tcons (cons, loc)
 
 let rec typ_of_tyexp : 'a 'b . env -> Env_level.t -> tyexp -> ('a, 'b) typ =
   fun env lvl ty -> match ty with
@@ -108,6 +100,7 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string Location.loc * ('a
     | Some b ->
        let temp_env = Env_types { level; rig_names; rig_defns = stubs; rest = env } in
        let bound = close_typ_rigid ~ispos:false level (typ_of_tyexp temp_env (env_level temp_env) b) in
+       (* FIXME: Tcons / Tjoin *)
        begin match bound with Tcons _ -> () | _ -> fail (snd b) (Illformed_type `Bound_not_cons) end;
        if not (check_simple bound) then fail (snd b) (Illformed_type `Bound_not_simple);
        Some bound
@@ -211,7 +204,7 @@ let inspect_poly = function
   | _ -> None
 
 type inspect_result =
-  | Imatches of (ptyp, ntyp) Cons.t
+  | Imatches of (ptyp, ntyp) Cons1.t
   (* FIXME: add Ifailed for when a Cons clearly does not match? *)
   | Iother
 
@@ -222,9 +215,10 @@ let inspect_cons cons = function
   | Checking (Tpoly _) ->
      (* FIXME: maybe make this impossible? *)
      Iother
-  | Checking (Tcons c) ->
-     (match Cons.get_single_sub cons c with Some c -> Imatches c | _ -> Iother)
-  | Checking (Ttop _ | Tvar _ | Tjoin _) | Inference _ -> Iother
+  (* FIXME: Tcons/Tjoin selection *)
+  | Checking (Tcons (c,_loc)) ->
+     (match Cons1.sub_head cons c with Le _ -> Imatches c | Un _ -> Iother)
+  | Checking (Tbot _ | Tvar _ | Tjoin _) | Inference _ -> Iother
 
 let rec check env ~(mode : generalisation_mode) e (ty : ty_mode) : typed_exp =
   (match ty with
@@ -276,7 +270,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
 
   | Tuple (tag, fields) ->
      if fields.fopen = `Open then failwith "invalid open tuple ctor";
-     let target_ty = Cons.Record(Option.map fst tag,
+     let target_ty = Cons1.Record(Option.map fst tag,
                             map_fields (fun _ _ -> ()) fields) in
      let fields =
        (* FIXME: simplify here? *)
@@ -344,7 +338,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
         check' env' ~mode eloc e (Checking body)
         (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
      | None ->
-        let target_ty = Cons.Func (List.map (fun (k,_) -> k,()) params, ()) in
+        let target_ty = Cons1.Func (List.map (fun (k,_) -> k,()) params, ()) in
         match poly, inspect_cons target_ty ty with
        | None, Imatches (Func (ptypes, rtype)) ->
           (* If poly <> None, then we should infer & subtype *)
@@ -432,13 +426,13 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
   | Pragma ("true"|"false" as b) when match inspect_cons Bool ty with Imatches Bool -> true | _ -> false ->
      Pragma b
   | Pragma "bot" ->
-     inferred (Tcons (Cons.bottom_loc eloc));
+     inferred (Tbot (Some eloc));
      Pragma "bot"
   | Pragma s -> failwith ("pragma: " ^ s)
 
 
 and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * typed_exp =
-  let ty = ref (Tcons Cons.bottom) in
+  let ty = ref (Tbot None) in
   let e = check env ~mode e (Inference ty) in
   wf_ptyp env !ty;
   !ty, e
@@ -480,8 +474,9 @@ and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * typed_func_
    let tparams, tret =
      (* FIXME awful hack *)
      match ty with
-     | Tcons {conses=[Func (t,r)];_}
-     | Tpoly { body = Tcons {conses=[Func (t,r)];_}; _ } -> t,r
+     | Tcons (Func (t,r), _loc)
+     | Tpoly { body = Tcons (Func (t,r), _loc); _ } -> t,r
+     (* FIXME Tjoin/Tcons *)
      | _ -> intfail "wuh?"
    in
    let params = List.map2 (fun (p, _) t -> (p, Some t)) params tparams in

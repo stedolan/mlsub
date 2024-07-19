@@ -74,30 +74,31 @@ let pp_err input loc err : PPrint.document =
      let env = err.env in
      let conflict =
        match err.err with
-        | Incompatible ->
+        | Head Incompatible ->
            pp "Type error"
         (* FIXME improve tuple field names *)
-        | Fields (`Missing name) ->
+        | Sub (Field_missing name) ->
            pp "The field '%s' is missing." (Tuple_fields.string_of_field_name name)
-        | Fields (`Extra (Some name)) ->
+        | Sub (Field_extra (Some name)) ->
            pp "A surplus field '%s' is present." (Tuple_fields.string_of_field_name name)
-        | Fields (`Extra None) ->
+        | Sub (Field_extra None) ->
            pp "Surplus fields are present."
-        | Tags (tag, tags') ->
+        | Head (Expected_tag (tag, tags')) ->
            let tag = match tag with None -> "no tag" | Some s -> "tag " ^ s in
            pp "The tag should be " ^^ separate_map (pp "|") (pp "%s") tags' ^^ pp ", but %s is present." tag
-        | Args `Too_few ->
+        | Head (Args `Too_few) ->
            pp "Too few arguments."
-        | Args `Too_many ->
+        | Head (Args `Too_many) ->
            pp "Too many arguments."
+        | Head (Args `Wrong_number) ->
+           pp "Wrong number of arguments."
      in
      conflict ^^
      nest 2 (hardline ^^ pp_context loc) ^^
      nest 2 (hardline ^^ pp "   found:" ^^ group (nest 3 (break 1 ^^ pp_ty ~env err.lhs))) ^^
      nest 2 (hardline ^^ pp "expected:" ^^ group (nest 3 (break 1 ^^ pp_ty ~env err.rhs))) ^^
      (match err.located with
-      | None -> empty
-      | Some ((lty,lloc),(rty,rloc)) ->
+      | ((lty,lloc),(rty,rloc)) ->
          let lty = nest 4 (break 1 ^^ pp_ty ~env lty) ^^ break 1 in
          let rty = nest 4 (break 1 ^^ pp_ty ~env rty) ^^ break 1 in
          let l_interest = not (Location.equal lloc loc) in

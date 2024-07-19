@@ -34,8 +34,8 @@ and _ dectree' =
   | Bind : IR.value IR.Binder.t * 'n s dectree -> 'n s dectree'
   (* Cases: nonempty and sorted *)
   | Cases :
-      (Typedefs.Cons.tuple_tag * 'n fields_split) list
-      * ((Typedefs.Cons.tuple_tag * unit tuple_fields) list * 'n dectree) option -> 'n s dectree'
+      (Typedefs.Cons1.tuple_tag * 'n fields_split) list
+      * ((Typedefs.Cons1.tuple_tag * unit tuple_fields) list * 'n dectree) option -> 'n s dectree'
   | Fields : 'n fields_split -> 'n s dectree'
 
 and 'n fields_split =
@@ -250,7 +250,7 @@ let rec split_cases :
        | Sp_fields fields ->
           let loc, fnames = collect_fields fields in
           (* FIXME loc? *)
-          let cons = Cons.Record(None, fnames) in
+          let cons = Cons1.Record(None, fnames) in
           begin match Types.match_typ env typ matchloc cons with
           | Ok (Record (_, ftypes)) ->
              let ftypes = map_fields (fun _ ((),t) -> t) ftypes in
@@ -259,14 +259,10 @@ let rec split_cases :
           | Error e -> Error.fail loc (Conflict (`Pat, e))
           end
        | Sp_cases (tags, cases, def) ->
-          let extract_cases = function
-            | Tcons {conses; _} ->
-               conses
-               |> List.map (function
-                 | Cons.Record (Some tag, fields) -> tag, fields
-                 | _ -> raise Exit)
-               |> List.to_seq
-               |> SymMap.of_seq
+          let rec extract_cases = function
+            (* FIXME handle rigvars with tagged bounds too *)
+            | Tcons (Record (Some tag, fields), _loc) -> SymMap.singleton tag fields
+            | Tjoin (a, b, _loc) -> SymMap.union (fun _ _ _ -> intfail "invalid type - duplicate tag") (extract_cases a) (extract_cases b)
             | _ -> raise Exit
           in
           match extract_cases typ with
@@ -305,14 +301,14 @@ let rec split_cases :
           | exception Exit ->
              begin match def with
              | [] -> ()
-             | row :: _ ->
+             | _row :: _ ->
                 Error.fail Location.noloc(*FIXME*) (Illformed_pat `Unknown_cases)
              end;
              let inferred_cases =
                cases |>
                SymMap.map (fun fields ->
                  let loc, fnames = collect_fields fields in
-                 let fields = map_fields (fun _ () -> ref (Tcons Cons.bottom)) fnames in
+                 let fields = map_fields (fun _ () -> ref (Tbot None)) fnames in
                  loc, fields)
              in
              let loc =
@@ -321,16 +317,16 @@ let rec split_cases :
              let conses =
                tags |> List.map (fun (tag,_) ->
                  let _, fields = SymMap.find tag inferred_cases in
-                 Cons.Record(Some tag, fields)) in
-             let cons = Cons.make' ~loc conses in
-             begin match Types.match_typ2 env typ cons with
-             | Ok () -> ()
-             | Error e -> Error.fail matchloc (Conflict (`Pat, e))
+                 let fields = Tuple_fields.map_fields (fun _ x -> (),x) fields in
+                 Ucons (Cons1.Record(Some tag, fields))) in
+             begin match Types.match_ptyp ~loc env typ conses with
+             | () -> ()
+             | exception (Types.SubtypeError e) -> Error.fail matchloc (Conflict (`Pat, e))
              end;
              let case_list =
                tags
                |> List.map (fun (tag,_) ->
-                  let (loc, fields) = SymMap.find tag inferred_cases in
+                  let (_FIXME_loc, fields) = SymMap.find tag inferred_cases in
                   let fields = map_fields (fun _ r -> !r) fields in
                   let case = SymMap.find tag cases in
                   tag, split_fields fields case)

@@ -88,6 +88,7 @@ fn[A,B](x : (A|B) -> A) { fn(a){x(a)} }
 > [A, B] ((A | B) -> A) -> (A | B) -> A
 > RECHECK: Failure("contravariant join")
 > 
+> typechecking error: Failure("contravariant join")
 > ELAB: Failure("contravariant join")
 > 
 > ELABINF: Failure("contravariant join")
@@ -105,6 +106,7 @@ fn[A,B](x) -> A|B {x}
 > [A, B] (A | B) -> A | B
 > RECHECK: Failure("contravariant join")
 > 
+> typechecking error: Failure("contravariant join")
 > ELAB: Failure("contravariant join")
 > 
 > ELABINF: Failure("contravariant join")
@@ -402,7 +404,7 @@ let ch = fn[A,B](x : A, y : B) -> A|B { if true { x } else { y } }; fn (a,b) { c
 >                         ^
 > but is used as R | A at test:1:
 >   (fn[A,B,R](x : A, y : B) -> R|A { if true { x } else { y } } : [A] (A, A) -> A)
->                               ^
+>                               ^^^
 
 (fn[A,B,R](x : A, y : B) -> R|A { x } : [A] (A, A) -> A)
 > ((fn [A, B, R](x: A, y: B) -> R | A { x }) : [A] (A, A) -> A)
@@ -448,9 +450,7 @@ let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x
 > This any comes from test:1:
 >   let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
 >                              ^
-> but is used as nothing at test:1:
->   let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
->                                     ^
+> but is used as nothing at _:0:
 
 # works in checking mode (bidir)
 let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){f(x); x.foo}) }
@@ -504,9 +504,7 @@ let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn
 > This any comes from test:1:
 >   let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
 >                                  ^
-> but is used as nothing at test:1:
->   let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
->                                            ^
+> but is used as nothing at _:0:
 
 let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let z = f({bar:x}); x.foo}) }
 > let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) };
@@ -781,11 +779,11 @@ fn[P, Q <: {foo:P}] (x) -> [A, B <: {bar: Q}, C <: {x:B, y:Q}] (A, B, C) -> (A, 
 > }
 >   fn [P, Q <: {foo: P}](
 >     x: (any, {bar: Q}, {x: {bar: Q}, y: Q}) -> (nothing, (P, Q), nothing)
->   ) -> [A, B <: {bar: Q}, C <: {x: B, y: Q}] (A, B, C) -> (A, (P, Q) | B, C) {
+>   ) -> [A, B <: {bar: Q}, C <: {x: B, y: Q}] (A, B, C) -> (A, B | (P, Q), C) {
 >     x
 >   }
 > [P, Q <: {foo: P}] ((any, {bar: Q}, {x: {bar: Q}, y: Q}) -> (nothing, (P, Q), nothing)) ->
-> [A, B <: {bar: Q}, C <: {x: B, y: Q}] (A, B, C) -> (A, (P, Q) | B, C)
+> [A, B <: {bar: Q}, C <: {x: B, y: Q}] (A, B, C) -> (A, B | (P, Q), C)
 > let  = %yield(fun (x) ret { ret(x) }); done
 
 # more approx_ntyp
@@ -852,7 +850,25 @@ fn[A <: {foo:int}, B <: {bar:int}](x) -> {a:A, b:{foo:int}|B} {
 >   let splat = fn (x) { {a: x, b: x} };
 >   splat(x)
 > }
-> typechecking error: unimplemented: multi RV upper bounds
+>   fn [A <: {foo: int}, B <: {bar: int}](x: A | B) -> {a: A, b: {foo: int} | B} {
+>     let splat : [C] (C) -> {a: C, b: C} =
+>     fn [C](x: C) -> {a: C, b: C} { {a: x, b: x} };
+>     splat(x)
+>   }
+> [A <: {foo: int}, B <: {bar: int}] (A | B) -> {a: A, b: {foo: int} | B}
+> RECHECK: Failure("contravariant join")
+> 
+> typechecking error: Failure("contravariant join")
+> ELAB: Failure("contravariant join")
+> 
+> ELABINF: Failure("contravariant join")
+> 
+> let  = %yield(fun (x) ret {
+>   let splat = fun (x2) ret2 { ret2((a: x2, b: x2)) };
+>   let x2 = splat(x);
+>   ret(x2)
+> });
+> done
 
 
 # weirdness: non-monotonicity wrt annotations
@@ -864,7 +880,20 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:{foo
 >   {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}} {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: multi RV upper bounds
+>   fn [A <: {foo: int}, B <: {bar: bool}](x: {bar: bool, foo: int} | A | B) ->
+>     {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}} {
+>     {a: x, b: x, c: x}
+>   }
+> [A <: {foo: int}, B <: {bar: bool}] ({bar: bool, foo: int} | A | B) ->
+> {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}}
+> RECHECK: Failure("contravariant join")
+> 
+> typechecking error: Failure("contravariant join")
+> ELAB: Failure("contravariant join")
+> 
+> ELABINF: Failure("contravariant join")
+> 
+> let  = %yield(fun (x) ret { ret((a: x, b: x, c: x)) }); done
 
 fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:any} {
   {a:x, b:x, c:x}
@@ -873,7 +902,19 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:any}
 >   {a: {bar: bool} | A, b: {foo: int} | B, c: any} {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: multi RV upper bounds
+>   fn [A <: {foo: int}, B <: {bar: bool}](x: {bar: bool, foo: int} | A | B) ->
+>     {a: {bar: bool} | A, b: {foo: int} | B, c: any} {
+>     {a: x, b: x, c: x}
+>   }
+> [A <: {foo: int}, B <: {bar: bool}] ({bar: bool, foo: int} | A | B) -> {a: {bar: bool} | A, b: {foo: int} | B, c: any}
+> RECHECK: Failure("contravariant join")
+> 
+> typechecking error: Failure("contravariant join")
+> ELAB: Failure("contravariant join")
+> 
+> ELABINF: Failure("contravariant join")
+> 
+> let  = %yield(fun (x) ret { ret((a: x, b: x, c: x)) }); done
 
 
 # FIXME: spec_sub_rigid_pos should remove one of the variables here
@@ -884,7 +925,20 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|A|B, c:an
 >   {a: {bar: bool} | A, b: {foo: int} | A | B, c: any} {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: multi RV upper bounds
+>   fn [A <: {foo: int}, B <: {bar: bool}](x: {bar: bool, foo: int} | A | B) ->
+>     {a: {bar: bool} | A, b: {foo: int} | A | B, c: any} {
+>     {a: x, b: x, c: x}
+>   }
+> [A <: {foo: int}, B <: {bar: bool}] ({bar: bool, foo: int} | A | B) ->
+> {a: {bar: bool} | A, b: {foo: int} | A | B, c: any}
+> RECHECK: Failure("contravariant join")
+> 
+> typechecking error: Failure("contravariant join")
+> ELAB: Failure("contravariant join")
+> 
+> ELABINF: Failure("contravariant join")
+> 
+> let  = %yield(fun (x) ret { ret((a: x, b: x, c: x)) }); done
 
 fn[A](x: any, y:A) { if true {x} else {y} }
 > fn [A](x: any, y: A) { if true { x } else { y } }
@@ -1152,7 +1206,9 @@ fn[A <: {foo:int}](x:A, y:{foo:int}) { if true {x} else {y} }
 # multi RV upper bounds tests
 fn[A <: {foo:int}](x) -> (A,{foo:int}) { (x,x) }
 > fn [A <: {foo: int}](x) -> (A, {foo: int}) { (x, x) }
-> typechecking error: unimplemented: multi RV upper bounds
+>   fn [A <: {foo: int}](x: A) -> (A, {foo: int}) { (x, x) }
+> [A <: {foo: int}] (A) -> (A, {foo: int})
+> let  = %yield(fun (x) ret { ret((0: x, 1: x)) }); done
 
 # ensure_rigvars_present gets this one
 fn mkdup[A]() -> (A) -> (A, A) { fn(x) { (x,x) } }
@@ -1172,12 +1228,20 @@ fn[A <: {foo:int}](x,y : A) -> (A,{foo:int}) { let id = mkdup(); let z = id(y); 
 >       (x, x)
 >     }
 >   }
->   fn [A <: {foo: int}](x: A, y: A) -> (A, {foo: int}) {
->     let id : (A) -> (A, A) = mkdup();
->     let z : (A, A) = id(y);
+>   fn [A <: {foo: int}, B <: A](x: B, y: A) -> (A, {foo: int}) {
+>     let id : (A | B) -> (A | B, A | B) = mkdup();
+>     let z : (A | B, A | B) = id(y);
 >     id(x)
 >   }
-> [A <: {foo: int}] (A, A) -> (A, {foo: int})
+> [A <: {foo: int}, B <: A] (B, A) -> (A, {foo: int})
+> RECHECK: Lang.Error.Fail(_)
+> 
+> _:0: Bounds must be constructed types
+> 
+> ELAB: Lang.Error.Fail(_)
+> 
+> ELABINF: Lang.Error.Fail(_)
+> 
 > let mkdup = fun () ret { ret(fun (x) ret2 { ret2((0: x, 1: x)) }) };
 > let  = %yield(fun (x, y) ret {
 >   let x2 = mkdup();
@@ -1189,8 +1253,15 @@ fn[A <: {foo:int}](x,y : A) -> (A,{foo:int}) { let id = mkdup(); let z = id(y); 
 
 fn [A,C,B <: int](x) -> (A|C,int|B|C) { (x,x) }
 > fn [A, C, B <: int](x) -> (A | C, int | B | C) { (x, x) }
->   fn [A, C, B <: int](x: C) -> (A | C, int | B | C) { (x, x) }
-> [A, C, B <: int] (C) -> (A | C, int | B | C)
+>   fn [A, C, B <: int](x: A | C | B) -> (A | C, int | B | C) { (x, x) }
+> [A, C, B <: int] (A | C | B) -> (A | C, int | B | C)
+> RECHECK: Failure("contravariant join")
+> 
+> typechecking error: Failure("contravariant join")
+> ELAB: Failure("contravariant join")
+> 
+> ELABINF: Failure("contravariant join")
+> 
 > let  = %yield(fun (x) ret { ret((0: x, 1: x)) }); done
 
-> STATS: fix: 58, flex: 1885
+> STATS: fix: 89, flex: 1860

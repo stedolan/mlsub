@@ -19,370 +19,284 @@ let rec compare_lists f p q =
   | [], _::_ -> -1
   | _::_, [] -> 1
 
+module One_or_two = struct
+  type ('a, 'b) t =
+    | L of 'a
+    | R of 'b
+    | LR of 'a * 'b
 
-module Cons = struct
-  open Tuple_fields
+  let left x = L x
+  let right x = R x
+  let both x y = LR (x,y)
+end
 
+module Cons1 = struct
   type tuple_tag = string
-
-  (* Head type constructors. These do not bind type variables. *)
-  type (+'neg, +'pos) t =
+  type (+'neg, +'pos) cons =
+    | Top
     (* FIXME: maybe delete these once abstypes exist? *)
     | Bool
     | Int
     | String
-    | Record of tuple_tag option * 'pos tuple_fields
+    (* FIXME: add a loc to tuple tag and each field *)
+    | Record of tuple_tag option * 'pos Tuple_fields.tuple_fields
     | Func of 'neg list * 'pos
 
+  type (+'neg, +'pos) t = ('neg, 'pos) cons
 
-  let equal_one ~neg ~pos p q =
+  let equal ~neg ~pos p q =
     match p, q with
+    | Top, Top -> true
     | Bool, Bool -> true
     | Int, Int -> true
     | String, String -> true
     | Record (pt, p), Record (qt, q) ->
        Option.equal (String.equal) pt qt &&
-       equal_fields pos p q
+       Tuple_fields.equal_fields pos p q
     | Func (pa, pr), Func (qa, qr) ->
        List.equal neg pa qa &&
        pos pr qr
-    | (Bool|Int|String|Record _|Func _), _ -> false
+    | (Bool|Int|String|Record _|Func _|Top), _ -> false
 
-  let map_one ~neg ~pos = function
+  let map ~neg ~pos = function
+    | Top -> Top
     | Bool -> Bool
     | Int -> Int
-
     | String -> String
     | Record (tag,fields) ->
-       Record (tag,map_fields (fun _fn x -> pos x) fields)
+       Record (tag, Tuple_fields.map_fields (fun _fn x -> pos x) fields)
     | Func (args, res) ->
        let args = List.map neg args in
        let res = pos res in
        Func (args, res)
 
-  type field_neg =
+  let iter ~neg ~pos x = ignore (map ~neg ~pos x)
+
+  type field =
     | Func_arg of int
-
-  type field_pos =
-    | Record_field of Tuple_fields.field_name
     | Func_res
+    | Record_field of Tuple_fields.field_name
 
-  type field = F_neg of field_neg | F_pos of field_pos
-
-  let equal_field_neg a b =
-    match a, b with
-    | Func_arg a, Func_arg b -> Tuple_fields.equal_field_name a b
-
-  let equal_field_pos a b =
-    match a, b with
-    | Record_field a, Record_field b -> Tuple_fields.equal_field_name a b
-    | Func_res, Func_res -> true
-    | _ -> false
+  let field_is_positive = function
+    | Func_arg _ -> false
+    | Func_res | Record_field _ -> true
 
   let equal_field a b =
     match a, b with
-    | F_neg a, F_neg b -> equal_field_neg a b
-    | F_pos a, F_pos b -> equal_field_pos a b
+    | Func_arg i, Func_arg j -> i = j
+    | Func_res, Func_res -> true
+    | Record_field a, Record_field b ->
+       Tuple_fields.equal_field_name a b
     | _ -> false
 
-  let mapi_one ~neg ~pos = function
+  let mapi ~neg ~pos = function
+    | Top -> Top
     | Bool -> Bool
     | Int -> Int
-
     | String -> String
-    | Record (tag, fields) ->
-       Record (tag, map_fields (fun fn x -> pos (Record_field fn) x) fields)
+    | Record (tag,fields) ->
+       Record (tag, Tuple_fields.map_fields (fun fn x -> pos (Record_field fn) x) fields)
     | Func (args, res) ->
-       let args = List.mapi (fun fn x -> neg (Func_arg fn) x) args in
+       let args = List.mapi (fun i x -> neg (Func_arg i) x) args in
        let res = pos Func_res res in
        Func (args, res)
 
+  type head_coercion =
+    | Id
+    | Drop_record_tag of tuple_tag
+    | To_top
 
-  type cons_head = (unit, unit) t list
+  type head_conflict =
+    | Incompatible
+    | Args of [`Too_few | `Too_many | `Wrong_number]
+    | Expected_tag of (tuple_tag option * tuple_tag list)
 
-  (* FIXME: can intern these if it turns out to be slow *)
-  type cons_loc = cons_head * Location.t
-  module Locs = AssocList.Make (struct
-    type nonrec t = cons_head
-    let equal a b = equal_lists (equal_one ~neg:(fun () () -> true) ~pos:(fun () () -> true)) a b
-  end)
-
-
-  type ('n,'p) conses = {
-    (* FIXME: enforce *)
-    conses: ('n, 'p) t list; (* pairwise incompatible - FIXME enforce *)
-    locs: Location.t Locs.t
-   }
-
-  let equal ~neg ~pos a b = equal_lists (equal_one ~neg ~pos) a.conses b.conses
-
-  let map ~neg ~pos t = { conses = List.map (map_one ~neg ~pos) t.conses; locs = t.locs }
-  let mapi ~neg ~pos t = { conses = List.map (mapi_one ~neg ~pos) t.conses; locs = t.locs }
-
-
-  (* p and q are compatible if they have a common subtype *)
-  let compatible p q =
-    let compat_fields p q =
-      (p.fopen = `Open || List.for_all (fun f -> FieldMap.mem f p.fields) q.fnames)
-      &&
-      (q.fopen = `Open || List.for_all (fun f -> FieldMap.mem f q.fields) p.fnames)
+  let merge_head_conflicts xs =
+    let merge c d =
+      match c, d with
+      | Incompatible, x | x, Incompatible -> x
+      | Args c, Args d ->
+         if c = d then Args c else Args `Wrong_number
+      | Args _, _ | _, Args _ -> Incompatible
+      | Expected_tag (p, c), Expected_tag (q, d) ->
+         Expected_tag ((if p = q then p else None), c @ d)
     in
+    List.fold_left merge Incompatible xs
+
+  (* least c' greater than c along coe *)
+  let coerce_up coe c =
+    match coe, c with
+    | Id, c ->
+       c
+    | To_top, _ -> Top
+    | Drop_record_tag t, Record (Some t', fs) ->
+       assert (t = t');
+       Record (None, fs)
+    | Drop_record_tag _, _ -> assert false
+
+  type head_ordering =
+    | Un of head_conflict
+    | Le of head_coercion
+
+  let sub_head p q =
     match p, q with
-    | Bool, Bool
-    | Int, Int
-    | String, String -> true
-    | Func (pa,_), Func (qa,_) ->
-       List.length pa = List.length qa
-    | Record (Some pt, p), Record (Some qt, q) ->
-       String.equal pt qt && compat_fields p q
-    | Record (_, p), Record (_, q) ->
-       compat_fields p q
-    | (Bool|Int|String|Record _|Func _), _ ->
-       false
+    | Top, Top -> Le Id
+    | _, Top -> Le To_top
+    | Top, _ -> Un Incompatible
+    | Bool, Bool -> Le Id
+    | Int, Int -> Le Id
+    | String, String -> Le Id
+    | (Bool|Int|String), _
+    | _, (Bool|Int|String) -> Un Incompatible
 
+    | Func (pa, _), Func (qa, _) ->
+       begin match List.compare_lengths pa qa with
+       | 0 -> Le Id
+       | n -> Un (Args (if n > 0 then `Too_few else `Too_many))
+       end
+    | Func _, _
+    | _, Func _ -> Un Incompatible
 
-  module TwoLists = struct
-    let left x = [x], []
-    let right x = [], [x]
-    let both x y = [x], [y]
+    | Record (ptag, _), Record (qtag, _) ->
+       begin match ptag, qtag with
+       | None, None -> Le Id
+       | Some t, None -> Le (Drop_record_tag t)
+       | Some pt, Some qt when String.equal pt qt -> Le Id
+       | _, Some qt -> Un (Expected_tag (ptag, [qt]))
+       end
 
-    let join (a,b) (a',b') = a@a', b@b'
-  end
+  let incomparable_head a b =
+    match sub_head a b, sub_head b a with
+    | Un _, Un _ -> true
+    | _, _ -> false
 
-  module One_or_two = struct
-    type ('a, 'b) t =
-      | L of 'a
-      | R of 'b
-      | LR of 'a * 'b
-
-    let left x = L x
-    let right x = R x
-    let both x y = LR (x,y)
-  end
-
-  let meet_one a b =
-    assert (compatible a b);
+  let join ~neg ~pos a b =
+    assert (sub_head a b = Le Id);
     match a, b with
+    | Top, Top -> Top
+    | (Top, _) | (_, Top) -> assert false
+
     | Bool, Bool -> Bool
     | Int, Int -> Int
     | String, String -> String
     | (Bool|Int|String), _ | _, (Bool|Int|String) ->
        assert false
 
-    | Record (t, c), Record (t', c') ->
-       let tag =
-         match t, t' with
-         | Some s, Some s' -> assert (s = s'); t
-         | (Some _ as tag), None
-         | None, (Some _ as tag) -> tag
-         | None, None -> None
-       in
+    | Record (tag, c), Record (tag', c') ->
+       assert (tag = tag');
        let fields =
-         let open One_or_two in
-         Tuple_fields.union c c' ~left ~right ~both
+         Tuple_fields.inter c c'
+           ~both:(fun s t -> pos s t)
        in
-       Record(tag, Option.get fields)
+       Record (tag, fields)
 
     | Func (args, res), Func (args', res') ->
-       (* FIXME: fail here rather than assuming variadic functions?
-          Could/should enforce that functions are always `Closed *)
-       let open One_or_two in
-       let args = List.map2 both args args' in
-       Func (args, both res res')
+       let args = List.map2 neg args args' in
+       Func(args, pos res res')
 
     | Record _, Func _ | Func _, Record _ -> assert false
 
-  let join_one a b =
-    assert (compatible a b);
+  let meet ~neg ~pos a b =
+    (* tree heads means meet exists only for comparable heads *)
+    assert (not (incomparable_head a b));
+    let open One_or_two in
     match a, b with
+    | Top, x ->
+       map ~neg:(fun x -> neg (R x)) ~pos:(fun x -> pos (R x)) x
+    | x, Top ->
+       map ~neg:(fun x -> neg (L x)) ~pos:(fun x -> pos (L x)) x
     | Bool, Bool -> Bool
     | Int, Int -> Int
     | String, String -> String
-    | (Bool|Int|String), _ | _, (Bool|Int|String) -> assert false
-  
-    | Record (t, c), Record (t', c') ->
-       let t =
-         match t, t' with
-         | _, None | None, _ -> None
-         | Some s, Some s' -> assert (String.equal s s'); t
+    | (Bool|Int|String), _ | _, (Bool|Int|String) ->
+       assert false
+    | Record (tag, c), Record (tag', c') ->
+       let tag =
+         match tag, tag' with
+         | None, x | x, None -> x
+         | Some t, Some t' -> assert (t = t'); tag
        in
-       let fields = Tuple_fields.inter c c' ~both:TwoLists.join in
-       Record (t, fields)
-  
+       (* FIXME hack until better closed/open logic is implemented. Wrong here! *)
+       let fields =
+         Tuple_fields.merge_fields c c'
+           ~left:(fun _ x -> Some (pos (L x)))
+           ~right:(fun _ y -> Some (pos (R y)))
+           ~both:(fun _ x y -> Some (pos (LR (x, y))))
+           ~extra:(function (`Open,_), (`Open,_) -> `Open | _ -> `Closed (* Unsound! *))
+       in
+       Record(tag, fields)
     | Func (args, res), Func (args', res') ->
-       let args = List.map2 TwoLists.join args args' in
-       Func(args, TwoLists.join res res')
-  
+       let args =
+         List.map2 (fun x y -> neg (LR (x,y))) args args' in
+       let res = pos (LR (res, res')) in
+       Func (args, res)
     | Record _, Func _ | Func _, Record _ -> assert false
 
-  let join a b =
-    let rec join1 a bc =
-      match a with
-      | [] -> [], false
-      | ac :: arest when compatible ac bc ->
-         let ab = join_one ac bc in
-         let rest, placed = join1 arest ab in
-         let res = if not placed then ab :: rest else rest in
-         res, true
-      | ac :: arest ->
-         let rest, placed = join1 arest bc in
-         ac :: rest, placed
-    in
-    let join1 a bc =
-      match join1 a bc with
-      | res, true -> res
-      | res, false -> res @ [bc]
-    in
-    let a = List.map (map_one ~neg:TwoLists.left ~pos:TwoLists.left) a in
-    let b = List.map (map_one ~neg:TwoLists.right ~pos:TwoLists.right) b in
-    List.fold_left join1 a b
+  type sub_error =
+    | Field_missing of Tuple_fields.field_name
+    | Field_extra of Tuple_fields.field_name option
 
-  let join_head_one a b =
-    let a = map_one ~neg:TwoLists.left ~pos:TwoLists.left a in
-    let b = map_one ~neg:TwoLists.right ~pos:TwoLists.right b in
-    join_one a b
+  exception SubError of sub_error
 
-  let join a b = { conses = join a.conses b.conses; locs = Locs.append a.locs b.locs ~merge:(fun a _ -> a) }
+  let sub ~neg ~pos a b =
+    assert (sub_head a b = Le Id);
+    match
+      match a, b with
+      | Top, Top
+      | Bool, Bool
+      | Int, Int
+      | String, String -> ()
+      | Func (args, res), Func (args', res') ->
+         List.combine args' args
+         |> List.iteri (fun i (a', a) -> neg (Func_arg i) a' a);
+         pos Func_res res res';
+         ()
+      | Record (t, af), Record (t', bf) ->
+         assert (t = t');
+         let open Tuple_fields in
+         begin match bf.fopen, af.fopen with
+         | `Open, _ ->  ()
+         | `Closed, `Open -> raise (SubError (Field_extra None))
+         | `Closed, `Closed ->
+            match List.find_opt (fun k -> not (FieldMap.mem k bf.fields)) af.fnames with
+            | Some k -> raise (SubError (Field_extra (Some k)))
+            | None -> ()
+         end;
+         FieldMap.bindings bf.fields |> List.iter (fun (k, b) ->
+           match FieldMap.find k af.fields with
+           | exception Not_found -> raise (SubError (Field_missing k))
+           | a -> pos (Record_field k) a b);
+      | _ -> assert false
+    with
+    | () -> Ok ()
+    | exception (SubError e) -> Error e
 
-  let meet a b =
-    a |> List.concat_map (fun a ->
-      b |> List.concat_map (fun b ->
-        if compatible a b then
-          [meet_one a b]
-        else []))
-
-  let meet a b = { conses = meet a.conses b.conses; locs = Locs.append a.locs b.locs ~merge:(fun a _ -> a) }
-
-  let bottom = { conses = []; locs = Locs.empty }
-  let bottom_loc loc = { conses = []; locs = Locs.single [] loc }
-  let is_bottom = function { conses = []; _ } -> true | _ -> false
-
-  let get_single_exn = function { conses = [c]; _ } -> c | _ -> assert false
-
-  let make ~loc c = { conses = [c]; locs = Locs.single [map_one ~pos:ignore ~neg:ignore c] loc }
-
-  let make' ~loc conses = { conses; locs = Locs.single (List.map (map_one ~pos:ignore ~neg:ignore) conses) loc }
-
-  type ('neg, 'pos) subfield =
-    | S_neg of field_neg * 'neg
-    | S_pos of field_pos * 'pos
-
-  type field_conflict = [`Missing of field_name | `Extra of field_name option]
-  type conflict =
-    | Fields of field_conflict
-    | Tags of (tuple_tag option * tuple_tag list)
-    | Args of [`Too_few | `Too_many]
-    | Incompatible
+end
 
 
-  type subtype_error =
-    {
-      conflict: conflict;
-      (* more specific mismatch *)
-      located: ((cons_head * Location.t) * (cons_head * Location.t)) option;
-    }
+module Cons = struct
+  (* pairwise head-incomparable (FIXME enforce this) *)
+  type ('n,'p) t = {
+    conses: ('n,'p) Cons1.t Location.loc list;
+    loc: Location.t
+  }
 
-  exception FieldError of field_conflict
-  let subtype_fields ~sub af bf =
-    if bf.fopen = `Closed then begin
-      if af.fopen = `Open then raise (FieldError (`Extra None));
-      (* check dom a ⊆ dom b *)
-      List.iter (fun k ->
-        match FieldMap.find k bf.fields with
-        | exception Not_found -> raise (FieldError (`Extra (Some k)))
-        | _ -> ()) af.fnames
-    end;
-    FieldMap.bindings bf.fields |> List.map (fun (k, b) ->
-      match FieldMap.find k af.fields with
-      | exception Not_found -> raise (FieldError (`Missing k))
-      | a -> sub k (a, b))
+  let equal ~neg ~pos c c' =
+    equal_lists (fun (c, _) (c', _) -> Cons1.equal ~neg ~pos c c') c.conses c'.conses
 
-  let subtype_one a b =
-    match a, b with
-    | Bool, Bool
-    | Int, Int
-    | String, String -> Ok []
-    | Func (args, res), Func (args', res') ->
-       begin match List.compare_lengths args args' with
-       | 0 ->
-          let pairs = List.combine args' args in
-          Ok (List.mapi (fun i p -> S_neg (Func_arg i, p)) pairs
-              @ [S_pos (Func_res, (res, res'))])
-       | n -> Error (Args (if n > 0 then `Too_few else `Too_many))
-       end
-    | Record (tag, fs), Record (tag', fs') ->
-       let tag_err =
-         match tag, tag' with
-         | _, None -> Ok ()
-         | Some s, Some s' when String.equal s s' -> Ok ()
-         | tag, Some tag' -> Error (Tags (tag, [tag']))
-       in
-       begin match tag_err with
-       | Error _ as err -> err
-       | Ok () ->
-       begin match subtype_fields ~sub:(fun k s -> S_pos (Record_field k, s)) fs fs' with
-       | sub -> Ok sub
-       | exception FieldError con -> Error (Fields con)
-       end
-       end
-    | _, _ -> Error Incompatible
+  let map ~neg ~pos (x : _ t) : _ t =
+    { x with conses = List.map (fun (c, l) -> Cons1.map ~neg ~pos c, l) x.conses }
 
-  let partition_results x =
-    List.partition_map (function Ok x -> Left x | Error x -> Right x) x
+  let iter ~neg ~pos t = ignore (map ~neg ~pos t)
 
-  let subtype' a b =
-    let parts =
-      a |> List.map (fun a ->
-        (* At most one of these should hold *)
-        match partition_results (List.map (fun b -> subtype_one a b) b) with
-        | [s], _ -> Ok s
-        | [], [] -> Error (a, Incompatible)
-        | [], errs ->
-           let tag_errs, other_errs =
-             List.partition_map
-               (function
-                | Tags (tag, tags') -> Left (tag, tags')
-                | e -> Right e) errs
-           in
-           let err =
-             match tag_errs, other_errs with
-             | _, e :: _ -> e
-             | tag_errs, [] ->
-                Tags (fst (List.hd tag_errs),
-                      List.concat_map snd tag_errs)
-           in
-           Error (a, err)
-        | _ :: _ :: _, _ ->
-           intfail "compatibility invariant broken")
-    in
-    match partition_results parts with
-    | subs, [] -> Ok (List.concat subs)
-    | _, err :: _ -> Error err
+  let is_bottom = function
+    | {conses=[]; _} -> true
+    | _ -> false
 
-  let subtype a b =
-    match subtype' a.conses b.conses with
-    | Ok subs -> Ok subs
-    | Error (lhs, conflict) ->
-       let located =
-         (a.locs :> cons_loc list) |> List.find_map (fun (a, al) ->
-           if Result.is_error (subtype' a [lhs]) then None
-           else (b.locs :> cons_loc list) |> List.find_map (fun (b, bl) ->
-             if Result.is_ok (subtype' a b) then None
-             else Some ((a, al), (b, bl))))
-       in
-       Error { conflict;
-               located }
-
-  (* FIXME: bad interface *)
-  let get_single_sub c {conses; _} =
-    match List.filter (compatible c) conses with
-    | [] -> None
-    | _ :: _ :: _ -> assert false
-    | [c'] ->
-       match subtype_one c c' with
-       | Ok _ -> Some c'
-       | _ -> None
-
+  let bottom = {conses=[]; loc=Location.noloc}
+  let bottom_loc loc = {conses=[]; loc}
+  let make ~loc (c : _ Cons1.t) : _ t =
+    {conses=[c,loc]; loc}
 end
 
 module SymMap = Tuple_fields.SymMap
@@ -450,9 +364,10 @@ module Rvset = UniqList.Make (struct
   let equal = equal_rigvar
 end)
 
+(* FIXME delete *)
 (* A ctor_ty is a join of a constructed type and some rigid variables *)
 type (+'neg,+'pos) ctor_ty_neg =
-  { cons_n: ('neg, 'pos) Cons.conses;
+  { cons_n: ('neg, 'pos) Cons.t;
     rigvars_n: Rvset.t }
 
 (* Flexvars are mutable but only in one direction.
@@ -461,32 +376,38 @@ type (+'neg,+'pos) ctor_ty_neg =
 and flexvar =
   { level: env_level;
     id: int;    (* for printing/sorting *)
-    mutable upper: styp_neg list; (* strictly covariant parts are matchable *)
+    mutable upper: upper;
     mutable lower: flex_lower_bound;
     mutable gen: flexvar_gen;
-    mutable rotated: bool
   }
 
-(* A well-formed negative styp is either:
-     - a single flexible variable
-     - a constructed type, possibly joined with some rigid variables *)
-and styp_neg =
-  | UBvar of flexvar
-    (* Only one allowed per set of rigid variables *)
-  | UBcons of (flex_lower_bound, flexvar) ctor_ty_neg
+and upper =
+  | Utop  (* Unrotated equiv of Ugen {cons=Top; higher_fvs=[]} *)
+  | Uflexvar of flexvar
+  | Ugen of
+      { cons: (flex_lower_bound, flexvar) upper_cons Location.loc;
+        higher_fvs: flexvar list }
+
+and (+'neg,+'pos) upper_cons = ('neg,'pos) upper_part list
+
+and (+'neg,+'pos) upper_part =
+  | Urigvar of rigvar * delayed_constraint list
+  | Ucons of ('neg, 'pos) Cons1.t
+
+and delayed_constraint =
+  { dy_lower: flex_lower_bound;
+    dy_upper: upper;
+    dy_flexvar: flexvar;
+    mutable dy_resolved: bool }
 
 (* Matchability constraint: the contravariant parts of a flexible variable's lower bound must be flexible variables.
    Flexible variables appearing in vars must not have UBvar upper bounds, as they are also constrained above here.
    Flexible variables appearing negatively in ctor might well have UBvar upper bounds.
  *)
 and flex_lower_bound =
-  | Lower of flexvar UniqList.t * Rvset.t * (flexvar, flex_lower_bound) Cons.conses
+  | Lower of flexvar UniqList.t * Rvset.t * (flexvar, flex_lower_bound) Cons.t
   | Ltop of Location.t option
 
-(* Variables in typs *)
-and typ_var =
-  | Vbound of {index: int; var:int; loc: Location.t option}
-  | Vrigid of rigvar
 
 (* Temporary structure used during generalisation *)
 and flexvar_gen_visit_counts = { mutable pos : int; mutable neg : int }
@@ -507,19 +428,26 @@ and flexvar_gen =
     }
 
 
+
+
 module Fvset = UniqList.Make (struct type t = flexvar let equal = (==) end)
+
+(* Variables in typs *)
+type typ_var =
+  | Vbound of {index: int; var:int; loc: Location.t option}
+  | Vrigid of rigvar
 
 (* FIXME: enforce tjoin invariants, especially in neg types *)
 type (+'neg, +'pos) typ =
   | Tsimple of 'pos
-  | Ttop of Location.t option
-  (* Bottom is represented as an empty Tcons *)
+  (* Top is a Tcons but Bot has a special repr *)
+  | Tbot of Location.t option
   | Tcons of ('neg, 'pos) cons_typ
   | Tvar of typ_var
-  | Tjoin of ('neg, 'pos) typ * ('neg, 'pos) typ
+  | Tjoin of ('neg, 'pos) typ * ('neg, 'pos) typ * Location.t option
      (* No Tpoly allowed under a Tjoin *)
   | Tpoly of ('neg, 'pos) poly_typ
-and (+'neg, +'pos) cons_typ = (('pos, 'neg) typ, ('neg, 'pos) typ) Cons.conses
+and (+'neg, +'pos) cons_typ = (('pos, 'neg) typ, ('neg, 'pos) typ) Cons1.t Location.loc
 and (+'neg, +'pos) poly_typ =
   { (* names must be distinct *)
     (* bound must be a constructed type, possibly joined with some rigid/bound vars *)
@@ -554,7 +482,7 @@ and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string Location.loc;
-  upper : (flexvar, flex_lower_bound) Cons.conses option;
+  upper : (flexvar, flex_lower_bound) Cons.t option;
 }
 
 (*
@@ -571,13 +499,26 @@ let rec equal_flex_lower_bound (p : flex_lower_bound) (q : flex_lower_bound) =
      Rvset.equal prigvars qrigvars &&
      Cons.equal ~neg:equal_flexvar ~pos:equal_flex_lower_bound pcons qcons
   | _, _ -> false
-let equal_styp_neg (p : styp_neg) (q : styp_neg) =
+
+let equal_upper_cons_loc ((p,_) : _ upper_cons Location.loc) ((q,_) : _ upper_cons Location.loc) =
+  let eq p q =
+    match p, q with
+    | Urigvar (pv, _pds_FIXME), Urigvar (qv, _qds_FIXME) -> equal_rigvar pv qv
+    | Ucons pc, Ucons qc ->
+       Cons1.equal pc qc ~neg:equal_flex_lower_bound ~pos:equal_flexvar
+    | _, _ -> false
+  in
+  List.equal eq p q
+
+let equal_upper (p : upper) (q : upper) =
   match p, q with
-  | UBvar pv, UBvar qv -> equal_flexvar pv qv
-  | UBcons cp, UBcons cq ->
-     Rvset.equal cp.rigvars_n cq.rigvars_n &&
-     Cons.equal ~neg:equal_flex_lower_bound ~pos:equal_flexvar cp.cons_n cq.cons_n
-  | (UBvar _|UBcons _), _ -> false
+  | Utop, Utop -> true
+  | Uflexvar pv, Uflexvar qv -> equal_flexvar pv qv
+  | Ugen {cons=pc; higher_fvs=pv},
+    Ugen {cons=qc; higher_fvs=qv} ->
+     equal_upper_cons_loc pc qc &&
+     List.equal equal_flexvar pv qv
+  | _, _ -> false
 
 let bottom = Lower(Fvset.empty, Rvset.empty, Cons.bottom)
 let of_flexvars fvs = Lower(fvs, Rvset.empty, Cons.bottom)
@@ -592,13 +533,8 @@ let is_bottom t = equal_flex_lower_bound bottom t
 
 type flexvar_change =
   | Change_expanded_mark (* hack for logging expand changes *)
-  | Change_rotated of flexvar * bool
-  | Change_upper of flexvar * styp_neg list
+  | Change_upper of flexvar * upper
   | Change_lower of flexvar * flex_lower_bound
-
-let fv_set_rotated ~changes fv =
-  changes := Change_rotated (fv, fv.rotated) :: !changes;
-  fv.rotated <- true
 
 let fv_set_upper ~changes fv upper =
   changes := Change_upper (fv, fv.upper) :: !changes;
@@ -615,14 +551,13 @@ let fv_maybe_set_lower ~changes fv lower =
   else false
 
 let fv_maybe_set_upper ~changes (fv : flexvar) upper =
-  if not (equal_lists equal_styp_neg fv.upper upper) then
+  if not (equal_upper fv.upper upper) then
     (fv_set_upper ~changes fv upper; true)
   else false
 
 let revert changes =
   changes |> List.iter (function
   | Change_expanded_mark -> ()
-  | Change_rotated (fv, rot) -> fv.rotated <- rot
   | Change_upper (fv, upper) -> fv.upper <- upper
   | Change_lower (fv, lower) -> fv.lower <- lower)
 
@@ -714,10 +649,11 @@ let assert_locally_closed_var ix = function
 let rec assert_locally_closed :
   'a 'b . int -> ('a, 'b) typ -> unit =
   fun ix ty -> match ty with
-  | Tsimple _ | Ttop _ -> ()
-  | Tcons c -> ignore (Cons.map ~neg:(assert_locally_closed ix) ~pos:(assert_locally_closed ix) c)
+  | Tsimple _ | Tbot _ -> ()
+  | Tcons (c, _cloc) ->
+     Cons1.iter ~neg:(assert_locally_closed ix) ~pos:(assert_locally_closed ix) c
   | Tvar v -> assert_locally_closed_var ix v
-  | Tjoin (a, b) -> assert_locally_closed ix a; assert_locally_closed ix b
+  | Tjoin (a, b, _loc) -> assert_locally_closed ix a; assert_locally_closed ix b
   | Tpoly {vars; body} ->
      let ix = ix + 1 in
      vars |> IArray.iter (fun (_, b) -> Option.iter (assert_locally_closed ix) b);
@@ -732,15 +668,16 @@ let open_typ_var f ix = function
   | v -> Tvar v
 
 let rec open_typ :
-  'neg 'pos . 
+  'neg 'pos .
     neg:(Location.t option -> int -> ('pos, 'neg) typ) ->
     pos:(Location.t option -> int -> ('neg, 'pos) typ) ->
     int -> ('neg, 'pos) typ -> ('neg, 'pos) typ =
   fun ~neg ~pos ix t -> match t with
-  | (Tsimple _ | Ttop _) as s -> s
-  | Tcons c -> Tcons (Cons.map ~neg:(open_typ ~neg:pos ~pos:neg ix) ~pos:(open_typ ~neg ~pos ix) c)
+  | (Tsimple _ | Tbot _) as s -> s
+  | Tcons (c, cloc) ->
+     Tcons (Cons1.map ~neg:(open_typ ~neg:pos ~pos:neg ix) ~pos:(open_typ ~neg ~pos ix) c, cloc)
   | Tvar v -> open_typ_var pos ix v
-  | Tjoin (a,b) -> Tjoin (open_typ ~neg ~pos ix a, open_typ ~neg ~pos ix b)
+  | Tjoin (a,b,loc) -> Tjoin (open_typ ~neg ~pos ix a, open_typ ~neg ~pos ix b, loc)
   | Tpoly {vars; body} ->
      let ix = ix + 1 in
      Tpoly {vars = IArray.map (fun (n, b) -> n, Option.map (open_typ ~neg:pos ~pos:neg ix) b) vars;
@@ -757,11 +694,13 @@ let rec close_typ :
   'a 'b . env_level -> (typ_var -> ispos:bool -> isjoin:bool -> int) -> simple:('a -> 'b)  -> ispos:bool -> isjoin:bool -> int -> ('a, 'a) typ -> ('b, 'b) typ
   = fun lvl var ~simple ~ispos ~isjoin ix ty -> match ty with
   | Tsimple z -> Tsimple (simple z)
-  | Ttop _ as z -> z
-  | Tcons c -> Tcons (Cons.map ~neg:(close_typ lvl var ~simple ~ispos:(not ispos) ~isjoin:false ix) ~pos:(close_typ lvl var ~simple ~ispos ~isjoin:false ix) c)
+  | Tbot _ as z -> z
+  | Tcons (c, cloc) -> Tcons (Cons1.map ~neg:(close_typ lvl var ~simple ~ispos:(not ispos) ~isjoin:false ix) ~pos:(close_typ lvl var ~simple ~ispos ~isjoin:false ix) c, cloc)
   | Tvar v -> Tvar (close_typ_var lvl var ~ispos ~isjoin ix v)
-  | Tjoin (a, b) -> Tjoin(close_typ lvl var ~simple ~ispos ~isjoin:true ix a,
-                          close_typ lvl var ~simple ~ispos ~isjoin:true ix b)
+  | Tjoin (a, b, loc) ->
+     Tjoin(close_typ lvl var ~simple ~ispos ~isjoin:true ix a,
+           close_typ lvl var ~simple ~ispos ~isjoin:true ix b,
+           loc)
   | Tpoly {vars; body} ->
      assert (not isjoin);
      let ix = ix + 1 in
@@ -787,7 +726,7 @@ let next_flexvar_id = ref 0
 let fresh_flexvar level : flexvar =
   let id = !next_flexvar_id in
   incr next_flexvar_id;
-  { level; upper = []; lower = bottom; id; gen = Not_generalising; rotated = false }
+  { level; upper = Utop; lower = bottom; id; gen = Not_generalising }
 
 
 let rec env_lookup_type_var env loc name : rigvar option =
@@ -800,12 +739,12 @@ let rec env_lookup_type_var env loc name : rigvar option =
      end
   | Env_nil -> None
 
-let lookup_named_type loc = let open Cons in function
-  | "any" -> Some (Ttop (Some loc))
-  | "nothing" -> Some (Tcons (Cons.bottom_loc loc))
-  | "bool" -> Some (Tcons (Cons.make ~loc Bool))
-  | "int" -> Some (Tcons (Cons.make ~loc Int))
-  | "string" -> Some (Tcons (Cons.make ~loc String))
+let lookup_named_type loc = function
+  | "any" -> Some (Tcons (Top, loc))
+  | "nothing" -> Some (Tbot (Some loc))
+  | "bool" -> Some (Tcons (Bool, loc))
+  | "int" -> Some (Tcons (Int, loc))
+  | "string" -> Some (Tcons (String, loc))
   | _ -> None
 
 let flexvar_name fv =
@@ -831,18 +770,35 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   (* FIXME rectypes *)
   begin match fv.lower with Lower (fvs, _, _) -> assert (not (Fvset.mem fv fvs)) | Ltop _ -> () end;
   wf_flex_lower_bound ~seen env fv.level fv.lower;
-  (* Rigvar sets must be distinct *)
-  let rvsets = List.filter_map (function UBvar _ -> None | UBcons c -> Some c.rigvars_n) fv.upper in
-  assert (List.length rvsets =
-         List.length (rvsets |> List.concat_map (fun rv1 -> rvsets |> List.filter (Rvset.equal rv1))));
-  fv.upper |> List.iter (function
-  | UBvar v ->
-     if fv.rotated then assert (not (Env_level.equal fv.level v.level));
-     wf_flexvar ~seen env fv.level v
-  | UBcons {cons_n;rigvars_n} ->
-     rigvars_n |> Rvset.to_list |> List.iter (fun rv -> wf_rigvar env lvl rv);
-     Cons.map ~neg:(wf_flex_lower_bound ~seen env fv.level) ~pos:(wf_flexvar ~seen env fv.level) cons_n |> ignore)
+  wf_upper ~seen env fv.level fv.upper
   end
+
+and wf_upper ~seen env lvl = function
+  | Utop -> ()
+  | Uflexvar v -> wf_flexvar ~seen env lvl v
+  | Ugen {cons=(cons,_loc); higher_fvs} ->
+     higher_fvs |> List.iter (fun v ->
+       assert (not (Env_level.equal lvl v.level));
+       wf_flexvar ~seen env lvl v);
+       cons |> List.iter (function
+         | Urigvar (rv, ds) ->
+            wf_rigvar env lvl rv;
+            List.iter (wf_delayed_constraint ~seen env lvl) ds
+         | Ucons c ->
+            Cons1.map c
+              ~neg:(wf_flex_lower_bound ~seen env lvl)
+              ~pos:(wf_flexvar ~seen env lvl)
+            |> ignore);
+       cons |> List.iteri (fun i c ->
+         cons |> List.iteri (fun j d ->
+           if i <> j then match c, d with
+           | Urigvar (a,_), Urigvar (b,_) -> assert (not (equal_rigvar a b))
+           | Ucons a, Ucons b -> assert (Cons1.incomparable_head a b)
+           | _, _ -> ()))
+
+and wf_delayed_constraint ~seen env _lvl {dy_lower; dy_upper; dy_flexvar; dy_resolved=_} =
+  wf_flex_lower_bound ~seen env dy_flexvar.level dy_lower;
+  wf_upper ~seen env dy_flexvar.level dy_upper
 
 and wf_rigvar env lvl (rv : rigvar) =
   assert (Env_level.extends rv.level lvl);
@@ -873,11 +829,11 @@ let rec wf_typ : 'pos 'neg .
   fun ~neg ~pos ~ispos env ext ty ->
   match ty with
   | Tsimple s -> pos s
-  | Ttop _ -> ()
-  | Tcons c ->
-     Cons.map ~neg:(wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) ~pos:(wf_typ ~neg ~pos ~ispos env ext) c |> ignore
+  | Tbot _  -> ()
+  | Tcons (c, _cloc) ->
+     Cons1.iter ~neg:(wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) ~pos:(wf_typ ~neg ~pos ~ispos env ext) c
   | Tvar v -> wf_var env ext v
-  | Tjoin (a, b) ->
+  | Tjoin (a, b, _loc) ->
      wf_typ ~neg ~pos ~ispos env ext a;
      wf_typ ~neg ~pos ~ispos env ext b
   | Tpoly {vars; body} ->
@@ -905,9 +861,10 @@ let mktyexp t = (Some t, noloc)
 let named_type s : Exp.tyexp' =
   Tnamed ({label=s; shift=0}, noloc)
 
-let unparse_cons ~neg ~pos ty =
-  let open Cons in
+let unparse_cons ~neg ~pos (ty,_tyloc) =
+  let open Cons1 in
   let ty = match ty with
+    | Top -> named_type "any"
     | Bool -> named_type "bool"
     | Int -> named_type "int"
     | String -> named_type "string"
@@ -960,14 +917,12 @@ let rec unparse_gen_typ :
              ('neg,'pos) typ -> Exp.tyexp =
   fun ~env ~neg ~pos ty -> match ty with
   | Tsimple t -> pos ~env t
-  | Ttop _ -> mktyexp (named_type "any")
+  | Tbot _ -> mktyexp (named_type "nothing")
   | Tcons c ->
-     unparse_joins
-       (List.map
-         (unparse_cons ~neg:(unparse_gen_typ ~env ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~env ~neg ~pos)) c.conses)
+     unparse_cons ~neg:(unparse_gen_typ ~env ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~env ~neg ~pos) c
   | Tvar var ->
      unparse_var ~env var
-  | Tjoin (a, b) ->
+  | Tjoin (a, b, _loc) ->
      mktyexp (Exp.Tjoin (unparse_gen_typ ~env ~neg ~pos a,
                          unparse_gen_typ ~env ~neg ~pos b))
   | Tpoly { vars; body } ->
@@ -994,7 +949,7 @@ and unparse_bounds :
   (env,ext), IArray.map (fun ((s,_), bound) ->
        let s = (s, noloc) in
        match bound with
-       | None | Some (Ttop _) ->
+       | None | Some (Tcons (Top, _)) ->
           s, None
        | Some t ->
           s, Some (unparse_gen_typ ~env:(env,ext) ~pos:neg ~neg:pos t)) vars |> IArray.to_list
@@ -1017,13 +972,17 @@ let rec unparse_flex_lower_bound ~env ~flexvar = function
      in
      unparse_join ts
 
-let unparse_styp_neg ~env ~flexvar = function
-  | UBvar v -> unparse_flexvar ~env ~flexvar v
-  | UBcons {cons_n=cons;rigvars_n=rigvars} ->
-     unparse_join
-       (List.map (unparse_cons ~neg:(unparse_flex_lower_bound ~env ~flexvar) ~pos:(unparse_flexvar ~env ~flexvar)) cons.conses
-        @
-        List.map (unparse_rigid_var ~env) (Rvset.to_list rigvars))
+let unparse_upper ~env ~flexvar = function
+  | Utop -> []
+  | Uflexvar v -> [unparse_flexvar ~env ~flexvar v]
+  | Ugen {cons=([Ucons Top], _loc); higher_fvs=[]} -> []
+  | Ugen {cons=(cons,_loc); higher_fvs} ->
+     (   (* FIXME: do something with delayed constraints? *)
+         [unparse_join
+           (cons |> List.map (fun c -> match c with
+              | Urigvar (rv, _FIXME) -> unparse_rigid_var ~env rv
+              | Ucons c -> unparse_cons ~neg:(unparse_flex_lower_bound ~env ~flexvar) ~pos:(unparse_flexvar ~env ~flexvar) (c,())))])
+     @ List.map (unparse_flexvar ~env ~flexvar) higher_fvs
 
 let unparse_ptyp ~flexvar ?(env=(Env_nil,[])) (t : ptyp) =
   unparse_gen_typ ~env ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) t
@@ -1048,9 +1007,9 @@ let pp_flexlb ppf t =
   let doc = unparse_flex_lower_bound ~env:(Env_nil,[]) ~flexvar:ignore t in
   pp_tyexp ppf doc
 
-let pp_styp_neg ppf t =
+let pp_upper ppf t =
   let env = Env_nil, [] in
-  let tys = List.map (unparse_styp_neg ~env ~flexvar:ignore) t in
+  let tys = unparse_upper ~env ~flexvar:ignore t in
   let docs = List.map Print.tyexp tys in
   pp_doc ppf (PPrint.(separate (comma ^^ space) docs))
 
@@ -1081,7 +1040,7 @@ let dump_ptyp ppf t =
        let l =
          if equal_flex_lower_bound fv.lower bottom then None
          else Some (unparse_flex_lower_bound ~env ~flexvar fv.lower) in
-       let u = List.map (unparse_styp_neg ~env ~flexvar) fv.upper in
+       let u = unparse_upper ~env ~flexvar fv.upper in
        Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
        ()
   and unparse t =
@@ -1093,7 +1052,7 @@ let dump_ptyp ppf t =
   fvs |> List.iter (function
     | n, (l, us) ->
        begin match l with
-       | Some l -> 
+       | Some l ->
           Format.fprintf ppf " %a <= %s" pp_tyexp l n
        | None ->
           Format.fprintf ppf "      %s" n
@@ -1110,7 +1069,6 @@ let pp_changes ppf changes =
       Format.fprintf ppf "%s%s%s" sp (flexvar_name fv) ty in
     match ch with
     | Change_expanded_mark -> Format.fprintf ppf "%s!" sp
-    | Change_rotated(v,_) -> pv v "/"
     | Change_upper(v,_) -> pv v "-"
     | Change_lower(v,_) -> pv v "+");
   Format.fprintf ppf "]"

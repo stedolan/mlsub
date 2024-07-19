@@ -48,21 +48,17 @@
 > This int comes from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
 >                                                              ^^^
-> but is used as string at test:1:
->   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
->                                                                                            ^^^^^^
+> but is used as string
 
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 > _:0: Type error
 > 
->      found: () -> {foo: (Y) -> _, bar: _}
+>      found: () -> {foo: (nothing) -> _, bar: _}
 >   expected: () -> {foo: (X) -> _, bar: _}
 > This X comes from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 >                                                                     ^
-> but is used as Y at test:1:
->   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
->                                                                                          ^
+> but is used as nothing
 
 : [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y} <: [X] () -> {foo: (X) -> X, bar: (X) -> X}
 > ok
@@ -126,9 +122,9 @@
 > This int comes from test:1:
 >   : [X <: int] (X) -> (X|bool) <: (int) -> bool
 >                                    ^^^
-> but is used as bool at test:1:
+> but is used as nothing at test:1:
 >   : [X <: int] (X) -> (X|bool) <: (int) -> bool
->                                            ^^^^
+>           ^^^
 : (int) -> bool <: [X <: int] (X) -> (X|bool)
 > ok
 
@@ -154,7 +150,7 @@
 >                                                 ^^^
 > but is used as nothing at test:1:
 >   : [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
->                                                                                 ^
+>           ^^^
 
 : (int) -> (int, [A <: int] (A) -> A) <: [A <: int] (A) -> (int, ([B] (A) -> A))
 > ok
@@ -194,9 +190,7 @@
 > This any comes from test:1:
 >   : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
 >                                                           ^
-> but is used as nothing at test:1:
->   : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
->                                                                 ^
+> but is used as nothing
 
 
 # tricky case of spec sub & rigvars (see cnrig <> [] case in ensure_upper_matches)
@@ -235,4 +229,11 @@
 > ok
 : [C] (C | {bar: C}) <: [C <: {bar: bool}] {bar: C}
 > ok
-> STATS: fix: 0, flex: 79
+
+# Tricky case showing that match_sub must refreshen matchable
+# variables when the set of rigvars in the bound increases
+:  [P <: {foo: any, ...}](P) -> P
+<: [P <: {foo: any, ...}](P) -> {foo:int} | P
+> ok
+
+> STATS: fix: 0, flex: 85

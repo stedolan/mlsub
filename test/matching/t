@@ -14,20 +14,7 @@ fn(x) { (Foo(), Bar, Foo{x: 42}, Baz(1)) }
 ( if true { Foo(@true) } else { Bar(6) }
   : 'Foo(bool) | 'Bar(int) )
 > (if true { Foo(@true) } else { Bar(6) } : 'Foo(bool) | 'Bar(int))
->   (if true { Foo(@true) } else { Bar(6) } : 'Foo(bool) | 'Bar(int))
-> 'Foo(bool) | 'Bar(int)
-> let k(x) = {
->   let  = %yield(x);
->   done
-> };
-> match <true> {
->   true() -> {
->     k(Foo(0: <true>))
->   };
->   false() -> {
->     k(Bar(0: 6))
->   }
-> }
+> typechecking error: Failure("pragma: true")
 
 ({x: 42} : 'Foo{x: int})
 > ({x: 42} : 'Foo{x: int})
@@ -308,6 +295,14 @@ fn(x) { match x { (z @ (A | B)) => z } }
 > fn (x) { match x { (z @ A | B) => z } }
 >   fn [A <: 'A | 'B](x: A) -> A { match x { (z @ A | B) => z } }
 > [A <: 'A | 'B] (A) -> A
+> RECHECK: Lang.Error.Fail(_)
+> 
+> _:0: Bounds must be constructed types
+> 
+> ELAB: Lang.Error.Fail(_)
+> 
+> ELABINF: Lang.Error.Fail(_)
+> 
 > let  = %yield(fun (x) ret { match x { A() -> { ret(x) }; B() -> { ret(x) } } });
 > done
 
@@ -336,6 +331,14 @@ fn(p, q) {
 >     }
 >   }
 > [A <: 'A | 'B, B <: 'A | 'B] (A, B) -> (A | B, A | B)
+> RECHECK: Lang.Error.Fail(_)
+> 
+> _:0: Bounds must be constructed types
+> 
+> ELAB: Lang.Error.Fail(_)
+> 
+> ELABINF: Lang.Error.Fail(_)
+> 
 > let  = %yield(fun (p, q) ret {
 >   let case(y, z) = {
 >     ret((0: y, 1: z))
@@ -402,6 +405,7 @@ fn (x) {
 > (('A | 'B, 'A)) -> int
 > RECHECK: Failure("unknown ctor")
 > 
+> typechecking error: Failure("unknown ctor")
 > ELAB: Failure("unknown ctor")
 > 
 > ELABINF: Failure("unknown ctor")
@@ -451,7 +455,7 @@ fn (x) {
 > test:10: The field 'bar' is missing.
 >     (y.foo, y.bar)
 >             ^^^^^
->      found: 'Good{foo: _, bar: _} | 'Bad{foo: _}
+>      found: 'Bad{foo: _}
 >   expected: {bar: _, ...}
 > This 'Bad{foo: _} comes from test:5:
 >       Bad{foo: x.foo}
@@ -501,6 +505,14 @@ fn (x) { use(make(x)) }
 >     use(make(x))
 >   }
 > [A] ({good: bool, bar: any, foo: A, ...}) -> A | A
+> RECHECK: internal error: duplicate RV in upper_cons
+> 
+> internal error: duplicate RV in upper_cons
+> 
+> ELAB: internal error: duplicate RV in upper_cons
+> 
+> ELABINF: internal error: duplicate RV in upper_cons
+> 
 > let make =
 >   fun (x) ret {
 >     let good = x.(good);
@@ -718,15 +730,11 @@ calls_any(use)
 >   calls_any(use)
 >             ^^^
 >      found: ('Foo | 'Bar) -> _
->   expected: ('Foo | 'Bar | 'Baz) -> _
+>   expected: ('Baz) -> _
 > This 'Baz comes from test:2:
 >     (f(Foo), f(Bar), f(Baz))
 >                        ^^^
-> but is used as 'Foo | 'Bar at test:6,test:7:
->     | Foo => 1
->       ^^^
->     | Bar => 2
->       ^^^
+> but is used as 'Foo | 'Bar at _:0:
 
 # codegen test for single-case matches
 fn(x) {
@@ -767,6 +775,7 @@ fn(x, y) {
 > ('A | 'B, 'A) -> int
 > RECHECK: Failure("unknown ctor")
 > 
+> typechecking error: Failure("unknown ctor")
 > ELAB: Failure("unknown ctor")
 > 
 > ELABINF: Failure("unknown ctor")
@@ -861,4 +870,4 @@ fn (x : 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
 
 
 # end
-> STATS: fix: 2, flex: 199
+> STATS: fix: 13, flex: 221

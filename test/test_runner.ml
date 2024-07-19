@@ -85,7 +85,8 @@ let run_cmd s =
           let env0 = env0 in
           Check.check env0 ~mode:(Check.fresh_gen_mode ()) e (Checking t) |> ignore
         with e ->
-            println "RECHECK: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
+            println "RECHECK: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ());
+            pexn e
         end;
         begin try
           wf_ptyp env0 t;

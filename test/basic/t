@@ -189,7 +189,7 @@ let (x) = (1,); {x}
 if (true) { (1, 2) } else { (1, true, 3) }
 > if true { (1, 2) } else { (1, true, 3) }
 >   if true { (1, 2) } else { (1, true, 3) }
-> (int, int) | (int, bool, int)
+> (int, int | bool, ...)
 > let k(x) = {
 >   let  = %yield(x);
 >   done
@@ -206,7 +206,7 @@ if (true) { (1, 2) } else { (1, true, 3) }
 if (false) { {foo:1,bar:2} } else { {foo:1,baz:()} }
 > if false { {foo: 1, bar: 2} } else { {foo: 1, baz: ()} }
 >   if false { {foo: 1, bar: 2} } else { {foo: 1, baz: ()} }
-> {foo: int, bar: int} | {foo: int, baz: ()}
+> {foo: int, ...}
 > let k(x) = {
 >   let  = %yield(x);
 >   done
@@ -222,14 +222,7 @@ if (false) { {foo:1,bar:2} } else { {foo:1,baz:()} }
 
 ((1,2,3) : (int,int))
 > ((1, 2, 3) : (int, int))
-> test:1: A surplus field '.2' is present.
->   ((1,2,3) : (int,int))
->    ^^^^^^^
->      found: (_, _, _)
->   expected: (_, _)
-> This (_, _, _) is used as (_, _) at test:1:
->   ((1,2,3) : (int,int))
->              ^^^^^^^^^
+> typechecking error: Failure("extra")
 
 ((1,2,asdf) : (int, int, ...))
 > ((1, 2, asdf) : (int, int, ...))
@@ -336,25 +329,11 @@ if true { (@bot : ((int,any), (int,int), any) -> string) } else {(@bot : ((any,s
 
 ((1, 2) : (int, int, int))
 > ((1, 2) : (int, int, int))
-> test:1: The field '.2' is missing.
->   ((1, 2) : (int, int, int))
->    ^^^^^^
->      found: (_, _)
->   expected: (_, _, _)
-> This (_, _) is used as (_, _, _) at test:1:
->   ((1, 2) : (int, int, int))
->             ^^^^^^^^^^^^^^^
+> typechecking error: Failure("missing .2")
 
 ((1, 2, 3) : (int, int))
 > ((1, 2, 3) : (int, int))
-> test:1: A surplus field '.2' is present.
->   ((1, 2, 3) : (int, int))
->    ^^^^^^^^^
->      found: (_, _, _)
->   expected: (_, _)
-> This (_, _, _) is used as (_, _) at test:1:
->   ((1, 2, 3) : (int, int))
->                ^^^^^^^^^^
+> typechecking error: Failure("extra")
 
 # weird. Should I allow this? eta-expansion?
 # (1, 2, ...)
@@ -523,14 +502,7 @@ let {x: foo, y: bar} : {x:int, y:bool} = {x:1, y:true}; foo
 > let x, y = (x: 1, y: <true>).(x, y); let  = %yield(x); done
 let {x: foo, y: bar} : {x:int} = {x:1, y:true}; foo
 > let {x: foo, y: bar} : {x: int} = {x: 1, y: true}; foo
-> test:1: A surplus field 'y' is present.
->   let {x: foo, y: bar} : {x:int} = {x:1, y:true}; foo
->                                    ^^^^^^^^^^^^^
->      found: {x: _, y: _}
->   expected: {x: _}
-> This {x: _, y: _} is used as {x: _} at test:1:
->   let {x: foo, y: bar} : {x:int} = {x:1, y:true}; foo
->                          ^^^^^^^
+> typechecking error: Failure("extra")
 let {x: foo, y: bar} : {x:int,y:int} = {x:1, y:true}; foo
 > let {x: foo, y: bar} : {x: int, y: int} = {x: 1, y: true}; foo
 > test:1: Type error
@@ -543,14 +515,7 @@ let {x: foo, y: bar} : {x:int,y:int} = {x:1, y:true}; foo
 >                                   ^^^
 let {x: foo, y: bar} : {x:int,y:bool,z:bool} = {x:1, y:true}; foo
 > let {x: foo, y: bar} : {x: int, y: bool, z: bool} = {x: 1, y: true}; foo
-> test:1: The field 'z' is missing.
->   let {x: foo, y: bar} : {x:int,y:bool,z:bool} = {x:1, y:true}; foo
->                                                  ^^^^^^^^^^^^^
->      found: {x: _, y: _}
->   expected: {x: _, y: _, z: _}
-> This {x: _, y: _} is used as {x: _, y: _, z: _} at test:1:
->   let {x: foo, y: bar} : {x:int,y:bool,z:bool} = {x:1, y:true}; foo
->                          ^^^^^^^^^^^^^^^^^^^^^
+> typechecking error: Failure("missing z")
 
 # punning
 
@@ -754,10 +719,10 @@ fn (a) { if (a.foo) { {bar: a.bar} } else { a } }
 # more tuple cases
 fn (f) { (f({x:1,y:2}), f({x:1,z:2})) }
 > fn (f) { (f({x: 1, y: 2}), f({x: 1, z: 2})) }
->   fn [A](f: ({x: int, y: int} | {x: int, z: int}) -> A) -> (A, A) {
+>   fn [A](f: ({x: int, ...}) -> A) -> (A, A) {
 >     (f({x: 1, y: 2}), f({x: 1, z: 2}))
 >   }
-> [A] (({x: int, y: int} | {x: int, z: int}) -> A) -> (A, A)
+> [A] (({x: int, ...}) -> A) -> (A, A)
 > let  = %yield(fun (f) ret {
 >   let x = f((x: 1, z: 2));
 >   let x2 = f((x: 1, y: 2));
@@ -767,14 +732,14 @@ fn (f) { (f({x:1,y:2}), f({x:1,z:2})) }
 
 fn (x) { if x.cond { {p:1} } else { {p:2,q:1} } }
 > fn (x) { if x.cond { {p: 1} } else { {p: 2, q: 1} } }
->   fn (x: {cond: bool, ...}) -> {p: int} | {p: int, q: int} {
+>   fn (x: {cond: bool, ...}) -> {p: int, ...} {
 >     if x.cond {
 >       {p: 1}
 >     } else {
 >       {p: 2, q: 1}
 >     }
 >   }
-> ({cond: bool, ...}) -> {p: int} | {p: int, q: int}
+> ({cond: bool, ...}) -> {p: int, ...}
 > let  = %yield(fun (x) ret {
 >   let cond = x.(cond);
 >   match cond {
@@ -819,12 +784,26 @@ fn (x) { let {p,q,...}=x; x }
 
 fn (x) { let {p,q} = x; let {p,q,r} = x; {p,q} }
 > fn (x) { let {p, q} = x; let {p, q, r} = x; {p, q} }
->   fn (x: nothing) -> {p: nothing, q: nothing} {
->     let {p, q} : nothing = x;
->     let {p, q, r} : nothing = x;
+>   fn [A, B](x: {p: A, q: B, r: any}) -> {p: A, q: B} {
+>     let {p, q} : {p: A, q: B, r: any} = x;
+>     let {p, q, r} : {p: A, q: B, r: any} = x;
 >     {p, q}
 >   }
-> (nothing) -> {p: nothing, q: nothing}
+> [A, B] ({p: A, q: B, r: any}) -> {p: A, q: B}
+> RECHECK: Lang.Error.Fail(_)
+> 
+> test:1: A surplus field 'r' is present.
+>   fn (x) { let {p,q} = x; let {p,q,r} = x; {p,q} }
+>                ^^^^^
+>      found: {p: _, q: _, r: _}
+>   expected: {p: _, q: _}
+> This {p: _, q: _, r: _} comes from _:0:
+> 
+> but is used as {p: _, q: _}
+> ELAB: Lang.Error.Fail(_)
+> 
+> ELABINF: Lang.Error.Fail(_)
+> 
 > let  = %yield(fun (x) ret {
 >   let p, q = x.(p, q);
 >   let p2, q2, r = x.(p, q, r);
@@ -849,12 +828,26 @@ fn (x) { let {p,q,...} = x; let {p,q,r} = x; {p,q} }
 
 fn (x) { let {p,q} = x; let {p,q,r,...} = x; {p,q} }
 > fn (x) { let {p, q} = x; let {p, q, r, ...} = x; {p, q} }
->   fn (x: nothing) -> {p: nothing, q: nothing} {
->     let {p, q} : nothing = x;
->     let {p, q, r, ...} : nothing = x;
+>   fn [A, B](x: {p: A, q: B, r: any}) -> {p: A, q: B} {
+>     let {p, q} : {p: A, q: B, r: any} = x;
+>     let {p, q, r, ...} : {p: A, q: B, r: any} = x;
 >     {p, q}
 >   }
-> (nothing) -> {p: nothing, q: nothing}
+> [A, B] ({p: A, q: B, r: any}) -> {p: A, q: B}
+> RECHECK: Lang.Error.Fail(_)
+> 
+> test:1: A surplus field 'r' is present.
+>   fn (x) { let {p,q} = x; let {p,q,r,...} = x; {p,q} }
+>                ^^^^^
+>      found: {p: _, q: _, r: _}
+>   expected: {p: _, q: _}
+> This {p: _, q: _, r: _} comes from _:0:
+> 
+> but is used as {p: _, q: _}
+> ELAB: Lang.Error.Fail(_)
+> 
+> ELABINF: Lang.Error.Fail(_)
+> 
 > let  = %yield(fun (x) ret {
 >   let p, q = x.(p, q);
 >   let p2, q2, r = x.(p, q, r);
@@ -1293,9 +1286,7 @@ fn (x, wid : (([A] (A) -> A) -> int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
 > This any comes from test:1:
 >   fn (x, wid : (([A] (A) -> A) -> int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
 >                       ^
-> but is used as nothing at test:1:
->   fn (x, wid : (([A] (A) -> A) -> int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
->                             ^
+> but is used as nothing at _:0:
 
 # with annotation
 fn (x : (any)->(), wid : (([A] (A) -> A) -> int)) { wid(fn(a){{x:x(a),y:a}.y}) }
@@ -1341,14 +1332,14 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { let 
 > }
 >   fn [A, B <: {foo: int, bar: string}](
 >     x: ({foo: int} | A) -> B,
->     wid: ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) -> int
+>     wid: ([A_2 <: {foo: int}] (A_2) -> A_2 | {foo: int, bar: string}) -> int
 >   ) -> int {
 >     let f : ({foo: int} | A) -> B = fn (a: {foo: int} | A) -> B { x(a) };
 >     wid(f)
 >   }
 > [A, B <: {foo: int, bar: string}] (
 >   ({foo: int} | A) -> B,
->   ([A_2 <: {foo: int}] (A_2) -> {foo: int, bar: string} | A_2) -> int
+>   ([A_2 <: {foo: int}] (A_2) -> A_2 | {foo: int, bar: string}) -> int
 > ) -> int
 > let  = %yield(fun (x, wid) ret {
 >   let f = fun (a) ret2 { let x2 = x(a); ret2(x2) };
@@ -1363,11 +1354,11 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(
 > }
 >   fn (
 >     x: ({foo: int}) -> {foo: int, bar: string},
->     wid: ([A <: {foo: int}] (A) -> {foo: int, bar: string} | A) -> int
+>     wid: ([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int
 >   ) -> int {
 >     wid(fn (a) { x(a) })
 >   }
-> (({foo: int}) -> {foo: int, bar: string}, ([A <: {foo: int}] (A) -> {foo: int, bar: string} | A) -> int) -> int
+> (({foo: int}) -> {foo: int, bar: string}, ([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int) -> int
 > let  = %yield(fun (x, wid) ret {
 >   let x2 = wid(fun (a) ret2 { let x2 = x(a); ret2(x2) });
 >   ret(x2)
@@ -1380,11 +1371,11 @@ fn (x, wid : (([A <: {foo:int}] (A) -> A | {foo:int,bar:string}) -> int)) { wid(
 > }
 >   fn (
 >     x: ({foo: int}) -> {foo: int, bar: string},
->     wid: ([A <: {foo: int}] (A) -> {foo: int, bar: string} | A) -> int
+>     wid: ([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int
 >   ) -> int {
 >     wid(x)
 >   }
-> (({foo: int}) -> {foo: int, bar: string}, ([A <: {foo: int}] (A) -> {foo: int, bar: string} | A) -> int) -> int
+> (({foo: int}) -> {foo: int, bar: string}, ([A <: {foo: int}] (A) -> A | {foo: int, bar: string}) -> int) -> int
 > let  = %yield(fun (x, wid) ret { let x2 = wid(x); ret(x2) }); done
 
 fn(f) { (fn(x) { 5 })(f(10)) }
@@ -1456,7 +1447,6 @@ fn(f) { fn(a,b) { let z = f(b); if true { {foo:b} } else { a } } }
 > done
 
 # this way around is harder: {foo:a}|b, when a is bound more deeply
-# hoists a to avoid an invalid Tvjoin
 fn(f) { fn(a,b) { let z = f(b); if true { {foo:a} } else { b } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { {foo: a} } else { b } } }
 >   fn [A, B](f: (A) -> any) -> (B, A) -> {foo: B} | A {
@@ -2129,4 +2119,4 @@ fn(x) {
 > done
 
 
-> STATS: fix: 65, flex: 1550
+> STATS: fix: 120, flex: 1555

@@ -9,9 +9,9 @@ let () = Printexc.record_backtrace true
 let dump (t : ptyp) =
   Format.printf "%a%!" dump_ptyp t
 
-let func a b = Cons.Func (a, b)
+let func a b = Cons1.Func (a, b)
 
-let tuple xs = Cons.Record (None, Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) xs)))
+let tuple xs = Cons1.Record (None, Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) xs)))
 
 let nope _ = assert false
 
@@ -42,7 +42,7 @@ let match_as_fn env f =
               | _ -> assert false in
   arg, res
 
-let tcons cons = Tcons (Cons.make ~loc:Location.noloc cons)
+let tcons cons = Tcons (cons, Location.noloc)
 
 let ok = function Ok () -> () | Error _ -> failwith "nope"
 
@@ -93,7 +93,7 @@ let match_bug () =
   subtype env ap bn |> ok;
   let b1, b2 = match_as_fn env bp in
   let a1, a2 = match_as_fn env ap in
-  subtype env a2 (Tcons Cons.bottom) |> ok;
+  subtype env a2 (Tbot None) |> ok;
   dump env (tcons (func [a1; b1; an] (tcons (tuple [a2; b2; bp]))))
   
 
@@ -108,7 +108,7 @@ let chain () =
   subtype env p.(8) n.(9) |> ok;
   subtype env p.(5) n.(6) |> ok;
   subtype env p.(0) n.(1) |> ok;
-  subtype env p.(3) (Ttop None) |> ok;
+  subtype env p.(3) (Tcons (Top, Location.noloc)) |> ok;
   subtype env p.(2) n.(3) |> ok;
   subtype env p.(1) n.(2) |> ok;
   subtype env p.(7) n.(8) |> ok;
@@ -131,7 +131,7 @@ let poly () =
   let bvar ?(index=0) ?(rest) var =
     match rest with
     | None -> Tvar (Vbound {index; var; loc=None})
-    | Some rest -> Tjoin (rest, Tvar(Vbound{index; var; loc=None})) in
+    | Some rest -> Tjoin (rest, Tvar(Vbound{index; var; loc=None}), None) in
   let t1 () =
     Tpoly {vars = IArray.of_array [| ("A",noloc), None; ("B",noloc), None |];
            body= tcons (func
