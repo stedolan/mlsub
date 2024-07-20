@@ -20,9 +20,6 @@ let tvjoin ?(base=Tbot None) vs =
 
 let tcons cons = Tcons cons
 
-let tcons' conses =
-  List.fold_left (tjoin ~loc:conses.Cons.loc) (Tbot (Some conses.Cons.loc)) (List.map tcons conses.Cons.conses)
-
 let tcons_head (c, loc) =
   let tunit _ = Tsimple () in
   Tcons (Cons1.map ~neg:tunit ~pos:tunit c, loc)
@@ -134,11 +131,8 @@ let lower_contains_fv fv lower =
     | _ -> false) lower
 
 let lower_of_rigid_bound env rv : lower =
-  match env_rigid_bound env rv with
-  | None -> [Lcons (Top, rv.loc)]
-  | Some c ->
-     c.conses |> List.map (fun (c,_cloc) ->
-       Lcons (c, rv.loc))
+  env_rigid_bound env rv
+  |> List.map (fun c -> Lcons (c,rv.loc))
 
 (* Check whether a flex-flex constraint α ≤ β is already present via an upper bound of α *)
 let rec has_flex_upper (pv : flexvar) nv =
@@ -603,7 +597,7 @@ let enter_rigid env vars rig_names =
   let temp_env =
     Env_types { level; rig_names;
                 rig_defns = IArray.map (fun (name, _) ->
-                    {name; upper=None}) vars; rest = env } in
+                    {name; upper=[Top]}) vars; rest = env } in
   let getrv loc var = Tvar (Vrigid {level; loc; var}) in
   let openrig t = open_typ ~neg:getrv ~pos:getrv 0 t in
   let rig_defns = IArray.map (fun (name, b) ->
@@ -613,17 +607,17 @@ let enter_rigid env vars rig_names =
        | Some b -> ptyp_to_lower ~simple:true temp_env (openrig b) in
      match upper with
      | [Lcons (Top, _)] ->
-        { name; upper = None }
+        { name; upper = [Top] }
      | lower ->
        (* FIXME: can you actually hit this?
           Try with a higher-rank type where the outer rank gets instantiated.
           Maybe change the type of the upper bound in parsed types.
           (to reflect its Tconsness)*)
         let conses = lower |> List.map (function
-          | Lcons c -> c
+          | Lcons (c,_) -> c
           | Lrigvar _ | Lflexvar _ -> assert false)
         in
-        { name; upper = Some {conses; loc=Location.noloc (*FIXME*)} }) vars in
+        { name; upper = conses }) vars in
   let env = Env_types { level; rig_names; rig_defns; rest = env} in
   env, openrig
 
@@ -859,6 +853,7 @@ let rec expand_lower visit ~changes ?(vexpand=[]) env orig_lower =
   in
   lower_rest @ fv_here
 
+
 and expand_fv_neg visit ~changes env nv =
   fv_gen_visit_neg env visit nv (function
     | Recursive_visit ->
@@ -902,61 +897,6 @@ type ('n, 'p) promote_info = {
 }
 
 
-
-(* After expansion, negatively reachable variables will have upper
-   bounds in a particular form *)
-type expanded_upper =
-  (* EUB_var v - v at same level *)
-  | EUB_var of flexvar
-  (* EUB_cons (c, vs) - none of vs at same level *)
-  | EUB_cons of (lower, flexvar) Cons.t * rigvar list * flexvar list
-
-(* FIXME: delete this function. Invariant should be true once higher Uflexvars rotated *)
-(*
-let get_upper (type n) (type p) (s : (n, p) promote_info) (fv : flexvar) =
-  assert (is_visited_neg s.visit fv);
-  match fv.upper with
-  | Utop ->
-     EUB_cons (None, [])
-  | Uflexvar v ->
-     if Env_level.equal v.level s.level then
-       (assert (not (is_visited_pos s.visit fv));
-        EUB_var v)
-     else
-       EUB_cons (None, [])
-  | Ugen {cons; higher_fvs} ->
-     EUB_cons (cons, higher_fvs)
-*)
-let get_upper (type n) (type p) (s : (n, p) promote_info) (fv : flexvar) =
-  assert (is_visited_neg s.visit fv);
-  match fv.upper with
-  | Uflexvar v when Env_level.equal v.level s.level ->
-     assert (not (is_visited_pos s.visit fv));
-     EUB_var v
-  | u ->
-     let ctors, vars =
-       match u with
-       | Utop -> ([Ucons Top], Location.noloc), []
-       | Uflexvar v -> ([Ucons Top], Location.noloc), [v]
-       | Ugen {cons; higher_fvs} -> cons, higher_fvs
-     in
-     begin match vars, s.policy with
-     | [], _
-     | _, Policy_hoist _ -> ()
-     | _ :: _, Policy_generalise _ ->
-        intfail "MonoLocalBinds violation: generalising with free flexvars"
-     end;
-     match ctors with
-     | (c,loc) ->
-        let conses, rvs = List.partition_map (function
-          | Urigvar (r,_ds) ->
-             (*if List.exists (fun d -> not d.dy_resolved) ds then
-               intfail "FIXME unresolved delayed constraints"; FIXME*)
-             Either.Right r
-          | Ucons c -> Either.Left (c,loc)) c in
-        let cons_n = Cons.{conses; loc} in
-        EUB_cons (cons_n, rvs, vars)
-
 let promote_rigvar s (rv : rigvar) =
   if Env_level.equal rv.level s.level
   then ((match Vector.get s.bvars rv.var with Gen_rigid r -> assert (equal_rigvar rv r) | _ -> assert false);
@@ -999,18 +939,9 @@ and promote_fv_neg :
   match promote_flexvar s nv, s.policy with
   | None, _ ->
      (* substitute away the variable *)
-     begin match get_upper s nv with
-     | EUB_var nv' -> promote_fv_neg s nv'
-     | EUB_cons (cons_n, rigvars_n, []) ->
-       let cons = Cons.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s) cons_n in
-       (* FIXME: can this create contravariant joins?
-          (Previous version dropped rigvars_gen here, which is dubious) *)
-       let rigvars = List.map (promote_rigvar s) rigvars_n in
-       tvjoin ~base:(tcons' cons) rigvars
-     | EUB_cons (_, _, _ :: _) ->
-        (* should have been promote_flexvar'd *)
-        assert false
-     end
+     let vars, ty = promote_upper s nv in
+     assert (vars = []);
+     ty
   | Some (Generalised var), Policy_generalise loc ->
      let v = Vbound {index=s.index; var; loc} in
      assert (is_visited_pos s.visit nv);
@@ -1025,6 +956,33 @@ and promote_fv_neg :
   | Some (Hoisted v), Policy_hoist hoist_env ->
      assert (Env_level.extends v.level (env_level hoist_env));
      Tsimple v
+
+and promote_upper :
+  type n p . (n, p) promote_info -> flexvar -> flexvar list * (p,n) typ =
+  fun s fv ->
+  match fv.upper with
+  | Uflexvar v when Env_level.equal v.level s.level ->
+     assert (not (is_visited_pos s.visit fv));
+     [], promote_fv_neg s v
+  | u ->
+     let c, loc, vars =
+       match u with
+       | Utop -> [Ucons Top], Location.noloc, []
+       | Uflexvar v -> [Ucons Top], Location.noloc, [v]
+       | Ugen {cons=(c,loc); higher_fvs} -> c, loc, higher_fvs
+     in
+     let conses, rigvars = c |> List.partition_map (function
+        | Urigvar (r,_ds) ->
+           (*if List.exists (fun d -> not d.dy_resolved) ds then
+             intfail "FIXME unresolved delayed constraints"; FIXME*)
+           Either.Right (promote_rigvar s r)
+        | Ucons c ->
+           let c = Cons1.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s) c in
+           Either.Left (tcons (c,loc))) in
+     let base = List.fold_left (tjoin ~loc) (Tbot (Some loc)) conses in
+     (* FIXME: can this create contravariant joins? *)
+     vars, tvjoin ~base rigvars
+
 
 and promote_flexvar :
   type n p . (n, p) promote_info -> flexvar -> (n, p) promote_flexvar_result option =
@@ -1062,15 +1020,7 @@ and promote_flexvar :
         gen.bound_var <- Computing_bound;
         let bv : flexvar_gen_status =
           assert (is_visited_pos s.visit fv || upper_requires_hoist fv.upper);
-          let vars, upper =
-            match get_upper s fv with
-            | EUB_cons (cons_n, rigvars_n, vars) ->
-               let cons_n = Cons.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s) cons_n in
-               (* FIXME: can this create contravariant joins? *)
-               let rigvars = List.map (promote_rigvar s) rigvars_n in
-               vars, tvjoin ~base:(tcons' cons_n) rigvars
-            | EUB_var _ -> assert false
-          in
+          let vars, upper = promote_upper s fv in
           match s.policy with
           | Policy_generalise _ ->
             assert (vars = []); (* since visited_pos *)

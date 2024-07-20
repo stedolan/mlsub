@@ -92,7 +92,7 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string Location.loc * ('a
   let level = Env_level.extend (env_level env) in
   let stubs =
     vars
-    |> List.map (fun (name,_) -> {name; upper=None})
+    |> List.map (fun (name,_) -> {name; upper=[Top]})
     |> IArray.of_list in
   let mkbound rig_names _loc bound =
     match bound with

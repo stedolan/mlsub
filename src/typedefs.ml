@@ -274,31 +274,6 @@ module Cons1 = struct
 end
 
 
-module Cons = struct
-  (* pairwise head-incomparable (FIXME enforce this) *)
-  type ('n,'p) t = {
-    conses: ('n,'p) Cons1.t Location.loc list;
-    loc: Location.t
-  }
-
-  let equal ~neg ~pos c c' =
-    equal_lists (fun (c, _) (c', _) -> Cons1.equal ~neg ~pos c c') c.conses c'.conses
-
-  let map ~neg ~pos (x : _ t) : _ t =
-    { x with conses = List.map (fun (c, l) -> Cons1.map ~neg ~pos c, l) x.conses }
-
-  let iter ~neg ~pos t = ignore (map ~neg ~pos t)
-
-  let is_bottom = function
-    | {conses=[]; _} -> true
-    | _ -> false
-
-  let bottom = {conses=[]; loc=Location.noloc}
-  let bottom_loc loc = {conses=[]; loc}
-  let make ~loc (c : _ Cons1.t) : _ t =
-    {conses=[c,loc]; loc}
-end
-
 module SymMap = Tuple_fields.SymMap
 
 module Env_level : sig
@@ -463,7 +438,7 @@ and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string Location.loc;
-  upper : (flexvar, lower) Cons.t option;
+  upper : (flexvar, lower) Cons1.t list;
 }
 
 (*
@@ -771,7 +746,7 @@ and wf_upper ~seen env lvl = function
             |> ignore);
        cons |> List.iteri (fun i c ->
          cons |> List.iteri (fun j d ->
-           if i <> j then match c, d with
+           if i < j then match c, d with
            | Urigvar (a,_), Urigvar (b,_) -> assert (not (equal_rigvar a b))
            | Ucons a, Ucons b -> assert (Cons1.incomparable_head a b)
            | _, _ -> ()))
@@ -786,7 +761,13 @@ and wf_rigvar env lvl (rv : rigvar) =
   assert (0 <= rv.var && rv.var < IArray.length rvs)
 
 and wf_lower ~seen env lvl l =
-  (* FIXME check distinctness of conses joined *)
+  l |> List.iteri (fun i a ->
+    l |> List.iteri (fun j b ->
+      if i < j then match a, b with
+      | Lflexvar a, Lflexvar b -> assert (not (equal_flexvar a b))
+      | Lrigvar a, Lrigvar b -> assert (not (equal_rigvar a b))
+      | Lcons (a,_), Lcons (b,_) -> assert (Cons1.incomparable_head a b)
+      | _, _ -> ()));
   l |> List.iter (function
     | Lflexvar v -> wf_flexvar ~seen env lvl v
     | Lrigvar v -> wf_rigvar env lvl v
