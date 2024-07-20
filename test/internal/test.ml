@@ -19,7 +19,7 @@ let dump env (t : ptyp) =
   dump t;
   flush stdout;
   Types.log_changes := true;
-  let bvars, _t = promote ~policy:`Generalise ~rigvars:IArray.empty ~env t
+  let bvars, _t = promote ~policy:(`Generalise noloc) ~rigvars:IArray.empty ~env t
                    ~map:(fun ~neg:_ ~pos t ->
                      let t = pos ~mode:`Poly ~index:0 t in
                      dump t; t) in
@@ -130,8 +130,8 @@ let poly () =
   let env = Env_nil and _lvl = Env_level.initial in
   let bvar ?(index=0) ?(rest) var =
     match rest with
-    | None -> Tvar (Vbound {index; var; loc=None})
-    | Some rest -> Tjoin (rest, Tvar(Vbound{index; var; loc=None}), None) in
+    | None -> Tvar (Vbound {index; var; loc=noloc})
+    | Some rest -> Tjoin (rest, Tvar(Vbound{index; var; loc=noloc}), None) in
   let t1 () =
     Tpoly {vars = IArray.of_array [| ("A",noloc), None; ("B",noloc), None |];
            body= tcons (func

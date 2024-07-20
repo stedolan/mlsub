@@ -347,7 +347,7 @@ type env_level = Env_level.t
 type rigvar =
   { level: env_level;
     var: int;
-    loc: Location.t option }
+    loc: Location.t }
 
 let equal_rigvar (p : rigvar) (q : rigvar) =
   Env_level.equal p.level q.level && p.var = q.var
@@ -436,7 +436,7 @@ module Fvset = UniqList.Make (struct type t = flexvar let equal = (==) end)
 
 (* Variables in typs *)
 type typ_var =
-  | Vbound of {index: int; var:int; loc: Location.t option}
+  | Vbound of {index: int; var:int; loc: Location.t}
   | Vrigid of rigvar
 
 (* FIXME: enforce tjoin invariants, especially in neg types *)
@@ -670,8 +670,8 @@ let open_typ_var f ix = function
 
 let rec open_typ :
   'neg 'pos .
-    neg:(Location.t option -> int -> ('pos, 'neg) typ) ->
-    pos:(Location.t option -> int -> ('neg, 'pos) typ) ->
+    neg:(Location.t -> int -> ('pos, 'neg) typ) ->
+    pos:(Location.t -> int -> ('neg, 'pos) typ) ->
     int -> ('neg, 'pos) typ -> ('neg, 'pos) typ =
   fun ~neg ~pos ix t -> match t with
   | (Tsimple _ | Tbot _) as s -> s
@@ -934,7 +934,7 @@ and unparse_bounds :
   (* FIXME: if freshening, use levels somehow to determine when not needed *)
   let taken name =
     lookup_named_type Location.noloc name <> None ||
-    env_lookup_type_var env None name <> None ||
+    env_lookup_type_var env Location.noloc name <> None ||
     List.exists (fun names -> IArray.exists (String.equal name) names) ext in
   let rec freshen name i =
     let p = Printf.sprintf "%s_%d" name i in

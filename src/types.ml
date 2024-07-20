@@ -135,10 +135,10 @@ let lower_contains_fv fv lower =
 
 let lower_of_rigid_bound env rv : lower =
   match env_rigid_bound env rv with
-  | None -> [Lcons (Top, Option.value rv.loc ~default:Location.noloc)]
+  | None -> [Lcons (Top, rv.loc)]
   | Some c ->
-     c.conses |> List.map (fun (c,cloc) ->
-       Lcons (c, Option.value rv.loc ~default:cloc))
+     c.conses |> List.map (fun (c,_cloc) ->
+       Lcons (c, rv.loc))
 
 (* Check whether a flex-flex constraint α ≤ β is already present via an upper bound of α *)
 let rec has_flex_upper (pv : flexvar) nv =
@@ -550,8 +550,7 @@ and ntyp_to_upper ~simple env : ntyp -> upper = function
      Ugen {cons = ([Ucons cons], consloc); higher_fvs = []}
   | Tvar (Vbound _) -> intfail "Vbound"
   | Tvar (Vrigid rv) ->
-     let loc = Option.value rv.loc ~default:Location.noloc in
-     Ugen {cons = ([Urigvar (rv, [])], loc); higher_fvs = []}
+     Ugen {cons = ([Urigvar (rv, [])], rv.loc); higher_fvs = []}
   | Tjoin (a, b, jloc) as ty ->
      begin match
        ntyp_to_upper ~simple:true env a, ntyp_to_upper ~simple:true env b
@@ -576,7 +575,7 @@ and ntyp_to_upper ~simple env : ntyp -> upper = function
        match bounds.(v) with
        | None -> intfail "recursive rigid bound"
        | Some t -> Tsimple t in
-     let pos l _v = Tbot l in
+     let pos l _v = Tbot (Some l) in
      vars |> IArray.iteri (fun i (_, b) ->
        let b = Option.map (open_typ ~neg:pos ~pos:neg 0) b in
        let b = Option.map (ptyp_to_lower ~simple:true env) b in
@@ -890,7 +889,7 @@ and expand_fv_neg visit ~changes env nv =
 
 type ('n, 'p) promotion_policy =
   | Policy_hoist : env -> (flexvar, lower) promotion_policy
-  | Policy_generalise : (zero, zero) promotion_policy
+  | Policy_generalise : Location.t -> (zero, zero) promotion_policy
 
 type ('n, 'p) promote_info = {
   visit: int;
@@ -945,7 +944,7 @@ let get_upper (type n) (type p) (s : (n, p) promote_info) (fv : flexvar) =
      begin match vars, s.policy with
      | [], _
      | _, Policy_hoist _ -> ()
-     | _ :: _, Policy_generalise ->
+     | _ :: _, Policy_generalise _ ->
         intfail "MonoLocalBinds violation: generalising with free flexvars"
      end;
      match ctors with
@@ -986,9 +985,9 @@ let rec promote_lower :
        | None -> None
        | Some r ->
           match s.policy with
-          | Policy_generalise ->
+          | Policy_generalise loc ->
              let Generalised var = r in
-             Some ((2,var),Tvar (Vbound {index=s.index; var; loc=None}))
+             Some ((2,var),Tvar (Vbound {index=s.index; var; loc}))
           | Policy_hoist _env ->
              let Hoisted fv = r in
              Some ((2,0),Tsimple [Lflexvar fv]))
@@ -1014,8 +1013,8 @@ and promote_fv_neg :
         (* should have been promote_flexvar'd *)
         assert false
      end
-  | Some (Generalised var), Policy_generalise ->
-     let v = Vbound {index=s.index; var; loc=None} in
+  | Some (Generalised var), Policy_generalise loc ->
+     let v = Vbound {index=s.index; var; loc} in
      assert (is_visited_pos s.visit nv);
      begin match s.mode with
      | `Poly -> Tvar v
@@ -1037,7 +1036,7 @@ and promote_flexvar :
     | Policy_hoist hoist_env ->
        assert (Env_level.extends fv.level (env_level hoist_env));
        Some (Hoisted fv)
-    | Policy_generalise ->
+    | Policy_generalise _ ->
        intfail "Flexible variable found during generalisation" (* MonoLocalBinds *)
   else begin
   assert (Env_level.equal fv.level s.level);
@@ -1056,7 +1055,7 @@ and promote_flexvar :
         (* FIXME: detect all recursion cases during expand so this can go away *)
         unimp "flexvar recursive in own bound"
      | Generalised var ->
-        (match s.policy with Policy_generalise -> Some (Generalised var) | _ -> assert false)
+        (match s.policy with Policy_generalise _ -> Some (Generalised var) | _ -> assert false)
      | Kept fv ->
         (match s.policy with Policy_hoist _ -> Some (Hoisted fv) | _ -> assert false)
      | Replace_with_rigid _ ->
@@ -1075,7 +1074,7 @@ and promote_flexvar :
             | EUB_var _ -> assert false
           in
           match s.policy with
-          | Policy_generalise ->
+          | Policy_generalise _ ->
             assert (vars = []); (* since visited_pos *)
             let n = Vector.push s.bvars (Gen_flex (gen_zero upper)) in
             Generalised n
@@ -1126,17 +1125,17 @@ let promote ~policy ~rigvars ~env ~(map : neg:_ -> pos:_ -> _ -> _) ty =
   let visit, ty = fixpoint 2 ty in
   (* Format.printf "ELAB2 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
   let bvars = Vector.create () in
-  rigvars |> IArray.iteri (fun var _ -> ignore (Vector.push bvars (Gen_rigid {loc=None;var;level=env_level env})));
+  rigvars |> IArray.iteri (fun var ((_,loc),_) -> ignore (Vector.push bvars (Gen_rigid {loc;var;level=env_level env})));
   let get_simple = function Tsimple t -> t | _ -> intfail "promote unexpanded?" in
   let promote (type p) (type n) (policy : (n,p) promotion_policy) =
     let s_base = { visit; bvars; env; level = env_level env; mode = `Poly; index = -1; policy } in
     let neg_simple ~mode ~index t : ntyp =
       let t = promote_fv_neg {s_base with mode; index} (get_simple t) in
-      match policy with Policy_generalise -> gen_zero t | Policy_hoist _ -> t
+      match policy with Policy_generalise _ -> gen_zero t | Policy_hoist _ -> t
     in
     let pos_simple ~mode ~index t : ptyp =
       let t = promote_lower {s_base with mode; index} (get_simple t) in
-      match policy with Policy_generalise -> gen_zero t | Policy_hoist _ -> t
+      match policy with Policy_generalise _ -> gen_zero t | Policy_hoist _ -> t
     in
     map ty
       ~neg:(fun ~mode ~index t ->
@@ -1147,7 +1146,7 @@ let promote ~policy ~rigvars ~env ~(map : neg:_ -> pos:_ -> _ -> _) ty =
   (* Format.printf "ELAB3 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
   let ty =
     match policy with
-    | `Generalise -> promote Policy_generalise
+    | `Generalise loc -> promote (Policy_generalise loc)
     | `Hoist env -> promote (Policy_hoist env)
   in
   bvars, ty

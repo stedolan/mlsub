@@ -62,7 +62,7 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
      begin match lookup_named_type loc name with
      | Some t -> t
      | None ->
-        match env_lookup_type_var env lvl (Some loc) name with
+        match env_lookup_type_var env lvl loc name with
         | Ok v -> Tvar (Vrigid v)
         | Error e -> fail loc e
      end
@@ -131,7 +131,7 @@ let mark_var_use_at_level ~(mode : generalisation_mode) lvl =
        Some (Env_level.min l1 l2)
 
 
-let elab_gen (env:env) ~mode poly (fn : env -> ptyp * typed_exp * env_level option * 'rest) : ptyp * (typed_polybounds option * typed_exp) * bool * 'rest =
+let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level option * 'rest) : ptyp * (typed_polybounds option * typed_exp) * bool * 'rest =
   let rigvars', rig_names =
     match poly with
     | None -> IArray.empty, SymMap.empty
@@ -156,7 +156,7 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * typed_exp * env_level opti
     in
     (ty, typed_exp)
   in
-  let policy = if can_generalise then `Generalise else `Hoist env in
+  let policy = if can_generalise then `Generalise loc else `Hoist env in
   let bvars, (ty, typed_exp) = promote ~policy ~rigvars:rigvars' ~env:env' ~map (orig_ty, typed_exp) in
   if Vector.length bvars = 0 then
     ty, (None, typed_exp), can_generalise, rest
@@ -169,7 +169,7 @@ let elab_gen (env:env) ~mode poly (fn : env -> ptyp * typed_exp * env_level opti
         | n when n < 26 -> Printf.sprintf "%c" (Char.chr (Char.code 'A' + n))
         | n -> Printf.sprintf "T_%d" (n-26) in
       (* NB: look up env', to ensure no collisions with rigvars *)
-      match env_lookup_type_var env' (env_level env') None name with
+      match env_lookup_type_var env' (env_level env') Location.noloc name with
       | Error _ -> name, Location.noloc
       | Ok _ -> mkname () in
     let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex r -> mkname (), Some r) |> IArray.of_array in
@@ -374,14 +374,14 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
           (* FIXME: insert / keep type annotations? *)
           Fn (None, List.map (fun (p, _) -> p, None) params, split, None (*FIXME ret_type?*), {act with rhs = body })
        | _ ->
-          let ty, tfndef = infer_func_def env ~mode eloc fndef in
+          let ty, tfndef = infer_func_def env ~loc:eloc ~mode eloc fndef in
           inferred ty;
           Fn tfndef
      end
 
   | FnDef ((s, sloc), fndef, body) ->
      let fmode = fresh_gen_mode () in
-     let fty, tfndef = infer_func_def env ~mode:fmode eloc fndef in
+     let fty, tfndef = infer_func_def env ~loc:sloc ~mode:fmode eloc fndef in
      mark_var_use_at_level ~mode fmode.gen_level_acc;
      let cvar = IR.Binder.fresh ~name:s () in
      let binding = {typ = fty; gen_level = fmode.gen_level_acc; comp_var = IR.Binder.ref cvar} in
@@ -433,9 +433,9 @@ and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * typed_exp =
   wf_ptyp env !ty;
   !ty, e
 
-and infer_func_def env ~mode eloc (poly, params, ret, body) : ptyp * typed_func_def =
+and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_func_def =
    let ty, (typed_poly, typed_fn), _generalised, (act, split) =
-     elab_gen env ~mode poly (fun env ->
+     elab_gen env ~loc ~mode poly (fun env ->
        let params = List.map (fun (p, ty) ->
          match ty with
          | Some ty ->
