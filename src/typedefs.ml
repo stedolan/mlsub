@@ -352,28 +352,10 @@ type rigvar =
 let equal_rigvar (p : rigvar) (q : rigvar) =
   Env_level.equal p.level q.level && p.var = q.var
 
-let compare_rigvar (p : rigvar) (q : rigvar) =
-  (* negate: sort highest level earliest *)
-  let cmp = ~- (compare (Env_level.to_int p.level) (Env_level.to_int q.level)) in
-  if cmp <> 0 then cmp else
-    (assert (Env_level.equal p.level q.level); compare p.var q.var)
-
-(* Sets of rigid variables *)
-module Rvset = UniqList.Make (struct
-  type t = rigvar
-  let equal = equal_rigvar
-end)
-
-(* FIXME delete *)
-(* A ctor_ty is a join of a constructed type and some rigid variables *)
-type (+'neg,+'pos) ctor_ty_neg =
-  { cons_n: ('neg, 'pos) Cons.t;
-    rigvars_n: Rvset.t }
-
 (* Flexvars are mutable but only in one direction.
      - level may decrease
      - bounds may become tighter (upper decreases, lower increases) *)
-and flexvar =
+type flexvar =
   { level: env_level;
     id: int;    (* for printing/sorting *)
     mutable upper: upper;
@@ -430,9 +412,6 @@ and flexvar_gen =
       visit : flexvar_gen_visit_counts;
       mutable bound_var : flexvar_gen_status
     }
-
-
-module Fvset = UniqList.Make (struct type t = flexvar let equal = (==) end)
 
 (* Variables in typs *)
 type typ_var =

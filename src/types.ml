@@ -903,14 +903,13 @@ type ('n, 'p) promote_info = {
 
 
 
-
 (* After expansion, negatively reachable variables will have upper
    bounds in a particular form *)
 type expanded_upper =
   (* EUB_var v - v at same level *)
   | EUB_var of flexvar
   (* EUB_cons (c, vs) - none of vs at same level *)
-  | EUB_cons of (lower, flexvar) ctor_ty_neg * flexvar list
+  | EUB_cons of (lower, flexvar) Cons.t * rigvar list * flexvar list
 
 (* FIXME: delete this function. Invariant should be true once higher Uflexvars rotated *)
 (*
@@ -956,8 +955,7 @@ let get_upper (type n) (type p) (s : (n, p) promote_info) (fv : flexvar) =
              Either.Right r
           | Ucons c -> Either.Left (c,loc)) c in
         let cons_n = Cons.{conses; loc} in
-        let rigvars_n = Rvset.of_list rvs in
-        EUB_cons ({cons_n; rigvars_n}, vars)
+        EUB_cons (cons_n, rvs, vars)
 
 let promote_rigvar s (rv : rigvar) =
   if Env_level.equal rv.level s.level
@@ -1003,13 +1001,13 @@ and promote_fv_neg :
      (* substitute away the variable *)
      begin match get_upper s nv with
      | EUB_var nv' -> promote_fv_neg s nv'
-     | EUB_cons ({cons_n; rigvars_n}, []) ->
+     | EUB_cons (cons_n, rigvars_n, []) ->
        let cons = Cons.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s) cons_n in
        (* FIXME: can this create contravariant joins?
           (Previous version dropped rigvars_gen here, which is dubious) *)
-       let rigvars = List.map (promote_rigvar s) (Rvset.to_list rigvars_n) in
+       let rigvars = List.map (promote_rigvar s) rigvars_n in
        tvjoin ~base:(tcons' cons) rigvars
-     | EUB_cons (_, _ :: _) ->
+     | EUB_cons (_, _, _ :: _) ->
         (* should have been promote_flexvar'd *)
         assert false
      end
@@ -1066,10 +1064,10 @@ and promote_flexvar :
           assert (is_visited_pos s.visit fv || upper_requires_hoist fv.upper);
           let vars, upper =
             match get_upper s fv with
-            | EUB_cons ({cons_n;rigvars_n}, vars) ->
+            | EUB_cons (cons_n, rigvars_n, vars) ->
                let cons_n = Cons.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s) cons_n in
                (* FIXME: can this create contravariant joins? *)
-               let rigvars = List.map (promote_rigvar s) (Rvset.to_list rigvars_n) in
+               let rigvars = List.map (promote_rigvar s) rigvars_n in
                vars, tvjoin ~base:(tcons' cons_n) rigvars
             | EUB_var _ -> assert false
           in

@@ -78,7 +78,7 @@ type 'a iarray = 'a IArray.t
 
 
 module type EQ = sig type t val equal : t -> t -> bool end
-module AssocList : sig
+module AssocList__UNUSED : sig
   type (+'a,+'b) t = private ('a * 'b) list
   module Make (El : EQ) : sig
     type el = El.t
@@ -152,7 +152,7 @@ end = struct
   end
 end
 
-module UniqList : sig
+module UniqList__UNUSED : sig
 type 'a t = private 'a list
 module Make (El : EQ) : sig
   type el = El.t
@@ -181,7 +181,7 @@ end
 end = struct
 type 'a t = 'a list
 module Make (El : EQ) = struct
-  module L = AssocList.Make (El)
+  module L = AssocList__UNUSED.Make (El)
   type el = El.t
   type t = El.t list
   let empty = []
@@ -437,7 +437,7 @@ end = struct
   let id (type t) ((module M) : t tag) =
     Obj.Extension_constructor.(id (of_val M.Tag))
 
-  let hash (type t) tag =
+  let hash tag =
     let k = id tag * 84374123 in
     k lxor (k lsr 16)
 
