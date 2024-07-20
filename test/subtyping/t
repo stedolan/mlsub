@@ -236,4 +236,4 @@
 <: [P <: {foo: any, ...}](P) -> {foo:int} | P
 > ok
 
-> STATS: fix: 0, flex: 85
+> STATS: fix: 0, flex: 84

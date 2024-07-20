@@ -377,15 +377,27 @@ and flexvar =
   { level: env_level;
     id: int;    (* for printing/sorting *)
     mutable upper: upper;
-    mutable lower: flex_lower_bound;
+    mutable lower: lower;
     mutable gen: flexvar_gen;
   }
+
+and lower = lower_part list
+
+
+(* Matchability constraint: the contravariant parts of a flexible variable's lower bound must be flexible variables.
+   Flexible variables appearing in vars must not have UBvar upper bounds, as they are also constrained above here.
+   Flexible variables appearing negatively in ctor might well have UBvar upper bounds.
+ *)
+and lower_part =
+  | Lflexvar of flexvar
+  | Lrigvar of rigvar
+  | Lcons of (flexvar, lower) Cons1.t Location.loc
 
 and upper =
   | Utop  (* Unrotated equiv of Ugen {cons=Top; higher_fvs=[]} *)
   | Uflexvar of flexvar
   | Ugen of
-      { cons: (flex_lower_bound, flexvar) upper_cons Location.loc;
+      { cons: (lower, flexvar) upper_cons Location.loc;
         higher_fvs: flexvar list }
 
 and (+'neg,+'pos) upper_cons = ('neg,'pos) upper_part list
@@ -395,18 +407,10 @@ and (+'neg,+'pos) upper_part =
   | Ucons of ('neg, 'pos) Cons1.t
 
 and delayed_constraint =
-  { dy_lower: flex_lower_bound;
+  { dy_lower: lower;
     dy_upper: upper;
     dy_flexvar: flexvar;
     mutable dy_resolved: bool }
-
-(* Matchability constraint: the contravariant parts of a flexible variable's lower bound must be flexible variables.
-   Flexible variables appearing in vars must not have UBvar upper bounds, as they are also constrained above here.
-   Flexible variables appearing negatively in ctor might well have UBvar upper bounds.
- *)
-and flex_lower_bound =
-  | Lower of flexvar UniqList.t * Rvset.t * (flexvar, flex_lower_bound) Cons.t
-  | Ltop of Location.t option
 
 
 (* Temporary structure used during generalisation *)
@@ -426,8 +430,6 @@ and flexvar_gen =
       visit : flexvar_gen_visit_counts;
       mutable bound_var : flexvar_gen_status
     }
-
-
 
 
 module Fvset = UniqList.Make (struct type t = flexvar let equal = (==) end)
@@ -454,8 +456,8 @@ and (+'neg, +'pos) poly_typ =
     vars : (string Location.loc * ('pos, 'neg) typ option) iarray;
     body : ('neg, 'pos) typ }
 
-type ptyp = (flexvar, flex_lower_bound) typ
-type ntyp = (flex_lower_bound, flexvar) typ
+type ptyp = (flexvar, lower) typ
+type ntyp = (lower, flexvar) typ
 
 type gen_level = env_level option
 
@@ -482,7 +484,7 @@ and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string Location.loc;
-  upper : (flexvar, flex_lower_bound) Cons.t option;
+  upper : (flexvar, lower) Cons.t option;
 }
 
 (*
@@ -491,21 +493,22 @@ and rigvar_defn = {
 
 let equal_flexvar (p : flexvar) (q : flexvar) =
   p == q
-let rec equal_flex_lower_bound (p : flex_lower_bound) (q : flex_lower_bound) =
-  match p, q with
-  | Ltop _, Ltop _ -> true
-  | Lower (pflex, prigvars, pcons), Lower (qflex, qrigvars, qcons) ->
-     Fvset.equal pflex qflex &&
-     Rvset.equal prigvars qrigvars &&
-     Cons.equal ~neg:equal_flexvar ~pos:equal_flex_lower_bound pcons qcons
-  | _, _ -> false
+
+let rec equal_lower (p : lower) (q : lower) =
+  let eq p q =
+    match p, q with
+    | Lflexvar pv, Lflexvar qv -> equal_flexvar pv qv
+    | Lrigvar pv, Lrigvar qv -> equal_rigvar pv qv
+    | Lcons (pc, _), Lcons (qc, _) -> Cons1.equal ~neg:equal_flexvar ~pos:equal_lower pc qc
+    | _, _ -> false
+  in List.equal eq p q
 
 let equal_upper_cons_loc ((p,_) : _ upper_cons Location.loc) ((q,_) : _ upper_cons Location.loc) =
   let eq p q =
     match p, q with
     | Urigvar (pv, _pds_FIXME), Urigvar (qv, _qds_FIXME) -> equal_rigvar pv qv
     | Ucons pc, Ucons qc ->
-       Cons1.equal pc qc ~neg:equal_flex_lower_bound ~pos:equal_flexvar
+       Cons1.equal pc qc ~neg:equal_lower ~pos:equal_flexvar
     | _, _ -> false
   in
   List.equal eq p q
@@ -520,12 +523,10 @@ let equal_upper (p : upper) (q : upper) =
      List.equal equal_flexvar pv qv
   | _, _ -> false
 
-let bottom = Lower(Fvset.empty, Rvset.empty, Cons.bottom)
-let of_flexvars fvs = Lower(fvs, Rvset.empty, Cons.bottom)
-let of_flexvar fv = of_flexvars (Fvset.single fv)
-let of_rigvars rigvars = Lower(Fvset.empty, rigvars, Cons.bottom)
-let of_rigvar rv = of_rigvars (Rvset.single rv)
-let is_bottom t = equal_flex_lower_bound bottom t
+let bottom : lower = []
+let of_flexvar fv = [Lflexvar fv]
+let of_rigvar rv = [Lrigvar rv]
+let is_bottom = function [] -> true | _ -> false
 
 (*
  * Flexvar mutations and backtracking log
@@ -534,19 +535,19 @@ let is_bottom t = equal_flex_lower_bound bottom t
 type flexvar_change =
   | Change_expanded_mark (* hack for logging expand changes *)
   | Change_upper of flexvar * upper
-  | Change_lower of flexvar * flex_lower_bound
+  | Change_lower of flexvar * lower
 
 let fv_set_upper ~changes fv upper =
   changes := Change_upper (fv, fv.upper) :: !changes;
   fv.upper <- upper
 
 let fv_set_lower ~changes fv lower =
-  begin match lower with Lower (fvs, _, _) -> assert (not (Fvset.mem fv fvs)) | Ltop _ -> () end;
+  assert (lower |> List.for_all (function Lflexvar fv' -> not (equal_flexvar fv fv') | _ -> true));
   changes := Change_lower (fv, fv.lower) :: !changes;
   fv.lower <- lower
 
 let fv_maybe_set_lower ~changes fv lower =
-  if not (equal_flex_lower_bound fv.lower lower) then
+  if not (equal_lower fv.lower lower) then
     (fv_set_lower ~changes fv lower; true)
   else false
 
@@ -768,8 +769,8 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   if not (Env_level.equal fv.level Env_level.initial) then
     ignore (env_rigid_vars env fv.level);
   (* FIXME rectypes *)
-  begin match fv.lower with Lower (fvs, _, _) -> assert (not (Fvset.mem fv fvs)) | Ltop _ -> () end;
-  wf_flex_lower_bound ~seen env fv.level fv.lower;
+  assert (not (List.exists (function Lflexvar v -> equal_flexvar v fv | _ -> false) fv.lower));
+  wf_lower ~seen env fv.level fv.lower;
   wf_upper ~seen env fv.level fv.upper
   end
 
@@ -786,7 +787,7 @@ and wf_upper ~seen env lvl = function
             List.iter (wf_delayed_constraint ~seen env lvl) ds
          | Ucons c ->
             Cons1.map c
-              ~neg:(wf_flex_lower_bound ~seen env lvl)
+              ~neg:(wf_lower ~seen env lvl)
               ~pos:(wf_flexvar ~seen env lvl)
             |> ignore);
        cons |> List.iteri (fun i c ->
@@ -797,7 +798,7 @@ and wf_upper ~seen env lvl = function
            | _, _ -> ()))
 
 and wf_delayed_constraint ~seen env _lvl {dy_lower; dy_upper; dy_flexvar; dy_resolved=_} =
-  wf_flex_lower_bound ~seen env dy_flexvar.level dy_lower;
+  wf_lower ~seen env dy_flexvar.level dy_lower;
   wf_upper ~seen env dy_flexvar.level dy_upper
 
 and wf_rigvar env lvl (rv : rigvar) =
@@ -805,16 +806,12 @@ and wf_rigvar env lvl (rv : rigvar) =
   let rvs = env_rigid_vars env rv.level in
   assert (0 <= rv.var && rv.var < IArray.length rvs)
 
-and wf_flex_lower_bound ~seen env lvl l =
-  match l with
-  | Ltop _ -> ()
-  | Lower (flexvars, rigvars, cons) ->
-     Fvset.iter ~f:(wf_flexvar ~seen env lvl) flexvars;
-     List.iter (wf_rigvar env lvl) (Rvset.to_list rigvars);
-     (* FIXME check distinctness of conses joined *)
-     Cons.map ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_flex_lower_bound ~seen env lvl) cons |> ignore
-
-
+and wf_lower ~seen env lvl l =
+  (* FIXME check distinctness of conses joined *)
+  l |> List.iter (function
+    | Lflexvar v -> wf_flexvar ~seen env lvl v
+    | Lrigvar v -> wf_rigvar env lvl v
+    | Lcons (c,_) -> Cons1.iter ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_lower ~seen env lvl) c)
 
 let wf_var env ext = function
   | Vrigid rv -> wf_rigvar env rv.level rv
@@ -959,18 +956,13 @@ let unparse_join = function
   | t :: ts ->
      List.fold_left (fun a b -> mktyexp (Exp.Tjoin (a, b))) t ts
 
-let rec unparse_flex_lower_bound ~env ~flexvar = function
-  | Ltop _ ->
-     mktyexp (named_type "any")
-  | Lower(flexvars, rigvars, cons) ->
-     let ts =
-       List.map (unparse_flexvar ~env ~flexvar) (flexvars :> flexvar list)
-       @
-       List.map (unparse_cons ~neg:(unparse_flexvar ~env ~flexvar) ~pos:(unparse_flex_lower_bound ~env ~flexvar)) cons.conses
-       @
-       List.map (unparse_rigid_var ~env) (Rvset.to_list rigvars)
-     in
-     unparse_join ts
+let rec unparse_lower ~env ~flexvar l =
+  l
+  |> List.map (function
+    | Lflexvar fv -> unparse_flexvar ~env ~flexvar fv
+    | Lrigvar rv -> unparse_rigid_var ~env rv
+    | Lcons c -> unparse_cons c ~neg:(unparse_flexvar ~env ~flexvar) ~pos:(unparse_lower ~env ~flexvar))
+  |> unparse_join
 
 let unparse_upper ~env ~flexvar = function
   | Utop -> []
@@ -981,13 +973,13 @@ let unparse_upper ~env ~flexvar = function
          [unparse_join
            (cons |> List.map (fun c -> match c with
               | Urigvar (rv, _FIXME) -> unparse_rigid_var ~env rv
-              | Ucons c -> unparse_cons ~neg:(unparse_flex_lower_bound ~env ~flexvar) ~pos:(unparse_flexvar ~env ~flexvar) (c,())))])
+              | Ucons c -> unparse_cons ~neg:(unparse_lower ~env ~flexvar) ~pos:(unparse_flexvar ~env ~flexvar) (c,())))])
      @ List.map (unparse_flexvar ~env ~flexvar) higher_fvs
 
 let unparse_ptyp ~flexvar ?(env=(Env_nil,[])) (t : ptyp) =
-  unparse_gen_typ ~env ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_flex_lower_bound ~flexvar) t
+  unparse_gen_typ ~env ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_lower ~flexvar) t
 let unparse_ntyp ~flexvar ?(env=(Env_nil,[])) (t : ntyp) =
-  unparse_gen_typ ~env ~neg:(unparse_flex_lower_bound ~flexvar) ~pos:(unparse_flexvar ~flexvar) t
+  unparse_gen_typ ~env ~neg:(unparse_lower ~flexvar) ~pos:(unparse_flexvar ~flexvar) t
 
 
 
@@ -1004,7 +996,7 @@ let pp_exp ppf e =
   pp_doc ppf (Print.exp e)
 
 let pp_flexlb ppf t =
-  let doc = unparse_flex_lower_bound ~env:(Env_nil,[]) ~flexvar:ignore t in
+  let doc = unparse_lower ~env:(Env_nil,[]) ~flexvar:ignore t in
   pp_tyexp ppf doc
 
 let pp_upper ppf t =
@@ -1038,8 +1030,8 @@ let dump_ptyp ppf t =
        Hashtbl.add fvs fv.id (fv_name, None);
        fv_list := fv.id :: !fv_list;
        let l =
-         if equal_flex_lower_bound fv.lower bottom then None
-         else Some (unparse_flex_lower_bound ~env ~flexvar fv.lower) in
+         if equal_lower fv.lower bottom then None
+         else Some (unparse_lower ~env ~flexvar fv.lower) in
        let u = unparse_upper ~env ~flexvar fv.upper in
        Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
        ()
@@ -1077,7 +1069,7 @@ let pp_changes ppf changes =
 let wf_ptyp env (t : ptyp) =
   try
     let seen = Hashtbl.create 10 in
-    wf_typ ~neg:(wf_flexvar ~seen env (env_level env)) ~pos:(wf_flex_lower_bound ~seen env (env_level env)) ~ispos:true env [] t
+    wf_typ ~neg:(wf_flexvar ~seen env (env_level env)) ~pos:(wf_lower ~seen env (env_level env)) ~ispos:true env [] t
   with
   | Assert_failure (file, line, _char) when file = __FILE__ ->
      intfail "Ill-formed type (%s:%d): %a" file line pp_ptyp t
@@ -1085,7 +1077,7 @@ let wf_ptyp env (t : ptyp) =
 let wf_ntyp env (t : ntyp) =
   try
     let seen = Hashtbl.create 10 in
-    wf_typ ~neg:(wf_flex_lower_bound ~seen env (env_level env)) ~pos:(wf_flexvar ~seen env (env_level env)) ~ispos:false env [] t
+    wf_typ ~neg:(wf_lower ~seen env (env_level env)) ~pos:(wf_flexvar ~seen env (env_level env)) ~ispos:false env [] t
   with
   | Assert_failure (file, line, _char) when file = __FILE__ ->
      intfail "Ill-formed type (%s:%d): %a" file line pp_ntyp t

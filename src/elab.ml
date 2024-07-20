@@ -142,7 +142,7 @@ module Elaborate = struct
          env, None
       | Some bounds ->
          let env, poly =
-           unparse_bounds ~env ~pos:(unparse_flex_lower_bound ~flexvar:ignore) ~neg:(unparse_flexvar ~flexvar:ignore) bounds
+           unparse_bounds ~env ~pos:(unparse_lower ~flexvar:ignore) ~neg:(unparse_flexvar ~flexvar:ignore) bounds
          in
          env, Some poly
     in

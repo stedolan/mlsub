@@ -10,6 +10,11 @@ let tjoin ?loc a b =
   | x, Tbot _ -> x
   | a, b -> Tjoin (a, b, loc)
 
+let tjoin' ?loc = function
+  | [] -> Tbot loc
+  | [x] -> x
+  | x :: xs -> List.fold_left (tjoin ?loc) x xs
+
 let tvjoin ?(base=Tbot None) vs =
   List.fold_left (fun t v -> tjoin t (Tvar v)) base vs
 
@@ -122,22 +127,18 @@ let subtype_cons env ~neg ~pos (cp,cploc) (cn,cnloc) =
   | Ok () -> ()
   | Error err -> raise (SubtypeError (make_err env (Sub err) (cp,cploc) (cn,cnloc)))
 
-(* add some flexvars to a join.
-   does not check levels, so level of resulting join may increase *)
-let join_flexvars lower vs =
-  match lower with
-  | Ltop l -> Ltop l
-  | Lower (flex, rigvars, cons) ->
-     Lower (Fvset.append flex vs, rigvars, cons)
+let lower_contains_fv fv lower =
+  List.exists (function
+    | Lflexvar a -> equal_flexvar a fv
+    | Lcons (Top, _) -> true
+    | _ -> false) lower
 
-let lower_contains_fv fv = function
-  | Ltop _ -> true
-  | Lower (flex, _, _) -> Fvset.mem fv flex
-
-let lower_of_rigid_bound env rv =
+let lower_of_rigid_bound env rv : lower =
   match env_rigid_bound env rv with
-  | None -> Ltop rv.loc
-  | Some c -> Lower(Fvset.empty, Rvset.empty, c)
+  | None -> [Lcons (Top, Option.value rv.loc ~default:Location.noloc)]
+  | Some c ->
+     c.conses |> List.map (fun (c,cloc) ->
+       Lcons (c, Option.value rv.loc ~default:cloc))
 
 (* Check whether a flex-flex constraint α ≤ β is already present via an upper bound of α *)
 let rec has_flex_upper (pv : flexvar) nv =
@@ -146,11 +147,6 @@ let rec has_flex_upper (pv : flexvar) nv =
   | Uflexvar pv' -> has_flex_upper pv' nv
   | Ugen {cons=_; higher_fvs} -> List.memq nv higher_fvs
   | Utop -> false
-
-type lower_part =
-  | Lflexvar of flexvar
-  | Lrigvar of rigvar
-  | Lcons of (flexvar, flex_lower_bound) Cons1.t Location.loc
 
 let upper_cons_map ~neg ~pos ((u,ul) : _ upper_cons Location.loc) : _ upper_cons Location.loc =
   u |> List.map (function
@@ -192,7 +188,7 @@ let upper_cons_is_top (cn : _ upper_cons) =
   | [Ucons Top] -> true
   | _ -> false
 
-let rec match_sub ~changes env (p : lower_part) ((cn : (flex_lower_bound, lower_part list ref) upper_cons), cnloc) : unit =
+let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list ref) upper_cons), cnloc) : unit =
   if upper_cons_is_top cn then ()
   else match p with
   | Lrigvar rv ->
@@ -201,7 +197,6 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (flex_lower_bound, lower_
        | Ok ds -> resolve_delayed_constraints ~changes env ds
        | Error () ->
           lower_of_rigid_bound env rv
-          |> parts_of_flex_lower_bound
           |> List.iter (fun l -> match_sub ~changes env l (cn, cnloc))
      with SubtypeError err ->
        (* FIXME update locations? Use rv.loc? *)
@@ -216,7 +211,7 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (flex_lower_bound, lower_
         (* FIXME: use hc instead of recomputing? *)
         subtype_cons env (cp,cploc) (cn,cnloc)
           ~neg:(fun p n -> subtype_lu ~changes env p (Uflexvar n))
-          ~pos:(fun p pr -> pr := !pr @ parts_of_flex_lower_bound p)
+          ~pos:(fun p pr -> pr := !pr @ p)
      | Error errs ->
         raise (SubtypeError (make_err_nocons env errs (cp, cploc) (cn, cnloc)))
      end
@@ -233,8 +228,8 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (flex_lower_bound, lower_
      let open struct
        type meet_pair =
          Meet_cons of
-           { cons_a: (flex_lower_bound, flexvar) Cons1.t;
-             cons_b: (flex_lower_bound, lower_part list ref) Cons1.t;
+           { cons_a: (lower, flexvar) Cons1.t;
+             cons_b: (lower, lower ref) Cons1.t;
              coe: (Cons1.head_coercion, Cons1.head_coercion) Either.t }
        | Meet_rv of
            { rigvar: rigvar;
@@ -375,17 +370,8 @@ and subtype_lpu ~changes env (p : lower_part) (n : upper) =
           subtype_lpu ~changes env p nv.upper
      end
 
-and subtype_lu ~changes env (p : flex_lower_bound) (n : upper) =
-  match p with
-  | Ltop loc ->
-     subtype_lpu ~changes env (Lcons (Top, Option.value loc ~default:Location.noloc)) n
-  | Lower (pflex, rigvars, cons) ->
-     Fvset.to_list pflex |> List.iter (fun pv ->
-       subtype_lpu ~changes env (Lflexvar pv) n);
-     Rvset.to_list rigvars |> List.iter (fun rv ->
-       subtype_lpu ~changes env (Lrigvar rv) n);
-     cons.conses |> List.iter (fun (c,loc) ->
-       subtype_lpu ~changes env (Lcons (c, loc)) n)
+and subtype_lu ~changes env (p : lower) (n : upper) =
+  p |> List.iter (fun p -> subtype_lpu ~changes env p n)
 
 and rotate_flex ~changes env (pv : flexvar) =
   match pv.upper with
@@ -422,7 +408,7 @@ and subtype_flex_flex ~changes env pv nv =
   end else begin
     let pv_cons, pv_higher_fvs = rotate_flex ~changes env pv in
     if Env_level.extends pv.level nv.level then begin
-      fv_set_lower ~changes nv (join_flexvars nv.lower (Fvset.single pv));
+      fv_set_lower ~changes nv (join_lower_part ~changes env nv.level nv.lower (Lflexvar pv));
       subtype_lu ~changes env (of_flexvar pv) nv.upper
     end else begin
       fv_set_upper ~changes pv (Ugen {cons=pv_cons; higher_fvs = nv::pv_higher_fvs});
@@ -431,109 +417,82 @@ and subtype_flex_flex ~changes env pv nv =
   end
 
 and join_lower_part ~changes env level lower ty =
-  (* lower is wf at level but ty may not be *)
-  match lower with
-  | Ltop _ -> lower
-  | Lower (fva, rva, consa) ->
-     match ty with
-     | Lflexvar fv ->
-        let fv =
-          if Env_level.extends fv.level level then fv
-          else let fv' = fresh_flexvar level in
-               noerror (fun () -> subtype_flex_flex ~changes env fv fv'); fv'
-        in
-        Lower (Fvset.add fva fv, rva, consa)
-     | Lrigvar rv ->
-        if Env_level.extends rv.level level then
-          Lower (fva, Rvset.add rva rv, consa)
-        else
-          join_lower ~changes env level lower (lower_of_rigid_bound env rv)
-     | Lcons (cb, cbloc) ->
-        let freshen (c, cloc) =
-          Cons1.map c
-            ~neg:(fun _ -> fresh_flexvar level)
-            ~pos:(fun _ -> bottom),
-          cloc
-        in
-        let join1 (ca, caloc) (cb, _cbloc) =
-          let neg vl vr =
-            noerror (fun () -> subtype_flex_flex ~changes env vl vr);
-            vl
-          in
-          let pos a b =
-            join_lower ~changes env level a b
-          in
-          Cons1.join ~neg ~pos ca cb, caloc (* FIXME loc *) in
-        let conses =
-          match
-            consa.conses |> List.partition_map (fun (ca, caloc) ->
-              match Cons1.sub_head ca cb with
-              | Le hc -> Left (Cons1.coerce_up hc ca, caloc)
-              | Un _ -> Right (ca, caloc))
-          with
-          | (ca1 :: ca), rest ->
-             (* Several types below cb. (ca is matchable) *)
-             rest @ [List.fold_left join1 ca1 (ca @ [cb, cbloc])]
-          | [], rest ->
-             let rec aux = function
-               | [] -> [join1 (freshen (cb, cbloc)) (cb, cbloc)]
-               | (ca, caloc) :: rest ->
-                  (* By antichain/tree, there is at most one ca s.t. cb <= ca *)
-                  match Cons1.sub_head cb ca with
-                  | Le hc -> join1 (ca, caloc) (Cons1.coerce_up hc cb, cbloc) :: rest
-                  | Un _ -> (ca, caloc) :: aux rest
-             in
-             aux rest
-        in
-        Lower (fva, rva, {conses; loc=consa.loc})
-
-and parts_of_flex_lower_bound ty =
+  let rec join_fv lower fv =
+    match lower with
+    | Lcons (Top, _) :: _ -> lower
+    | Lflexvar fv' :: rest when equal_flexvar fv fv'
+      (* alt: [has_flex_upper fv' fv] - is this better? *) ->
+       Lflexvar fv :: rest
+    | part :: rest -> part :: join_fv rest fv
+    | [] ->
+       let fv =
+         if Env_level.extends fv.level level then fv
+         else
+           let fv' = fresh_flexvar level in
+           noerror (fun () -> subtype_flex_flex ~changes env fv fv'); fv'
+       in
+       [Lflexvar fv]
+  in
+  let rec join_rv lower rv =
+    match lower with
+    | Lcons (Top, _) :: _ -> lower
+    | Lrigvar rv' :: _ when equal_rigvar rv rv' -> lower
+    | part :: rest -> part :: join_rv rest rv
+    | [] ->
+       assert (Env_level.extends rv.level level);
+       [Lrigvar rv]
+  in
+  let join1 (ca, caloc) (cb, _cbloc) = (* ca assumed matchable & correct level *)
+    let neg vl vr =
+      noerror (fun () -> subtype_flex_flex ~changes env vl vr);
+      vl
+    in
+    let pos a b = join_lower ~changes env level a b in
+    Cons1.join ~neg ~pos ca cb, caloc (* FIXME loc *)
+  in
+  let rec join_cons lower ca_acc cb cb_loc =
+    match lower with
+    | (Lflexvar _ | Lrigvar _) as part :: rest -> part :: join_cons rest ca_acc cb cb_loc
+    | Lcons (ca, ca_loc) as part :: rest ->
+       begin match Cons1.sub_head cb ca with
+       | Le hc -> (* cb <= ca, only once because antichain *)
+          Lcons (join1 (ca, ca_loc) (Cons1.coerce_up hc cb, cb_loc)) :: rest
+       | Un _ ->
+          match Cons1.sub_head ca cb with
+          | Le hc -> (* ca <= cb *)
+             join_cons rest ((Cons1.coerce_up hc ca, ca_loc) :: ca_acc) cb cb_loc
+          | Un _ ->
+             part :: join_cons rest ca_acc cb cb_loc
+       end
+    | [] ->
+       (* Must make cb matchable & at correct level *)
+       let cons =
+         Cons1.map cb
+           ~neg:(fun v -> let v' = fresh_flexvar level in noerror (fun () -> subtype_flex_flex ~changes env v' v); v')
+           ~pos:(fun l -> join_lower ~changes env level bottom l),
+         cb_loc
+       in
+       let cons = List.fold_left (fun acc ca -> join1 ca acc) cons ca_acc in
+       [Lcons cons]
+  in
   match ty with
-  | Ltop loc ->
-     [Lcons (Top, Option.value loc ~default:Location.noloc)]
-  | Lower (fvb, rvb, consb) ->
-     let parts =
-       (Fvset.to_list fvb |> List.map (fun v -> Lflexvar v)) @
-       (Rvset.to_list rvb |> List.map (fun v -> Lrigvar v)) @
-       (consb.conses |> List.map (fun c -> Lcons c))
-     in
-     parts
+  | Lflexvar fv -> join_fv lower fv
+  | Lrigvar rv ->
+     if Env_level.extends rv.level level
+     then join_rv lower rv
+     else join_lower ~changes env level lower (lower_of_rigid_bound env rv)
+  | Lcons (cb, cbloc) -> join_cons lower [] cb cbloc
 
-and flex_lower_bound_of_parts ps =
-  List.fold_left (fun (fvb, rvb, consb) ty ->
-    match ty with
-    | Lflexvar v -> Fvset.add fvb v, rvb, consb
-    | Lrigvar v -> fvb, Rvset.add rvb v, consb
-    | Lcons c -> fvb, rvb, {consb with Cons.conses = consb.Cons.conses @ [c]})
-    (Fvset.empty, Rvset.empty, Cons.bottom)
-    ps
-  |> fun (fv,rv,c) -> Lower (fv, rv, c)
-
-and join_lower ~changes env level lower ty =
-  match ty with
-  | Ltop _ -> ty
-  | Lower (fvb, rvb, consb) ->
-     let parts =
-       (Fvset.to_list fvb |> List.map (fun v -> Lflexvar v)) @
-       (Rvset.to_list rvb |> List.map (fun v -> Lrigvar v)) @
-       (consb.conses |> List.map (fun c -> Lcons c))
-     in
-     List.fold_left (join_lower_part ~changes env level) lower parts
+and join_lower ~changes env level lower (ty : lower) =
+  List.fold_left (join_lower_part ~changes env level) lower ty
 
 let join_simple env a b =
-  match a, b with
-  | Lower(fva, rva, consa), Lower(fvb, rvb, consb)
-       when Cons.is_bottom consa || Cons.is_bottom consb ->
-     (* easy case: only one side has cons, so no nontrivial joining to do *)
-     Lower(Fvset.append fva fvb,
-           Rvset.append rva rvb,
-           if Cons.is_bottom consa then consb else consa)
-  | _ ->
-     let changes = ref [] in
-     let r = bottom in
-     let r = join_lower ~changes env (env_level env) r a in
-     let r = join_lower ~changes env (env_level env) r b in
-     r
+  (* FIXME: start with a not bottom. (Improve matchability) *)
+  let changes = ref [] in
+  let r = bottom in
+  let r = join_lower ~changes env (env_level env) r a in
+  let r = join_lower ~changes env (env_level env) r b in
+  r
 
 let check_simple t =
   (* FIXME Tjoin / Tcons *)
@@ -566,14 +525,13 @@ let rec instantiate_flex env vars body =
     fvars vars;
   open_typ ~neg:fvneg ~pos:fvpos 0 body
 
-and ptyp_to_lower ~simple env : ptyp -> flex_lower_bound = function
+(* FIXME: what is the matchability of contravariant parts of this? *)
+and ptyp_to_lower ~simple env : ptyp -> lower = function
   | Tsimple t -> t
-  | Tcons (Top, loc) -> Ltop (Some loc)
-  | Tbot l ->
-     Lower(Fvset.empty, Rvset.empty, Cons.bottom_loc (Option.value l ~default:Location.noloc))
+  | Tbot _loc -> [] (*FIXME: loc?*)
   | Tcons (cons, loc) ->
      let cons = Cons1.map ~neg:(ntyp_to_flexvar ~simple env) ~pos:(ptyp_to_lower ~simple env) cons in
-     Lower(Fvset.empty, Rvset.empty, Cons.make ~loc cons)
+     [Lcons (cons, loc)]
   | Tvar (Vbound _) -> intfail "Vbound"
   | Tvar (Vrigid rv) -> of_rigvar rv
   | Tjoin (a, b, _loc) -> join_simple env (ptyp_to_lower ~simple:true env a) (ptyp_to_lower ~simple:true env b)
@@ -626,6 +584,8 @@ and ntyp_to_upper ~simple env : ntyp -> upper = function
      let body = open_typ ~neg ~pos 0 body in
      ntyp_to_upper ~simple env body
 
+(* FIXME: maybe this should always be fresh? For matchability?
+   There should maybe be a matchability counterex here? *)
 and ntyp_to_flexvar ~simple env (t : ntyp) =
   match ntyp_to_upper ~simple env t with
   | Utop -> fresh_flexvar (env_level env)
@@ -650,19 +610,21 @@ let enter_rigid env vars rig_names =
   let rig_defns = IArray.map (fun (name, b) ->
      let upper =
        match b with
-       | None -> Ltop (Some (snd name))
+       | None -> [Lcons (Top, snd name)]
        | Some b -> ptyp_to_lower ~simple:true temp_env (openrig b) in
      match upper with
-     | Ltop _ ->
+     | [Lcons (Top, _)] ->
         { name; upper = None }
-     | Lower (fvs, rvs, cons) ->
+     | lower ->
        (* FIXME: can you actually hit this?
           Try with a higher-rank type where the outer rank gets instantiated.
           Maybe change the type of the upper bound in parsed types.
           (to reflect its Tconsness)*)
-        assert (Fvset.is_empty fvs);
-        assert (Rvset.is_empty rvs);
-        { name; upper = Some cons }) vars in
+        let conses = lower |> List.map (function
+          | Lcons c -> c
+          | Lrigvar _ | Lflexvar _ -> assert false)
+        in
+        { name; upper = Some {conses; loc=Location.noloc (*FIXME*)} }) vars in
   let env = Env_types { level; rig_names; rig_defns; rest = env} in
   env, openrig
 
@@ -740,10 +702,9 @@ let rec match_ptyp ~loc env (p : ptyp) (heads : (_ * ntyp ref, _ * ptyp ref) upp
      let ref_pairs = ref [] in
      let shead = upper_cons_map ~neg:instneg ~pos:(fun (_,v) -> let r = ref [] in ref_pairs := (v,r) :: !ref_pairs; r) (heads,loc) in
      ptyp_to_lower ~simple:false env t
-     |> parts_of_flex_lower_bound
      |> List.iter (fun l ->
        match_sub ~changes:(ref []) env l shead);
-     !ref_pairs |> List.iter (fun (v, r) -> v := join_ptyp env !v (Tsimple (flex_lower_bound_of_parts !r)))
+     !ref_pairs |> List.iter (fun (v, r) -> v := join_ptyp env !v (Tsimple !r))
 
 let match_typ env ty loc head =
   let head = Cons1.map ~neg:(fun x -> x, ref (Tcons (Top, Location.noloc))) ~pos:(fun x -> x, ref (Tbot None)) head in
@@ -765,25 +726,24 @@ let match_typ env ty loc head =
    Used only for optimisations, to avoid generalising a when x <= a <= x.
    Not a bug if it spuriously returns false sometimes (but leads to uglier types) *)
 (* FIXME: can this diverge? *)
-let rec clearly_subtype env (a : flexvar) b : bool =
-  match b with
-  | Ltop _ -> true
-  | Lower(flexvars, rigvars, cons) ->
-  Fvset.mem a flexvars ||
+let rec clearly_subtype env (a : flexvar) (b : lower) : bool =
+  lower_contains_fv a b ||
   match a.upper with
   | Utop -> false
   | Uflexvar a -> clearly_subtype env a b
   | Ugen {cons=(cn,cnloc); higher_fvs} ->
     List.exists (fun a' -> clearly_subtype env a' b) higher_fvs ||
-    cn |> List.for_all (function
-      | Urigvar (rv, []) -> Rvset.mem rv rigvars
-      | Urigvar (_, _ :: _) -> false
-      | Ucons cn ->
-         cons.conses |> List.exists (fun cp ->
+    cn |> List.for_all (fun u ->
+      b |> List.exists (fun l ->
+        match u, l with
+        | Urigvar (rv, []), Lrigvar rv' -> equal_rigvar rv rv'
+        | Ucons cn, Lcons cp ->
            let sub a b = if not (clearly_subtype env a b) then raise Exit in
-           match subtype_cons env ~neg:sub ~pos:sub (cn,cnloc) cp with
+           begin match subtype_cons env ~neg:sub ~pos:sub (cn,cnloc) cp with
            | exception (SubtypeError _ | Exit) -> false
-           | () -> true))
+           | () -> true
+           end
+        | _ -> false))
 
 (* This function could be optimised by skipping subtrees that have no use
    of the outermost level, Remy-style *)
@@ -855,45 +815,50 @@ let is_visited_neg visit fv =
       (not counting UBvar upper bounds at higher levels)
    (Only applied to flexvars at the current level) *)
 
-let remove_flexvar fv = function
-  | Lower(fvs, rvs, cons) when Fvset.mem fv fvs ->
-     Lower(Fvset.filter ~f:(fun v -> not (equal_flexvar v fv)) fvs, rvs, cons)
-  | p -> p
+let remove_flexvar fv lower =
+  List.filter (function Lflexvar a when equal_flexvar fv a -> false | _ -> true) lower
 
-let optimise_lower env = function
-  | Ltop _ as p -> p
-  | Lower(flexvars, rigvars, cons) ->
-     (* MLsub-style entailment optimisation: in (α ∧ {foo: β}) → (α ∨ {foo: β}), α is redundant *)
-     let flexvars = Fvset.filter flexvars ~f:(fun fv ->
-       not (clearly_subtype env fv (Lower(Fvset.empty, rigvars, cons)))) in
-     Lower(flexvars, rigvars, cons)
-
-let rec expand_lower visit ~changes ?(vexpand=[]) env = function
-  | Ltop _ as p -> p
-  | Lower(flexvars, rigvars, cons) as _orig ->
-     let level = env_level env in
-     let fv_here = Fvset.filter flexvars ~f:(fun fv -> Env_level.equal fv.level level) in
-     Fvset.iter fv_here ~f:(fun pv ->
-       fv_gen_visit_pos env visit pv (function
-         | Recursive_visit ->
-            (* recursive occurrences are fine if not under a constructor *)
-            if not (List.memq pv vexpand)
-            then unimp "positive recursion on flexvars"
-         | First_visit ->
-            let _, _ = rotate_flex ~changes env pv in
-            (* Add pv to expand so we ignore it if seen before the next ctor *)
-            let lower = expand_lower visit ~changes ~vexpand:(pv::vexpand) env pv.lower in
-            ignore (fv_maybe_set_lower ~changes pv (remove_flexvar pv lower))));
-     let cons = Cons.map ~neg:(expand_fv_neg visit ~changes env) ~pos:(expand_lower visit ~changes env) cons in
-     let res =
-       List.fold_left
-         (fun acc fv -> join_lower ~changes env level acc fv.lower)
-         (Lower(flexvars, rigvars, cons))
-         (fv_here :> flexvar list)
-       |> optimise_lower env
-     in
-     res
-
+let rec expand_lower visit ~changes ?(vexpand=[]) env orig_lower =
+  let level = env_level env in
+  let lower =
+    orig_lower |> List.map (function
+      | Lflexvar pv when Env_level.equal pv.level level ->
+          fv_gen_visit_pos env visit pv (function
+            | Recursive_visit ->
+               (* recursive occurrences are fine if not under a constructor *)
+               if not (List.memq pv vexpand)
+               then unimp "positive recursion on flexvars"
+            | First_visit ->
+               let _, _ = rotate_flex ~changes env pv in
+               (* Add pv to expand so we ignore it if seen before the next ctor *)
+               let lower = expand_lower visit ~changes ~vexpand:(pv::vexpand) env pv.lower in
+               ignore (fv_maybe_set_lower ~changes pv (remove_flexvar pv lower)));
+          Lflexvar pv
+      | Lflexvar _ | Lrigvar _ as l -> l
+      | Lcons (c, cloc) ->
+         Lcons (Cons1.map c ~neg:(expand_fv_neg visit ~changes env) ~pos:(expand_lower visit ~changes env), cloc))
+  in
+  let lower =
+    List.fold_left
+      (fun acc l ->
+        match l with
+        | Lflexvar fv when Env_level.equal fv.level level ->
+           join_lower ~changes env level acc fv.lower
+        | _ -> acc)
+      lower
+      lower
+  in
+  let lower_rest, fv_here =
+    lower |> List.partition_map (function
+      | Lflexvar fv when Env_level.equal fv.level level -> Right fv
+      | l -> Left l)
+  in
+  let fv_here =
+    fv_here
+    |> List.filter (fun fv -> not (clearly_subtype env fv lower_rest))
+    |> List.map (fun x -> Lflexvar x)
+  in
+  lower_rest @ fv_here
 
 and expand_fv_neg visit ~changes env nv =
   fv_gen_visit_neg env visit nv (function
@@ -910,7 +875,7 @@ and expand_fv_neg visit ~changes env nv =
              let cons =
                upper_cons_map cons
                  ~neg:(fun x -> let x' = expand_lower visit ~changes env x in
-                                if not (equal_flex_lower_bound x x') then change := true;
+                                if not (equal_lower x x') then change := true;
                                 x')
                  ~pos:(expand_fv_neg visit ~changes env)
              in
@@ -924,7 +889,7 @@ and expand_fv_neg visit ~changes env nv =
    rigvars at the current level. *)
 
 type ('n, 'p) promotion_policy =
-  | Policy_hoist : env -> (flexvar, flex_lower_bound) promotion_policy
+  | Policy_hoist : env -> (flexvar, lower) promotion_policy
   | Policy_generalise : (zero, zero) promotion_policy
 
 type ('n, 'p) promote_info = {
@@ -946,7 +911,7 @@ type expanded_upper =
   (* EUB_var v - v at same level *)
   | EUB_var of flexvar
   (* EUB_cons (c, vs) - none of vs at same level *)
-  | EUB_cons of (flex_lower_bound, flexvar) ctor_ty_neg * flexvar list
+  | EUB_cons of (lower, flexvar) ctor_ty_neg * flexvar list
 
 (* FIXME: delete this function. Invariant should be true once higher Uflexvars rotated *)
 (*
@@ -995,39 +960,41 @@ let get_upper (type n) (type p) (s : (n, p) promote_info) (fv : flexvar) =
         let rigvars_n = Rvset.of_list rvs in
         EUB_cons ({cons_n; rigvars_n}, vars)
 
-let promote_rigvars s rvs =
-  rvs |> Rvset.to_list |> List.map (fun (rv:rigvar) ->
-    if Env_level.equal rv.level s.level
-    then ((match Vector.get s.bvars rv.var with Gen_rigid r -> assert (equal_rigvar rv r) | _ -> assert false);
-          Vbound {index=s.index; var=rv.var; loc=rv.loc})
-    else Vrigid rv)
+let promote_rigvar s (rv : rigvar) =
+  if Env_level.equal rv.level s.level
+  then ((match Vector.get s.bvars rv.var with Gen_rigid r -> assert (equal_rigvar rv r) | _ -> assert false);
+        Vbound {index=s.index; var=rv.var; loc=rv.loc})
+  else Vrigid rv
 
 type ('n, 'p) promote_flexvar_result =
   | Generalised : int -> (zero, zero) promote_flexvar_result
-  | Hoisted : flexvar -> (flexvar, flex_lower_bound) promote_flexvar_result
+  | Hoisted : flexvar -> (flexvar, lower) promote_flexvar_result
 
 let rec promote_lower :
-  type n p . (n, p) promote_info -> flex_lower_bound -> (n, p) typ =
-  fun s lb -> match lb with
-  | Ltop loc -> Tcons (Top, Option.value loc ~default:Location.noloc)
-  | Lower (flexvars, rigvars, cons) ->
-     (* FIXME: variable sort order below *)
-     let cons = Cons.map ~neg:(promote_fv_neg s) ~pos:(promote_lower s) cons in
-     let rigvars = promote_rigvars s rigvars in
-     let t = tvjoin ~base:(tcons' cons) (List.sort compare rigvars) in
-     match List.filter_map (promote_flexvar s) (flexvars :> flexvar list) with
-     | [] -> t
-     | flexvars ->
-        match s.policy with
-        | Policy_generalise ->
-           let flexvars = List.map (fun (Generalised var) -> Vbound {index=s.index; var; loc=None}) flexvars in
-           (* FIXME use a better sort *)
-           tvjoin ~base:t (List.sort compare flexvars)
-        | Policy_hoist _env ->
-           let flexvars = List.map (fun (Hoisted fv) -> fv) flexvars in
-           (* FIXME: This can create joins between Tcons containing Vbound and flexvars.
-              Is this OK? They can only come up in explicit polymorphism w/ unannotated deps *)
-           tjoin t (Tsimple (of_flexvars (Fvset.of_list flexvars)))
+  type n p . (n, p) promote_info -> lower -> (n, p) typ =
+  fun s lower ->
+  lower
+  |> List.filter_map (function
+    | Lcons (c,cloc) ->
+       Some ((0,0), tcons (Cons1.map ~neg:(promote_fv_neg s) ~pos:(promote_lower s) c, cloc))
+    | Lrigvar rv ->
+       let v = promote_rigvar s rv in
+       let k = match v with Vrigid rv -> (1, rv.var) | Vbound v -> (2, v.var) in
+       Some (k,Tvar v)
+    | Lflexvar fv ->
+       match promote_flexvar s fv with
+       | None -> None
+       | Some r ->
+          match s.policy with
+          | Policy_generalise ->
+             let Generalised var = r in
+             Some ((2,var),Tvar (Vbound {index=s.index; var; loc=None}))
+          | Policy_hoist _env ->
+             let Hoisted fv = r in
+             Some ((2,0),Tsimple [Lflexvar fv]))
+  |> List.sort (fun (ka,_) (kb,_) -> compare ka kb)
+  |> List.map snd
+  |> tjoin'
 
 and promote_fv_neg :
   type n p . (n, p) promote_info -> flexvar -> (p, n) typ =
@@ -1041,7 +1008,7 @@ and promote_fv_neg :
        let cons = Cons.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s) cons_n in
        (* FIXME: can this create contravariant joins?
           (Previous version dropped rigvars_gen here, which is dubious) *)
-       let rigvars = promote_rigvars s rigvars_n in
+       let rigvars = List.map (promote_rigvar s) (Rvset.to_list rigvars_n) in
        tvjoin ~base:(tcons' cons) rigvars
      | EUB_cons (_, _ :: _) ->
         (* should have been promote_flexvar'd *)
@@ -1103,7 +1070,7 @@ and promote_flexvar :
             | EUB_cons ({cons_n;rigvars_n}, vars) ->
                let cons_n = Cons.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s) cons_n in
                (* FIXME: can this create contravariant joins? *)
-               let rigvars = promote_rigvars s rigvars_n in
+               let rigvars = List.map (promote_rigvar s) (Rvset.to_list rigvars_n) in
                vars, tvjoin ~base:(tcons' cons_n) rigvars
             | EUB_var _ -> assert false
           in
@@ -1144,14 +1111,14 @@ let promote ~policy ~rigvars ~env ~(map : neg:_ -> pos:_ -> _ -> _) ty =
     let pos_simple ~index:_ t =
       let t = ptyp_to_lower ~simple:true env t in
       let t' = expand_lower visit ~changes env t in
-      if not (equal_flex_lower_bound t t') then
+      if not (equal_lower t t') then
         changes := Change_expanded_mark :: !changes;
       Tsimple t'
     in
     let neg ~mode:_ ~index t = map_typ_simple ~neg:pos_simple ~pos:neg_simple ~index t in
     let pos ~mode:_ ~index t = map_typ_simple ~neg:neg_simple ~pos:pos_simple ~index t in
     let ty = map ~neg ~pos prev_ty in
-    if !log_changes || visit > 90 then Format.printf "changed: %a\n\n" pp_changes !changes;
+    if !log_changes || visit > 90 then Format.printf "changed: %a\n\n%!" pp_changes !changes;
     if !changes = [] then
       (visit, ty)
     else

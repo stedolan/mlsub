@@ -1506,8 +1506,8 @@ fn(f) { fn(a,b) { let z = f(b); if true { b } else { a } } }
 
 fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
 > fn (f) { fn (a, b) { let z = f(b); if true { a } else { b } } }
->   fn [A, B](f: (A) -> any) -> (B, A) -> A | B {
->     fn (a: B, b: A) -> A | B {
+>   fn [A, B](f: (A) -> any) -> (B, A) -> B | A {
+>     fn (a: B, b: A) -> B | A {
 >       let z : any = f(b);
 >       if true {
 >         a
@@ -1516,7 +1516,7 @@ fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
 >       }
 >     }
 >   }
-> [A, B] ((A) -> any) -> (B, A) -> A | B
+> [A, B] ((A) -> any) -> (B, A) -> B | A
 > let  = %yield(fun (f) ret {
 >   ret(fun (a, b) ret2 {
 >     let x = f(b);
@@ -2119,4 +2119,4 @@ fn(x) {
 > done
 
 
-> STATS: fix: 120, flex: 1555
+> STATS: fix: 124, flex: 1555
