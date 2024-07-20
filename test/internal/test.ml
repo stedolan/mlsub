@@ -36,11 +36,11 @@ let fresh_flow lvl =
 
 
 let match_as_fn env f =
-  let ((), arg), ((), res) =
-    match_typ env f Location.noloc (func [()] ())
-    |> function Ok (Func (a, r)) -> List.hd a, r 
-              | _ -> assert false in
-  arg, res
+  let arg = ref (Tcons (Top, Location.noloc)) in
+  let ret = ref (Tbot None) in
+  match_ptyp ~loc:Location.noloc env f [func [arg] ret]
+  |> function Ok () -> !arg, !ret
+            | _ -> assert false
 
 let tcons cons = Tcons (cons, Location.noloc)
 
@@ -67,7 +67,7 @@ let choosy () =
   let root = gen env lvl ty in
   dump (styp_of_flex_lower_bound root.lower);
   dump (gen_subst env lvl root)
-*)           
+*)
 
 let lbs () =
   next_flexvar_id := 0;
@@ -95,7 +95,7 @@ let match_bug () =
   let a1, a2 = match_as_fn env ap in
   subtype env a2 (Tbot None) |> ok;
   dump env (tcons (func [a1; b1; an] (tcons (tuple [a2; b2; bp]))))
-  
+
 
 let chain () =
   next_flexvar_id := 0;
@@ -153,7 +153,7 @@ let poly () =
   print_endline "t3 <= t1, t2";
   subtype env (t3 ()) (t2 ()) |> ok;
   subtype env (t3 ()) (t1 ()) |> ok;
-  let sub = 
+  let sub =
     match subtype env (t1 ()) (t3 ()) with
     | Ok () -> true
     | Error _ -> false in

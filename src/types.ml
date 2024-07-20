@@ -671,14 +671,14 @@ let meet_ntyp env (p : ntyp) (q : ntyp) : ntyp =
      subtype_lu ~changes:(ref []) env (of_flexvar v) (ntyp_to_upper ~simple:false env q);
      Tsimple v
 
-let rec match_ptyp ~loc env (p : ptyp) (heads : (_ * ntyp ref, _ * ptyp ref) upper_cons) =
+let rec match_ptyp ~loc env (p : ptyp) (heads : (ntyp ref, ptyp ref) upper_cons) =
   match p with
   | Tcons (c, cloc) ->
      begin match upper_find_cons c heads with
      | Ok (_hc, head) ->
         subtype_cons env (c, cloc) (head, loc)
-          ~neg:(fun (_,v) t -> v := meet_ntyp env !v t)
-          ~pos:(fun t (_,v) -> v := join_ptyp env !v t)
+          ~neg:(fun v t -> v := meet_ntyp env !v t)
+          ~pos:(fun t v -> v := join_ptyp env !v t)
      | Error err ->
         raise (SubtypeError (make_err_nocons env err (c, cloc) (heads, loc)))
      end
@@ -688,27 +688,24 @@ let rec match_ptyp ~loc env (p : ptyp) (heads : (_ * ntyp ref, _ * ptyp ref) upp
      let body = instantiate_flex env vars body in
      match_ptyp ~loc env body heads
   | t ->
-     let instneg (_,v) =
+     let instneg v =
        let fv = fresh_flexvar (env_level env) in
        v := meet_ntyp env !v (Tsimple fv);
        of_flexvar fv in
      let ref_pairs = ref [] in
-     let shead = upper_cons_map ~neg:instneg ~pos:(fun (_,v) -> let r = ref [] in ref_pairs := (v,r) :: !ref_pairs; r) (heads,loc) in
+     let shead = upper_cons_map ~neg:instneg ~pos:(fun v -> let r = ref [] in ref_pairs := (v,r) :: !ref_pairs; r) (heads,loc) in
      ptyp_to_lower ~simple:false env t
      |> List.iter (fun l ->
        match_sub ~changes:(ref []) env l shead);
      !ref_pairs |> List.iter (fun (v, r) -> v := join_ptyp env !v (Tsimple !r))
 
-let match_typ env ty loc head =
-  let head = Cons1.map ~neg:(fun x -> x, ref (Tcons (Top, Location.noloc))) ~pos:(fun x -> x, ref (Tbot None)) head in
-  wf_ptyp env ty;
-  match match_ptyp ~loc env ty [Ucons head] with
-  | exception SubtypeError e ->
+let match_ptyp ~loc env ty heads =
+  let heads = List.map (fun x -> Ucons x) heads in
+  match match_ptyp ~loc env ty heads with
+  | () -> Ok ()
+  | exception (SubtypeError e) ->
      assert (fst e.env == env);
      Error e
-  | () ->
-     wf_ptyp env ty;
-     Ok (Cons1.map ~neg:(fun (x, r) -> x, !r) ~pos:(fun (x, r) -> x, !r) head)
 
 (*
  * Generalisation

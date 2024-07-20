@@ -296,15 +296,15 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
   | Proj (e, (field, loc)) ->
      let ty, e = infer env ~mode e in
      let f = Field_named field in
-     let (), tyf =
+     let r = ref (Tbot None) in
+     let tyf =
        match
-        match_typ env ty eloc
-         (Record (None,
-                  { fields = FieldMap.singleton f ();
-                   fnames = [Field_named field]; fopen = `Open }))
+        match_ptyp ~loc:eloc env ty
+         [Record (None,
+                  { fields = FieldMap.singleton f r;
+                    fnames = [Field_named field]; fopen = `Open })]
        with
-       | Ok (Record (_, r)) -> FieldMap.find f r.fields
-       | Ok _ -> assert false
+       | Ok () -> !r
        | Error c -> fail eloc (Conflict (`Expr, c)) in
      inferred tyf;
      Proj (e, (field, loc))
@@ -391,16 +391,15 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
 
   | App (f, args) ->
      let fty, f = infer env ~mode f in
-     let tyargs, ((), tyret) =
-       match
-        match_typ env fty eloc (Func (args, ()))
-       with
-       | Ok (Func (a, r)) -> a, r
-       | Ok _ -> assert false
+     let tyargs = List.map (fun _ -> ref (Tcons (Top, Location.noloc))) args in
+     let tyret = ref (Tbot None) in
+     let () =
+       match match_ptyp ~loc:eloc env fty [Func (tyargs, tyret)] with
+       | Ok () -> ()
        | Error e -> fail eloc (Conflict (`Expr, e)) in
      (* FIXME: don't ignore param names *)
-     let args = List.map (fun ((_,e), t) -> check env ~mode e (Checking t)) tyargs in
-     inferred tyret;
+     let args = List.map2 (fun (_,e) t -> check env ~mode e (Checking !t)) args tyargs in
+     inferred !tyret;
      App (f, args)
 
   | Match ((es, matchloc), cases) ->

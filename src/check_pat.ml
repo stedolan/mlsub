@@ -250,12 +250,12 @@ let rec split_cases :
        | Sp_fields fields ->
           let loc, fnames = collect_fields fields in
           (* FIXME loc? *)
+          let fnames = Tuple_fields.map_fields (fun _ () -> ref (Tbot None)) fnames in
           let cons = Cons1.Record(None, fnames) in
-          begin match Types.match_typ env typ matchloc cons with
-          | Ok (Record (_, ftypes)) ->
-             let ftypes = map_fields (fun _ ((),t) -> t) ftypes in
+          begin match Types.match_ptyp ~loc:matchloc env typ [cons] with
+          | Ok () ->
+             let ftypes = map_fields (fun _ t -> !t) fnames in
              Fields (split_fields ftypes fields)
-          | Ok _ -> assert false
           | Error e -> Error.fail loc (Conflict (`Pat, e))
           end
        | Sp_cases (tags, cases, def) ->
@@ -317,11 +317,10 @@ let rec split_cases :
              let conses =
                tags |> List.map (fun (tag,_) ->
                  let _, fields = SymMap.find tag inferred_cases in
-                 let fields = Tuple_fields.map_fields (fun _ x -> (),x) fields in
-                 Ucons (Cons1.Record(Some tag, fields))) in
+                 Cons1.Record(Some tag, fields)) in
              begin match Types.match_ptyp ~loc env typ conses with
-             | () -> ()
-             | exception (Types.SubtypeError e) -> Error.fail matchloc (Conflict (`Pat, e))
+             | Ok () -> ()
+             | Error e -> Error.fail matchloc (Conflict (`Pat, e))
              end;
              let case_list =
                tags
