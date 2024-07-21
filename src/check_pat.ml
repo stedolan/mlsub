@@ -159,8 +159,8 @@ let rec split_head_row :
 let split_head head_typ (m : _ pat_matrix) =
   List.fold_right (split_head_row head_typ) m (None, Sp_any [])
 
-let any : pat = (Some Pany, noloc)
-let pat_or p q : pat = (Some (Por (p, q)), noloc)
+let any : pat = (Some Pany, Location.noloc)
+let pat_or p q : pat = (Some (Por (p, q)), Location.noloc)
 
 let rec split_cases :
   type w . matchloc:_ -> env:_ -> (w, ptyp * Typedefs.gen_level) Clist.t -> w pat_matrix -> w dectree =
@@ -301,8 +301,8 @@ let rec split_cases :
           | exception Exit ->
              begin match def with
              | [] -> ()
-             | _row :: _ ->
-                Error.fail Location.noloc(*FIXME*) (Illformed_pat `Unknown_cases)
+             | (_, (_, act)) :: _ ->
+                Error.fail act.pat_loc (Illformed_pat `Unknown_cases)
              end;
              let inferred_cases =
                cases |>
@@ -355,14 +355,14 @@ let rec counterexamples :
      counterexamples_fields ~tag:None len fields
   | _ :: len, Cases (cases, defaults) ->
      List.concat_map (fun (tag, fields) ->
-       counterexamples_fields ~tag:(Some (tag, noloc)) len fields) cases
+       counterexamples_fields ~tag:(Some (tag, Location.noloc)) len fields) cases
      @
      match defaults with
      | Some (tags, dt) when not dt.total ->
         let case_pats : pat list =
           List.map (fun (tag, fields) ->
-             Some (Ptuple (Some (tag, noloc),
-                           map_fields (fun _ () -> any) fields)), noloc) tags
+             Some (Ptuple (Some (tag, Location.noloc),
+                           map_fields (fun _ () -> any) fields)), Location.noloc) tags
         in
         let head = List.fold_left pat_or (List.hd case_pats) (List.tl case_pats) in
         counterexamples len dt
@@ -380,7 +380,7 @@ and counterexamples_fields :
       |> Clist.to_list
       |> Tuple_fields.fields_of_list ~fopen
     in
-    Clist.((Some (Ptuple (tag, fields)), noloc) :: rest))
+    Clist.((Some (Ptuple (tag, fields)), Location.noloc) :: rest))
 
 
 (*

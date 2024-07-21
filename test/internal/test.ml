@@ -15,6 +15,8 @@ let tuple xs = Cons1.Record (None, Tuple_fields.(collect_fields (List.map (fun x
 
 let nope _ = assert false
 
+let noloc = Location.noloc
+
 let dump env (t : ptyp) =
   dump t;
   flush stdout;

@@ -809,14 +809,10 @@ let rec wf_typ : 'pos 'neg .
  * Unparsing: converting a typ back to a Exp.tyexp
  *)
 
-let noloc : Location.t =
- [{ loc_start = {pos_fname="_";pos_lnum=0;pos_cnum=0;pos_bol=0};
-    loc_end = {pos_fname="_";pos_lnum=0;pos_cnum=0;pos_bol=0} }]
-
-let mktyexp t = (Some t, noloc)
+let mktyexp t = (Some t, Location.noloc)
 
 let named_type s : Exp.tyexp' =
-  Tnamed ({label=s; shift=0}, noloc)
+  Tnamed ({label=s; shift=0}, Location.noloc)
 
 let unparse_cons ~neg ~pos (ty,_tyloc) =
   let open Cons1 in
@@ -826,7 +822,7 @@ let unparse_cons ~neg ~pos (ty,_tyloc) =
     | Int -> named_type "int"
     | String -> named_type "string"
     | Record (tag, fs) ->
-       Trecord (Option.map (fun t -> t, noloc) tag,
+       Trecord (Option.map (fun t -> t, Location.noloc) tag,
                 Tuple_fields.map_fields (fun _ t -> pos t) fs)
     | Func (args, ret) ->
        Tfunc (List.map neg args, pos ret)
@@ -904,7 +900,7 @@ and unparse_bounds :
   let vars = IArray.map (fun ((s,l), b) -> (freshen s,l), b) vars in
   let ext = IArray.map (fun ((s,_),_) -> s) vars :: ext in
   (env,ext), IArray.map (fun ((s,_), bound) ->
-       let s = (s, noloc) in
+       let s = (s, Location.noloc) in
        match bound with
        | None | Some (Tcons (Top, _)) ->
           s, None

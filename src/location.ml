@@ -26,6 +26,10 @@ let noloc : t =
   let loc : Lexing.position = {pos_fname="_";pos_lnum=0;pos_cnum=0;pos_bol=0} in
   [{ loc_start = loc; loc_end = loc}]
 
+let fixme s : t =
+  let loc : Lexing.position = {pos_fname="FIXME-"^s;pos_lnum=0;pos_cnum=0;pos_bol=0} in
+  [{ loc_start = loc; loc_end = loc}]
+
 let mark : t=
   let loc : Lexing.position = {pos_fname="MARK";pos_lnum=1;pos_cnum=0;pos_bol=0} in
   [{ loc_start = loc; loc_end = loc}]

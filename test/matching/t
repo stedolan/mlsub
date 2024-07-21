@@ -109,7 +109,9 @@ fn(x) { match x, x { a, b, c => 2 } }
 
 fn(x) { match x { Foo => 1 | _ => 2 } }
 > fn (x) { match x { Foo => 1 | _ => 2 } }
-> _:0: Cannot determine which cases this pattern matches
+> test:1: Cannot determine which cases this pattern matches
+>   fn(x) { match x { Foo => 1 | _ => 2 } }
+>                                ^
 
 fn(x) { match x { (a | Foo) => 1 } }
 > fn (x) { match x { (a | Foo) => 1 } }

@@ -450,7 +450,9 @@ let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x
 > This any comes from test:1:
 >   let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
 >                              ^
-> but is used as nothing at _:0:
+> but is used as nothing at test:1:
+>   let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
+>                                     ^
 
 # works in checking mode (bidir)
 let wid = fn (id: [B]({foo:B}) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){f(x); x.foo}) }
@@ -504,7 +506,9 @@ let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn
 > This any comes from test:1:
 >   let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
 >                                  ^
-> but is used as nothing at _:0:
+> but is used as nothing at test:1:
+>   let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
+>                                            ^
 
 let wid = fn (id: [B,A <: {foo:B}](A) -> B) { id({foo:5}) }; fn(f) { wid(fn(x){let z = f({bar:x}); x.foo}) }
 > let wid = fn (id: [B, A <: {foo: B}] (A) -> B) { id({foo: 5}) };

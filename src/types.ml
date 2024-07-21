@@ -321,7 +321,9 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
      (* Format.printf "MSUB %a@." dump_ptyp (Tsimple (of_flexvar pv)); *)
      (* FIXME: better fixpoint check here *)
      wf_ntyp env (Tsimple pv);
-     let new_cons_loc = if !cons_decreased then cnloc else upper_loc in
+     let new_cons_loc =
+       if !cons_decreased || upper_loc == Location.noloc then cnloc else upper_loc
+     in
      let newbound = Ugen {cons = (upper, new_cons_loc); higher_fvs} in
      if fv_maybe_set_upper ~changes pv newbound then
        subtype_lu ~changes env pv.lower newbound;
@@ -542,7 +544,7 @@ and ntyp_to_upper ~simple env : ntyp -> upper = function
   | Tsimple t -> Uflexvar t
   | Tcons (Top, _) -> Utop
   | Tbot loc ->
-     Ugen {cons = ([], Option.value loc ~default:Location.noloc); higher_fvs = []}
+     Ugen {cons = ([], Option.value loc ~default:Location.(fixme "ntyp_Tbot")); higher_fvs = []}
   | Tcons (cons, consloc) ->
      let cons = Cons1.map ~neg:(ptyp_to_lower ~simple env) ~pos:(ntyp_to_flexvar ~simple env) cons in
      Ugen {cons = ([Ucons cons], consloc); higher_fvs = []}

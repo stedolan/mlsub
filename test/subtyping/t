@@ -60,7 +60,9 @@
 > This X comes from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 >                                                                     ^
-> but is used as nothing
+> but is used as nothing at test:1:
+>   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
+>                                                                                          ^
 
 : [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y} <: [X] () -> {foo: (X) -> X, bar: (X) -> X}
 > ok
@@ -192,7 +194,9 @@
 > This any comes from test:1:
 >   : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
 >                                                           ^
-> but is used as nothing
+> but is used as nothing at test:1:
+>   : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
+>                                                                 ^
 
 
 # tricky case of spec sub & rigvars (see cnrig <> [] case in ensure_upper_matches)

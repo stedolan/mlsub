@@ -99,8 +99,8 @@ let run_cmd s =
         begin try
           let t', _ty, _gen, _comp = Check.elab_gen Env_nil ~loc:Location.noloc ~mode:(Check.fresh_gen_mode ()) None (fun env -> let a, b = Check.infer env ~mode:(Check.fresh_gen_mode ()) elab in a, b, None, ()) in
           let te' = Typedefs.unparse_ptyp ~flexvar:ignore t' in
-          Types.subtype Env_nil t' (Check.typ_of_tyexp Env_nil te) |> Error.or_raise `Subtype noloc;
-          Types.subtype Env_nil t (Check.typ_of_tyexp Env_nil te') |> Error.or_raise `Subtype noloc;
+          Types.subtype Env_nil t' (Check.typ_of_tyexp Env_nil te) |> Error.or_raise `Subtype Location.noloc;
+          Types.subtype Env_nil t (Check.typ_of_tyexp Env_nil te') |> Error.or_raise `Subtype Location.noloc;
           ()
         with e ->
           println "ELABINF: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
@@ -124,7 +124,7 @@ let run_cmd s =
        let t1 = Check.typ_of_tyexp Env_nil t1 in
        let t2 = Check.typ_of_tyexp Env_nil t2 in
        (*PPrint.(ToChannel.pretty 1. 80 stdout (Typedefs.pr_typ Pos t1 ^^ string " <: " ^^ Typedefs.pr_typ Neg t2 ^^ hardline));*)
-       Types.subtype Env_nil t1 t2 |> Error.or_raise `Subtype Typedefs.noloc
+       Types.subtype Env_nil t1 t2 |> Error.or_raise `Subtype Location.noloc
      with
       | () -> println "ok"
       | exception e -> pexn e)
