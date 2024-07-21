@@ -734,7 +734,11 @@ calls_any(use)
 > This 'Baz comes from test:2:
 >     (f(Foo), f(Bar), f(Baz))
 >                        ^^^
-> but is used as 'Foo | 'Bar at _:0:
+> but is used as 'Foo | 'Bar at test:6,test:7:
+>     | Foo => 1
+>       ^^^
+>     | Bar => 2
+>       ^^^
 
 # codegen test for single-case matches
 fn(x) {

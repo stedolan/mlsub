@@ -212,7 +212,6 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
 
   | Lflexvar pv ->
      let (upper, upper_loc), higher_fvs = rotate_flex ~changes env pv in
-     assert (equal_upper pv.upper (Ugen {cons=(upper,upper_loc); higher_fvs}));
      (* shallow scope check *)
      let upper_in_scope = function
        | Urigvar (rv, _) -> Env_level.extends rv.level pv.level
@@ -255,6 +254,7 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
             end)
      in
      let found_new_rv = ref false in
+     let cons_decreased = ref false in
      let meets_b =
        cn |> List.concat_map (function
          | Urigvar (rv, delay_b) ->
@@ -278,6 +278,7 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
             begin match upper_find_cons cons_b upper with
             | Ok (Id, _) -> [] (* already in meets_a *)
             | Ok (coe, cons_a) ->
+               cons_decreased := true;
                [Meet_cons {cons_a; cons_b; coe=Right coe}]
             | Error _ -> []
             end)
@@ -320,7 +321,8 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
      (* Format.printf "MSUB %a@." dump_ptyp (Tsimple (of_flexvar pv)); *)
      (* FIXME: better fixpoint check here *)
      wf_ntyp env (Tsimple pv);
-     let newbound = Ugen {cons = (upper, upper_loc); higher_fvs} in
+     let new_cons_loc = if !cons_decreased then cnloc else upper_loc in
+     let newbound = Ugen {cons = (upper, new_cons_loc); higher_fvs} in
      if fv_maybe_set_upper ~changes pv newbound then
        subtype_lu ~changes env pv.lower newbound;
      wf_ntyp env (Tsimple pv);
