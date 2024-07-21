@@ -517,11 +517,12 @@ let rec instantiate_flex env vars body =
       | None -> Utop
       | Some t -> ntyp_to_upper ~simple:true env (open_typ ~neg:fvpos ~pos:fvneg 0 t) in
     assert (fv.upper = Utop && is_bottom fv.lower);
-    fv_set_upper ~changes:(ref []) fv b)
+    (* b need not be matchable, so we need to subtype_lpu rather
+       than using it directly as fv.upper *)
+    subtype_lpu ~changes:(ref []) env (Lflexvar fv) b)
     fvars vars;
   open_typ ~neg:fvneg ~pos:fvpos 0 body
 
-(* FIXME: what is the matchability of contravariant parts of this? *)
 and ptyp_to_lower ~simple env : ptyp -> lower = function
   | Tsimple t -> t
   | Tbot _loc -> [] (*FIXME: loc?*)
@@ -536,6 +537,7 @@ and ptyp_to_lower ~simple env : ptyp -> lower = function
      let body = instantiate_flex env vars body in
      ptyp_to_lower ~simple env body
 
+(* Result is not necessarily matchable, so cannot be used directly as fv.upper *)
 and ntyp_to_upper ~simple env : ntyp -> upper = function
   | Tsimple t -> Uflexvar t
   | Tcons (Top, _) -> Utop
@@ -579,8 +581,6 @@ and ntyp_to_upper ~simple env : ntyp -> upper = function
      let body = open_typ ~neg ~pos 0 body in
      ntyp_to_upper ~simple env body
 
-(* FIXME: maybe this should always be fresh? For matchability?
-   There should maybe be a matchability counterex here? *)
 and ntyp_to_flexvar ~simple env (t : ntyp) =
   match ntyp_to_upper ~simple env t with
   | Utop -> fresh_flexvar (env_level env)

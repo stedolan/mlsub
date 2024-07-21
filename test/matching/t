@@ -874,4 +874,4 @@ fn (x : 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
 
 
 # end
-> STATS: fix: 13, flex: 221
+> STATS: fix: 13, flex: 227

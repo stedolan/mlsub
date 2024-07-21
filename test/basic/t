@@ -2118,5 +2118,25 @@ fn(x) {
 > }));
 > done
 
+# ntyp_to_upper matchability failure
+# (should infer bar: any)
+let go = fn[A, B <: {foo:A, bar:A}](x: B) { x };
+fn(z) { go(z).foo.baz }
+> let go = fn [A, B <: {foo: A, bar: A}](x: B) { x }; fn (z) { go(z).foo.baz }
+>   let go : [A, B <: {foo: A, bar: A}] (B) -> B =
+>   fn [A, B <: {foo: A, bar: A}](x: B) -> B { x };
+>   fn [A](z: {foo: {baz: A, ...}, bar: any}) -> A {
+>     go(z).foo.baz
+>   }
+> [A] ({foo: {baz: A, ...}, bar: any}) -> A
+> let go = fun (x) ret { ret(x) };
+> let  = %yield(fun (z) ret {
+>   let x = go(z);
+>   let foo = x.(foo);
+>   let baz = foo.(baz);
+>   ret(baz)
+> });
+> done
 
-> STATS: fix: 124, flex: 1555
+
+> STATS: fix: 125, flex: 1666
