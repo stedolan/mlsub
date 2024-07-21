@@ -191,12 +191,18 @@ let fresh_flow env =
   let fv = fresh_flexvar (env_level env) in
   Tsimple fv, Tsimple (of_flexvar fv)
 
+(* "Simultaneous Input and Output", e.g. sec 6.4 of Bidirectional Typing *)
 type ty_mode =
-  | Checking of ntyp
-  | Inference of ptyp ref
+  { ty_checked: ntyp;
+    ty_inferred: ptyp ref option }
 
-let inspect_poly = function
-  | Checking (Tpoly p) -> Some p
+let checking ty =
+  { ty_checked = ty;
+    ty_inferred = None }
+
+let inspect_poly ty =
+  match ty.ty_checked with
+  | Tpoly p -> Some p
   | _ -> None
 
 type inspect_result =
@@ -204,22 +210,21 @@ type inspect_result =
   (* FIXME: add Ifailed for when a Cons clearly does not match? *)
   | Iother
 
-let inspect_cons cons = function
-  | Checking (Tsimple _) ->
+let inspect_cons cons ty =
+  match ty.ty_checked with
+  | Tsimple _ ->
      (* bidirectional checking does not look inside Tsimple *)
      Iother
-  | Checking (Tpoly _) ->
+  | Tpoly _ ->
      (* FIXME: maybe make this impossible? *)
      Iother
   (* FIXME: Tcons/Tjoin selection *)
-  | Checking (Tcons (c,_loc)) ->
+  | Tcons (c,_loc) ->
      (match Cons1.sub_head cons c with Le _ -> Imatches c | Un _ -> Iother)
-  | Checking (Tbot _ | Tvar _ | Tjoin _) | Inference _ -> Iother
+  | Tbot _ | Tvar _ | Tjoin _ -> Iother
 
 let rec check env ~(mode : generalisation_mode) e (ty : ty_mode) : typed_exp =
-  (match ty with
-   | Checking ty -> wf_ntyp env ty
-   | Inference _ -> ());
+  wf_ntyp env ty.ty_checked;
   match e with
   | None, loc -> fail loc Syntax
   | Some e, loc ->
@@ -231,11 +236,10 @@ let rec check env ~(mode : generalisation_mode) e (ty : ty_mode) : typed_exp =
    (1,2) against int *)
 and check' env ~mode eloc (e : exp') ty : typed_exp' =
   let inferred inf =
-    match ty with
-    | Checking ty ->
-       subtype env inf ty |> or_raise `Expr eloc
-    | Inference slot ->
-       slot := join_ptyp env !slot inf
+    subtype env inf ty.ty_checked |> or_raise `Expr eloc;
+    match ty.ty_inferred with
+    | None -> ()
+    | Some r -> r := join_ptyp env !r inf
   in
   match e with
   | Lit l ->
@@ -255,11 +259,11 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
   | Typed (e, ty) ->
      let t = typ_of_tyexp env ty in
      inferred t;
-     let e = check env ~mode e (Checking t) in
+     let e = check env ~mode e (checking t) in
      Typed (e, elab_ptyp t)
 
   | If (e, ifso, ifnot) ->
-     let e = check env ~mode e (Checking (tcons (snd e) Bool)) in
+     let e = check env ~mode e (checking (tcons (snd e) Bool)) in
      let ifso = check env ~mode ifso ty in
      let ifnot = check env ~mode ifnot ty in
      If (e, ifso, ifnot)
@@ -277,7 +281,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
             Some (Typed (e, elab_ptyp ty)), loc
           in
           merge_fields fields tf
-            ~both:(fun _fn e ty -> Some (check env ~mode e (Checking ty)))
+            ~both:(fun _fn e ty -> Some (check env ~mode e (checking ty)))
             ~left:(fun _fn e -> Some (infer_typed env e))
             ~right:(fun fn _ty -> failwith ("missing " ^ string_of_field_name fn) )
             ~extra:(function
@@ -320,7 +324,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      Let (p, split, elab_ptyp pty, e, { act with rhs = body })
 
   | Seq (e1, e2) ->
-     let e1 = check env ~mode e1 (Checking (unit eloc)) in
+     let e1 = check env ~mode e1 (checking (unit eloc)) in
      let e2 = check env ~mode e2 ty in
      Seq (e1, e2)
 
@@ -331,7 +335,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
         (* rigvars not in scope in body, so no rig_names *)
         let env', open_rigvars = enter_rigid env vars SymMap.empty in
         let body = open_rigvars body in
-        check' env' ~mode eloc e (Checking body)
+        check' env' ~mode eloc e (checking body)
         (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
      | None ->
         let target_ty = Cons1.Func (List.map (fun (k,_) -> k,()) params, ()) in
@@ -369,7 +373,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
                subtype env' t rtype |> or_raise `Subtype (snd ty');
                t
           in
-          let body = check env' ~mode body (Checking ret_type) in
+          let body = check env' ~mode body (checking ret_type) in
           (* FIXME: is this wrong? What if the annotations names have changed? *)
           (* FIXME: insert / keep type annotations? *)
           Fn (None, List.map (fun (p, _) -> p, None) params, split, None (*FIXME ret_type?*), {act with rhs = body })
@@ -398,7 +402,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
        | Ok () -> ()
        | Error e -> fail eloc (Conflict (`Expr, e)) in
      (* FIXME: don't ignore param names *)
-     let args = List.map2 (fun (_,e) t -> check env ~mode e (Checking !t)) args tyargs in
+     let args = List.map2 (fun (_,e) t -> check env ~mode e (checking !t)) args tyargs in
      inferred !tyret;
      App (f, args)
 
@@ -428,7 +432,8 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
 
 and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * typed_exp =
   let ty = ref (Tbot None) in
-  let e = check env ~mode e (Inference ty) in
+  let ty_mode = { ty_inferred = Some ty; ty_checked = Tcons (Top, Location.noloc) } in
+  let e = check env ~mode e ty_mode in
   wf_ptyp env !ty;
   !ty, e
 
@@ -457,7 +462,7 @@ and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_
          | Some ty ->
             let ty = typ_of_tyexp env ty in
             ignore (close_typ_rigid ~ispos:true (env_level env) ty);
-            ty, check env' ~mode:bmode body (Checking ty)
+            ty, check env' ~mode:bmode body (checking ty)
          | None ->
             infer env' ~mode:bmode body in
        let _ = List.map (fun ((tn,tp),_,_) -> wf_ntyp env tn; wf_ptyp env tp) params in
@@ -504,4 +509,4 @@ and check_rhs env ~mode pty e =
      pty, e, bmode.gen_level_acc
   | Some ty ->
      let t = typ_of_tyexp env ty in
-     t, check env ~mode e (Checking t), None
+     t, check env ~mode e (checking t), None

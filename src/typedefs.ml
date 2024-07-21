@@ -5,20 +5,6 @@ open Util
 
 module StrMap = Map.Make (struct type t = string let compare = compare end)
 
-
-let equal_lists f p q =
-  try List.for_all2 f p q
-  with Invalid_argument _ -> false
-
-let rec compare_lists f p q =
-  match p, q with
-  | [], [] -> 0
-  | p::ps, q::qs ->
-     let cmp = f p q in
-     if cmp = 0 then compare_lists f ps qs else cmp
-  | [], _::_ -> -1
-  | _::_, [] -> 1
-
 module One_or_two = struct
   type ('a, 'b) t =
     | L of 'a
