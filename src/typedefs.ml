@@ -181,6 +181,13 @@ module Fields = struct
     in
     { fields; fnames; fopen }
 
+  let to_list t =
+    t.fnames |> List.map (fun f -> f, Map.find f t.fields)
+
+  let find f (t, t_loc) =
+    try Map.find f t.fields
+    with Not_found -> desc_of_ext t_loc t.fopen
+
   let empty = { fopen = Ext_open; fnames = []; fields = Map.empty }
 end
 

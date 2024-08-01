@@ -130,26 +130,14 @@ module Elaborate = struct
        Pragma s
 
   and tuple env fields =
-    match
-      List.mapi (fun i ((f,_), e) ->
-        match Mandatory, f with
-        | Mandatory, Tuple_fields.Field_positional j when i = j -> exp env e
-        | _ -> raise_notrace Exit)
-        fields
-    with
-    | tuple ->
-       Ftuple (tuple, Ext_closed)
-    | exception Exit ->
-       let fields =
-         fields |> List.map (fun ((f,floc), e) ->
-           let e = match f, e with
-             | Field_named k, (Some (Var (({label=s';shift=0},_), _)), _) when k = s' ->
-                None
-             | _, e -> Some (exp env e)
-           in
-           (f,floc), Mandatory, e)
-       in
-       Frecord (fields, Ext_closed)
+    fields
+    |> List.map (function
+        | (Field_named k, _) as f,
+          (Some (Var (({label=s';shift=0},_), _)), _) when k = s' ->
+           f, Mandatory, None
+        | f, e ->
+           f, Mandatory, Some (exp env e))
+    |> Exp.of_record_fields ~fopen:Ext_closed
 
   and case env (ps, e) = (ps, exp env e.rhs)
 

@@ -34,6 +34,16 @@ let record_fields ~loc = function
      List.mapi (fun i x -> (Tuple_fields.Field_positional i, loc), Mandatory, Some x) xs, ext
   | Frecord (fields, ext) -> fields, ext
 
+let of_record_fields ~fopen fs =
+  match
+    List.mapi (fun i x ->
+      match x with
+      | (Tuple_fields.Field_positional j, _), Mandatory, Some x when i = j -> x
+      | _ -> raise_notrace Exit) fs
+  with
+  | ts -> Ftuple (ts, fopen)
+  | exception Exit -> Frecord (fs, fopen)
+
 type exp = exp' mayloc and exp' =
   (* 42 or "hello" *)
   | Lit of literal loc
