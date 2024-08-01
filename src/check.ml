@@ -48,7 +48,9 @@ let syn_tjoin loc (a : (_, _) typ) (b : (_, _) typ) =
   check_join a b;
   Tjoin (a, b, Some loc)
 
-let tcons loc cons = Tcons (cons, loc)
+let tcons loc cons =
+  Cons1.wf ~neg:ignore ~pos:ignore cons;
+  Tcons (cons, loc)
 
 let rec typ_of_tyexp : 'a 'b . env -> Env_level.t -> tyexp -> ('a, 'b) typ =
   fun env lvl ty -> match ty with
@@ -67,7 +69,28 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
         | Error e -> fail loc e
      end
   | Trecord (tag, fields) ->
-     tcons loc (Record (Option.map fst tag, typs_of_tuple_tyexp env lvl fields))
+     let fields, fopen = Exp.record_fields ~loc fields in
+     let fnames = List.map (fun ((f,_), _, _) -> f) fields in
+     let fields = List.fold_left (fun acc ((f,floc), m, ty) ->
+       let ty : _ Fields.field_desc =
+         match m, ty with
+         | Optional, Some (Some (Tnamed ({label="absent"; shift=0},_)), _) ->
+            Fabsent floc
+         | Mandatory, Some (Some (Tnamed ({label="absent"; shift=0},_)), _) ->
+            Fbroken {abs_loc=floc; pres_loc=floc}
+         | Optional, None ->
+            Funknown floc
+         | Optional, Some ty ->
+            Foptional (typ_of_tyexp env lvl ty, {abs_loc=floc; pres_loc=floc})
+         | Mandatory, Some ty ->
+            Fpresent (typ_of_tyexp env lvl ty, floc)
+         | Mandatory, None ->
+            fail loc Syntax
+       in FieldMap.add f ty acc)
+       FieldMap.empty
+       fields
+     in
+     tcons loc (Record {tag = Option.map fst tag; body={fields; fnames; fopen}})
   | Tfunc (args, res) ->
      tcons loc (Func (List.map (typ_of_tyexp env lvl) args, typ_of_tyexp env lvl res))
   | Tjoin (a, b) ->
@@ -78,7 +101,7 @@ and typ_of_tyexp' : 'a 'b . env -> Env_level.t -> Location.t -> tyexp' -> ('a, '
      let body = close_typ_rigid ~ispos:true (env_level env) (typ_of_tyexp env (env_level env) body) in
      Tpoly { vars; body }
 
-and typs_of_tuple_tyexp : 'a 'b . env -> Env_level.t -> tyexp tuple_fields -> ('a, 'b) typ tuple_fields =
+and typs_of_tuple_tyexp : 'a 'b . env -> Env_level.t -> tyexp Exp.fields -> ('a, 'b) typ Exp.fields =
   fun env lvl ts -> map_fields (fun _fn t -> typ_of_tyexp env lvl t) ts
 
 and enter_polybounds : 'a 'b . env -> typolybounds -> (string Location.loc * ('a,'b) typ option) iarray * int SymMap.t =
@@ -112,7 +135,7 @@ and enter_polybounds : 'a 'b . env -> typolybounds -> (string Location.loc * ('a
 
 let typ_of_tyexp env t = typ_of_tyexp env (env_level env) t
 
-let unit loc = tcons loc (Record (None, Tuple_fields.collect_fields []))
+let unit loc = tcons loc (Record {tag=None; body={fnames=[]; fields=FieldMap.empty; fopen=Ext_closed}})
 
 open Elab
 
@@ -186,7 +209,7 @@ let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level
 let elab_ptyp = function
   | Tsimple [Lflexvar v] -> Elab_ntyp (Tsimple v)
   | ty -> Elab_ptyp ty
-  
+
 let fresh_flow env =
   let fv = fresh_flexvar (env_level env) in
   Tsimple fv, Tsimple (of_flexvar fv)
@@ -206,7 +229,7 @@ let inspect_poly ty =
   | _ -> None
 
 type inspect_result =
-  | Imatches of (ptyp, ntyp) Cons1.t
+  | Imatches of (ptyp, ntyp) Cons1.t loc
   (* FIXME: add Ifailed for when a Cons clearly does not match? *)
   | Iother
 
@@ -219,8 +242,8 @@ let inspect_cons cons ty =
      (* FIXME: maybe make this impossible? *)
      Iother
   (* FIXME: Tcons/Tjoin selection *)
-  | Tcons (c,_loc) ->
-     (match Cons1.sub_head cons c with Le _ -> Imatches c | Un _ -> Iother)
+  | Tcons (c,cloc) ->
+     (match Cons1.sub_head cons c with Le _ -> Imatches (c,cloc) | Un _ -> Iother)
   | Tbot _ | Tvar _ | Tjoin _ -> Iother
 
 let rec check env ~(mode : generalisation_mode) e (ty : ty_mode) : typed_exp =
@@ -269,33 +292,67 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      If (e, ifso, ifnot)
 
   | Tuple (tag, fields) ->
-     if fields.fopen = `Open then failwith "invalid open tuple ctor";
-     let target_ty = Cons1.Record(Option.map fst tag,
-                            map_fields (fun _ _ -> ()) fields) in
-     let fields =
-       (* FIXME: simplify here? *)
-       match inspect_cons target_ty ty with
-       | Imatches (Record (_, tf)) ->
-          let infer_typed env ((_,loc) as e) =
-            let ty, e = infer env ~mode e in
-            Some (Typed (e, elab_ptyp ty)), loc
-          in
-          merge_fields fields tf
-            ~both:(fun _fn e ty -> Some (check env ~mode e (checking ty)))
-            ~left:(fun _fn e -> Some (infer_typed env e))
-            ~right:(fun fn _ty -> failwith ("missing " ^ string_of_field_name fn) )
-            ~extra:(function
-              | _, (`Closed, `Extra) -> failwith "extra"
-              | (`Open, _), _ -> failwith "invalid open tuple ctor" (* no open tuples *)
-              | (`Closed, `Extra), _ -> failwith "missing"
-              | _ -> `Closed)
-       | _ ->
-          let fields = map_fields (fun _fn e -> infer env ~mode e) fields in
-          inferred (tcons eloc (Record (Option.map fst tag,
-                                        map_fields (fun _ (ty, _e) -> ty) fields)));
-          map_fields (fun _fn (_ty, e) -> e) fields
+     let fields, fopen = Exp.record_fields ~loc:eloc fields in
+     if fopen = Ext_open then fail eloc (Bad_tuple_intro `Ext_open);
+     let res_fields = List.map (fun ((f,floc), m, e) ->
+       if m = Optional then fail floc (Bad_tuple_intro `Opt);
+       let e = match f, e with
+         | _, Some e -> e
+         | Field_positional _, None -> fail floc Syntax
+         | Field_named k, None -> (Some (Exp.Var ({label=k; shift=0}, floc)), floc) in
+       (f,floc), e, ref None) fields
      in
-     Tuple(tag, fields)
+     let exp_fields =
+       res_fields
+       |> List.map (fun ((f,floc), e, r) -> f, Fields.Fpresent ((e,r), floc))
+       |> Fields.of_list ~fopen:Ext_closed
+     in
+     let infer_typed env ((_,loc) as e) =
+       let ty, e = infer env ~mode e in
+       Some (Typed (e, elab_ptyp ty)), loc
+     in
+     let fields =
+       let tag = Option.map fst tag in
+       let econs = Cons1.Record {tag; body=exp_fields} in
+       match inspect_cons econs ty with
+       | Imatches (Record _ as ty, tyloc) ->
+          (* FIXME this should updated inferred type too! *)
+          begin match
+            Types.subtype_cons env (econs,eloc) (ty,tyloc)
+              ~neg:(fun _ _ -> assert false)
+              ~pos:(fun (_, r) ty -> r := Some (checking ty))
+          with
+          | () -> ()
+          | exception (SubtypeError e) -> fail eloc (Conflict (`Expr, e))
+          end;
+          res_fields |> List.map (fun (f,e,r) ->
+            f,
+            match !r with
+            | Some ty -> check env ~mode e ty
+            | None -> infer_typed env e)
+       | _ ->
+          let econs = Cons1.map econs
+            ~neg:never
+            ~pos:(fun (_e,r) ->
+              let p = ref (Tbot None) in
+              r := Some { ty_inferred = Some p;
+                          ty_checked = Tcons (Top, Location.noloc) };
+              p)
+          in
+          let fields =
+            res_fields |> List.map (fun (f,e,r) ->
+              f,
+              match !r with
+              | Some ty -> check env ~mode e ty
+              | None -> infer_typed env e)
+          in
+          let econs = Cons1.map econs
+                        ~neg:never
+                        ~pos:(fun r -> !r) in
+          inferred (tcons eloc econs);
+          fields
+     in
+     Tuple (tag, fields)
 
   | Proj (e, (field, loc)) ->
      let ty, e = infer env ~mode e in
@@ -304,9 +361,10 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      let tyf =
        match
         match_ptyp ~loc:eloc env ty
-         [Record (None,
-                  { fields = FieldMap.singleton f r;
-                    fnames = [Field_named field]; fopen = `Open })]
+         [Record { tag = None;
+                   body = {
+                       fields = FieldMap.singleton f (Fields.Fpresent (r, loc));
+                       fnames = [Field_named field]; fopen = Ext_open } }]
        with
        | Ok () -> !r
        | Error c -> fail eloc (Conflict (`Expr, c)) in
@@ -340,7 +398,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      | None ->
         let target_ty = Cons1.Func (List.map (fun (k,_) -> k,()) params, ()) in
         match poly, inspect_cons target_ty ty with
-       | None, Imatches (Func (ptypes, rtype)) ->
+       | None, Imatches (Func (ptypes, rtype), _) ->
           (* If poly <> None, then we should infer & subtype *)
           (* FIXME: do we need another level here? Does hoisting break things? *)
           let param_list =
@@ -422,7 +480,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
             split,
             List.map2 (fun (ps,_) e -> ps, e) cases actions)
 
-  | Pragma ("true"|"false" as b) when match inspect_cons Bool ty with Imatches Bool -> true | _ -> false ->
+  | Pragma ("true"|"false" as b) when match inspect_cons Bool ty with Imatches (Bool,_) -> true | _ -> false ->
      Pragma b
   | Pragma "bot" ->
      inferred (Tbot (Some eloc));
@@ -431,7 +489,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
 
 
 and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * typed_exp =
-  let ty = ref (Tbot None) in
+  let ty = ref (Tbot (Some (Location.fixme "inference"))) in
   let ty_mode = { ty_inferred = Some ty; ty_checked = Tcons (Top, Location.noloc) } in
   let e = check env ~mode e ty_mode in
   wf_ptyp env !ty;
@@ -486,7 +544,7 @@ and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_
     split,
     Some tret,
     { act with rhs = typed_fn })
- 
+
 and extend_env env act =
   let vals = (Option.get act.Check_pat.bindings).bindings in
   Env_vals { vals; rest = env }

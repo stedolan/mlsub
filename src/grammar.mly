@@ -8,7 +8,7 @@
 %token EOF WS COMMENT NL ERROR
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
 %token COLON EQUALS DOT DOTS COMMA SEMI UNDER QUESTION ARROW FATARROW AMPER VBAR
-%token FN LET TRUE FALSE IF ELSE TILDE
+%token FN LET TRUE FALSE IF ELSE TILDE HASH
 %token SUBTYPE SUPTYPE AT
 %token MATCH
 
@@ -23,9 +23,6 @@
 %start <[`Exp of Exp.exp | `Sub of Exp.tyexp * Exp.tyexp]> prog
 
 %{
-let parse_fields fs = collect_fields fs
-let parse_tyfields fs = collect_fields fs
-
 let pvar s = Pbind (s, (Some Pany, snd s))
 %}
 %%
@@ -36,6 +33,8 @@ let pvar s = Pbind (s, (Some Pany, snd s))
   { e, [{ loc_start = $startpos(e); loc_end = $endpos(e) }] }
 %inline mayfail(X): e = X { Some e } | ERROR { None }
 %inline mayloc(X): e = loc(mayfail(X)) { e }
+%inline mayfail_opt(X): e = X { e } | ERROR { None }
+%inline mayloc_opt(X): e = loc(mayfail_opt(X)) { e }
 
 prog:
 | e = exp; EOF { `Exp e }
@@ -43,7 +42,12 @@ prog:
 
 symbol: s = loc(SYMBOL) { s }
 usymbol: s = loc(USYMBOL) { s }
-qusymbol: s = loc(QUSYMBOL) { s }
+
+struct_tag: s = loc(struct_tag_) { (s : string loc) }
+struct_tag_:
+| s = QUSYMBOL { s }
+(*| HASH { "" }
+| HASH; s = USYMBOL { s }*)
 
 (* FIXME: probably a bad idea. Enforce case conventions *)
 anysymbol:
@@ -78,26 +82,84 @@ literal_:
 | FALSE
   { Bool false }
 
-exp:
-| e = mayloc(exp_) { e }
-| LPAR; ERROR; RPAR { None, [{ loc_start = $startpos; loc_end = $endpos }] }
+%inline mand_flag:
+|
+  { Mandatory }
+| QUESTION
+  { Optional }
+
+field_name:
+| f = SYMBOL
+  { Field_named f }
+| f = INT
+  { Field_positional f }
+
+%inline ext_dots:
+|      { Ext_closed }
+| DOTS { Ext_open }
+
+fields_paren_items1(X):
+| DOTS
+  { [], Ext_open }
+| f = X; ioption(COMMA)
+  { [f], Ext_closed }
+| f = X; COMMA; fs = fields_paren_items1(X)
+  { (f::fst fs), snd fs }
+
+fields_paren_items(X):
+| e = ext_dots
+  { [], false, e }
+| f = X; c = ioption(COMMA)
+  { [f], Option.is_some c, Ext_closed }
+| f = X; COMMA; fs = fields_paren_items1(X)
+  { (f::fst fs), false, snd fs }
+
+fields_brace_item(X):
+| f = loc(field_name); m = mand_flag; COLON; e = X
+  { f, m, Some e }
+| f = loc(field_name); m = mand_flag
+  { f, m, None }
+
+fields_brace_items1(X):
+| DOTS
+  { [], Ext_open }
+| f = fields_brace_item(X); ioption(COMMA)
+  { [f], Ext_closed }
+| f = fields_brace_item(X); COMMA; fs = fields_brace_items1(X)
+  { (f::fst fs), snd fs }
+
+fields_brace_items(X):
+| 
+  { [], Ext_closed }
+| fs = fields_brace_items1(X)
+  { fs }
+
+fields(X):
+| LPAR; xs = fields_paren_items(X); RPAR
+  { match xs with
+    | [x] as xs, false, e -> Some x, Ftuple (xs, e)
+    | xs, _, e -> None, Ftuple (xs, e) }
+| LBRACE; xs = fields_brace_items(X); RBRACE
+  { None, Frecord (fst xs, snd xs) }
+
+exp: e = mayloc_opt(exp_) { e }
 exp_:
 | FN; def = fndef
-  { Fn def }
+  { Some (Fn def) }
 | FN; s = symbol; def = fndef; e = exp %prec SEMI
-  { FnDef (s, def, e) }
+  { Some (FnDef (s, def, e)) }
 | IF; e = exp; LBRACE; t = exp; RBRACE; ELSE; LBRACE; f = exp; RBRACE
-  { If (e, t, f) }
+  { Some (If (e, t, f)) }
 | s = PRAGMA
-  { Pragma s }
+  { Some (Pragma s) }
 | LET; p = pat; EQUALS; e = exp; SEMI; body = exp
-  { Let (p, None, e, body) }
+  { Some (Let (p, None, e, body)) }
 | LET; p = pat; COLON; t = tyexp; EQUALS; e = exp; SEMI; body = exp
-  { Let (p, Some t, e, body) }
+  { Some (Let (p, Some t, e, body)) }
 | e1 = exp; SEMI; e2 = exp
-  { Seq (e1, e2) }
+  { Some (Seq (e1, e2)) }
 | MATCH; es = loc(separated_nonempty_list(COMMA, exp)); LBRACE; cs = cases; RBRACE
-  { Match (es, cs) }
+  { Some (Match (es, cs)) }
 | t = term_
   { t }
 
@@ -108,36 +170,25 @@ fndef:
   LBRACE; body = exp; RBRACE
   { (poly, params, ty, body) }
 
-term: e = mayloc(term_) { e }
+term: e = mayloc_opt(term_) { e }
 term_:
 | v = ident
-  { Var v }
+  { Some (Var v) }
 | k = literal
-  { Lit k }
+  { Some (Lit k) }
 | fn = term; LPAR; args = separated_list(COMMA, argument); RPAR
-  { App (fn, args) }
+  { Some (App (fn, args)) }
 | e = term; DOT; f = symbol
-  { Proj (e, f) }
+  { Some (Proj (e, f)) }
 | tag = usymbol %prec low_priority
-  { Tuple (Some tag, parse_fields []) }
-| tag = ioption(usymbol); LPAR; RPAR
-  { Tuple (tag, parse_fields []) }
-| LPAR; e = exp_; RPAR
-  { e }
+  { Some (Tuple (Some tag, Ftuple ([], Ext_closed))) }
 | LPAR; e = exp; COLON; t = tyexp; RPAR
-  { Typed (e, t) }
-| tag = usymbol; LPAR; e = exp; RPAR
-  { Tuple(Some tag, parse_fields [Fpos e]) }
-| tag = ioption(usymbol); LPAR; e = exp; COMMA; es = separated_list(COMMA, exp); RPAR
-  { Tuple (tag, parse_fields (List.map (fun e -> Fpos e) (e :: es))) }
-| tag = ioption(usymbol); LBRACE; es = separated_nonempty_list(COMMA, named_field); RBRACE
-  { Tuple (tag, parse_fields es) }
-
-named_field:
-| f = SYMBOL; COLON; e = exp
-  { Fnamed (f, e) }
-| f = ident
-  { Fnamed ((fst f).label, (Some (Var f), snd f)) }
+  { Some (Typed (e, t)) }
+| tag = ioption(usymbol); fs = fields(exp)
+  { match tag, fs with
+    | None, (Some (Some e, _), _) -> Some e
+    | None, (Some (None, _), _) -> None
+    | tag, (_, fs) -> Some (Tuple (tag, fs)) }
 
 argument:
 | e = exp
@@ -163,22 +214,6 @@ case:
   FATARROW; e = exp
   { ps, e }
 
-tyfield:
-| t = tyexp
-  { Fpos t }
-| TILDE; f = SYMBOL; COLON; e = tyexp
-  { Fnamed (f, e) }
-| DOTS
-  { Fdots }
-
-tyfields:
-|
-  { [Fempty] }
-| f = tyfield
-  { [f] }
-| f = tyfield; COMMA; fs = tyfields
-  { f :: fs }
-
 pat: p = mayloc(pat_) { p }
 pat_:
 | p = onepat_
@@ -195,33 +230,11 @@ onepat_:
 | UNDER
   { Pany }
 | tag = usymbol
-  { Ptuple (Some tag, parse_fields []) }
-| tag = ioption(usymbol); LPAR; RPAR
-  { Ptuple (tag, parse_fields []) }
-| tag = ioption(usymbol); LPAR; DOTS; RPAR
-  { Ptuple (tag, parse_fields [Fdots]) }
-| LPAR; p = pat_; RPAR
-  { p }
-| tag = usymbol; LPAR; p = pat; RPAR
-  { Ptuple (Some tag, parse_fields [Fpos p]) }
-| tag = ioption(usymbol); LPAR; p = pat; COMMA; ps = separated_list(COMMA, pat_or_dots); RPAR
-  { Ptuple (tag, parse_fields (Fpos p :: ps)) }
-| tag = ioption(usymbol); LBRACE; ps = separated_nonempty_list(COMMA, named_field_pat); RBRACE
-  { Ptuple (tag, parse_fields ps) }
-
-pat_or_dots:
-| p = pat
-  { Fpos p }
-| DOTS
-  { Fdots }
-
-named_field_pat:
-| f = SYMBOL; COLON; p = pat
-  { Fnamed(f, p) }
-| f = symbol
-  { Fnamed(fst f, (Some (pvar f), snd f)) }
-| DOTS
-  { Fdots }
+  { Ptuple (Some tag, Ftuple ([], Ext_closed)) }
+| tag = ioption(usymbol); fs = fields(pat)
+  { match tag, fs with
+    | None, (Some (Some p, _), _) -> p
+    | tag, (_, fs) -> Ptuple (tag, fs) }
 
 typolybounds:
 | LBRACK; t = separated_list(COMMA, typolybound); RBRACK
@@ -231,30 +244,20 @@ tyexp: t = mayloc(tyexp_) { t }
 tyexp_:
 | t = anyident
   { Tnamed t }
-| tag = qusymbol %prec low_priority
-  { Trecord(Some tag, parse_tyfields []) }
-| tag = ioption(qusymbol); LPAR; t = tyfields; RPAR
+| tag = struct_tag %prec low_priority
+  { Trecord(Some tag, Ftuple ([], Ext_closed)) }
+| tag = ioption(struct_tag); t = fields(tyexp)
   { match tag, t with
-    | None, [Fpos (Some t, _)] -> t
-    | tag, fs -> Trecord (tag, parse_tyfields fs) }
-| tag = ioption(qusymbol);
-  LBRACE; ts = separated_nonempty_list(COMMA, named_field_typ); RBRACE
-
-  { Trecord (tag, parse_tyfields ts) }
+    | None, (Some (Some t, _), _) -> t
+    | tag, (_, fs) -> Trecord (tag, fs) }
 (* FIXME: what does (...) -> a | b mean? (prec of -> and |) *)
-| LPAR; t = tyfields; RPAR; ARROW; r = tyexp
-  { let t = List.concat_map (function Fpos t -> [t] | Fempty -> [] | _ -> failwith "syntax FIXME") t in
+| LPAR; t = fields_paren_items(tyexp); RPAR; ARROW; r = tyexp
+  { let (t, _, _FIXME_e) = t in
     Tfunc (t, r) }
 | t1 = tyexp; VBAR; t2 = tyexp
   { Tjoin(t1, t2) }
 | t = typolybounds; b = tyexp %prec ARROW (* kinda hack *)
   { Tforall(t, b) }
-
-named_field_typ:
-| f = SYMBOL; COLON; t = tyexp
-  { Fnamed(f, t) }
-| DOTS
-  { Fdots }
 
 typolybound:
 | s = anysymbol; SUBTYPE; b = tyexp

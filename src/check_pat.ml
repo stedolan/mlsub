@@ -3,6 +3,38 @@ open Typedefs
 open Tuple_fields
 open Util
 
+(* FIXME DELETE *)
+module TFISO = struct
+  let of_exp_fields ~def (x : _ Exp.fields) : _ tuple_fields =
+    let of_ext = function Ext_closed -> [] | Ext_open -> [Fdots] in
+    (match x with
+    | Ftuple (xs, ext) ->
+       List.map (fun x -> Fpos x) xs @ of_ext ext
+    | Frecord (xs, ext) ->
+       List.map (fun ((f,_), _, x) -> Fnamed (string_of_field_name f, match x with Some x -> x | None -> def f)) xs @ of_ext ext)
+    |>  Tuple_fields.collect_fields 
+
+  let to_exp_fields (x : pat tuple_fields) : pat Exp.fields =
+    let fopen = match x.fopen with `Closed -> Ext_closed | `Open -> Ext_open in
+    match List.mapi (fun i f -> match f with Field_positional j when i = j -> FieldMap.find f x.fields | _ -> raise Exit) x.fnames with
+    | ts -> Ftuple (ts, fopen)
+    | exception Exit ->
+       let fields = List.map (fun f -> ((f,Location.noloc), Mandatory, Some (FieldMap.find f x.fields))) x.fnames in
+       Frecord(fields, fopen)
+
+  let of_fields_desc ~fields ~fnames ~fopen =
+    let fields = FieldMap.map Fields.(function (Foptional (x,_) | Fpresent (x,_)) -> x | _ -> assert false) fields in
+    let fopen = match fopen with Ext_closed -> `Closed | Ext_open -> `Open in
+    {fields; fnames; fopen}
+
+  let to_record ~tag fs =
+    let fopen = match fs.fopen with `Closed -> Ext_closed | `Open -> Ext_open in
+    let fields = FieldMap.map (fun x -> Fields.Fpresent (x, Location.noloc)) fs.fields in
+    let c = Cons1.Record {tag; body = {fnames = fs.fnames; fopen; fields} } in
+    Cons1.wf ~neg:ignore ~pos:ignore c;
+    c
+end
+
 type bindings = Typedefs.value_binding SymMap.t
 
 type act_bindings =
@@ -71,6 +103,8 @@ module Hashcons = struct
       total = is_total t }
 end
 
+let pvar s = Pbind (s, (Some Pany, snd s))
+
 (* The result of splitting a (w+1)-size matrix along the first column *)
 type 'w split_head =
   | Sp_any of 'w pat_matrix
@@ -121,7 +155,7 @@ let rec split_head_row :
              in
              Error.fail head_loc (Incompatible_patterns other_locs)
         in
-        let split = Sp_fields (((fields, head_loc), (ps, act)) :: acc_fields) in
+        let split = Sp_fields (((TFISO.of_exp_fields ~def:(fun x -> (Some (pvar (Tuple_fields.string_of_field_name x, Location.noloc)), Location.noloc))  fields, head_loc), (ps, act)) :: acc_fields) in
         var, split
      | Ptuple (Some ((tag,_) as tagloc), fields) ->
         let acc_tags, acc_cases, acc_def =
@@ -142,7 +176,7 @@ let rec split_head_row :
         var,
         Sp_cases (
             (if SymMap.mem tag acc_cases then acc_tags else tagloc :: acc_tags),
-            SymMap.add tag (((fields, head_loc), (ps, act)) :: tail) acc_cases,
+            SymMap.add tag (((TFISO.of_exp_fields ~def:(fun x -> (Some (pvar (Tuple_fields.string_of_field_name x, Location.noloc)), Location.noloc)) fields, head_loc), (ps, act)) :: tail) acc_cases,
             acc_def)
      | Pbind ((name, _), subpat) ->
         let var =
@@ -251,7 +285,7 @@ let rec split_cases :
           let loc, fnames = collect_fields fields in
           (* FIXME loc? *)
           let fnames = Tuple_fields.map_fields (fun _ () -> ref (Tbot None)) fnames in
-          let cons = Cons1.Record(None, fnames) in
+          let cons = TFISO.to_record ~tag:None fnames in
           begin match Types.match_ptyp ~loc:matchloc env typ [cons] with
           | Ok () ->
              let ftypes = map_fields (fun _ t -> !t) fnames in
@@ -261,7 +295,7 @@ let rec split_cases :
        | Sp_cases (tags, cases, def) ->
           let rec extract_cases = function
             (* FIXME handle rigvars with tagged bounds too *)
-            | Tcons (Record (Some tag, fields), _loc) -> SymMap.singleton tag fields
+            | Tcons (Record {tag=Some tag; body={fields; fnames; fopen}}, _loc) -> SymMap.singleton tag (TFISO.of_fields_desc ~fields ~fnames ~fopen)
             | Tjoin (a, b, _loc) -> SymMap.union (fun _ _ _ -> intfail "invalid type - duplicate tag") (extract_cases a) (extract_cases b)
             | _ -> raise Exit
           in
@@ -317,7 +351,7 @@ let rec split_cases :
              let conses =
                tags |> List.map (fun (tag,_) ->
                  let _, fields = SymMap.find tag inferred_cases in
-                 Cons1.Record(Some tag, fields)) in
+                 TFISO.to_record ~tag:(Some tag) fields) in
              begin match Types.match_ptyp ~loc env typ conses with
              | Ok () -> ()
              | Error e -> Error.fail matchloc (Conflict (`Pat, e))
@@ -362,7 +396,7 @@ let rec counterexamples :
         let case_pats : pat list =
           List.map (fun (tag, fields) ->
              Some (Ptuple (Some (tag, Location.noloc),
-                           map_fields (fun _ () -> any) fields)), Location.noloc) tags
+                           TFISO.to_exp_fields (map_fields (fun _ () -> any) fields))), Location.noloc) tags
         in
         let head = List.fold_left pat_or (List.hd case_pats) (List.tl case_pats) in
         counterexamples len dt
@@ -380,7 +414,7 @@ and counterexamples_fields :
       |> Clist.to_list
       |> Tuple_fields.fields_of_list ~fopen
     in
-    Clist.((Some (Ptuple (tag, fields)), Location.noloc) :: rest))
+    Clist.((Some (Ptuple (tag, TFISO.to_exp_fields fields)), Location.noloc) :: rest))
 
 
 (*
@@ -420,7 +454,7 @@ and check_fvs' ploc = function
      let p = check_fvs p in
      SymMap.add v ploc p
   | Ptuple (_, fs) ->
-     check_fvs_list (List.map snd (list_fields fs))
+     check_fvs_list (List.map snd (list_fields (TFISO.of_exp_fields ~def:(fun x -> (Some (pvar (Tuple_fields.string_of_field_name x, Location.noloc)), Location.noloc)) fs)))
   | Por (p, q) ->
      let p = check_fvs p in
      let q = check_fvs q in

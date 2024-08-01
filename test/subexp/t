@@ -854,12 +854,12 @@ fn[A <: {foo:int}, B <: {bar:int}](x) -> {a:A, b:{foo:int}|B} {
 >   let splat = fn (x) { {a: x, b: x} };
 >   splat(x)
 > }
->   fn [A <: {foo: int}, B <: {bar: int}](x: A | B) -> {a: A, b: {foo: int} | B} {
+>   fn [A <: {foo: int}, B <: {bar: int}](x: B | A) -> {a: A, b: {foo: int} | B} {
 >     let splat : [C] (C) -> {a: C, b: C} =
 >     fn [C](x: C) -> {a: C, b: C} { {a: x, b: x} };
 >     splat(x)
 >   }
-> [A <: {foo: int}, B <: {bar: int}] (A | B) -> {a: A, b: {foo: int} | B}
+> [A <: {foo: int}, B <: {bar: int}] (B | A) -> {a: A, b: {foo: int} | B}
 > RECHECK: Failure("contravariant join")
 > 
 > typechecking error: Failure("contravariant join")
@@ -884,11 +884,11 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:{foo
 >   {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}} {
 >   {a: x, b: x, c: x}
 > }
->   fn [A <: {foo: int}, B <: {bar: bool}](x: {bar: bool, foo: int} | A | B) ->
+>   fn [A <: {foo: int}, B <: {bar: bool}](x: {bar: absent, foo: absent} | A | B) ->
 >     {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}} {
 >     {a: x, b: x, c: x}
 >   }
-> [A <: {foo: int}, B <: {bar: bool}] ({bar: bool, foo: int} | A | B) ->
+> [A <: {foo: int}, B <: {bar: bool}] ({bar: absent, foo: absent} | A | B) ->
 > {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}}
 > RECHECK: Failure("contravariant join")
 > 
@@ -899,18 +899,20 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:{foo
 > 
 > let  = %yield(fun (x) ret { ret((a: x, b: x, c: x)) }); done
 
-fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:any} {
+fn[A <: {foo:int,...}, B <: {bar:bool,...}](x) -> {a:{bar:bool,...}|A, b:{foo:int,...}|B, c:any} {
   {a:x, b:x, c:x}
 }
-> fn [A <: {foo: int}, B <: {bar: bool}](x) ->
->   {a: {bar: bool} | A, b: {foo: int} | B, c: any} {
+> fn [A <: {foo: int, ...}, B <: {bar: bool, ...}](x) ->
+>   {a: {bar: bool, ...} | A, b: {foo: int, ...} | B, c: any} {
 >   {a: x, b: x, c: x}
 > }
->   fn [A <: {foo: int}, B <: {bar: bool}](x: {bar: bool, foo: int} | A | B) ->
->     {a: {bar: bool} | A, b: {foo: int} | B, c: any} {
+>   fn [A <: {foo: int, ...}, B <: {bar: bool, ...}](
+>     x: {bar: bool, foo: int, ...} | A | B
+>   ) -> {a: {bar: bool, ...} | A, b: {foo: int, ...} | B, c: any} {
 >     {a: x, b: x, c: x}
 >   }
-> [A <: {foo: int}, B <: {bar: bool}] ({bar: bool, foo: int} | A | B) -> {a: {bar: bool} | A, b: {foo: int} | B, c: any}
+> [A <: {foo: int, ...}, B <: {bar: bool, ...}] ({bar: bool, foo: int, ...} | A | B) ->
+> {a: {bar: bool, ...} | A, b: {foo: int, ...} | B, c: any}
 > RECHECK: Failure("contravariant join")
 > 
 > typechecking error: Failure("contravariant join")
@@ -922,19 +924,20 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:any}
 
 
 # FIXME: spec_sub_rigid_pos should remove one of the variables here
-fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|A|B, c:any} {
+fn[A <: {foo:int,...}, B <: {bar:bool,...}](x) -> {a:{bar:bool,...}|A, b:{foo:int,...}|A|B, c:any} {
   {a:x, b:x, c:x}
 }
-> fn [A <: {foo: int}, B <: {bar: bool}](x) ->
->   {a: {bar: bool} | A, b: {foo: int} | A | B, c: any} {
+> fn [A <: {foo: int, ...}, B <: {bar: bool, ...}](x) ->
+>   {a: {bar: bool, ...} | A, b: {foo: int, ...} | A | B, c: any} {
 >   {a: x, b: x, c: x}
 > }
->   fn [A <: {foo: int}, B <: {bar: bool}](x: {bar: bool, foo: int} | A | B) ->
->     {a: {bar: bool} | A, b: {foo: int} | A | B, c: any} {
+>   fn [A <: {foo: int, ...}, B <: {bar: bool, ...}](
+>     x: {bar: bool, foo: int, ...} | A | B
+>   ) -> {a: {bar: bool, ...} | A, b: {foo: int, ...} | A | B, c: any} {
 >     {a: x, b: x, c: x}
 >   }
-> [A <: {foo: int}, B <: {bar: bool}] ({bar: bool, foo: int} | A | B) ->
-> {a: {bar: bool} | A, b: {foo: int} | A | B, c: any}
+> [A <: {foo: int, ...}, B <: {bar: bool, ...}] ({bar: bool, foo: int, ...} | A | B) ->
+> {a: {bar: bool, ...} | A, b: {foo: int, ...} | A | B, c: any}
 > RECHECK: Failure("contravariant join")
 > 
 > typechecking error: Failure("contravariant join")
@@ -1268,4 +1271,4 @@ fn [A,C,B <: int](x) -> (A|C,int|B|C) { (x,x) }
 > 
 > let  = %yield(fun (x) ret { ret((0: x, 1: x)) }); done
 
-> STATS: fix: 89, flex: 1997
+> STATS: fix: 89, flex: 1990

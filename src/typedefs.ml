@@ -2,6 +2,7 @@
  * Core definitions used by the typechecker
  *)
 open Util
+type 'a loc = 'a Location.loc
 
 module StrMap = Map.Make (struct type t = string let compare = compare end)
 
@@ -16,16 +17,187 @@ module One_or_two = struct
   let both x y = LR (x,y)
 end
 
+module Fields = struct
+  module Map = Tuple_fields.FieldMap
+  module Table = Hashtbl.Make (struct
+    type t = Tuple_fields.field_name
+    let equal = Tuple_fields.equal_field_name
+    let hash = Hashtbl.hash (*FIXME better hash*)
+  end)
+
+  type paloc = {pres_loc: Location.t; abs_loc: Location.t}
+  type 'a field_desc =
+    | Funknown of Location.t
+    | Foptional of 'a * paloc
+    | Fpresent of 'a loc
+    | Fabsent of Location.t
+    | Fbroken of paloc
+
+  let equal_field_desc f p q =
+    match p, q with
+    | Funknown _, Funknown _ -> true
+    | Foptional (p, _), Foptional (q, _) -> f p q
+    | Fpresent (p, _), Fpresent (q, _) -> f p q
+    | Fabsent _, Fabsent _ -> true
+    | Fbroken _, Fbroken _ -> true
+    | (Funknown _ | Foptional _ | Fpresent _ | Fabsent _ | Fbroken _), _ ->
+       false
+
+  let field_desc_map f = function
+    | Foptional (x, l) -> Foptional (f x, l)
+    | Fpresent (x, l) -> Fpresent (f x, l)
+    | Funknown _ | Fabsent _ | Fbroken _ as f -> f
+
+  let desc_of_ext l = function
+    | Exp.Ext_open -> Funknown l
+    | Exp.Ext_closed -> Fabsent l
+
+  type 'a t =
+    { fields: 'a field_desc Map.t;
+      fnames: Tuple_fields.field_name list;
+      fopen: Exp.extensible_flag }
+
+  let equal ~pos
+        {fields=pfields; fnames=pnames; fopen=popen}
+        {fields=qfields; fnames=qnames; fopen=qopen} =
+    pnames = qnames &&
+    popen = qopen &&
+    Map.equal (equal_field_desc pos) pfields qfields
+
+  let map ~pos t =
+    let fields = Map.map (field_desc_map pos) t.fields in
+    { t with fields }
+
+  let mapi ~pos t =
+    let fields = Map.mapi (fun fn x -> field_desc_map (pos fn) x) t.fields in
+    { t with fields }
+
+  let wf ~pos {fields; fnames; fopen} =
+    let remaining =
+      List.fold_left (fun fields fn ->
+        begin match Map.find fn fields with
+        | Foptional (t, _) | Fpresent (t, _) -> pos t
+        | _ -> ()
+        | exception Not_found -> intfail "Cons.wf: missing field %s" (Tuple_fields.string_of_field_name fn)
+        end;
+        Map.remove fn fields) fields fnames in
+    remaining |> Map.iter (fun _ d ->
+      assert (equal_field_desc (fun _ _ -> false) d (desc_of_ext Location.noloc fopen)))
+
+  let merge ~fdef ~f (a, a_loc) (b, b_loc) =
+    let def_a = desc_of_ext a_loc a.fopen in
+    let def_b = desc_of_ext b_loc b.fopen in
+    let fopen = fdef a.fopen b.fopen in
+    let def = desc_of_ext a_loc fopen in
+    let is_default x = equal_field_desc (fun _ _ -> assert false) def x in
+    assert (is_default (f def_a def_b));
+    let seen = Table.create 10 in
+    let merge_field fn a b =
+      let r = f (Option.value a ~default:def_a) (Option.value b ~default:def_b) in
+      if not (is_default r) then
+        Table.add seen fn ();
+      (* OPT: Consider dropping the field entirely if it's default with a_loc *)
+      Some r
+    in
+    let fields = Map.merge merge_field a.fields b.fields in
+    let check_name fn =
+      if Table.mem seen fn
+      then (Table.remove seen fn; true)
+      else false
+    in
+    let fnames =
+      let a_names = List.filter check_name a.fnames in
+      let b_names = List.filter check_name b.fnames in
+      a_names @ b_names
+    in
+    let r = { fields; fnames; fopen } in
+    wf ~pos:ignore r; r
+
+  let join ~pos a b =
+    merge a b
+      ~fdef:(fun a b -> match a, b with
+          | Exp.Ext_closed, Exp.Ext_closed -> Exp.Ext_closed
+          | _, _ -> Exp.Ext_open)
+      ~f:(fun a b -> match a, b with
+         | (Funknown _ as x), _
+         | _, (Funknown _ as x) -> x
+         | x, Fbroken _
+         | Fbroken _, x -> x
+         | Foptional (a, l), (Foptional (b, _) | Fpresent (b, _)) -> Foptional (pos a b, l)
+         | Foptional _ as a, (Fabsent _) -> a
+         | Fpresent (a, l), Fpresent (b, _) -> Fpresent (pos a b, l)
+         | Fpresent (a, pres_loc), Foptional (b, l) ->
+            Foptional (pos a b, {l with pres_loc})
+         | Fpresent (a, pres_loc), Fabsent abs_loc ->
+            Foptional (a, {abs_loc; pres_loc})
+         | Fabsent abs_loc, (Foptional (b, {pres_loc; _})) ->
+            Foptional (b, {abs_loc; pres_loc})
+         | Fabsent _ as a, (Fabsent _) -> a
+         | Fabsent abs_loc, Fpresent (b, pres_loc) ->
+            Foptional (b, {abs_loc; pres_loc}))
+
+  (* Meet. Locations from lower side, from left if same *)
+  let meet ~pos a b =
+    let open One_or_two in
+    merge a b
+      ~fdef:(fun a b -> match a, b with
+          | Exp.Ext_open, Exp.Ext_open -> Exp.Ext_open
+          | _, _ -> Exp.Ext_closed)
+      ~f:(fun a b -> match a, b with
+          | x, Funknown _ ->
+             field_desc_map (fun x -> pos (L x)) x
+          | Funknown _, x ->
+             field_desc_map (fun x -> pos (R x)) x
+          | (Fbroken _ as x), _
+          | _, (Fbroken _ as x) -> x
+          | Foptional (a, l), Foptional (b, _) ->
+             Foptional (pos (LR (a, b)), l)
+          | Foptional (a, _), Fpresent (b, l) ->
+             Fpresent (pos (LR (a, b)), l)
+          | Foptional _, (Fabsent _ as b) ->
+             b
+          | Fpresent (a, l), (Foptional (b, _) | Fpresent (b, _)) ->
+             Fpresent (pos (LR (a, b)), l)
+          | Fpresent (_, pres_loc), Fabsent abs_loc
+          | Fabsent abs_loc, Fpresent (_, pres_loc) ->
+             Fbroken {pres_loc; abs_loc}
+          | (Fabsent _ as a), (Foptional _ | Fabsent _) ->
+             a)
+
+  let sub ~f (a,a_loc) (b,b_loc) =
+    let def_a = desc_of_ext a_loc a.fopen in
+    let def_b = desc_of_ext b_loc b.fopen in
+    f None def_a def_b;
+    let sub_field fn a b =
+      f (Some fn) (Option.value a ~default:def_a) (Option.value b ~default:def_b);
+      None
+    in
+    ignore (Map.merge sub_field a.fields b.fields)
+
+  let of_list ~fopen fields =
+    let fnames = List.map fst fields in
+    let fields =
+      List.fold_left (fun acc (f, x) -> Map.add f x acc) Map.empty fields
+    in
+    { fields; fnames; fopen }
+
+  let empty = { fopen = Ext_open; fnames = []; fields = Map.empty }
+end
+
 module Cons1 = struct
+  open Fields
   type tuple_tag = string
+
   type (+'neg, +'pos) cons =
     | Top
     (* FIXME: maybe delete these once abstypes exist? *)
     | Bool
     | Int
     | String
-    (* FIXME: add a loc to tuple tag and each field *)
-    | Record of tuple_tag option * 'pos Tuple_fields.tuple_fields
+    | Record of {
+        tag: tuple_tag option;
+        body: 'pos Fields.t
+      }
     | Func of 'neg list * 'pos
 
   type (+'neg, +'pos) t = ('neg, 'pos) cons
@@ -36,9 +208,9 @@ module Cons1 = struct
     | Bool, Bool -> true
     | Int, Int -> true
     | String, String -> true
-    | Record (pt, p), Record (qt, q) ->
-       Option.equal (String.equal) pt qt &&
-       Tuple_fields.equal_fields pos p q
+    | Record p, Record q ->
+       Option.equal (String.equal) p.tag q.tag &&
+       Fields.equal ~pos p.body q.body
     | Func (pa, pr), Func (qa, qr) ->
        List.equal neg pa qa &&
        pos pr qr
@@ -49,14 +221,20 @@ module Cons1 = struct
     | Bool -> Bool
     | Int -> Int
     | String -> String
-    | Record (tag,fields) ->
-       Record (tag, Tuple_fields.map_fields (fun _fn x -> pos x) fields)
+    | Record {tag; body} ->
+       Record {tag; body = Fields.map ~pos body}
     | Func (args, res) ->
        let args = List.map neg args in
        let res = pos res in
        Func (args, res)
 
-  let iter ~neg ~pos x = ignore (map ~neg ~pos x)
+  let wf ~neg ~pos = function
+    | Top | Bool | Int | String -> ()
+    | Record {tag=_; body} ->
+       Fields.wf ~pos body
+    | Func (args, res) ->
+       List.iter neg args;
+       pos res
 
   type field =
     | Func_arg of int
@@ -80,8 +258,9 @@ module Cons1 = struct
     | Bool -> Bool
     | Int -> Int
     | String -> String
-    | Record (tag,fields) ->
-       Record (tag, Tuple_fields.map_fields (fun fn x -> pos (Record_field fn) x) fields)
+    | Record {tag; body} ->
+       let pos fn x = pos (Record_field fn) x in
+       Record {tag; body = Fields.mapi ~pos body }
     | Func (args, res) ->
        let args = List.mapi (fun i x -> neg (Func_arg i) x) args in
        let res = pos Func_res res in
@@ -112,12 +291,11 @@ module Cons1 = struct
   (* least c' greater than c along coe *)
   let coerce_up coe c =
     match coe, c with
-    | Id, c ->
-       c
+    | Id, c -> c
     | To_top, _ -> Top
-    | Drop_record_tag t, Record (Some t', fs) ->
+    | Drop_record_tag t, Record {tag=Some t'; body} ->
        assert (t = t');
-       Record (None, fs)
+       Record {tag=None; body}
     | Drop_record_tag _, _ -> assert false
 
   type head_ordering =
@@ -143,7 +321,7 @@ module Cons1 = struct
     | Func _, _
     | _, Func _ -> Un Incompatible
 
-    | Record (ptag, _), Record (qtag, _) ->
+    | Record {tag=ptag; _}, Record {tag=qtag; _} ->
        begin match ptag, qtag with
        | None, None -> Le Id
        | Some t, None -> Le (Drop_record_tag t)
@@ -156,33 +334,30 @@ module Cons1 = struct
     | Un _, Un _ -> true
     | _, _ -> false
 
-  let join ~neg ~pos a b =
+  let join ~neg ~pos (a, a_loc) (b, b_loc) =
     assert (sub_head a b = Le Id);
     match a, b with
-    | Top, Top -> Top
+    | Top, Top -> Top, a_loc
     | (Top, _) | (_, Top) -> assert false
 
-    | Bool, Bool -> Bool
-    | Int, Int -> Int
-    | String, String -> String
+    | Bool, Bool -> Bool, a_loc
+    | Int, Int -> Int, a_loc
+    | String, String -> String, a_loc
     | (Bool|Int|String), _ | _, (Bool|Int|String) ->
        assert false
 
-    | Record (tag, c), Record (tag', c') ->
-       assert (tag = tag');
-       let fields =
-         Tuple_fields.inter c c'
-           ~both:(fun s t -> pos s t)
-       in
-       Record (tag, fields)
+    | Record a, Record b ->
+       assert (a.tag = b.tag);
+       Record {tag = a.tag; body = Fields.join ~pos (a.body, a_loc) (b.body, b_loc) },
+       a_loc (* FIXME: which loc is best here? *)
 
     | Func (args, res), Func (args', res') ->
        let args = List.map2 neg args args' in
-       Func(args, pos res res')
+       Func(args, pos res res'), a_loc
 
     | Record _, Func _ | Func _, Record _ -> assert false
 
-  let meet ~neg ~pos a b =
+  let meet ~neg ~pos (a, a_loc) (b, b_loc) =
     (* tree heads means meet exists only for comparable heads *)
     assert (not (incomparable_head a b));
     let open One_or_two in
@@ -196,21 +371,13 @@ module Cons1 = struct
     | String, String -> String
     | (Bool|Int|String), _ | _, (Bool|Int|String) ->
        assert false
-    | Record (tag, c), Record (tag', c') ->
+    | Record a, Record b ->
        let tag =
-         match tag, tag' with
+         match a.tag, b.tag with
          | None, x | x, None -> x
-         | Some t, Some t' -> assert (t = t'); tag
+         | Some t, Some t' -> assert (t = t'); a.tag
        in
-       (* FIXME hack until better closed/open logic is implemented. Wrong here! *)
-       let fields =
-         Tuple_fields.merge_fields c c'
-           ~left:(fun _ x -> Some (pos (L x)))
-           ~right:(fun _ y -> Some (pos (R y)))
-           ~both:(fun _ x y -> Some (pos (LR (x, y))))
-           ~extra:(function (`Open,_), (`Open,_) -> `Open | _ -> `Closed (* Unsound! *))
-       in
-       Record(tag, fields)
+       Record {tag; body = Fields.meet ~pos (a.body, a_loc) (b.body, b_loc) }
     | Func (args, res), Func (args', res') ->
        let args =
          List.map2 (fun x y -> neg (LR (x,y))) args args' in
@@ -218,44 +385,49 @@ module Cons1 = struct
        Func (args, res)
     | Record _, Func _ | Func _, Record _ -> assert false
 
-  type sub_error =
-    | Field_missing of Tuple_fields.field_name
-    | Field_extra of Tuple_fields.field_name option
+  type field_error =
+    | Field_missing of Tuple_fields.field_name * Location.t * Location.t
+    | Field_extra of Tuple_fields.field_name option * Location.t * Location.t
 
-  exception SubError of sub_error
+  exception SubError of field_error
 
-  let sub ~neg ~pos a b =
+  let sub ~neg ~pos (a, a_loc) (b, b_loc) =
     assert (sub_head a b = Le Id);
-    match
-      match a, b with
-      | Top, Top
-      | Bool, Bool
-      | Int, Int
-      | String, String -> ()
-      | Func (args, res), Func (args', res') ->
-         List.combine args' args
-         |> List.iteri (fun i (a', a) -> neg (Func_arg i) a' a);
-         pos Func_res res res';
-         ()
-      | Record (t, af), Record (t', bf) ->
-         assert (t = t');
-         let open Tuple_fields in
-         begin match bf.fopen, af.fopen with
-         | `Open, _ ->  ()
-         | `Closed, `Open -> raise (SubError (Field_extra None))
-         | `Closed, `Closed ->
-            match List.find_opt (fun k -> not (FieldMap.mem k bf.fields)) af.fnames with
-            | Some k -> raise (SubError (Field_extra (Some k)))
-            | None -> ()
-         end;
-         FieldMap.bindings bf.fields |> List.iter (fun (k, b) ->
-           match FieldMap.find k af.fields with
-           | exception Not_found -> raise (SubError (Field_missing k))
-           | a -> pos (Record_field k) a b);
-      | _ -> assert false
-    with
-    | () -> Ok ()
-    | exception (SubError e) -> Error e
+    match a, b with
+    | Top, Top
+    | Bool, Bool
+    | Int, Int
+    | String, String -> Ok ()
+    | Func (args, res), Func (args', res') ->
+       List.combine args' args
+       |> List.iteri (fun i (a', a) -> neg (Func_arg i) a' a);
+       pos Func_res res res';
+       Ok ()
+    | Record a, Record b ->
+       assert (a.tag = b.tag);
+       let sub_field k a b =
+         match a, b with
+         | _, Funknown _ -> ()
+         | Fbroken _, _ -> ()
+         | Fabsent _, (Fabsent _ | Foptional _) -> ()
+         | (Foptional (a, _) | Fpresent (a, _)), Foptional (b, _)
+         | Fpresent (a, _), Fpresent (b, _) -> pos (Record_field (Option.get k)) a b
+
+         | (Funknown la | Fabsent la | Foptional (_, {abs_loc=la; _})),
+           (Fpresent (_, lb) | Fbroken {pres_loc=lb; _})
+         | (Funknown la, Foptional (_, {pres_loc=lb; _})) ->
+            (* failed to be present *)
+            raise (SubError (Field_missing (Option.get k, la, lb)))
+         | (Funknown la | Foptional (_,{pres_loc=la;_}) | Fpresent (_, la)),
+           (Fbroken {abs_loc=lb;_} | Fabsent lb) ->
+            (* failed to be absent *)
+            raise (SubError (Field_extra (k, la, lb)))
+       in
+       begin match Fields.sub ~f:sub_field (a.body,a_loc) (b.body,b_loc) with
+       | () -> Ok ()
+       | exception (SubError e) -> Error e
+       end
+    | _ -> assert false
 
 end
 
@@ -592,7 +764,7 @@ let rec assert_locally_closed :
   fun ix ty -> match ty with
   | Tsimple _ | Tbot _ -> ()
   | Tcons (c, _cloc) ->
-     Cons1.iter ~neg:(assert_locally_closed ix) ~pos:(assert_locally_closed ix) c
+     Cons1.wf ~neg:(assert_locally_closed ix) ~pos:(assert_locally_closed ix) c
   | Tvar v -> assert_locally_closed_var ix v
   | Tjoin (a, b, _loc) -> assert_locally_closed ix a; assert_locally_closed ix b
   | Tpoly {vars; body} ->
@@ -757,7 +929,7 @@ and wf_lower ~seen env lvl l =
   l |> List.iter (function
     | Lflexvar v -> wf_flexvar ~seen env lvl v
     | Lrigvar v -> wf_rigvar env lvl v
-    | Lcons (c,_) -> Cons1.iter ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_lower ~seen env lvl) c)
+    | Lcons (c,_) -> Cons1.wf ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_lower ~seen env lvl) c)
 
 let wf_var env ext = function
   | Vrigid rv -> wf_rigvar env rv.level rv
@@ -774,7 +946,7 @@ let rec wf_typ : 'pos 'neg .
   | Tsimple s -> pos s
   | Tbot _  -> ()
   | Tcons (c, _cloc) ->
-     Cons1.iter ~neg:(wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) ~pos:(wf_typ ~neg ~pos ~ispos env ext) c
+     Cons1.wf ~neg:(wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) ~pos:(wf_typ ~neg ~pos ~ispos env ext) c
   | Tvar v -> wf_var env ext v
   | Tjoin (a, b, _loc) ->
      wf_typ ~neg ~pos ~ispos env ext a;
@@ -807,9 +979,34 @@ let unparse_cons ~neg ~pos (ty,_tyloc) =
     | Bool -> named_type "bool"
     | Int -> named_type "int"
     | String -> named_type "string"
-    | Record (tag, fs) ->
-       Trecord (Option.map (fun t -> t, Location.noloc) tag,
-                Tuple_fields.map_fields (fun _ t -> pos t) fs)
+    | Record {tag; body = {fields; fnames; fopen}} ->
+       let open Fields in
+       let unparse_field_desc k = function
+         | Funknown l -> (k,l), Exp.Optional, None
+         | Foptional (a, l) -> (k,l.pres_loc), Exp.Optional, Some (pos a)
+         | Fpresent (a, l) -> (k,l), Exp.Mandatory, Some (pos a)
+         | Fabsent l -> (k,l), Exp.Optional, Some (mktyexp (named_type "absent"))
+         | Fbroken l -> (k,l.abs_loc), Exp.Mandatory, Some (mktyexp (named_type "absent"))
+       in
+       let fs =
+         match
+           List.mapi (fun i f ->
+             match f with
+             | Tuple_fields.Field_positional j when i = j ->
+                begin match Map.find f fields with
+                | Fpresent (a,_loc) -> pos a
+                | _ -> raise_notrace Exit
+                end
+             | _ -> raise_notrace Exit)
+             fnames
+         with
+         | tuple ->
+            Exp.Ftuple (tuple, fopen)
+         | exception Exit ->
+            Exp.Frecord (List.map (fun f -> unparse_field_desc f (Map.find f fields)) fnames,
+                         fopen)
+       in
+       Trecord (Option.map (fun t -> t, Location.noloc) tag, fs)
     | Func (args, ret) ->
        Tfunc (List.map neg args, pos ret)
   in

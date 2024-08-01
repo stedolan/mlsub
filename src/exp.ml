@@ -1,4 +1,3 @@
-open Tuple_fields
 open Location
 
 type 'a mayloc = 'a option loc
@@ -12,6 +11,29 @@ type tuple_tag = string loc
 
 (* Expressions *)
 
+(* FIXME: move somewhere new? *)
+type mand_flag =
+  | Mandatory
+  | Optional
+
+type extensible_flag =
+  | Ext_open
+  | Ext_closed
+
+type 'a fields =
+  | Ftuple of 'a list * extensible_flag
+  | Frecord of (Tuple_fields.field_name loc * mand_flag * 'a option) list * extensible_flag
+
+let map_fields ?(loc=Fun.id) f = function
+  | Ftuple (x,ext) -> Ftuple (List.mapi (fun i x -> f (Tuple_fields.Field_positional i, Mandatory) x) x, ext)
+  | Frecord (fs,ext) -> Frecord (List.map (fun ((s,sloc),m,x) -> (s,loc sloc), m, Option.map (f (s,m)) x) fs, ext)
+
+(* FIXME: is this a better repr? *)
+let record_fields ~loc = function
+  | Ftuple (xs, ext) ->
+     List.mapi (fun i x -> (Tuple_fields.Field_positional i, loc), Mandatory, Some x) xs, ext
+  | Frecord (fields, ext) -> fields, ext
+
 type exp = exp' mayloc and exp' =
   (* 42 or "hello" *)
   | Lit of literal loc
@@ -24,7 +46,7 @@ type exp = exp' mayloc and exp' =
   (* f(...) *)
   | App of exp * (string option * exp) list
   (* (a, b, c) or {x: a, y, z: c}*)
-  | Tuple of tuple_tag option * exp tuple_fields
+  | Tuple of tuple_tag option * exp fields
   (* let a : t = ...; ... *)
   | Let of pat * tyexp option * exp * exp
   (* e; e *)
@@ -51,7 +73,7 @@ and parameters = (pat * tyexp option) list
 and pat = pat' mayloc and pat' =
   | Pany
   | Pbind of symbol * pat
-  | Ptuple of tuple_tag option * pat tuple_fields
+  | Ptuple of tuple_tag option * pat fields
   | Por of pat * pat
 
 (* Type expressions *)
@@ -59,7 +81,7 @@ and pat = pat' mayloc and pat' =
 and tyexp = tyexp' mayloc and tyexp' =
   | Tnamed of ident
   | Tforall of typolybounds * tyexp
-  | Trecord of tuple_tag option * tyexp tuple_fields
+  | Trecord of tuple_tag option * tyexp fields
   | Tfunc of tyexp list * tyexp
   | Tjoin of tyexp * tyexp
 
@@ -106,7 +128,7 @@ let mapper =
     | App (f, args) ->
        App (r.exp r f, List.map (fun (k, x) -> k, r.exp r x) args)
     | Tuple (tag, es) ->
-       Tuple (Option.map (sym r) tag, map_fields (fun _fn e -> r.exp r e) es)
+       Tuple (Option.map (sym r) tag, map_fields ~loc:(r.loc r) (fun _fn e -> r.exp r e) es)
     | Let (p, ty, e, body) ->
        Let (r.pat r p, Option.map (r.tyexp r) ty, r.exp r e, r.exp r body)
     | Seq (e1, e2) ->
@@ -127,7 +149,7 @@ let mapper =
     | Pany -> Pany
     | Pbind (s, p) -> Pbind (sym r s, r.pat r p)
     | Ptuple (tag, ps) ->
-       Ptuple (Option.map (sym r) tag, map_fields (fun _fn x -> r.pat r x) ps)
+       Ptuple (Option.map (sym r) tag, map_fields ~loc:(r.loc r) (fun _fn x -> r.pat r x) ps)
     | Por (p, q) -> Por (r.pat r p, r.pat r q)
   in
 
@@ -139,7 +161,7 @@ let mapper =
        let body = r.tyexp r body in
        Tforall (bounds, body)
     | Trecord (tag, ts) ->
-       Trecord (Option.map (sym r) tag, map_fields (fun _fn t -> r.tyexp r t) ts)
+       Trecord (Option.map (sym r) tag, map_fields ~loc:(r.loc r) (fun _fn t -> r.tyexp r t) ts)
     | Tfunc (args, ret) ->
        Tfunc (List.map (r.tyexp r) args, r.tyexp r ret)
     | Tjoin (s, t) ->

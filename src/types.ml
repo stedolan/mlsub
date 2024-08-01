@@ -26,7 +26,8 @@ let tcons_head (c, loc) =
 
 type conflict =
   | Head of Cons1.head_conflict
-  | Sub of Cons1.sub_error
+  | Field_missing of Tuple_fields.field_name
+  | Field_extra of Tuple_fields.field_name option
 
 type err_typ = (unit, unit) typ
 type subtyping_error = {
@@ -113,7 +114,7 @@ let subtype_cons env ~neg ~pos (cp,cploc) (cn,cnloc) =
     | Le coe -> Cons1.coerce_up coe cp
   in
   match
-    Cons1.sub cp' cn
+    Cons1.sub (cp',cploc) (cn,cnloc)
       ~neg:(fun k a b ->
         try neg a b
         with SubtypeError err -> raise (SubtypeError (wrap_err k err)))
@@ -122,7 +123,15 @@ let subtype_cons env ~neg ~pos (cp,cploc) (cn,cnloc) =
         with SubtypeError err -> raise (SubtypeError (wrap_err k err)))
   with
   | Ok () -> ()
-  | Error err -> raise (SubtypeError (make_err env (Sub err) (cp,cploc) (cn,cnloc)))
+  | Error err ->
+     let err =
+       match err with
+       | Field_missing (name, ploc, nloc) ->
+          make_err env (Field_missing name) (cp, ploc) (cn, nloc)
+       | Field_extra (name, ploc, nloc) ->
+          make_err env (Field_extra name) (cp, ploc) (cn, nloc)
+     in
+     raise (SubtypeError err)
 
 let lower_contains_fv fv lower =
   List.exists (function
@@ -299,7 +308,7 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
             in
             let open One_or_two in
             let cons =
-              Cons1.meet cons_a cons_b
+              Cons1.meet (cons_a, upper_loc) (cons_b, cnloc)
                 ~neg:(function
                   | L x -> x
                   | R r -> join_lower ~changes env pv.level bottom r
@@ -440,13 +449,13 @@ and join_lower_part ~changes env level lower ty =
        assert (Env_level.extends rv.level level);
        [Lrigvar rv]
   in
-  let join1 (ca, caloc) (cb, _cbloc) = (* ca assumed matchable & correct level *)
+  let join1 (ca, caloc) (cb, cbloc) = (* ca assumed matchable & correct level *)
     let neg vl vr =
       noerror (fun () -> subtype_flex_flex ~changes env vl vr);
       vl
     in
     let pos a b = join_lower ~changes env level a b in
-    Cons1.join ~neg ~pos ca cb, caloc (* FIXME loc *)
+    Cons1.join ~neg ~pos (ca, caloc) (cb, cbloc)
   in
   let rec join_cons lower ca_acc cb cb_loc =
     match lower with

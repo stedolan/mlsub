@@ -69,6 +69,32 @@ let sep ?(trail=false) s xs =
            (if trail then s else empty) ^^
            break 0)
 let pp_doc () d = d
+
+let field_name = function
+  | Field_positional n -> string (Printf.sprintf "%d" n)
+  | Field_named s -> string s
+
+let ext_flag = function
+  | Ext_open -> [string "..."]
+  | Ext_closed -> []
+
+let fields ~tcomma f = function
+  | Ftuple ([x],Ext_closed) when tcomma ->
+     (* Trailing comma required to disambiguate *)
+     parens (sep ~trail:true comma [f x])
+  | Ftuple (fs, ext) ->
+     let fs = List.map f fs in
+     parens (sep comma (fs @ ext_flag ext))
+  | Frecord (fs, ext) ->
+     let mand_flag = function
+       | Mandatory -> empty
+       | Optional -> string "?"
+     in
+     let fs = List.map (function
+       | ((s,_loc), m, Some x) -> field_name s ^^ mand_flag m ^^ string ":" ^^ break 1 ^^ f x
+       | ((s,_loc), m, None) -> field_name s ^^ mand_flag m) fs in
+     braces (sep comma (fs @ ext_flag ext))
+
 let rec exp ~prec e =
   match e with
   | None, _ -> string "(<err>)"
@@ -97,9 +123,9 @@ and exp_ e =
        pat p ^^ opt_type_annotation ty ^^
        op "=" ^^ group (exp e) ^^
        string ";") ^^ break 1 ^^ exp body*)
-  | Tuple (None, t) -> record ~tcomma:true ~pun:exp_pun (exp ~prec:Exp) t
-  | Tuple (Some tag, t) when Tuple_fields.is_empty t -> symbol tag
-  | Tuple (Some tag, t) -> symbol tag ^^ record ~tcomma:false ~pun:exp_pun (exp ~prec:Exp) t
+  | Tuple (None, t) -> fields ~tcomma:true (exp ~prec:Exp) t
+  | Tuple (Some tag, Ftuple ([],Ext_closed)) -> symbol tag
+  | Tuple (Some tag, t) -> symbol tag ^^ fields ~tcomma:false (exp ~prec:Exp) t
   | App (f, args) ->
      let args = List.map (function
        | (Some s, x) -> string s ^^ string ":" ^^ space ^^ exp ~prec x
@@ -131,32 +157,6 @@ and fndef ~name (poly, params, ty, body) =
 
 and block e =
   space ^^ braces' (indent (break 1 ^^ exp ~prec:Max e) ^^ break 1)
-
-and fields : 'e . ?tcomma:bool -> (pos:bool -> field_name -> 'e -> document) -> 'e tuple_fields -> document =
-  fun ?(tcomma=false) print_elem {fnames; fields; fopen} ->
-  let rec annot_fnames i = function
-    | (Field_positional n as fn) :: rest when n = i ->
-       (true, fn) :: annot_fnames (i+1) rest
-    | fnames -> List.map (fun fn -> false, fn) fnames in
-  let fnames = annot_fnames 0 fnames in
-  let tcomma = tcomma && List.length fnames = 1 && fopen = `Closed in
-  sep comma ~trail:tcomma
-    (List.map (fun (pos,f) -> print_elem ~pos f (FieldMap.find f fields)) fnames
-    @ (match fopen with `Open -> [string "..."] | `Closed -> []))
-
-and record : 'e . tcomma:bool -> pun:(field_name * 'e -> bool) -> ('e -> document) -> 'e tuple_fields -> document =
-  fun ~tcomma ~pun print_elem t ->
-  if t.fnames = List.init (List.length t.fnames) (fun i -> Field_positional i) then
-    parens (fields ~tcomma (fun ~pos:_ _ e -> print_elem e) t)
-  else
-    braces (fields ~tcomma:false (fun ~pos:_ fn e ->
-       if pun (fn, e) then field_name fn else
-          field_name fn ^^ string ":" ^^ break 1 ^^ print_elem e) t)
-
-and field_name = function
-  (* FIXME: positional field syntax *)
-  | Field_positional n -> string (Printf.sprintf ".%d" n)
-  | Field_named s -> string s
 
 and exp_pun = function
   | Field_named s, (Some (Var ({label=s';shift=0}, _)), _) -> s = s'
@@ -198,9 +198,9 @@ and pat_ p =
   | Pany -> string "_"
   | Pbind (s, (Some Pany, _)) -> symbol s
   | Pbind (s, p) -> symbol s ^^ op "@" ^^ pat ~prec:Infix p
-  | Ptuple (None, ts) -> record ~tcomma:true ~pun:pat_pun (pat ~prec:Term) ts
-  | Ptuple (Some tag, ts) when Tuple_fields.is_empty ts && ts.fopen = `Closed -> symbol tag
-  | Ptuple (Some tag, ts) -> symbol tag ^^ record ~tcomma:false ~pun:pat_pun (pat ~prec:Term) ts
+  | Ptuple (None, ts) -> fields ~tcomma:true (pat ~prec:Term) ts
+  | Ptuple (Some tag, Ftuple ([],Ext_closed)) -> symbol tag
+  | Ptuple (Some tag, ts) -> symbol tag ^^ fields ~tcomma:false (pat ~prec:Term) ts
   | Por (p, q) -> pat ~prec p ^^ op "|" ^^ pat ~prec q
 
 and tyexp ~prec t =
@@ -213,12 +213,9 @@ and tyexp_ t =
   let prec = ty_precedence t in
   match t with
   | Tnamed s -> ident s
-  | Trecord (None, fields) ->
-     record ~tcomma:true ~pun:(fun _ -> false) (tyexp ~prec:Exp) fields
-  | Trecord (Some tag, fields) when Tuple_fields.is_empty fields ->
-     qsymbol tag
-  | Trecord (Some tag, fields) ->
-     qsymbol tag ^^ record ~tcomma:false ~pun:(fun _ -> false) (tyexp ~prec:Term) fields
+  | Trecord (None, fs) -> fields ~tcomma:true (tyexp ~prec:Exp) fs
+  | Trecord (Some tag, Ftuple ([],Ext_closed)) -> qsymbol tag
+  | Trecord (Some tag, fs) -> qsymbol tag ^^ fields ~tcomma:false (tyexp ~prec:Term) fs
   | Tfunc (args, ret) ->
      parens (sep comma (List.map (tyexp ~prec:Exp) args)) ^^
        space ^^ group (string "->" ^^ break 1 ^^ group (tyexp ~prec:Exp ret))

@@ -462,7 +462,9 @@ fn (x) {
 > This 'Bad{foo: _} comes from test:5:
 >       Bad{foo: x.foo}
 >       ^^^^^^^^^^^^^^^
-> but is used as {bar: _, ...}
+> but is used as {bar: _, ...} at test:10:
+>     (y.foo, y.bar)
+>               ^^^
 
 let make = fn (x) {
   if x.good {
@@ -486,9 +488,9 @@ fn (x) { use(make(x)) }
 >   use(make(x))
 > }
 >   let make :
->     [A, B] ({good: bool, bar: A, foo: B, ...}) ->
+>     [A, B] ({good: bool, foo: B, bar: A, ...}) ->
 >     'Good{foo: B, bar: A} | 'Bad{foo: B} =
->   fn [A, B](x: {good: bool, bar: A, foo: B, ...}) ->
+>   fn [A, B](x: {good: bool, foo: B, bar: A, ...}) ->
 >     'Good{foo: B, bar: A} | 'Bad{foo: B} {
 >     if x.good {
 >       Good{foo: x.foo, bar: x.bar}
@@ -503,10 +505,10 @@ fn (x) { use(make(x)) }
 >       | Bad{foo: bar, ...} => bar
 >     }
 >   };
->   fn [A](x: {good: bool, bar: any, foo: A, ...}) -> A | A {
+>   fn [A](x: {good: bool, foo: A, bar: any, ...}) -> A | A {
 >     use(make(x))
 >   }
-> [A] ({good: bool, bar: any, foo: A, ...}) -> A | A
+> [A] ({good: bool, foo: A, bar: any, ...}) -> A | A
 > RECHECK: internal error: duplicate RV in upper_cons
 > 
 > internal error: duplicate RV in upper_cons
@@ -678,7 +680,7 @@ fn (x : (('A(int,int)|'B{x:string,y:string}|'C|'D|'E), 'B|'C|'D)) {
 }
 > fn (x: ('A(int, int) | 'B{x: string, y: string} | 'C | 'D | 'E, 'B | 'C | 'D)) {
 >   match x {
->     | ((A(_, _) | B(...)), (C | D))
+>     | ((A(_, _) | B{...}), (C | D))
 >     | (C, C)
 >     | (D, C) => 1
 >   }

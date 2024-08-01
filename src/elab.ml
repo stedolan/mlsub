@@ -14,7 +14,7 @@ type typed_exp = typed_exp' mayloc and typed_exp' =
   | Fn of typed_func_def
   | FnDef of symbol * IR.value IR.Binder.t * typed_func_def * typed_exp
   | App of typed_exp * typed_exp list (* FIXME: restore/preserve parameter names? *)
-  | Tuple of tuple_tag option * typed_exp tuple_fields
+  | Tuple of tuple_tag option * (field_name loc * typed_exp) list
   | Let of typed_pat * Check_pat.ex_split * elab_typ * typed_exp * typed_exp Check_pat.action
   | Seq of typed_exp * typed_exp
   | Proj of typed_exp * symbol
@@ -56,7 +56,7 @@ and typed_map_typs_exp' ~neg ~pos ~index = function
      App (typed_map_typs_exp ~neg ~pos ~index f,
           List.map (fun x -> typed_map_typs_exp ~neg ~pos ~index x) args)
   | Tuple (tag, fs) ->
-     Tuple (tag, Tuple_fields.map_fields (fun _fn x -> typed_map_typs_exp ~neg ~pos ~index x) fs)
+     Tuple (tag, List.map (fun (fn, x) -> fn, typed_map_typs_exp ~neg ~pos ~index x) fs)
   | Let (p, split, ty, e, body) ->
      (* FIXME binding? *)
      Let (p, split, map_elab_typ ~neg ~pos ~index ty, typed_map_typs_exp ~neg ~pos ~index e, typed_map_typs_action ~neg ~pos ~index body)
@@ -113,7 +113,7 @@ module Elaborate = struct
     | App (f, args) ->
        App (exp env f, List.map (fun e -> None (*FIXME*), exp env e) args)
     | Tuple (tag, fs) ->
-       Tuple (tag, map_fields (fun _fn e -> exp env e) fs)
+       Tuple (tag, tuple env fs)
     | Let (p, _split, ty, e, body) ->
        Let (p, Some (typ env ty), exp env e, exp env body.rhs)
     | Seq (e1, e2) ->
@@ -128,6 +128,28 @@ module Elaborate = struct
        Typed (exp env e, typ env ty)
     | Pragma s ->
        Pragma s
+
+  and tuple env fields =
+    match
+      List.mapi (fun i ((f,_), e) ->
+        match Mandatory, f with
+        | Mandatory, Tuple_fields.Field_positional j when i = j -> exp env e
+        | _ -> raise_notrace Exit)
+        fields
+    with
+    | tuple ->
+       Ftuple (tuple, Ext_closed)
+    | exception Exit ->
+       let fields =
+         fields |> List.map (fun ((f,floc), e) ->
+           let e = match f, e with
+             | Field_named k, (Some (Var (({label=s';shift=0},_), _)), _) when k = s' ->
+                None
+             | _, e -> Some (exp env e)
+           in
+           (f,floc), Mandatory, e)
+       in
+       Frecord (fields, Ext_closed)
 
   and case env (ps, e) = (ps, exp env e.rhs)
 
@@ -185,17 +207,6 @@ type pat = IR.value -> IR.comp -> IR.comp
 let eval_cont (e : exp) (cont : IR.value -> IR.comp) =
   e (Gen_cont cont)
 
-let eval_cont_fields (fs : exp tuple_fields) (cont : IR.value tuple_fields -> IR.comp) =
-  let final : IR.value FieldMap.t -> IR.comp =
-    fun valmap ->
-    cont (map_fields (fun fn _ -> FieldMap.find fn valmap) fs) in
-  let add_field (acc : IR.value FieldMap.t -> IR.comp) fn e =
-    fun valmap ->
-    eval_cont e @@ fun v ->
-    acc (FieldMap.add fn v valmap)
-  in
-  (Tuple_fields.fold_fields add_field final fs) FieldMap.empty
-
 let eval_cont_list (es : exp list) (cont : IR.value list -> IR.comp) =
   let add_exp (acc : IR.value list -> IR.comp) exp =
     fun vals ->
@@ -214,10 +225,10 @@ let literal lit : exp =
 let var v =
   fun k -> apply_cont k (Var v)
 
-let tuple tag fields =
+let tuple tag (fields : (field_name * exp) list) =
   fun k ->
-  eval_cont_fields fields @@ fun fs ->
-  apply_cont k (Tuple (tag, fs))
+  eval_cont_list (List.map snd fields) @@ fun vs ->
+  apply_cont k (Tuple (tag, List.map2 (fun (f, _) v -> f, v) fields vs))
 
 (* FIXME lambda *)
 
@@ -273,7 +284,7 @@ module Compile = struct
 
     | Tuple (tag, fields) ->
        (let tag = Option.map (fun (t,_) -> IR.Symbol.of_string t) tag in
-        IRB.tuple tag (map_fields (fun _fn e -> exp e) fields))
+        IRB.tuple tag (List.map (fun ((fn,_loc), e) -> (fn, exp e)) fields))
 
     | Proj (e, (field, _loc)) ->
        IRB.project (exp e) field

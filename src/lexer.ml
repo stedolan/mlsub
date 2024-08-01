@@ -24,6 +24,7 @@ let rec lex buf =
   | '&' -> AMPER
   | '|' -> VBAR
   | '~' -> TILDE
+  | '#' -> HASH
   | "->" -> ARROW
   | "=>" -> FATARROW
   | "<:" -> SUBTYPE

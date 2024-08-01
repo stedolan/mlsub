@@ -9,13 +9,16 @@ let () = Printexc.record_backtrace true
 let dump (t : ptyp) =
   Format.printf "%a%!" dump_ptyp t
 
-let func a b = Cons1.Func (a, b)
-
-let tuple xs = Cons1.Record (None, Tuple_fields.(collect_fields (List.map (fun x -> Fpos x) xs)))
-
 let nope _ = assert false
 
 let noloc = Location.noloc
+
+let func a b = Cons1.Func (a, b)
+
+let tuple xs =
+  let open Fields in
+  let body = of_list ~fopen:Ext_closed (List.mapi (fun i x -> Tuple_fields.Field_positional i, Fpresent (x, noloc)) xs) in
+  Cons1.Record {tag=None; body}
 
 let dump env (t : ptyp) =
   dump t;

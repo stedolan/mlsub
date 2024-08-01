@@ -3,10 +3,10 @@ type error_kind =
   | Bad_name of [`Unknown|`Duplicate] * [`Type|`Var] * string
   | Illformed_type of [`Join_multi_cons | `Join_not_cons_or_var | `Join_poly | `Bound_not_simple | `Bound_not_cons | `Bound_crosses_levels of string]
   | Conflict of [`Expr|`Pat|`Subtype] * Types.subtyping_error
-
   | Illformed_pat of [`Duplicate_name of string * Location.t | `Orpat_different_names of string | `Wrong_length of int * int | `Unknown_cases | `Unknown_constructor of string]
   | Incompatible_patterns of Location.t
   | Nonexhaustive of Exp.pat list list
+  | Bad_tuple_intro of [`Ext_open | `Opt]
   | Unused_pattern
 
 type t = Location.t * error_kind
@@ -70,6 +70,10 @@ let pp_err input loc err : PPrint.document =
      pp "Bounds must be constructed types" ^^ context
   | Illformed_type (`Bound_crosses_levels n) ->
      pp "Rigid variable %s not allowed in join with variable bound earlier" n ^^ context
+  | Bad_tuple_intro `Ext_open ->
+     pp "Tuple construction cannot use '...'" ^^ context
+  | Bad_tuple_intro `Opt ->
+     pp "Tuple construction cannot use optional fields" ^^ context
   | Conflict (_kind, err) ->
      let env = err.env in
      let conflict =
@@ -77,11 +81,11 @@ let pp_err input loc err : PPrint.document =
         | Head Incompatible ->
            pp "Type error"
         (* FIXME improve tuple field names *)
-        | Sub (Field_missing name) ->
+        | Field_missing name ->
            pp "The field '%s' is missing." (Tuple_fields.string_of_field_name name)
-        | Sub (Field_extra (Some name)) ->
+        | Field_extra (Some name) ->
            pp "A surplus field '%s' is present." (Tuple_fields.string_of_field_name name)
-        | Sub (Field_extra None) ->
+        | Field_extra None ->
            pp "Surplus fields are present."
         | Head (Expected_tag (tag, tags')) ->
            let tag = match tag with None -> "no tag" | Some s -> "tag " ^ s in

@@ -14,7 +14,6 @@ module Binder : sig
   val phase : unit -> ('p, 'a) phase
   val with_binder : ('p,'a) phase -> 'a t -> 'p -> (unit -> 'r) -> 'r
   val with_binders : ('p, 'a) phase -> ('a t * 'p) list -> (unit -> 'r) -> 'r
-  val with_field_binders : ('p, 'a) phase -> ('a t * 'p) TF.tuple_fields -> (unit -> 'r) -> 'r
   val deref : ('p,'a) phase -> 'a ref -> 'p
 end = struct
   type _ phase_tag = ..
@@ -58,11 +57,6 @@ end = struct
     | [] -> f ()
     | (b,x) :: rest ->
        with_binder p b x (fun () -> with_binders p rest f)
-
-  let with_field_binders p binders f =
-    let binders =
-      List.rev (TF.fold_fields (fun acc _ x -> x :: acc) [] binders) in
-    with_binders p binders f
 
   let deref (type p) (type a) ((module P) : (p,a) phase) cell =
     match cell.entry with
@@ -113,7 +107,7 @@ type cont = [`Cont]
 type value =
   | Literal of Exp.literal
   | Var of value Binder.ref
-  | Tuple of tag option * value TF.tuple_fields
+  | Tuple of tag option * (field * value) list
   | Lambda of value Binder.t list * cont Binder.t * comp
 
 and comp =
@@ -142,7 +136,7 @@ let wf orig_c =
   let rec value = function
     | Literal _ -> ()
     | Var v -> Binder.deref pval v
-    | Tuple (_, vs) -> TF.iter_fields (fun _fn v -> value v) vs
+    | Tuple (_, vs) -> List.iter (fun (_fn, v) -> value v) vs
     | Lambda (params, ret, body) ->
        Binder.with_binders pval (List.map (fun p -> p, ()) params) @@ fun () ->
          Binder.with_binder pcont ret 1 @@ fun () ->
@@ -225,7 +219,6 @@ let pp origc =
   let pp_field_name () s = pp "%s" (field_name s) in
   let pp_fields ppx () xs =
     xs
-    |> TF.list_fields
     |> PPrint.separate_map (pp ",@ ") (fun (fn, x) -> pp "@[%a: %a@]" pp_field_name fn ppx x)
   in
 
@@ -336,7 +329,7 @@ let subst_aliases origc =
   let rec value = function
     | Literal _ as v -> v
     | Var v -> Binder.deref substv v
-    | Tuple (tag, vs) -> Tuple (tag, TF.map_fields (fun _fn v -> value v) vs)
+    | Tuple (tag, vs) -> Tuple (tag, List.map (fun (fn, v) -> fn, value v) vs)
     | Lambda (params, ret, body) ->
        Lambda (params, ret,
          Binder.with_binders substv (List.map (fun p -> p, Var (Binder.ref p)) params) @@ fun () ->
