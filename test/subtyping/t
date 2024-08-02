@@ -55,12 +55,12 @@
 : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 > _:0: Type error
 > 
->      found: () -> {foo: _, bar: (nothing) -> _}
+>      found: () -> {foo: _, bar: (X) -> _}
 >   expected: () -> {foo: _, bar: (Y) -> _}
 > This Y comes from test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 >                                                                                    ^
-> but is used as nothing at test:1:
+> but is used as X at test:1:
 >   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
 >                                                                           ^
 
@@ -242,4 +242,4 @@
 <: [P <: {foo: any, ...}](P) -> {foo:int} | P
 > ok
 
-> STATS: fix: 0, flex: 91
+> STATS: fix: 0, flex: 90

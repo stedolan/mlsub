@@ -529,8 +529,8 @@ and (+'neg,+'pos) upper_part =
   | Ucons of ('neg, 'pos) Cons1.t
 
 and delayed_constraint =
-  { dy_lower: lower;
-    dy_upper: upper;
+  { dy_lower: (flexvar, lower) Cons1.t loc;
+    dy_upper: (lower, flexvar) Cons1.t loc;
     dy_flexvar: flexvar;
     mutable dy_resolved: bool }
 
@@ -603,7 +603,7 @@ and rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string Location.loc;
-  upper : (flexvar, lower) Cons1.t list;
+  upper : (flexvar, lower) Cons1.t loc list;
 }
 
 (*
@@ -918,8 +918,9 @@ and wf_upper ~seen env lvl = function
            | _, _ -> ()))
 
 and wf_delayed_constraint ~seen env _lvl {dy_lower; dy_upper; dy_flexvar; dy_resolved=_} =
-  wf_lower ~seen env dy_flexvar.level dy_lower;
-  wf_upper ~seen env dy_flexvar.level dy_upper
+  let lvl = dy_flexvar.level in
+  Cons1.wf ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_lower ~seen env lvl) (fst dy_lower);
+  Cons1.wf ~pos:(wf_flexvar ~seen env lvl) ~neg:(wf_lower ~seen env lvl) (fst dy_upper)
 
 and wf_rigvar env lvl (rv : rigvar) =
   assert (Env_level.extends rv.level lvl);

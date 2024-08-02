@@ -854,25 +854,7 @@ fn[A <: {foo:int}, B <: {bar:int}](x) -> {a:A, b:{foo:int}|B} {
 >   let splat = fn (x) { {a: x, b: x} };
 >   splat(x)
 > }
->   fn [A <: {foo: int}, B <: {bar: int}](x: B | A) -> {a: A, b: {foo: int} | B} {
->     let splat : [C] (C) -> {a: C, b: C} =
->     fn [C](x: C) -> {a: C, b: C} { {a: x, b: x} };
->     splat(x)
->   }
-> [A <: {foo: int}, B <: {bar: int}] (B | A) -> {a: A, b: {foo: int} | B}
-> RECHECK: Failure("contravariant join")
-> 
-> typechecking error: Failure("contravariant join")
-> ELAB: Failure("contravariant join")
-> 
-> ELABINF: Failure("contravariant join")
-> 
-> let  = %yield(fun (x) ret {
->   let splat = fun (x2) ret2 { ret2((a: x2, b: x2)) };
->   let x2 = splat(x);
->   ret(x2)
-> });
-> done
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: int} <= {foo: _1465}
 
 
 # weirdness: non-monotonicity wrt annotations
@@ -884,20 +866,7 @@ fn[A <: {foo:int}, B <: {bar:bool}](x) -> {a:{bar:bool}|A, b:{foo:int}|B, c:{foo
 >   {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}} {
 >   {a: x, b: x, c: x}
 > }
->   fn [A <: {foo: int}, B <: {bar: bool}](x: {bar: absent, foo: absent} | A | B) ->
->     {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}} {
->     {a: x, b: x, c: x}
->   }
-> [A <: {foo: int}, B <: {bar: bool}] ({bar: absent, foo: absent} | A | B) ->
-> {a: {bar: bool} | A, b: {foo: int} | B, c: {foo: int}}
-> RECHECK: Failure("contravariant join")
-> 
-> typechecking error: Failure("contravariant join")
-> ELAB: Failure("contravariant join")
-> 
-> ELABINF: Failure("contravariant join")
-> 
-> let  = %yield(fun (x) ret { ret((a: x, b: x, c: x)) }); done
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: int} <= {foo: _1470}
 
 fn[A <: {foo:int,...}, B <: {bar:bool,...}](x) -> {a:{bar:bool,...}|A, b:{foo:int,...}|B, c:any} {
   {a:x, b:x, c:x}
@@ -906,21 +875,7 @@ fn[A <: {foo:int,...}, B <: {bar:bool,...}](x) -> {a:{bar:bool,...}|A, b:{foo:in
 >   {a: {bar: bool, ...} | A, b: {foo: int, ...} | B, c: any} {
 >   {a: x, b: x, c: x}
 > }
->   fn [A <: {foo: int, ...}, B <: {bar: bool, ...}](
->     x: {bar: bool, foo: int, ...} | A | B
->   ) -> {a: {bar: bool, ...} | A, b: {foo: int, ...} | B, c: any} {
->     {a: x, b: x, c: x}
->   }
-> [A <: {foo: int, ...}, B <: {bar: bool, ...}] ({bar: bool, foo: int, ...} | A | B) ->
-> {a: {bar: bool, ...} | A, b: {foo: int, ...} | B, c: any}
-> RECHECK: Failure("contravariant join")
-> 
-> typechecking error: Failure("contravariant join")
-> ELAB: Failure("contravariant join")
-> 
-> ELABINF: Failure("contravariant join")
-> 
-> let  = %yield(fun (x) ret { ret((a: x, b: x, c: x)) }); done
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: int, ...} <= {foo: _1479, ...}
 
 
 # FIXME: spec_sub_rigid_pos should remove one of the variables here
@@ -931,21 +886,7 @@ fn[A <: {foo:int,...}, B <: {bar:bool,...}](x) -> {a:{bar:bool,...}|A, b:{foo:in
 >   {a: {bar: bool, ...} | A, b: {foo: int, ...} | A | B, c: any} {
 >   {a: x, b: x, c: x}
 > }
->   fn [A <: {foo: int, ...}, B <: {bar: bool, ...}](
->     x: {bar: bool, foo: int, ...} | A | B
->   ) -> {a: {bar: bool, ...} | A, b: {foo: int, ...} | A | B, c: any} {
->     {a: x, b: x, c: x}
->   }
-> [A <: {foo: int, ...}, B <: {bar: bool, ...}] ({bar: bool, foo: int, ...} | A | B) ->
-> {a: {bar: bool, ...} | A, b: {foo: int, ...} | A | B, c: any}
-> RECHECK: Failure("contravariant join")
-> 
-> typechecking error: Failure("contravariant join")
-> ELAB: Failure("contravariant join")
-> 
-> ELABINF: Failure("contravariant join")
-> 
-> let  = %yield(fun (x) ret { ret((a: x, b: x, c: x)) }); done
+> typechecking error: unimplemented: unresolved delayed constraints: {bar: bool, ...} <= {bar: _1484, ...}
 
 fn[A](x: any, y:A) { if true {x} else {y} }
 > fn [A](x: any, y: A) { if true { x } else { y } }
@@ -1213,9 +1154,7 @@ fn[A <: {foo:int}](x:A, y:{foo:int}) { if true {x} else {y} }
 # multi RV upper bounds tests
 fn[A <: {foo:int}](x) -> (A,{foo:int}) { (x,x) }
 > fn [A <: {foo: int}](x) -> (A, {foo: int}) { (x, x) }
->   fn [A <: {foo: int}](x: A) -> (A, {foo: int}) { (x, x) }
-> [A <: {foo: int}] (A) -> (A, {foo: int})
-> let  = %yield(fun (x) ret { ret((0: x, 1: x)) }); done
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: int} <= {foo: _1968}
 
 # ensure_rigvars_present gets this one
 fn mkdup[A]() -> (A) -> (A, A) { fn(x) { (x,x) } }
@@ -1252,15 +1191,137 @@ fn[A <: {foo:int}](x,y : A) -> (A,{foo:int}) { let id = mkdup(); let z = id(y); 
 
 fn [A,C,B <: int](x) -> (A|C,int|B|C) { (x,x) }
 > fn [A, C, B <: int](x) -> (A | C, int | B | C) { (x, x) }
->   fn [A, C, B <: int](x: A | C | B) -> (A | C, int | B | C) { (x, x) }
-> [A, C, B <: int] (A | C | B) -> (A | C, int | B | C)
-> RECHECK: Failure("contravariant join")
-> 
-> typechecking error: Failure("contravariant join")
-> ELAB: Failure("contravariant join")
-> 
-> ELABINF: Failure("contravariant join")
-> 
+>   fn [A, C, B <: int](x: C) -> (A | C, int | B | C) { (x, x) }
+> [A, C, B <: int] (C) -> (A | C, int | B | C)
 > let  = %yield(fun (x) ret { ret((0: x, 1: x)) }); done
 
-> STATS: fix: 90, flex: 2019
+
+# match_sub error propagation bug
+fn id(x) { x }
+fn (x: {foo:{bar:{baz:bool}}}) -> {foo:{bar:{baz:int}}} {
+  id(x)
+}
+> fn id(x) {
+>   x
+> }
+> fn (x: {foo: {bar: {baz: bool}}}) -> {foo: {bar: {baz: int}}} {
+>   id(x)
+> }
+> test:3: Type error
+>     id(x)
+>     ^^^^^
+>      found: {foo: {bar: {baz: bool}}}
+>   expected: {foo: {bar: {baz: int}}}
+> This bool comes from test:2:
+>   fn (x: {foo:{bar:{baz:bool}}}) -> {foo:{bar:{baz:int}}} {
+>                         ^^^^
+> but is used as int at test:2:
+>   fn (x: {foo:{bar:{baz:bool}}}) -> {foo:{bar:{baz:int}}} {
+>                                                    ^^^
+
+#
+# delayed constraint tests
+#
+fn [A <: {foo:{bar:int}}] (x) -> ({foo:int}, A) { (x,x) }
+> fn [A <: {foo: {bar: int}}](x) -> ({foo: int}, A) { (x, x) }
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: {bar: int}} <= {foo: _2031}
+
+fn ch[A](x:A,y:A) -> (A,A) { if true {(x,x)} else {(y,y)} }
+fn [A <: {foo:{bar:int}}] (x, y:A) -> ({foo:bool}, A) { ch(x,y) }
+> fn ch[A](x: A, y: A) -> (A, A) {
+>   if true {
+>     (x, x)
+>   } else {
+>     (y, y)
+>   }
+> }
+> fn [A <: {foo: {bar: int}}](x, y: A) -> ({foo: bool}, A) {
+>   ch(x, y)
+> }
+> test:2: Type error
+>   fn [A <: {foo:{bar:int}}] (x, y:A) -> ({foo:bool}, A) { ch(x,y) }
+>                                                           ^^^^^^^
+>      found: ({foo: {bar: _}}, _)
+>   expected: ({foo: bool}, _)
+> This {bar: _} comes from test:2:
+>   fn [A <: {foo:{bar:int}}] (x, y:A) -> ({foo:bool}, A) { ch(x,y) }
+>                 ^^^^^^^^^
+> but is used as bool at test:2:
+>   fn [A <: {foo:{bar:int}}] (x, y:A) -> ({foo:bool}, A) { ch(x,y) }
+>                                               ^^^^
+
+#
+# rv locations
+#
+fn [A <: {foo:int}](x : A) -> bool { x }
+> fn [A <: {foo: int}](x: A) -> bool { x }
+> test:1: Type error
+>   fn [A <: {foo:int}](x : A) -> bool { x }
+>                                        ^
+>      found: A
+>   expected: bool
+> This A comes from test:1:
+>   fn [A <: {foo:int}](x : A) -> bool { x }
+>                           ^
+> but is used as bool at test:1:
+>   fn [A <: {foo:int}](x : A) -> bool { x }
+>                                 ^^^^
+
+fn [A <: {foo:int}](x : A) -> {foo:bool} { x }
+> fn [A <: {foo: int}](x: A) -> {foo: bool} { x }
+> test:1: Type error
+>   fn [A <: {foo:int}](x : A) -> {foo:bool} { x }
+>                                              ^
+>      found: {foo: int}
+>   expected: {foo: bool}
+> This int comes from test:1:
+>   fn [A <: {foo:int}](x : A) -> {foo:bool} { x }
+>                 ^^^
+> but is used as bool at test:1:
+>   fn [A <: {foo:int}](x : A) -> {foo:bool} { x }
+>                                      ^^^^
+
+fn [A <: {foo:int,...}](x : A) -> {bar:bool,...} { x }
+> fn [A <: {foo: int, ...}](x: A) -> {bar: bool, ...} { x }
+> test:1: The field 'bar' is missing.
+>   fn [A <: {foo:int,...}](x : A) -> {bar:bool,...} { x }
+>                                                      ^
+>      found: {foo: _, ...}
+>   expected: {bar: _, ...}
+> This {foo: _, ...} comes from test:1:
+>   fn [A <: {foo:int,...}](x : A) -> {bar:bool,...} { x }
+>            ^^^^^^^^^^^^^
+> but is used as {bar: _, ...} at test:1:
+>   fn [A <: {foo:int,...}](x : A) -> {bar:bool,...} { x }
+>                                      ^^^
+
+fn [A <: {foo:int,...}](x : A) -> 'Tag{bar:bool,...} { x }
+> fn [A <: {foo: int, ...}](x: A) -> 'Tag{bar: bool, ...} { x }
+> test:1: The tag should be Tag, but no tag is present.
+>   fn [A <: {foo:int,...}](x : A) -> 'Tag{bar:bool,...} { x }
+>                                                          ^
+>      found: A
+>   expected: 'Tag{bar: _, ...}
+> This A comes from test:1:
+>   fn [A <: {foo:int,...}](x : A) -> 'Tag{bar:bool,...} { x }
+>                               ^
+> but is used as 'Tag{bar: _, ...} at test:1:
+>   fn [A <: {foo:int,...}](x : A) -> 'Tag{bar:bool,...} { x }
+>                                     ^^^^^^^^^^^^^^^^^^
+
+fn [A <: ({foo:int,...},int)](x : A) -> ('Tag{bar:bool,...},int) { x }
+> fn [A <: ({foo: int, ...}, int)](x: A) -> ('Tag{bar: bool, ...}, int) { x }
+> test:1: The tag should be Tag, but no tag is present.
+>   fn [A <: ({foo:int,...},int)](x : A) -> ('Tag{bar:bool,...},int) { x }
+>                                                                      ^
+>      found: ({foo: _, ...}, _)
+>   expected: ('Tag{bar: _, ...}, _)
+> This {foo: _, ...} comes from test:1:
+>   fn [A <: ({foo:int,...},int)](x : A) -> ('Tag{bar:bool,...},int) { x }
+>             ^^^^^^^^^^^^^
+> but is used as 'Tag{bar: _, ...} at test:1:
+>   fn [A <: ({foo:int,...},int)](x : A) -> ('Tag{bar:bool,...},int) { x }
+>                                            ^^^^^^^^^^^^^^^^^^
+
+
+> STATS: fix: 91, flex: 2045

@@ -8,6 +8,8 @@ let unimp fmt =
   Format.kasprintf (fun s -> raise (Unimplemented s)) fmt
 let () = Printexc.register_printer (function Unimplemented s -> Some ("unimplemented: " ^ s) | _ -> None)
 
+let fixme [@alert fixme] = ()
+
 let id x = x
 
 type zero = |

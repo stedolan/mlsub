@@ -78,9 +78,8 @@ let make_err env err (cp,cploc) (cn,cnloc) =
     located = ((lhs, cploc), (rhs, cnloc));
     env = (env, []) }
 
-let make_err_nocons env errs (cp,cploc) (cn,cnloc) =
-  let err = Head errs in
-  let lhs = tcons_head (cp, cploc) in
+let make_head_err env err (lhs, cploc) (cn, cnloc) =
+  let err = Head err in
   let rhs =
     List.fold_left (fun acc u ->
       match u with
@@ -93,21 +92,26 @@ let make_err_nocons env errs (cp,cploc) (cn,cnloc) =
     located = ((lhs, cploc), (rhs, cnloc));
     env = (env, []) }
 
-let subtype_cons env ~neg ~pos (cp,cploc) (cn,cnloc) =
-  let wrap_err k err =
-    let wrap_cons c inner =
-      let f k' _ = if Cons1.equal_field k k' then inner else Tsimple () in
-      Cons1.mapi c ~neg:f ~pos:f
-    in
-    let tl, tr =
-      if Cons1.field_is_positive k
-      then err.lhs, err.rhs
-      else err.rhs, err.lhs
-    in
-    { err with
-      lhs = Tcons (wrap_cons cp tl, cploc);
-      rhs = Tcons (wrap_cons cn tr, cnloc) }
+let make_err_nocons env errs (cp,cploc) (cn,cnloc) =
+  make_head_err env errs (tcons_head (cp, cploc), cploc) (cn, cnloc)
+
+let wrap_cons_err (cp, cploc) (cn, cnloc) k err =
+  let wrap_cons c inner =
+    let f k' _ = if Cons1.equal_field k k' then inner else Tsimple () in
+    Cons1.mapi c ~neg:f ~pos:f
   in
+  let tl, tr =
+    if Cons1.field_is_positive k
+    then err.lhs, err.rhs
+    else err.rhs, err.lhs
+  in
+  { err with
+    lhs = Tcons (wrap_cons cp tl, cploc);
+    rhs = Tcons (wrap_cons cn tr, cnloc) }
+
+
+let subtype_cons env ~neg ~pos (cp,cploc) (cn,cnloc) =
+  let wrap_err k err = wrap_cons_err (cp, cploc) (cn, cnloc) k err in
   let cp' =
     match Cons1.sub_head cp cn with
     | Un err -> raise (SubtypeError (make_err env (Head err) (cp,cploc) (cn,cnloc)))
@@ -141,7 +145,7 @@ let lower_contains_fv fv lower =
 
 let lower_of_rigid_bound env rv : lower =
   env_rigid_bound env rv
-  |> List.map (fun c -> Lcons (c,rv.loc))
+  |> List.map (fun (c,cloc) -> Lcons (c, if cloc = Location.noloc then rv.loc else cloc))
 
 (* Check whether a flex-flex constraint α ≤ β is already present via an upper bound of α *)
 let rec has_flex_upper (pv : flexvar) nv =
@@ -191,22 +195,22 @@ let upper_cons_is_top (cn : _ upper_cons) =
   | [Ucons Top] -> true
   | _ -> false
 
-let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list ref) upper_cons), cnloc) : unit =
+let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower -> unit) upper_cons), cnloc) : unit =
   if upper_cons_is_top cn then ()
   else match p with
   | Lrigvar rv ->
-     begin try
-       match upper_find_rv rv cn with
-       | Ok ds -> resolve_delayed_constraints ~changes env ds
-       | Error () ->
-          lower_of_rigid_bound env rv
-          |> List.iter (fun l -> match_sub ~changes env l (cn, cnloc))
-     with SubtypeError err ->
-       (* FIXME update locations? Use rv.loc? *)
-       let lhs = Tvar (Vrigid rv) in
-       let (_l, lloc), (r, rloc) = err.located in
-       let located = (lhs, lloc), (r, rloc) in
-       raise (SubtypeError {err with lhs; located})
+     begin match upper_find_rv rv cn with
+     | Ok ds ->
+        resolve_delayed_constraints ~changes env ds
+     | Error () ->
+        env_rigid_bound env rv |> List.iter (fun (l,lloc) ->
+          match upper_find_cons l cn with
+          | Ok (_hc, cn) ->
+             subtype_cons env (l, lloc) (cn, cnloc)
+               ~neg:(fun p n -> subtype_lu ~changes env p (Uflexvar n))
+               ~pos:(fun p pr -> pr p)
+          | Error err ->
+             raise (SubtypeError (make_head_err env err (Tvar (Vrigid rv), rv.loc) (cn, cnloc))))
      end
   | Lcons (cp, cploc) ->
      begin match upper_find_cons cp cn with
@@ -214,7 +218,7 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
         (* FIXME: use hc instead of recomputing? *)
         subtype_cons env (cp,cploc) (cn,cnloc)
           ~neg:(fun p n -> subtype_lu ~changes env p (Uflexvar n))
-          ~pos:(fun p pr -> pr := !pr @ p)
+          ~pos:(fun p pr -> pr p)
      | Error errs ->
         raise (SubtypeError (make_err_nocons env errs (cp, cploc) (cn, cnloc)))
      end
@@ -231,12 +235,30 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
        type meet_pair =
          Meet_cons of
            { cons_a: (lower, flexvar) Cons1.t;
-             cons_b: (lower, lower ref) Cons1.t;
+             cons_b: (lower, lower -> unit) Cons1.t;
              coe: (Cons1.head_coercion, Cons1.head_coercion) Either.t }
        | Meet_rv of
            { rigvar: rigvar;
              delay: delayed_constraint list }
      end in
+     let gen_delayed_constraints rv cons =
+       match cons with
+       | [Ucons Top], _loc -> Ok []
+       | cons ->
+          match
+            env_rigid_bound env rv
+            |> List.map (fun (cp, cploc) ->
+              match upper_find_cons cp (fst cons) with
+              | Ok (_hc, cn) ->
+                 { dy_lower = (cp, cploc);
+                   dy_upper = (cn, snd cons);
+                   dy_flexvar = pv;
+                   dy_resolved = false }
+              | Error _ -> raise_notrace Exit)
+          with
+          | xs -> Ok xs
+          | exception Exit -> Error ()
+     in
      let meets_a =
        upper |> List.concat_map (function
          | Urigvar (rv, delay_a) ->
@@ -248,16 +270,16 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
                in
                [Meet_rv { rigvar = rv; delay }]
             | Error () ->
-               (* rv included in output
-                  iff up(rv) <= cn *)
-               (* FIXME broken *)
-               let d =
-                 { dy_lower = lower_of_rigid_bound env rv;
-                   dy_upper = Utop (*FIXME *);
-                   dy_flexvar = pv;
-                   dy_resolved = false }
+               (* rv included in output iff up(rv) <= cn *)
+               let freshen r =
+                 let v = fresh_flexvar pv.level in
+                 r [Lflexvar v];
+                 v
                in
-               [Meet_rv {rigvar = rv; delay = delay_a @ [d] }]
+               let cn' = upper_cons_map ~neg:id ~pos:freshen (cn,cnloc) in
+               match gen_delayed_constraints rv cn' with
+               | Ok ds -> [Meet_rv {rigvar = rv; delay = delay_a @ ds}]
+               | Error () -> []
             end
          | Ucons cons_a ->
             begin match upper_find_cons cons_a cn with
@@ -275,17 +297,11 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
             | Ok _delay_a -> [] (* already in meets_a *)
             | Error () ->
                assert (Env_level.extends rv.level pv.level);
-               (* FIXME improve check (subtype_cons at least) *)
-               (* FIXME is this right? *)
-(*               Format.printf "DELAY %a (upper %a / %a) on %a@." pp_ptyp (Tvar (Vrigid rv)) pp_upper (Ugen {cons=(upper,upper_loc);higher_fvs}) pp_upper pv.upper dump_ptyp (Tsimple (of_flexvar pv));*)
-               let d =
-                 { dy_lower = lower_of_rigid_bound env rv;
-                   dy_upper = Ugen {cons=(upper,upper_loc);higher_fvs};
-                   dy_flexvar = pv;
-                   dy_resolved = false }
-               in
-               found_new_rv := true;
-               [Meet_rv {rigvar=rv; delay = delay_b @ [d]}]
+               match gen_delayed_constraints rv (upper,upper_loc) with
+               | Ok ds -> 
+                  found_new_rv := true;
+                  [Meet_rv {rigvar = rv; delay = delay_b @ ds}]
+               | Error () -> []
             end
          | Ucons cons_b ->
             begin match upper_find_cons cons_b upper with
@@ -321,10 +337,10 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
                   | L x -> x
                   | R r ->
                      let v = fresh_flexvar pv.level in
-                     r := Lflexvar v :: !r;
+                     r [Lflexvar v];
                      v
                   | LR (v, r) ->
-                     r := Lflexvar v :: !r;
+                     r [Lflexvar v];
                      v)
             in
             Ucons cons
@@ -344,7 +360,6 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
      ()
 
 and resolve_delayed_constraints ~changes env ds =
-  (* FIXME: where should the errors go from here? *)
   ds |> List.iter (fun dy ->
     (* FIXME: when are these resolved for flexvars going out of scope? *)
     assert (Env_level.extends dy.dy_flexvar.level (env_level env));
@@ -352,10 +367,13 @@ and resolve_delayed_constraints ~changes env ds =
     if not dy.dy_resolved then begin
       dy.dy_resolved <- true;
       try
-        subtype_lu ~changes env dy.dy_lower dy.dy_upper
-      with
-      | e ->     (*Format.printf "DELAYFAIL %a <= %a\n" pp_ptyp (Tsimple dy.dy_lower) pp_upper dy.dy_upper;*)  raise e
-
+        subtype_cons env dy.dy_lower dy.dy_upper
+          ~neg:(fun a b -> subtype_lu ~changes env a (Uflexvar b))
+          ~pos:(fun a b -> subtype_lu ~changes env a (Uflexvar b))
+      with e ->
+        dy.dy_resolved <- false;
+        (*Format.printf "DELAYFAIL %a <= %a\n%!" pp_ptyp (Tsimple dy.dy_lower) pp_upper dy.dy_upper;*)
+        raise e
     end)
 
 and subtype_lpu ~changes env (p : lower_part) (n : upper) =
@@ -363,15 +381,10 @@ and subtype_lpu ~changes env (p : lower_part) (n : upper) =
   | Utop -> ()
   | Ugen {cons=cn; higher_fvs} ->
      higher_fvs |> List.iter (fun nv -> subtype_lpu ~changes env p (Uflexvar nv));
-     let constraints = ref [] in
-     let templ = upper_cons_map cn ~neg:id ~pos:(fun t ->
-       let r = ref [] in
-       constraints := (r, t) :: !constraints;
-       r)
+     let templ = upper_cons_map cn ~neg:id ~pos:(fun n ->
+       fun p -> subtype_lu ~changes env p (Uflexvar n))
      in
      match_sub ~changes env p templ;
-     !constraints |> List.rev |> List.iter (fun (r, n) ->
-       !r |> List.iter (fun p -> subtype_lpu ~changes env p (Uflexvar n)));
   | Uflexvar nv ->
      begin match p with
      | Lflexvar pv -> subtype_flex_flex ~changes env pv nv
@@ -614,24 +627,24 @@ let enter_rigid env vars rig_names =
   let temp_env =
     Env_types { level; rig_names;
                 rig_defns = IArray.map (fun (name, _) ->
-                    {name; upper=[Top]}) vars; rest = env } in
+                    {name; upper=[Top,Location.noloc]}) vars; rest = env } in
   let getrv loc var = Tvar (Vrigid {level; loc; var}) in
   let openrig t = open_typ ~neg:getrv ~pos:getrv 0 t in
   let rig_defns = IArray.map (fun (name, b) ->
      let upper =
        match b with
-       | None -> [Lcons (Top, snd name)]
+       | None -> [Lcons (Top, Location.noloc)]
        | Some b -> ptyp_to_lower ~simple:true temp_env (openrig b) in
      match upper with
-     | [Lcons (Top, _)] ->
-        { name; upper = [Top] }
+     | [Lcons (Top, loc)] ->
+        { name; upper = [Top, loc] }
      | lower ->
        (* FIXME: can you actually hit this?
           Try with a higher-rank type where the outer rank gets instantiated.
           Maybe change the type of the upper bound in parsed types.
           (to reflect its Tconsness)*)
         let conses = lower |> List.map (function
-          | Lcons (c,_) -> c
+          | Lcons (c,cloc) -> c,cloc
           | Lrigvar _ | Lflexvar _ -> assert false)
         in
         { name; upper = conses }) vars in
@@ -710,7 +723,7 @@ let rec match_ptyp ~loc env (p : ptyp) (heads : (ntyp ref, ptyp ref) upper_cons)
        v := meet_ntyp env !v (Tsimple fv);
        of_flexvar fv in
      let ref_pairs = ref [] in
-     let shead = upper_cons_map ~neg:instneg ~pos:(fun v -> let r = ref [] in ref_pairs := (v,r) :: !ref_pairs; r) (heads,loc) in
+     let shead = upper_cons_map ~neg:instneg ~pos:(fun v -> let r = ref [] in ref_pairs := (v,r) :: !ref_pairs; fun p -> r := !r @ p) (heads,loc) in
      ptyp_to_lower ~simple:false env t
      |> List.iter (fun l ->
        match_sub ~changes:(ref []) env l shead);
@@ -884,9 +897,10 @@ and expand_fv_neg visit ~changes env nv =
              let change = ref false in
              let cons =
                upper_cons_map cons
-                 ~neg:(fun x -> let x' = expand_lower visit ~changes env x in
-                                if not (equal_lower x x') then change := true;
-                                x')
+                 ~neg:(fun x ->
+                   let x' = expand_lower visit ~changes env x in
+                   if not (equal_lower x x') then change := true;
+                   x')
                  ~pos:(expand_fv_neg visit ~changes env)
              in
              (* FIXME change tracking *)
@@ -988,16 +1002,22 @@ and promote_upper :
        | Ugen {cons=(c,loc); higher_fvs} -> c, loc, higher_fvs
      in
      let conses, rigvars = c |> List.partition_map (function
-        | Urigvar (r,_ds) ->
-           (*if List.exists (fun d -> not d.dy_resolved) ds then
-             intfail "FIXME unresolved delayed constraints"; FIXME*)
-           Either.Right (promote_rigvar s r)
+        | Urigvar (r,ds) ->
+           begin match List.find_opt (fun d -> not d.dy_resolved) ds with
+           | None ->
+              Either.Right (Some (promote_rigvar s r));
+           | Some dy ->
+              (* FIXME: It would be sound to drop these variables. Would that be weird? *)
+              unimp "unresolved delayed constraints: %a <= %a"
+                pp_ptyp (Tsimple [Lcons dy.dy_lower]) pp_upper (Ugen {cons=([Ucons (fst dy.dy_upper)], snd dy.dy_upper);higher_fvs=[]})
+              (* Either.Right None *)
+           end
         | Ucons c ->
            let c = Cons1.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s) c in
            Either.Left (tcons (c,loc))) in
      let base = List.fold_left (tjoin ~loc) (Tbot (Some loc)) conses in
      (* FIXME: can this create contravariant joins? *)
-     vars, tvjoin ~base rigvars
+     vars, tvjoin ~base (List.filter_map id rigvars)
 
 
 and promote_flexvar :
@@ -1068,6 +1088,7 @@ let promote ~policy ~rigvars ~env ~(map : neg:_ -> pos:_ -> _ -> _) ty =
     if visit > 99 then intfail "looping?";
     let changes = ref [] in
     let neg_simple ~index:_ t =
+      (* FIXME: this creates many useless flexvars *)
       let t = ntyp_to_flexvar ~simple:true env t in
       Tsimple (expand_fv_neg visit ~changes env t)
     in
