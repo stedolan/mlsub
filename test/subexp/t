@@ -1235,20 +1235,12 @@ fn[A <: {foo:int}](x,y : A) -> (A,{foo:int}) { let id = mkdup(); let z = id(y); 
 >       (x, x)
 >     }
 >   }
->   fn [A <: {foo: int}, B <: A](x: B, y: A) -> (A, {foo: int}) {
->     let id : (A | B) -> (A | B, A | B) = mkdup();
->     let z : (A | B, A | B) = id(y);
+>   fn [A <: {foo: int}](x: A, y: A) -> (A, {foo: int}) {
+>     let id : (A) -> (A, A) = mkdup();
+>     let z : (A, A) = id(y);
 >     id(x)
 >   }
-> [A <: {foo: int}, B <: A] (B, A) -> (A, {foo: int})
-> RECHECK: Lang.Error.Fail(_)
-> 
-> _:0: Bounds must be constructed types
-> 
-> ELAB: Lang.Error.Fail(_)
-> 
-> ELABINF: Lang.Error.Fail(_)
-> 
+> [A <: {foo: int}] (A, A) -> (A, {foo: int})
 > let mkdup = fun () ret { ret(fun (x) ret2 { ret2((0: x, 1: x)) }) };
 > let  = %yield(fun (x, y) ret {
 >   let x2 = mkdup();
@@ -1271,4 +1263,4 @@ fn [A,C,B <: int](x) -> (A|C,int|B|C) { (x,x) }
 > 
 > let  = %yield(fun (x) ret { ret((0: x, 1: x)) }); done
 
-> STATS: fix: 89, flex: 1990
+> STATS: fix: 90, flex: 2019

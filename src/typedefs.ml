@@ -625,7 +625,8 @@ let rec equal_lower (p : lower) (q : lower) =
 let equal_upper_cons_loc ((p,_) : _ upper_cons Location.loc) ((q,_) : _ upper_cons Location.loc) =
   let eq p q =
     match p, q with
-    | Urigvar (pv, _pds_FIXME), Urigvar (qv, _qds_FIXME) -> equal_rigvar pv qv
+    | Urigvar (pv, pds), Urigvar (qv, qds) ->
+       equal_rigvar pv qv && List.equal (==) pds qds
     | Ucons pc, Ucons qc ->
        Cons1.equal pc qc ~neg:equal_lower ~pos:equal_flexvar
     | _, _ -> false

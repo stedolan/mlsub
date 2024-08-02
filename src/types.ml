@@ -242,7 +242,11 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower_part list r
          | Urigvar (rv, delay_a) ->
             begin match upper_find_rv rv cn with
             | Ok delay_b ->
-               [Meet_rv { rigvar = rv; delay = delay_a @ delay_b }]
+               let delay =
+                 delay_a
+                 @ List.filter (fun d -> not (List.memq d delay_a)) delay_b
+               in
+               [Meet_rv { rigvar = rv; delay }]
             | Error () ->
                (* rv included in output
                   iff up(rv) <= cn *)
@@ -739,7 +743,9 @@ let rec clearly_subtype env (a : flexvar) (b : lower) : bool =
     cn |> List.for_all (fun u ->
       b |> List.exists (fun l ->
         match u, l with
-        | Urigvar (rv, []), Lrigvar rv' -> equal_rigvar rv rv'
+        | Urigvar (rv, _ds), Lrigvar rv' ->
+           (* It is correct to ignore ds here, since LHS is either rv or Bot *)
+           equal_rigvar rv rv'
         | Ucons cn, Lcons cp ->
            let sub a b = if not (clearly_subtype env a b) then raise Exit in
            begin match subtype_cons env ~neg:sub ~pos:sub (cn,cnloc) cp with
