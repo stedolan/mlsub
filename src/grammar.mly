@@ -20,7 +20,7 @@
 (*%nonassoc high_priority*)
 
 %{ open Tuple_fields open Exp open Location %}
-%start <[`Exp of Exp.exp | `Sub of Exp.tyexp * Exp.tyexp]> prog
+%start <[`Exp of Exp.exp | `Sub of Exp.tyexp * Exp.tyexp | `Prog of Exp.decl list]> prog
 
 %{
 let pvar s = Pbind (s, (Some Pany, snd s))
@@ -37,8 +37,17 @@ let pvar s = Pbind (s, (Some Pany, snd s))
 %inline mayloc_opt(X): e = loc(mayfail_opt(X)) { e }
 
 prog:
-| e = exp; EOF { `Exp e }
-| COLON; t1 = tyexp; SUBTYPE; t2 = tyexp; EOF { `Sub (t1, t2) }
+| e = exp; EOF
+  { `Exp e }
+| LBRACE; ds = nonempty_list(decl); RBRACE; EOF
+  { `Prog ds }
+| COLON; t1 = tyexp; SUBTYPE; t2 = tyexp; EOF
+  { `Sub (t1, t2) }
+
+decl: v = mayloc(decl_) { v }
+decl_:
+| FN; s = symbol; def = fndef
+  { Dfn (s, def) }
 
 symbol: s = loc(SYMBOL) { s }
 usymbol: s = loc(USYMBOL) { s }

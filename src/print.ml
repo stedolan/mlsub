@@ -234,7 +234,13 @@ and typolybounds bs =
        group (symbol a ^^ op "<:" ^^ tyexp ~prec:Max ty) in
   brackets (separate (comma ^^ break 1) (List.map bound bs))
 
-
 let exp = exp ~prec:Max
 let tyexp = tyexp ~prec:Max
 let pat = pat ~prec:Max
+
+let decl = function
+  | None, _ -> string "<err>"
+  | Some (Dfn (s, def)), _ ->
+     fndef ~name:(Some s) def
+
+let prog p = separate hardline (List.map decl p)

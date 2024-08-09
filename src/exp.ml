@@ -98,14 +98,19 @@ and tyexp = tyexp' mayloc and tyexp' =
 and typolybounds =
   (symbol * tyexp option) list
 
+type decl = decl' mayloc and decl' =
+  | Dfn of symbol * func_def
+
 type mapper = {
   loc : mapper -> location -> location;
   exp : mapper -> exp -> exp;
   pat : mapper -> pat -> pat;
-  tyexp : mapper -> tyexp -> tyexp
+  tyexp : mapper -> tyexp -> tyexp;
+  decl : mapper -> decl -> decl;
 }
 let map_exp m e = m.exp m e
 let map_tyexp m t = m.tyexp m t
+let map_prog m p = List.map (m.decl m) p
 
 let mapper =
   let loc _ l = l in
@@ -177,10 +182,15 @@ let mapper =
     | Tjoin (s, t) ->
        Tjoin (r.tyexp r s, r.tyexp r t)
   in
-  { loc; exp; pat; tyexp }
+
+  let decl = mayloc @@ fun r d -> match d with
+    | Dfn (s, f) -> Dfn (sym r s, fndef r f)
+  in
+  { loc; exp; pat; tyexp; decl }
 
 let strip_locations =
   { mapper with loc = fun _ _ -> noloc }
 
 let equal e1 e2 = map_exp strip_locations e1 = map_exp strip_locations e2
-  
+
+let equal_prog p1 p2 = map_prog strip_locations p1 = map_prog strip_locations p2

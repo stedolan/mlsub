@@ -119,6 +119,16 @@ let run_cmd s =
      | exception e ->
         pexn e
      end
+  | Ok (`Prog p) ->
+     let rendered = to_string (Print.prog p) in
+     println "%s" rendered;
+     begin match Parse.parse_string ("{ " ^  rendered ^ " }") with
+     | exception e -> println "MISMATCH: %s" (Printexc.to_string e)
+     | Ok (`Prog p') when Exp.equal_prog p p' -> ()
+     | Ok (`Prog p') -> println "MISMATCH %s" (to_string ~width:1000 (Print.prog p'))
+     | _ -> println "MISMATCH"
+     end;
+     println "PROG UNCHECKED"
   | Ok (`Sub (t1, t2)) ->
      (match
        let t1 = Check.typ_of_tyexp Env_nil t1 in
