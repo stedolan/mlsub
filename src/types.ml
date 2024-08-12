@@ -24,6 +24,21 @@ let tcons_head (c, loc) =
   let tunit _ = Tsimple () in
   Tcons (Cons1.map ~neg:tunit ~pos:tunit c, loc)
 
+let rec tlower_part : lower_part -> ptyp = function
+  | Lflexvar fv -> Tsimple (Vflex fv)
+  | Lrigvar rv -> Tvar (Vrigid rv)
+  | Lcons (c, cloc) ->
+     let c = Cons1.map c
+       ~neg:(fun fv -> Tsimple fv)
+       ~pos:tlower
+     in
+     Tcons (c, cloc)
+
+and tlower : lower -> ptyp = function
+  | [] -> Tbot None
+  | [x] -> tlower_part x
+  | x :: xs -> List.fold_left (fun a b -> Tjoin (a, tlower_part b, None)) (tlower_part x) xs
+
 type conflict =
   | Head of Cons1.head_conflict
   | Field_missing of Tuple_fields.field_name
@@ -433,7 +448,7 @@ and subtype_flex_flex ~changes env pv nv =
     let pv_cons, pv_higher_fvs = rotate_flex ~changes env pv in
     if Env_level.extends pv.level nv.level then begin
       fv_set_lower ~changes nv (join_lower_part ~changes env nv.level nv.lower (Lflexvar pv));
-      subtype_lu ~changes env (of_flexvar pv) nv.upper
+      subtype_lpu ~changes env (Lflexvar pv) nv.upper
     end else begin
       fv_set_upper ~changes pv (Ugen {cons=pv_cons; higher_fvs = nv::pv_higher_fvs});
       subtype_lu ~changes env pv.lower (Uflexvar nv)
@@ -535,16 +550,16 @@ let upper_is_bot = function
   | Ugen {cons=([],_); higher_fvs=_} -> true
   | _ -> false
 
-let rec instantiate_flex env vars body =
+let rec instantiate_flex env vars (body : ptyp) : ptyp =
   let fvars = IArray.map (fun _ -> fresh_flexvar (env_level env)) vars in
   let fvneg _loc i = Tsimple (IArray.get fvars i) in
-  let fvpos _loc i = Tsimple (of_flexvar (IArray.get fvars i)) in
+  let fvpos _loc i = Tsimple (Vflex (IArray.get fvars i)) in
   IArray.iter2 (fun (fv : flexvar) (_,t) ->
     let b =
       match t with
       | None -> Utop
       | Some t -> ntyp_to_upper ~simple:true env (open_typ ~neg:fvpos ~pos:fvneg 0 t) in
-    assert (fv.upper = Utop && is_bottom fv.lower);
+    assert (fv.upper = Utop && fv.lower = []);
     (* b need not be matchable, so we need to subtype_lpu rather
        than using it directly as fv.upper *)
     subtype_lpu ~changes:(ref []) env (Lflexvar fv) b)
@@ -552,13 +567,13 @@ let rec instantiate_flex env vars body =
   open_typ ~neg:fvneg ~pos:fvpos 0 body
 
 and ptyp_to_lower ~simple env : ptyp -> lower = function
-  | Tsimple t -> t
+  | Tsimple (Vflex t) -> [Lflexvar t]
   | Tbot _loc -> [] (*FIXME: loc?*)
   | Tcons (cons, loc) ->
      let cons = Cons1.map ~neg:(ntyp_to_flexvar ~simple env) ~pos:(ptyp_to_lower ~simple env) cons in
      [Lcons (cons, loc)]
   | Tvar (Vbound _) -> intfail "Vbound"
-  | Tvar (Vrigid rv) -> of_rigvar rv
+  | Tvar (Vrigid rv) -> [Lrigvar rv]
   | Tjoin (a, b, _loc) -> join_simple env (ptyp_to_lower ~simple:true env a) (ptyp_to_lower ~simple:true env b)
   | Tpoly {vars; body} ->
      assert (not simple);
@@ -600,7 +615,7 @@ and ntyp_to_upper ~simple env : ntyp -> upper = function
      let neg _l v =
        match bounds.(v) with
        | None -> intfail "recursive rigid bound"
-       | Some t -> Tsimple t in
+       | Some t -> tlower t in
      let pos l _v = Tbot (Some l) in
      vars |> IArray.iteri (fun i (_, b) ->
        let b = Option.map (open_typ ~neg:pos ~pos:neg 0) b in
@@ -615,7 +630,7 @@ and ntyp_to_flexvar ~simple env (t : ntyp) =
   | Uflexvar v -> v
   | Ugen _ as u ->
      let fv = fresh_flexvar (env_level env) in
-     noerror (fun () -> subtype_lu ~changes:(ref []) env (of_flexvar fv) u);
+     noerror (fun () -> subtype_lpu ~changes:(ref []) env (Lflexvar fv) u);
      fv
 
 (*
@@ -689,7 +704,7 @@ let join_ptyp env (p : ptyp) (q : ptyp) : ptyp =
   match p, q with
   | Tbot _, x | x, Tbot _ -> x
   | p, q ->
-     Tsimple (join_simple env (ptyp_to_lower ~simple:false env p) (ptyp_to_lower ~simple:false env q))
+     tlower (join_simple env (ptyp_to_lower ~simple:false env p) (ptyp_to_lower ~simple:false env q))
 
 (* FIXME: is this ever needed in nontrivial ways? *)
 let meet_ntyp env (p : ntyp) (q : ntyp) : ntyp =
@@ -697,8 +712,8 @@ let meet_ntyp env (p : ntyp) (q : ntyp) : ntyp =
   | Tcons (Top, _), x | x, Tcons (Top, _) -> x
   | p, q ->
      let v = fresh_flexvar (env_level env) in
-     subtype_lu ~changes:(ref []) env (of_flexvar v) (ntyp_to_upper ~simple:false env p);
-     subtype_lu ~changes:(ref []) env (of_flexvar v) (ntyp_to_upper ~simple:false env q);
+     subtype_lpu ~changes:(ref []) env (Lflexvar v) (ntyp_to_upper ~simple:false env p);
+     subtype_lpu ~changes:(ref []) env (Lflexvar v) (ntyp_to_upper ~simple:false env q);
      Tsimple v
 
 let rec match_ptyp ~loc env (p : ptyp) (heads : (ntyp ref, ptyp ref) upper_cons) =
@@ -721,13 +736,13 @@ let rec match_ptyp ~loc env (p : ptyp) (heads : (ntyp ref, ptyp ref) upper_cons)
      let instneg v =
        let fv = fresh_flexvar (env_level env) in
        v := meet_ntyp env !v (Tsimple fv);
-       of_flexvar fv in
+       [Lflexvar fv] in
      let ref_pairs = ref [] in
      let shead = upper_cons_map ~neg:instneg ~pos:(fun v -> let r = ref [] in ref_pairs := (v,r) :: !ref_pairs; fun p -> r := !r @ p) (heads,loc) in
      ptyp_to_lower ~simple:false env t
      |> List.iter (fun l ->
        match_sub ~changes:(ref []) env l shead);
-     !ref_pairs |> List.iter (fun (v, r) -> v := join_ptyp env !v (Tsimple !r))
+     !ref_pairs |> List.iter (fun (v, r) -> v := join_ptyp env !v (tlower !r))
 
 let match_ptyp ~loc env ty heads =
   let heads = List.map (fun x -> Ucons x) heads in
@@ -767,31 +782,32 @@ let rec clearly_subtype env (a : flexvar) (b : lower) : bool =
            end
         | _ -> false))
 
-(* This function could be optimised by skipping subtrees that have no use
-   of the outermost level, Remy-style *)
-let rec map_typ_simple : 'neg1 'pos1 'neg2 'pos2 .
-  neg:(index:int -> ('pos1,'neg1) typ -> ('pos2, 'neg2) typ) ->
-  pos:(index:int -> ('neg1,'pos1) typ -> ('neg2, 'pos2) typ) ->
+let rec map_typ_0 : 'neg1 'pos1 'neg2 'pos2 .
+  neg:(index:int -> 'neg1 -> ('pos2, 'neg2) typ) ->
+  pos:(index:int -> 'pos1 -> ('neg2, 'pos2) typ) ->
   index:int -> ('neg1, 'pos1) typ -> ('neg2, 'pos2) typ =
   fun ~neg ~pos ~index -> function
   | Tbot _ as t -> t
   | Tcons (c, cloc) ->
      Tcons (Cons1.map
-              ~neg:(map_typ_simple ~pos:neg ~neg:pos ~index)
-              ~pos:(map_typ_simple ~neg ~pos ~index)
+              ~neg:(map_typ_0 ~pos:neg ~neg:pos ~index)
+              ~pos:(map_typ_0 ~neg ~pos ~index)
               c,
             cloc)
   | Tjoin (a, b, jloc) ->
-     Tjoin(map_typ_simple ~neg ~pos ~index a, map_typ_simple ~neg ~pos ~index b, jloc)
-  | Tvar (Vbound _) as t -> t
-  | Tsimple _
-  | Tvar (Vrigid _) as t ->
-     pos ~index t
+     Tjoin(map_typ_0 ~neg ~pos ~index a, map_typ_0 ~neg ~pos ~index b, jloc)
+  | Tvar _ as t -> t
+  | Tsimple t -> pos ~index t
   | Tpoly {vars; body} ->
      let index = index + 1 in
-     let vars = IArray.map (fun (n, t) -> n, Option.map (map_typ_simple ~neg:pos ~pos:neg ~index) t) vars in
-     let body = map_typ_simple ~neg ~pos ~index body in
+     let vars = IArray.map (fun (n, t) -> n, Option.map (map_typ_0 ~neg:pos ~pos:neg ~index) t) vars in
+     let body = map_typ_0 ~neg ~pos ~index body in
      Tpoly {vars; body}
+
+let map_typ_1 ~neg ~pos ~index t =
+  let neg ~index:_ t = Tsimple (neg t) in
+  let pos ~index:_ t = Tsimple (pos t) in
+  map_typ_0 ~neg ~pos ~index t
 
 (* FIXME: bit weird... There must be a better representation for bvars here *)
 
@@ -913,7 +929,7 @@ and expand_fv_neg visit ~changes env nv =
    rigvars at the current level. *)
 
 type ('n, 'p) promotion_policy =
-  | Policy_hoist : env -> (flexvar, lower) promotion_policy
+  | Policy_hoist : env -> (flexvar, pos_flexvar) promotion_policy
   | Policy_generalise : Location.t -> (zero, zero) promotion_policy
 
 type ('n, 'p) promote_info = {
@@ -926,7 +942,6 @@ type ('n, 'p) promote_info = {
   policy : ('n, 'p) promotion_policy;
 }
 
-
 let promote_rigvar s (rv : rigvar) =
   if Env_level.equal rv.level s.level
   then ((match Vector.get s.bvars rv.var with Gen_rigid r -> assert (equal_rigvar rv r) | _ -> assert false);
@@ -935,33 +950,38 @@ let promote_rigvar s (rv : rigvar) =
 
 type ('n, 'p) promote_flexvar_result =
   | Generalised : int -> (zero, zero) promote_flexvar_result
-  | Hoisted : flexvar -> (flexvar, lower) promote_flexvar_result
+  | Hoisted : flexvar -> (flexvar, pos_flexvar) promote_flexvar_result
 
 let rec promote_lower :
   type n p . (n, p) promote_info -> lower -> (n, p) typ =
   fun s lower ->
   lower
-  |> List.filter_map (function
-    | Lcons (c,cloc) ->
-       Some ((0,0), tcons (Cons1.map ~neg:(promote_fv_neg s) ~pos:(promote_lower s) c, cloc))
-    | Lrigvar rv ->
-       let v = promote_rigvar s rv in
-       let k = match v with Vrigid rv -> (1, rv.var) | Vbound v -> (2, v.var) in
-       Some (k,Tvar v)
-    | Lflexvar fv ->
-       match promote_flexvar s fv with
-       | None -> None
-       | Some r ->
-          match s.policy with
-          | Policy_generalise loc ->
-             let Generalised var = r in
-             Some ((2,var),Tvar (Vbound {index=s.index; var; loc}))
-          | Policy_hoist _env ->
-             let Hoisted fv = r in
-             Some ((2,0),Tsimple [Lflexvar fv]))
+  |> List.filter_map (promote_lower_part s)
   |> List.sort (fun (ka,_) (kb,_) -> compare ka kb)
   |> List.map snd
   |> tjoin'
+
+and promote_lower_part :
+  type n p . (n, p) promote_info -> lower_part -> ((int*int) * (n, p) typ) option =
+  fun s p -> match p with
+  | Lcons (c,cloc) ->
+     Some ((0,0), tcons (Cons1.map ~neg:(promote_fv_neg s) ~pos:(promote_lower s) c, cloc))
+  | Lrigvar rv ->
+     let v = promote_rigvar s rv in
+     let k = match v with Vrigid rv -> (1, rv.var) | Vbound v -> (2, v.var) in
+     Some (k,Tvar v)
+  | Lflexvar fv ->
+     match promote_flexvar s fv with
+     | None -> None
+     | Some r ->
+        match s.policy with
+        | Policy_generalise loc ->
+           let Generalised var = r in
+           Some ((2,var),Tvar (Vbound {index=s.index; var; loc}))
+        | Policy_hoist _env ->
+           let Hoisted fv = r in
+           Some ((2,0),Tsimple (Vflex fv))
+
 
 and promote_fv_neg :
   type n p . (n, p) promote_info -> flexvar -> (p, n) typ =
@@ -1009,7 +1029,7 @@ and promote_upper :
            | Some dy ->
               (* FIXME: It would be sound to drop these variables. Would that be weird? *)
               unimp "unresolved delayed constraints: %a <= %a"
-                pp_ptyp (Tsimple [Lcons dy.dy_lower]) pp_upper (Ugen {cons=([Ucons (fst dy.dy_upper)], snd dy.dy_upper);higher_fvs=[]})
+                pp_ptyp (tlower [Lcons dy.dy_lower]) pp_upper (Ugen {cons=([Ucons (fst dy.dy_upper)], snd dy.dy_upper);higher_fvs=[]})
               (* Either.Right None *)
            end
         | Ucons c ->
@@ -1066,10 +1086,10 @@ and promote_flexvar :
               (* FIXME: surely I need to consider fv.lower as well? *)
             let h = fresh_flexvar (env_level hoist_env) in
             Result.get_ok
-              (subtype hoist_env (Tsimple (of_flexvar h)) upper);
+              (subtype hoist_env (Tsimple (Vflex h)) upper);
             vars |> List.iter (fun var' ->
               Result.get_ok
-                (subtype hoist_env (Tsimple (of_flexvar h)) (Tsimple var')));
+                (subtype hoist_env (Tsimple (Vflex h)) (Tsimple var')));
             Kept h
         in
         gen.bound_var <- bv;
@@ -1081,27 +1101,78 @@ let fixpoint_iters = ref 0
 let log_changes = ref false
 let verbose_types = match Sys.getenv "VERBOSE_TYPES" with _ -> true | exception Not_found -> false
 
-let promote ~policy ~rigvars ~env ~(map : neg:_ -> pos:_ -> _ -> _) ty =
+module Promotion (P : sig
+  type ('n, 'p) t
+  val map : 
+    neg:(mode:[ `Elab | `Poly ] ->
+         index:int -> ('p1, 'n1) typ -> ('p2,'n2) typ) ->
+    pos:(mode:[ `Elab | `Poly ] ->
+         index:int -> ('n1, 'p1) typ -> ('n2, 'p2) typ) ->
+    ('n1, 'p1) t -> ('n2, 'p2) t
+end) = struct
+
+let rec is_join_with_simple = function
+  | Tsimple _ -> true
+  | Tjoin (a, b, _) -> is_join_with_simple a || is_join_with_simple b
+  | _ -> false
+
+let promote ~policy ~rigvars ~env (ty : (flexvar, pos_flexvar) P.t) : _ * (flexvar, pos_flexvar) P.t =
+  let ty : (flexvar, lower) P.t =
+    let rec neg : ntyp -> (lower, flexvar) typ = function
+      | Tbot _ as t -> t
+      | Tcons (c, cloc) ->
+         let c = Cons1.map ~neg:pos ~pos:neg c in
+         Tcons (c, cloc)
+      | Tvar (Vbound _) as t -> t
+      | Tsimple _
+      | Tvar (Vrigid _) as t ->
+         Tsimple (ntyp_to_flexvar ~simple:true env t)
+      | Tjoin (a, b, jloc) ->
+         Tjoin (neg a, neg b, jloc) (* FIXME *)
+      | Tpoly {vars; body} ->
+         let vars = IArray.map (fun (n,t) -> n, Option.map pos t) vars in
+         let body = neg body in
+         Tpoly {vars; body}
+
+    and pos : ptyp -> (flexvar, lower) typ = function
+      | t when is_join_with_simple t -> Tsimple (ptyp_to_lower ~simple:true env t)
+      | Tbot _ as t -> t
+      | Tcons (c, cloc) ->
+         let c = Cons1.map ~neg ~pos c in
+         Tcons (c, cloc)
+      | Tvar (Vbound _) as t -> t
+      | Tsimple _
+      | Tvar (Vrigid _) as t ->
+         Tsimple (ptyp_to_lower ~simple:true env t)
+      | Tjoin (a,b,jloc) ->
+         Tjoin (pos a, pos b, jloc)
+      | Tpoly {vars; body} ->
+         let vars = IArray.map (fun (n,t) -> n, Option.map neg t) vars in
+         let body = pos body in
+         Tpoly {vars; body}
+    in
+    P.map ty
+      ~neg:(fun ~mode:_ ~index:_ t -> neg t)
+      ~pos:(fun ~mode:_ ~index:_ t -> pos t)
+  in
+
   (* Format.printf "ELAB %a{\n%a}@." dump_ptyp orig_ty pp_elab_req erq; *)
-  let rec fixpoint visit prev_ty =
+  let rec fixpoint visit (prev_ty : (flexvar, lower) P.t) =
     (* if verbose_types then Format.printf "FIX: %a" dump_ptyp prev_ty; *)
     if visit > 99 then intfail "looping?";
     let changes = ref [] in
-    let neg_simple ~index:_ t =
-      (* FIXME: this creates many useless flexvars *)
-      let t = ntyp_to_flexvar ~simple:true env t in
-      Tsimple (expand_fv_neg visit ~changes env t)
+    let neg_simple t =
+      expand_fv_neg visit ~changes env t
     in
-    let pos_simple ~index:_ t =
-      let t = ptyp_to_lower ~simple:true env t in
+    let pos_simple t =
       let t' = expand_lower visit ~changes env t in
       if not (equal_lower t t') then
         changes := Change_expanded_mark :: !changes;
-      Tsimple t'
+      t'
     in
-    let neg ~mode:_ ~index t = map_typ_simple ~neg:pos_simple ~pos:neg_simple ~index t in
-    let pos ~mode:_ ~index t = map_typ_simple ~neg:neg_simple ~pos:pos_simple ~index t in
-    let ty = map ~neg ~pos prev_ty in
+    let neg ~mode:_ ~index t = map_typ_1 ~index ~neg:pos_simple ~pos:neg_simple t in
+    let pos ~mode:_ ~index t = map_typ_1 ~index ~neg:neg_simple ~pos:pos_simple t in
+    let ty = P.map ~neg ~pos prev_ty in
     if !log_changes || visit > 90 then Format.printf "changed: %a\n\n%!" pp_changes !changes;
     if !changes = [] then
       (visit, ty)
@@ -1111,22 +1182,21 @@ let promote ~policy ~rigvars ~env ~(map : neg:_ -> pos:_ -> _ -> _) ty =
   (* Format.printf "ELAB2 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
   let bvars = Vector.create () in
   rigvars |> IArray.iteri (fun var ((_,loc),_) -> ignore (Vector.push bvars (Gen_rigid {loc;var;level=env_level env})));
-  let get_simple = function Tsimple t -> t | _ -> intfail "promote unexpanded?" in
   let promote (type p) (type n) (policy : (n,p) promotion_policy) =
     let s_base = { visit; bvars; env; level = env_level env; mode = `Poly; index = -1; policy } in
     let neg_simple ~mode ~index t : ntyp =
-      let t = promote_fv_neg {s_base with mode; index} (get_simple t) in
+      let t = promote_fv_neg {s_base with mode; index} t in
       match policy with Policy_generalise _ -> gen_zero t | Policy_hoist _ -> t
     in
-    let pos_simple ~mode ~index t : ptyp =
-      let t = promote_lower {s_base with mode; index} (get_simple t) in
+    let pos_simple ~mode ~index (t : lower) : ptyp =
+      let t = promote_lower {s_base with mode; index} t in
       match policy with Policy_generalise _ -> gen_zero t | Policy_hoist _ -> t
     in
-    map ty
+    P.map ty
       ~neg:(fun ~mode ~index t ->
-        map_typ_simple ~neg:(pos_simple ~mode) ~pos:(neg_simple ~mode) ~index t)
+        map_typ_0 ~neg:(pos_simple ~mode) ~pos:(neg_simple ~mode) ~index t)
       ~pos:(fun ~mode ~index t ->
-        map_typ_simple ~neg:(neg_simple ~mode) ~pos:(pos_simple ~mode) ~index t)
+        map_typ_0 ~neg:(neg_simple ~mode) ~pos:(pos_simple ~mode) ~index t)
   in
   (* Format.printf "ELAB3 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
   let ty =
@@ -1135,3 +1205,5 @@ let promote ~policy ~rigvars ~env ~(map : neg:_ -> pos:_ -> _ -> _) ty =
     | `Hoist env -> promote (Policy_hoist env)
   in
   bvars, ty
+
+end

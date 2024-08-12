@@ -52,4 +52,4 @@ fn[A,B](x:A) -> A | (A) -> B { x }
 > test:1: Bounds must be simple types
 >   : [A <: ([] int) -> int ] A <: int
 >           ^^^^^^^^^^^^^^^
-> STATS: fix: 3, flex: 69
+> STATS: fix: 3, flex: 70

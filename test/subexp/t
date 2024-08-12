@@ -1131,14 +1131,14 @@ fn [A](x:A, f:[B <: A](B) -> B) { x }
 # Not sure it's worth the effort, though
 fn[A <: {foo:int}](x:A, y:{foo:int}) { if true {x} else {y} }
 > fn [A <: {foo: int}](x: A, y: {foo: int}) { if true { x } else { y } }
->   fn [A <: {foo: int}](x: A, y: {foo: int}) -> {foo: int} | A {
+>   fn [A <: {foo: int}](x: A, y: {foo: int}) -> A | {foo: int} {
 >     if true {
 >       x
 >     } else {
 >       y
 >     }
 >   }
-> [A <: {foo: int}] (A, {foo: int}) -> {foo: int} | A
+> [A <: {foo: int}] (A, {foo: int}) -> A | {foo: int}
 > let  = %yield(fun (x, y) ret {
 >   match <true> {
 >     true() -> {

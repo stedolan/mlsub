@@ -533,18 +533,10 @@ fn (x) { use(make(x)) }
 >       | Bad{foo: bar, ...} => bar
 >     }
 >   };
->   fn [A](x: {good: bool, foo: A, bar: any, ...}) -> A | A {
+>   fn [A](x: {good: bool, foo: A, bar: any, ...}) -> A {
 >     use(make(x))
 >   }
-> [A] ({good: bool, foo: A, bar: any, ...}) -> A | A
-> RECHECK: internal error: duplicate RV in upper_cons
-> 
-> internal error: duplicate RV in upper_cons
-> 
-> ELAB: internal error: duplicate RV in upper_cons
-> 
-> ELABINF: internal error: duplicate RV in upper_cons
-> 
+> [A] ({good: bool, foo: A, bar: any, ...}) -> A
 > let make =
 >   fun (x) ret {
 >     let good = x.(good);
@@ -906,4 +898,4 @@ fn (x : 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
 
 
 # end
-> STATS: fix: 13, flex: 241
+> STATS: fix: 13, flex: 246

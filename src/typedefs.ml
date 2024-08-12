@@ -558,6 +558,9 @@ type typ_var =
   | Vbound of {index: int; var:int; loc: Location.t}
   | Vrigid of rigvar
 
+type pos_flexvar =
+  | Vflex of flexvar
+
 (* FIXME: enforce tjoin invariants, especially in neg types *)
 type (+'neg, +'pos) typ =
   | Tsimple of 'pos
@@ -575,8 +578,8 @@ and (+'neg, +'pos) poly_typ =
     vars : (string Location.loc * ('pos, 'neg) typ option) iarray;
     body : ('neg, 'pos) typ }
 
-type ptyp = (flexvar, lower) typ
-type ntyp = (lower, flexvar) typ
+type ptyp = (flexvar, pos_flexvar) typ
+type ntyp = (pos_flexvar, flexvar) typ
 
 type gen_level = env_level option
 
@@ -644,9 +647,6 @@ let equal_upper (p : upper) (q : upper) =
   | _, _ -> false
 
 let bottom : lower = []
-let of_flexvar fv = [Lflexvar fv]
-let of_rigvar rv = [Lrigvar rv]
-let is_bottom = function [] -> true | _ -> false
 
 (*
  * Flexvar mutations and backtracking log
@@ -927,6 +927,11 @@ and wf_rigvar env lvl (rv : rigvar) =
   let rvs = env_rigid_vars env rv.level in
   assert (0 <= rv.var && rv.var < IArray.length rvs)
 
+and wf_lower_part ~seen env lvl = function
+  | Lflexvar v -> wf_flexvar ~seen env lvl v
+  | Lrigvar v -> wf_rigvar env lvl v
+  | Lcons (c,_) -> Cons1.wf ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_lower ~seen env lvl) c
+
 and wf_lower ~seen env lvl l =
   l |> List.iteri (fun i a ->
     l |> List.iteri (fun j b ->
@@ -935,10 +940,7 @@ and wf_lower ~seen env lvl l =
       | Lrigvar a, Lrigvar b -> assert (not (equal_rigvar a b))
       | Lcons (a,_), Lcons (b,_) -> assert (Cons1.incomparable_head a b)
       | _, _ -> ()));
-  l |> List.iter (function
-    | Lflexvar v -> wf_flexvar ~seen env lvl v
-    | Lrigvar v -> wf_rigvar env lvl v
-    | Lcons (c,_) -> Cons1.wf ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_lower ~seen env lvl) c)
+  l |> List.iter (wf_lower_part ~seen env lvl)
 
 let wf_var env ext = function
   | Vrigid rv -> wf_rigvar env rv.level rv
@@ -1104,12 +1106,14 @@ let unparse_join = function
   | t :: ts ->
      List.fold_left (fun a b -> mktyexp (Exp.Tjoin (a, b))) t ts
 
-let rec unparse_lower ~env ~flexvar l =
+let rec unparse_lower_part ~env ~flexvar = function
+  | Lflexvar fv -> unparse_flexvar ~env ~flexvar fv
+  | Lrigvar rv -> unparse_rigid_var ~env rv
+  | Lcons c -> unparse_cons c ~neg:(unparse_flexvar ~env ~flexvar) ~pos:(unparse_lower ~env ~flexvar)
+
+and unparse_lower ~env ~flexvar l =
   l
-  |> List.map (function
-    | Lflexvar fv -> unparse_flexvar ~env ~flexvar fv
-    | Lrigvar rv -> unparse_rigid_var ~env rv
-    | Lcons c -> unparse_cons c ~neg:(unparse_flexvar ~env ~flexvar) ~pos:(unparse_lower ~env ~flexvar))
+  |> List.map (unparse_lower_part ~env ~flexvar)
   |> unparse_join
 
 let unparse_upper ~env ~flexvar = function
@@ -1125,9 +1129,9 @@ let unparse_upper ~env ~flexvar = function
      @ List.map (unparse_flexvar ~env ~flexvar) higher_fvs
 
 let unparse_ptyp ~flexvar ?(env=(Env_nil,[])) (t : ptyp) =
-  unparse_gen_typ ~env ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_lower ~flexvar) t
+  unparse_gen_typ ~env ~neg:(unparse_flexvar ~flexvar) ~pos:(fun ~env (Vflex fv) -> unparse_flexvar ~env ~flexvar fv) t
 let unparse_ntyp ~flexvar ?(env=(Env_nil,[])) (t : ntyp) =
-  unparse_gen_typ ~env ~neg:(unparse_lower ~flexvar) ~pos:(unparse_flexvar ~flexvar) t
+  unparse_gen_typ ~env ~neg:(fun ~env (Vflex fv) -> unparse_flexvar ~env ~flexvar fv) ~pos:(unparse_flexvar ~flexvar) t
 
 
 
@@ -1217,7 +1221,7 @@ let pp_changes ppf changes =
 let wf_ptyp env (t : ptyp) =
   try
     let seen = Hashtbl.create 10 in
-    wf_typ ~neg:(wf_flexvar ~seen env (env_level env)) ~pos:(wf_lower ~seen env (env_level env)) ~ispos:true env [] t
+    wf_typ ~neg:(wf_flexvar ~seen env (env_level env)) ~pos:(fun (Vflex fv) -> wf_flexvar ~seen env (env_level env) fv) ~ispos:true env [] t
   with
   | Assert_failure (file, line, _char) when file = __FILE__ ->
      intfail "Ill-formed type (%s:%d): %a" file line pp_ptyp t
@@ -1225,7 +1229,7 @@ let wf_ptyp env (t : ptyp) =
 let wf_ntyp env (t : ntyp) =
   try
     let seen = Hashtbl.create 10 in
-    wf_typ ~neg:(wf_lower ~seen env (env_level env)) ~pos:(wf_flexvar ~seen env (env_level env)) ~ispos:false env [] t
+    wf_typ ~neg:(fun (Vflex fv) -> wf_flexvar ~seen env (env_level env) fv) ~pos:(wf_flexvar ~seen env (env_level env)) ~ispos:false env [] t
   with
   | Assert_failure (file, line, _char) when file = __FILE__ ->
      intfail "Ill-formed type (%s:%d): %a" file line pp_ntyp t

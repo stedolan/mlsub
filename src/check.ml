@@ -138,6 +138,8 @@ let typ_of_tyexp env t = typ_of_tyexp env (env_level env) t
 let unit loc = tcons loc (Record {tag=None; body={fnames=[]; fields=FieldMap.empty; fopen=Ext_closed}})
 
 open Elab
+type typed_exp = (flexvar, pos_flexvar) Elab.typed_exp
+type typed_exp' = (flexvar, pos_flexvar) Elab.typed_exp'
 
 type generalisation_mode = {
   mutable gen_level_acc: env_level option;
@@ -153,8 +155,18 @@ let mark_var_use_at_level ~(mode : generalisation_mode) lvl =
     | Some l1, Some l2 ->
        Some (Env_level.min l1 l2)
 
+module Promotion = Types.Promotion (struct
+  type ('n,'p) t = ('n,'p) typ * ('n,'p) Elab.typed_exp
+  let map ~neg ~pos (ty, typed_exp) =
+    let ty = pos ~mode:`Poly ~index:0 ty in
+    let typed_exp = typed_map_typs_exp typed_exp ~index:0
+                ~neg:(neg ~mode:`Elab)
+                ~pos:(pos ~mode:`Elab)
+    in
+    (ty, typed_exp)
+end)
 
-let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level option * 'rest) : ptyp * (typed_polybounds option * typed_exp) * bool * 'rest =
+let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level option * 'rest) : ptyp * (_ typed_polybounds option * typed_exp) * bool * 'rest =
   let rigvars', rig_names =
     match poly with
     | None -> IArray.empty, SymMap.empty
@@ -171,16 +183,8 @@ let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level
        mark_var_use_at_level ~mode lvl;
        false
   in
-  let map ~neg ~pos (ty, typed_exp) =
-    let ty = pos ~mode:`Poly ~index:0 ty in
-    let typed_exp = typed_map_typs_exp typed_exp ~index:0
-                ~neg:(neg ~mode:`Elab)
-                ~pos:(pos ~mode:`Elab)
-    in
-    (ty, typed_exp)
-  in
   let policy = if can_generalise then `Generalise loc else `Hoist env in
-  let bvars, (ty, typed_exp) = promote ~policy ~rigvars:rigvars' ~env:env' ~map (orig_ty, typed_exp) in
+  let bvars, (ty, typed_exp) = Promotion.promote ~policy ~rigvars:rigvars' ~env:env' (orig_ty, typed_exp) in
   if Vector.length bvars = 0 then
     ty, (None, typed_exp), can_generalise, rest
   else
@@ -207,12 +211,12 @@ let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level
    This improves elaborations but is a bit of a hack.
    Decide whether to keep it! *)
 let elab_ptyp = function
-  | Tsimple [Lflexvar v] -> Elab_ntyp (Tsimple v)
+  | Tsimple (Vflex v) -> Elab_ntyp (Tsimple v)
   | ty -> Elab_ptyp ty
 
-let fresh_flow env =
+let fresh_flow env : ntyp * ptyp =
   let fv = fresh_flexvar (env_level env) in
-  Tsimple fv, Tsimple (of_flexvar fv)
+  Tsimple fv, Tsimple (Vflex fv)
 
 (* "Simultaneous Input and Output", e.g. sec 6.4 of Bidirectional Typing *)
 type ty_mode =
@@ -495,7 +499,7 @@ and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * typed_exp =
   wf_ptyp env !ty;
   !ty, e
 
-and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_func_def =
+and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * _ typed_func_def =
    let ty, (typed_poly, typed_fn), _generalised, (act, split) =
      elab_gen env ~loc ~mode poly (fun env ->
        let params = List.map (fun (p, ty) ->

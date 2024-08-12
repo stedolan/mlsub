@@ -20,14 +20,21 @@ let tuple xs =
   let body = of_list ~fopen:Ext_closed (List.mapi (fun i x -> Tuple_fields.Field_positional i, Fpresent (x, noloc)) xs) in
   Cons1.Record {tag=None; body}
 
+
 let dump env (t : ptyp) =
   dump t;
   flush stdout;
   Types.log_changes := true;
-  let bvars, _t = promote ~policy:(`Generalise noloc) ~rigvars:IArray.empty ~env t
-                   ~map:(fun ~neg:_ ~pos t ->
-                     let t = pos ~mode:`Poly ~index:0 t in
-                     dump t; t) in
+  let t_orig = t in
+  let module Promotion = Types.Promotion (struct
+    type ('n,'p) t = ('n,'p) typ
+    let map ~neg:_ ~pos t =
+      let t = pos ~mode:`Poly ~index:0 t in
+      dump t_orig;
+      t
+  end) in
+  let bvars, t = Promotion.promote ~policy:(`Generalise noloc) ~rigvars:IArray.empty ~env t_orig in
+  dump t;
   Types.log_changes := false;
   Vector.iteri bvars (fun ix v -> match v with
   | Gen_rigid _ -> assert false
@@ -37,7 +44,7 @@ let dump env (t : ptyp) =
 
 let fresh_flow lvl =
   let fv = fresh_flexvar lvl in
-  Tsimple fv, Tsimple (of_flexvar fv)
+  Tsimple fv, Tsimple (Vflex fv)
 
 
 let match_as_fn env f =
