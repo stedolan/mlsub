@@ -7,7 +7,10 @@ type symbol = string loc
 type ident = ident' loc and ident' =
   { label : string; shift : int }
 
-type tuple_tag = string loc
+type tuple_tag =
+  | Anon_tag
+  | Struct_tag of string loc
+  | Named_tag of symbol
 
 (* Expressions *)
 
@@ -23,6 +26,8 @@ type extensible_flag =
 type 'a fields =
   | Ftuple of 'a list * extensible_flag
   | Frecord of (Tuple_fields.field_name loc * mand_flag * 'a option) list * extensible_flag
+
+let empty_fields = Ftuple ([], Ext_closed)
 
 let map_fields ?(loc=Fun.id) f = function
   | Ftuple (x,ext) -> Ftuple (List.mapi (fun i x -> f (Tuple_fields.Field_positional i, Mandatory) x) x, ext)
@@ -89,17 +94,32 @@ and pat = pat' mayloc and pat' =
 (* Type expressions *)
 
 and tyexp = tyexp' mayloc and tyexp' =
-  | Tnamed of ident
   | Tforall of typolybounds * tyexp
-  | Trecord of tuple_tag option * tyexp fields
+  | Ttyvar of symbol
+  | Trecord of tuple_tag option * tyarg list * tyexp fields
   | Tfunc of tyexp list * tyexp
   | Tjoin of tyexp * tyexp
+
+and tyarg = tyarg' mayloc and tyarg' =
+  | Arg_pos of tyexp
+  | Arg_neg of tyexp
+  | Arg_gen of tyexp
+  | Arg_both of {neg:tyexp; pos:tyexp}
 
 and typolybounds =
   (symbol * tyexp option) list
 
+type variance_spec =
+  { occurs_pos: [`No | `Strict | `Yes];
+    occurs_neg: [`No | `Yes] }
+
+type type_decl_body =
+  | Dty_record of tyexp fields loc
+  | Dty_variant of (symbol * tyexp fields loc) list
+
 type decl = decl' mayloc and decl' =
   | Dfn of symbol * func_def
+  | Dtype of symbol * (variance_spec option * symbol) list * type_decl_body
 
 type mapper = {
   loc : mapper -> location -> location;
@@ -131,6 +151,14 @@ let mapper =
 
   let case r ((pats, ploc), exp) = ((List.map (List.map (r.pat r)) pats, r.loc r ploc), r.exp r exp) in
 
+  let fields f r fs = map_fields ~loc:(r.loc r) (fun _fn e -> f r e) fs in
+
+  let tuple_tag r t = match t with
+    | Anon_tag -> Anon_tag
+    | Struct_tag t -> Struct_tag (sym r t)
+    | Named_tag t -> Named_tag (sym r t)
+  in
+
   let exp = mayloc @@ fun r e -> match e with
     | Lit (l, loc) ->
        Lit (l, r.loc r loc)
@@ -143,7 +171,7 @@ let mapper =
     | App (f, args) ->
        App (r.exp r f, List.map (fun (k, x) -> k, r.exp r x) args)
     | Tuple (tag, es) ->
-       Tuple (Option.map (sym r) tag, map_fields ~loc:(r.loc r) (fun _fn e -> r.exp r e) es)
+       Tuple (Option.map (tuple_tag r) tag, fields r.exp r es)
     | Let (p, ty, e, body) ->
        Let (r.pat r p, Option.map (r.tyexp r) ty, r.exp r e, r.exp r body)
     | Seq (e1, e2) ->
@@ -164,27 +192,42 @@ let mapper =
     | Pany -> Pany
     | Pbind (s, p) -> Pbind (sym r s, r.pat r p)
     | Ptuple (tag, ps) ->
-       Ptuple (Option.map (sym r) tag, map_fields ~loc:(r.loc r) (fun _fn x -> r.pat r x) ps)
+       Ptuple (Option.map (tuple_tag r) tag, fields r.pat r ps)
     | Por (p, q) -> Por (r.pat r p, r.pat r q)
   in
 
   let tyexp = mayloc @@ fun r t -> match t with
-    | Tnamed (n,l) ->
-       Tnamed (n, r.loc r l)
     | Tforall (bounds, body) ->
        let bounds = List.map (fun (s, t) -> (sym r s, Option.map (r.tyexp r) t)) bounds in
        let body = r.tyexp r body in
        Tforall (bounds, body)
-    | Trecord (tag, ts) ->
-       Trecord (Option.map (sym r) tag, map_fields ~loc:(r.loc r) (fun _fn t -> r.tyexp r t) ts)
+    | Ttyvar v ->
+       Ttyvar (sym r v)
+    | Trecord (tag, args, ts) ->
+       let tyarg = mayloc @@ fun r t -> match t with
+         | Arg_pos t -> Arg_pos (r.tyexp r t)
+         | Arg_neg t -> Arg_neg (r.tyexp r t)
+         | Arg_gen t -> Arg_gen (r.tyexp r t)
+         | Arg_both {neg;pos} -> Arg_both {neg=r.tyexp r neg; pos=r.tyexp r pos}
+       in
+       Trecord (Option.map (tuple_tag r) tag,
+                List.map (tyarg r) args,
+                fields r.tyexp r ts)
     | Tfunc (args, ret) ->
        Tfunc (List.map (r.tyexp r) args, r.tyexp r ret)
     | Tjoin (s, t) ->
        Tjoin (r.tyexp r s, r.tyexp r t)
   in
 
+  let ty_decl_body r = function
+    | Dty_record (fs,loc) -> Dty_record (fields r.tyexp r fs, r.loc r loc)
+    | Dty_variant vs -> Dty_variant (List.map (fun (s,(fs,loc)) -> sym r s, (fields r.tyexp r fs, r.loc r loc)) vs)
+  in
+
   let decl = mayloc @@ fun r d -> match d with
     | Dfn (s, f) -> Dfn (sym r s, fndef r f)
+    | Dtype (s, ps, body) ->
+       Dtype (sym r s, List.map (fun (v,s) -> v, sym r s) ps, ty_decl_body r body)
   in
   { loc; exp; pat; tyexp; decl }
 
@@ -192,5 +235,6 @@ let strip_locations =
   { mapper with loc = fun _ _ -> noloc }
 
 let equal e1 e2 = map_exp strip_locations e1 = map_exp strip_locations e2
+let equal_tyexp e1 e2 = map_tyexp strip_locations e1 = map_tyexp strip_locations e2
 
 let equal_prog p1 p2 = map_prog strip_locations p1 = map_prog strip_locations p2

@@ -1,15 +1,15 @@
 %token <string> SYMBOL
 %token <string> USYMBOL
-%token <string> QUSYMBOL
-%token <int> INT
+%token ZERO
+%token <int> NZINT
 %token <string> STRING
 %token <string> PRAGMA
 %token SHIFT
 %token EOF WS COMMENT NL ERROR
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
 %token COLON EQUALS DOT DOTS COMMA SEMI UNDER QUESTION ARROW FATARROW AMPER VBAR
-%token FN LET TRUE FALSE IF ELSE TILDE HASH
-%token SUBTYPE SUPTYPE AT
+%token FN LET TRUE FALSE IF ELSE TILDE HASH PLUS MINUS
+%token SUBTYPE SUPTYPE AT TYPE
 %token MATCH
 
 %nonassoc low_priority
@@ -36,6 +36,8 @@ let pvar s = Pbind (s, (Some Pany, snd s))
 %inline mayfail_opt(X): e = X { e } | ERROR { None }
 %inline mayloc_opt(X): e = loc(mayfail_opt(X)) { e }
 
+INT: ZERO { 0 } | n = NZINT { n }
+
 prog:
 | e = exp; EOF
   { `Exp e }
@@ -44,40 +46,19 @@ prog:
 | COLON; t1 = tyexp; SUBTYPE; t2 = tyexp; EOF
   { `Sub (t1, t2) }
 
-decl: v = mayloc(decl_) { v }
-decl_:
-| FN; s = symbol; def = fndef
-  { Dfn (s, def) }
-
 symbol: s = loc(SYMBOL) { s }
 usymbol: s = loc(USYMBOL) { s }
 
-struct_tag: s = loc(struct_tag_) { (s : string loc) }
-struct_tag_:
-| s = QUSYMBOL { s }
-(*| HASH { "" }
-| HASH; s = USYMBOL { s }*)
-
-(* FIXME: probably a bad idea. Enforce case conventions *)
-anysymbol:
-| s = symbol { s }
-| s = usymbol { s }
+struct_tag:
+| HASH { Anon_tag }
+| s = loc(HASH; s=USYMBOL {s}) { Struct_tag s }
+| s = loc(USYMBOL) { Named_tag s }
 
 ident: v = loc(ident_) { v }
 ident_:
 | s = SYMBOL
   { { label = s; shift = 0 } }
 | v = ident_; SHIFT
-  { { v with shift = v.shift + 1 } }
-
-(* FIXME: remove and enforce case conventions *)
-anyident: v = loc(anyident_) { v }
-anyident_:
-| s = SYMBOL
-  { { label = s; shift = 0 } }
-| s = USYMBOL
-  { { label = s; shift = 0 } }
-| v = anyident_; SHIFT
   { { v with shift = v.shift + 1 } }
 
 literal: l = loc(literal_) { l }
@@ -134,7 +115,7 @@ fields_brace_items1(X):
   { [], Ext_open }
 | f = fields_brace_item(X); ioption(COMMA)
   { [f], Ext_closed }
-| f = fields_brace_item(X); COMMA; fs = fields_brace_items1(X)
+| f = fields_brace_item(X); ioption(COMMA); fs = fields_brace_items1(X)
   { (f::fst fs), snd fs }
 
 fields_brace_items(X):
@@ -143,13 +124,19 @@ fields_brace_items(X):
 | fs = fields_brace_items1(X)
   { fs }
 
-fields(X):
+%inline fields_parens(X):
 | LPAR; xs = fields_paren_items(X); RPAR
   { match xs with
     | [x] as xs, false, e -> Some x, Ftuple (xs, e)
     | xs, _, e -> None, Ftuple (xs, e) }
+
+%inline fields_braces(X):
 | LBRACE; xs = fields_brace_items(X); RBRACE
-  { None, Frecord (fst xs, snd xs) }
+  { Frecord (fst xs, snd xs) }
+
+fields(X):
+| fs = fields_parens(X) { fs }
+| fs = fields_braces(X) { None, fs }
 
 exp: e = mayloc_opt(exp_) { e }
 exp_:
@@ -175,7 +162,7 @@ exp_:
 fndef:
 | poly = ioption(typolybounds);
   LPAR; params = separated_list(COMMA, parameter); RPAR;
-  ty = ioption(ARROW; t = tyexp {t});
+  ty = ioption(ARROW; t = tyterm {t});
   LBRACE; body = exp; RBRACE
   { (poly, params, ty, body) }
 
@@ -189,14 +176,15 @@ term_:
   { Some (App (fn, args)) }
 | e = term; DOT; f = symbol
   { Some (Proj (e, f)) }
-| tag = usymbol %prec low_priority
-  { Some (Tuple (Some tag, Ftuple ([], Ext_closed))) }
+| tag = struct_tag %prec low_priority
+  { Some (Tuple (Some tag, empty_fields)) }
 | LPAR; e = exp; COLON; t = tyexp; RPAR
   { Some (Typed (e, t)) }
-| tag = ioption(usymbol); fs = fields(exp)
+| tag = ioption(struct_tag); fs = fields(exp)
   { match tag, fs with
     | None, (Some (Some e, _), _) -> Some e
     | None, (Some (None, _), _) -> None
+    | None, (_, (Ftuple _ as fs)) -> Some (Tuple (Some Anon_tag, fs))
     | tag, (_, fs) -> Some (Tuple (tag, fs)) }
 
 argument:
@@ -238,37 +226,115 @@ onepat_:
   { pvar v }
 | UNDER
   { Pany }
-| tag = usymbol
-  { Ptuple (Some tag, Ftuple ([], Ext_closed)) }
-| tag = ioption(usymbol); fs = fields(pat)
+| HASH; tag = usymbol (* FIXME named tags *)
+  { Ptuple (Some (Struct_tag tag), empty_fields) }
+| tag = ioption(struct_tag); fs = fields(pat) (* FIXME named tags *)
   { match tag, fs with
     | None, (Some (Some p, _), _) -> p
+    | None, (_, (Ftuple _ as fs)) -> Ptuple (Some Anon_tag, fs)
     | tag, (_, fs) -> Ptuple (tag, fs) }
 
 typolybounds:
 | LBRACK; t = separated_list(COMMA, typolybound); RBRACK
   { t }
 
+%inline
+tytagargs:
+| HASH; tag = loc(USYMBOL)
+  { Struct_tag tag, [] }
+| HASH
+  { Anon_tag, [] }
+| tag = loc(USYMBOL)
+  { Named_tag tag, [] }
+| tag = loc(USYMBOL); LBRACK; args = separated_list(COMMA, tyarg); RBRACK
+  { Named_tag tag, args }
+
+tyatomic: t = mayloc(tyatomic_) { t }
+%inline tyatomic_:
+| t = symbol
+  { Ttyvar t }
+| t = tytagargs
+  { Trecord (Some (fst t), snd t, empty_fields) }
+
 tyexp: t = mayloc(tyexp_) { t }
 tyexp_:
-| t = anyident
-  { Tnamed t }
-| tag = struct_tag %prec low_priority
-  { Trecord(Some tag, Ftuple ([], Ext_closed)) }
-| tag = ioption(struct_tag); t = fields(tyexp)
-  { match tag, t with
-    | None, (Some (Some t, _), _) -> t
-    | tag, (_, fs) -> Trecord (tag, fs) }
-(* FIXME: what does (...) -> a | b mean? (prec of -> and |) *)
+| tagargs = ioption(tytagargs); fs = fields_braces(tyexp)
+  { match tagargs, fs with
+    | None, fs -> Trecord (None, [], fs)
+    | Some (tag, args), fs -> Trecord (Some tag, args, fs) }
+| t = tyterm_
+  { t }
 | LPAR; t = fields_paren_items(tyexp); RPAR; ARROW; r = tyexp
   { let (t, _, _FIXME_e) = t in
     Tfunc (t, r) }
+| t = tyatomic; ARROW; r = tyexp
+  { Tfunc ([t], r) }
 | t1 = tyexp; VBAR; t2 = tyexp
   { Tjoin(t1, t2) }
 | t = typolybounds; b = tyexp %prec ARROW (* kinda hack *)
   { Tforall(t, b) }
 
+tyterm: t = mayloc(tyterm_) { t }
+tyterm_:
+| ty = tyatomic_
+  { ty }
+| tagargs = ioption(tytagargs); fs = fields_parens(tyexp)
+  { match tagargs, fs with
+    | None, (Some (Some t, _), _) -> t
+    | None, (_, fs) -> Trecord (Some Anon_tag, [], fs)
+    | Some (tag, args), (_, fs) -> Trecord (Some tag, args, fs) }
+
 typolybound:
-| s = anysymbol; SUBTYPE; b = tyexp
+| s = symbol; SUBTYPE; b = tyexp
   { s, Some b }
-| s = anysymbol { s, None }
+| s = symbol { s, None }
+
+tyarg: v = loc(tyarg_) { Some (fst v), snd v }
+tyarg_:
+| t = tyexp
+  { Arg_gen t }
+| PLUS; t = tyexp
+  { Arg_pos t }
+| MINUS; t = tyexp
+  { Arg_neg t }
+| PLUS; pos = tyexp; MINUS; neg = tyexp
+| MINUS; neg = tyexp; PLUS; pos = tyexp
+  { Arg_both {neg;pos} }
+
+decl: v = mayloc(decl_) { v }
+decl_:
+| FN; s = symbol; def = fndef
+  { Dfn (s, def) }
+| TYPE; s = usymbol; ps = decl_ty_params; body = decl_ty_body
+  { Dtype(s,ps,body) }
+
+decl_ty_body:
+| fs = loc(fields(tyexp))
+  { let ((_,fs),loc) = fs in
+    Dty_record(fs,loc) }
+| LBRACE; ioption(VBAR); vs = separated_nonempty_list(VBAR, decl_ty_variant); RBRACE
+  { Dty_variant(vs) }
+
+decl_ty_variant:
+| tag = usymbol; fs = loc(fields(tyexp))
+  { let ((_,fs),loc) = fs in tag, (fs,loc) }
+
+decl_ty_params:
+|
+  { [] } 
+| LBRACK; ps = separated_list(COMMA, decl_ty_param); RBRACK
+  { ps }
+
+decl_ty_param:
+| v = option(variance_spec); id = symbol
+  { v, id }
+
+variance_spec:
+| ZERO            { { occurs_pos = `No; occurs_neg = `No  } }
+| MINUS           { { occurs_pos = `No; occurs_neg = `Yes } }
+| PLUS PLUS       { { occurs_pos = `Yes; occurs_neg = `No } }
+| PLUS PLUS MINUS
+| MINUS PLUS PLUS { { occurs_pos = `Yes; occurs_neg = `Yes } }
+| PLUS            { { occurs_pos = `Strict; occurs_neg = `No } }
+| PLUS MINUS
+| MINUS PLUS      { { occurs_pos = `Strict; occurs_neg = `Yes } }

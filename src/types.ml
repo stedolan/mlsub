@@ -63,7 +63,7 @@ let close_err_rigid ~orig_env ~env vars {lhs; rhs; err; located; env = (_env', e
     | _ -> intfail "expected rigid var"
   in
   let close ~ispos t =
-    close_typ (env_level env) close_var ~simple:id ~ispos ~isjoin:false 0 t
+    close_typ (Env.level env) close_var ~simple:id ~ispos ~isjoin:false 0 t
   in
   let lhs = close ~ispos:true lhs in
   let rhs = close ~ispos:false rhs in
@@ -159,7 +159,7 @@ let lower_contains_fv fv lower =
     | _ -> false) lower
 
 let lower_of_rigid_bound env rv : lower =
-  env_rigid_bound env rv
+  Env.rigid_bound env rv
   |> List.map (fun (c,cloc) -> Lcons (c, if cloc = Location.noloc then rv.loc else cloc))
 
 (* Check whether a flex-flex constraint α ≤ β is already present via an upper bound of α *)
@@ -218,7 +218,7 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower -> unit) up
      | Ok ds ->
         resolve_delayed_constraints ~changes env ds
      | Error () ->
-        env_rigid_bound env rv |> List.iter (fun (l,lloc) ->
+        Env.rigid_bound env rv |> List.iter (fun (l,lloc) ->
           match upper_find_cons l cn with
           | Ok (_hc, cn) ->
              subtype_cons env (l, lloc) (cn, cnloc)
@@ -261,7 +261,7 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower -> unit) up
        | [Ucons Top], _loc -> Ok []
        | cons ->
           match
-            env_rigid_bound env rv
+            Env.rigid_bound env rv
             |> List.map (fun (cp, cploc) ->
               match upper_find_cons cp (fst cons) with
               | Ok (_hc, cn) ->
@@ -377,7 +377,7 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower -> unit) up
 and resolve_delayed_constraints ~changes env ds =
   ds |> List.iter (fun dy ->
     (* FIXME: when are these resolved for flexvars going out of scope? *)
-    assert (Env_level.extends dy.dy_flexvar.level (env_level env));
+    assert (Env_level.extends dy.dy_flexvar.level (Env.level env));
     (* FIXME: is recursion ever relevant here? *)
     if not dy.dy_resolved then begin
       dy.dy_resolved <- true;
@@ -529,8 +529,8 @@ let join_simple env a b =
   (* FIXME: start with a not bottom. (Improve matchability) *)
   let changes = ref [] in
   let r = bottom in
-  let r = join_lower ~changes env (env_level env) r a in
-  let r = join_lower ~changes env (env_level env) r b in
+  let r = join_lower ~changes env (Env.level env) r a in
+  let r = join_lower ~changes env (Env.level env) r b in
   r
 
 let check_simple t =
@@ -551,7 +551,7 @@ let upper_is_bot = function
   | _ -> false
 
 let rec instantiate_flex env vars (body : ptyp) : ptyp =
-  let fvars = IArray.map (fun _ -> fresh_flexvar (env_level env)) vars in
+  let fvars = IArray.map (fun _ -> fresh_flexvar (Env.level env)) vars in
   let fvneg _loc i = Tsimple (IArray.get fvars i) in
   let fvpos _loc i = Tsimple (Vflex (IArray.get fvars i)) in
   IArray.iter2 (fun (fv : flexvar) (_,t) ->
@@ -626,10 +626,10 @@ and ntyp_to_upper ~simple env : ntyp -> upper = function
 
 and ntyp_to_flexvar ~simple env (t : ntyp) =
   match ntyp_to_upper ~simple env t with
-  | Utop -> fresh_flexvar (env_level env)
+  | Utop -> fresh_flexvar (Env.level env)
   | Uflexvar v -> v
   | Ugen _ as u ->
-     let fv = fresh_flexvar (env_level env) in
+     let fv = fresh_flexvar (Env.level env) in
      noerror (fun () -> subtype_lpu ~changes:(ref []) env (Lflexvar fv) u);
      fv
 
@@ -638,11 +638,14 @@ and ntyp_to_flexvar ~simple env (t : ntyp) =
  *)
 
 let enter_rigid env vars rig_names =
-  let level = Env_level.extend (env_level env) in
+  let level = Env_level.extend (Env.level env) in
   let temp_env =
-    Env_types { level; rig_names;
-                rig_defns = IArray.map (fun (name, _) ->
-                    {name; upper=[Top,Location.noloc]}) vars; rest = env } in
+    Env.extend_types env
+      ~level
+      ~rig_names
+      ~rig_defns:(IArray.map (fun (name, _) ->
+                    {name; upper=[Top,Location.noloc]}) vars)
+  in
   let getrv loc var = Tvar (Vrigid {level; loc; var}) in
   let openrig t = open_typ ~neg:getrv ~pos:getrv 0 t in
   let rig_defns = IArray.map (fun (name, b) ->
@@ -663,7 +666,7 @@ let enter_rigid env vars rig_names =
           | Lrigvar _ | Lflexvar _ -> assert false)
         in
         { name; upper = conses }) vars in
-  let env = Env_types { level; rig_names; rig_defns; rest = env} in
+  let env = Env.extend_types env ~level ~rig_names ~rig_defns in
   env, openrig
 
 let rec subtype env (p : ptyp) (n : ntyp) =
@@ -711,7 +714,7 @@ let meet_ntyp env (p : ntyp) (q : ntyp) : ntyp =
   match p, q with
   | Tcons (Top, _), x | x, Tcons (Top, _) -> x
   | p, q ->
-     let v = fresh_flexvar (env_level env) in
+     let v = fresh_flexvar (Env.level env) in
      subtype_lpu ~changes:(ref []) env (Lflexvar v) (ntyp_to_upper ~simple:false env p);
      subtype_lpu ~changes:(ref []) env (Lflexvar v) (ntyp_to_upper ~simple:false env q);
      Tsimple v
@@ -734,7 +737,7 @@ let rec match_ptyp ~loc env (p : ptyp) (heads : (ntyp ref, ptyp ref) upper_cons)
      match_ptyp ~loc env body heads
   | t ->
      let instneg v =
-       let fv = fresh_flexvar (env_level env) in
+       let fv = fresh_flexvar (Env.level env) in
        v := meet_ntyp env !v (Tsimple fv);
        [Lflexvar fv] in
      let ref_pairs = ref [] in
@@ -857,7 +860,7 @@ let remove_flexvar fv lower =
   List.filter (function Lflexvar a when equal_flexvar fv a -> false | _ -> true) lower
 
 let rec expand_lower visit ~changes ?(vexpand=[]) env orig_lower =
-  let level = env_level env in
+  let level = Env.level env in
   let lower =
     orig_lower |> List.map (function
       | Lflexvar pv when Env_level.equal pv.level level ->
@@ -1004,7 +1007,7 @@ and promote_fv_neg :
         tvjoin ~base:(promote_lower s nv.lower) [v]
      end
   | Some (Hoisted v), Policy_hoist hoist_env ->
-     assert (Env_level.extends v.level (env_level hoist_env));
+     assert (Env_level.extends v.level (Env.level hoist_env));
      Tsimple v
 
 and promote_upper :
@@ -1046,7 +1049,7 @@ and promote_flexvar :
   if not (Env_level.equal fv.level s.level) then
     match s.policy with
     | Policy_hoist hoist_env ->
-       assert (Env_level.extends fv.level (env_level hoist_env));
+       assert (Env_level.extends fv.level (Env.level hoist_env));
        Some (Hoisted fv)
     | Policy_generalise _ ->
        intfail "Flexible variable found during generalisation" (* MonoLocalBinds *)
@@ -1084,7 +1087,7 @@ and promote_flexvar :
             Generalised n
           | Policy_hoist hoist_env ->
               (* FIXME: surely I need to consider fv.lower as well? *)
-            let h = fresh_flexvar (env_level hoist_env) in
+            let h = fresh_flexvar (Env.level hoist_env) in
             Result.get_ok
               (subtype hoist_env (Tsimple (Vflex h)) upper);
             vars |> List.iter (fun var' ->
@@ -1181,9 +1184,9 @@ let promote ~policy ~rigvars ~env (ty : (flexvar, pos_flexvar) P.t) : _ * (flexv
   let visit, ty = fixpoint 2 ty in
   (* Format.printf "ELAB2 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
   let bvars = Vector.create () in
-  rigvars |> IArray.iteri (fun var ((_,loc),_) -> ignore (Vector.push bvars (Gen_rigid {loc;var;level=env_level env})));
+  rigvars |> IArray.iteri (fun var ((_,loc),_) -> ignore (Vector.push bvars (Gen_rigid {loc;var;level=Env.level env})));
   let promote (type p) (type n) (policy : (n,p) promotion_policy) =
-    let s_base = { visit; bvars; env; level = env_level env; mode = `Poly; index = -1; policy } in
+    let s_base = { visit; bvars; env; level = Env.level env; mode = `Poly; index = -1; policy } in
     let neg_simple ~mode ~index t : ntyp =
       let t = promote_fv_neg {s_base with mode; index} t in
       match policy with Policy_generalise _ -> gen_zero t | Policy_hoist _ -> t

@@ -1,0 +1,143 @@
+# Basic error messages
+
+{
+  type Foo{}
+  type Bar{}
+  type Foo{}
+}
+> test:4: Duplicate type name Foo
+>     type Foo{}
+>          ^^^
+> test:2: previously defined here
+>     type Foo{}
+>          ^^^
+
+{ type A[+a, -b, c, d] { next: A[+#P, -#P, -#Q +#P, -#P] } }
+> test:1: The type A does not take argument 3 (c) contravariantly
+>   { type A[+a, -b, c, d] { next: A[+#P, -#P, -#Q +#P, -#P] } }
+>                                              ^^^^^^^
+
+{ type A { next: B[+#P, +#P, +#P] }
+  type B[+a, -b, c] { prev: A } }
+> test:1: The type B does not take argument 2 (b) covariantly
+>   { type A { next: B[+#P, +#P, +#P] }
+>                           ^^^
+
+{ type A { next: A[#P] } }
+> test:1: The type A does not take arguments
+>   { type A { next: A[#P] } }
+>                    ^^^^^
+
+{ type A[a,b] { next: A[#P] } }
+> test:1: The type A takes 2 arguments, not 1
+>   { type A[a,b] { next: A[#P] } }
+>                         ^^^^^
+
+{ type A[a,a] { } }
+> test:1: Duplicate type name a
+>   { type A[a,a] { } }
+>              ^
+> test:1: previously defined here
+>   { type A[a,a] { } }
+>            ^
+
+{ type A[a] { foo: (a,a), bar: a -> #P } }
+> type A[+-a]{foo: (a, a), bar: a -> #P}
+
+{ type A { foo: (A -> ()) -> () } }
+> test:1: The type A is used recursively in a non-strictly-positive position
+>   { type A { foo: (A -> ()) -> () } }
+>                    ^
+
+# non-strictly-positive recursion, but more work required to find it
+{ type Neg[a] { foo: a -> () }
+  type Pos[a] { foo: a  }
+  type R { bad: Pos[Neg[Pos[Neg[R]]]] } }
+> test:3: The type R is used recursively in a non-strictly-positive position
+>     type R { bad: Pos[Neg[Pos[Neg[R]]]] } }
+>                                   ^
+{ type DNeg[a] { foo: (a -> ()) -> () }
+  type Bad { foo: DNeg[Bad] } }
+> test:2: The type Bad is used recursively in a non-strictly-positive position
+>     type Bad { foo: DNeg[Bad] } }
+>                          ^^^
+
+{ type I[a] { foo: a -> a, bar: R[(),()] }
+  type R[b,c] { p: I[+b], q:I[-c]  } }
+> type I[+-a]{foo: a -> a, bar: R[(), ()]}
+> type R[+b, -c]{p: I[+b], q: I[-c]}
+
+{ type A[a] { foo: A[a], blah: a, poly: [a] a -> a } }
+> type A[+a]{foo: A[a], blah: a, poly: [a_2] a_2 -> a_2}
+
+{ type PPos[a] { foo: (a -> ()) -> (), buh: a, bah: DNeg }
+  type DNeg { foo : PPos[DNeg] -> () } }
+> type PPos[++a]{foo: (a -> ()) -> (), buh: a, bah: DNeg}
+> type DNeg{foo: PPos[DNeg] -> ()}
+
+{ type R[-a] { foo: R[a -> ()] } }
+> test:1: The type parameter -a cannot be used here covariantly
+>   { type R[-a] { foo: R[a -> ()] } }
+>                         ^
+
+
+# bad use of argument variance
+# (param vs use, nonrec vs rec)
+{ type A[+a] { foo: B[a] } type B[a] {x: a->()} }
+> test:1: The type parameter +a cannot be used here contravariantly
+>   { type A[+a] { foo: B[a] } type B[a] {x: a->()} }
+>                         ^
+{ type A[a] { foo: B[+a] } type B[a] {x: a->()} }
+> test:1: The type B does not take argument 1 (a) covariantly
+>   { type A[a] { foo: B[+a] } type B[a] {x: a->()} }
+>                        ^^
+{ type A[+a] { foo: B[a] } type B[a] {x: a->(), r:A[()]} }
+> test:1: The type parameter +a cannot be used here contravariantly
+>   { type A[+a] { foo: B[a] } type B[a] {x: a->(), r:A[()]} }
+>                         ^
+{ type A[a] { foo: B[+a] } type B[a] {x: a->(), r:A[()]} }
+> test:1: The type B does not take argument 1 (a) covariantly
+>   { type A[a] { foo: B[+a] } type B[a] {x: a->(), r:A[()]} }
+>                        ^^
+
+
+{
+type First{}
+type Second_1(Second_2)
+type Second_2(Second_1)
+type Qux(Int, Bar, Quux)
+type Foo[a, + b, ++ c, ++-d, +e, -+f, 0 g, h]{
+  field_1: a
+  field_2: b
+  field_3: Baz[d,f]
+  field_4: (Bar,(Qux) -> Quux)
+  field_5: Nop[(g,h)]
+}
+type Blah{}
+type Blorp(Blah,Blah)
+type Quux{ blah: (Bar, Qux) }
+type Bar(Int, Qux)
+type Baz[a,b] {
+  Baz_A(a)
+| Baz_B { foo: (a, b, Bar) }
+}
+type Nop[g] { rec: Nop[g -> g] }
+}
+> type First()
+> type Second_1(Second_2)
+> type Second_2(Second_1)
+> type Qux(Int, Bar, Quux)
+> type Foo[+a, +b, ++c, ++-d, +e, +-f, 0 g, 0 h]{
+>   field_1: a
+>   field_2: b
+>   field_3: Baz[d, f]
+>   field_4: (Bar, Qux -> Quux)
+>   field_5: Nop[Any]
+> }
+> type Blah()
+> type Blorp(Blah, Blah)
+> type Quux{blah: (Bar, Qux)}
+> type Bar(Int, Qux)
+> type Baz[+a, +b]{ Baz_A(a) | Baz_B{foo: (a, b, Bar)} }
+> type Nop[0 g]{rec: Nop[Any]}
+> STATS: fix: 0, flex: 0

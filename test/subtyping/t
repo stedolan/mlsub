@@ -1,245 +1,245 @@
-: int <: int
+: Int <: Int
 > ok
 
-: int <: bool
-> _:0: Type error
+: Int <: Bool
+> _:0: The tag should be Bool, but tag Int is present.
 > 
->      found: int
->   expected: bool
-> This int comes from test:1:
->   : int <: bool
+>      found: Int
+>   expected: Bool
+> This Int comes from test:1:
+>   : Int <: Bool
 >     ^^^
-> but is used as bool at test:1:
->   : int <: bool
+> but is used as Bool at test:1:
+>   : Int <: Bool
 >            ^^^^
 
-: [A] (A) -> A <: (int) -> int
+: [a] (a) -> a <: (Int) -> Int
 > ok
 
-: (int) -> int <: [A] (A) -> A
+: (Int) -> Int <: [a] (a) -> a
 > _:0: Type error
 > 
->      found: (int) -> _
->   expected: (A) -> _
-> This A comes from test:1:
->   : (int) -> int <: [A] (A) -> A
+>      found: Int -> _
+>   expected: a -> _
+> This a comes from test:1:
+>   : (Int) -> Int <: [a] (a) -> a
 >                          ^
-> but is used as int at test:1:
->   : (int) -> int <: [A] (A) -> A
+> but is used as Int at test:1:
+>   : (Int) -> Int <: [a] (a) -> a
 >      ^^^
 
-: [A, B] (A, B) -> (A|B) <: [X] (X, X) -> X
+: [a, b] (a, b) -> (a|b) <: [x] (x, x) -> x
 > ok
 
-: [X] (X, X) -> X <: [A, B] (A, B) -> (A|B)
+: [x] (x, x) -> x <: [a, b] (a, b) -> (a|b)
 > ok
 
-: [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (int) -> int}
+: [x] () -> {foo: (x) -> x, bar: (x) -> x} <: () -> {foo: (Int) -> Int, bar: (Int) -> Int}
 > ok
 
-: [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X <: int] () -> {foo: (X) -> int, bar: (X) -> X}
+: [x] () -> {foo: (x) -> x, bar: (x) -> x} <: [x <: Int] () -> {foo: (x) -> Int, bar: (x) -> x}
 > ok
 
-: [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
-> _:0: Type error
+: [x] () -> {foo: (x) -> x, bar: (x) -> x} <: () -> {foo: (Int) -> Int, bar: (String) -> String}
+> _:0: The tag should be Int, but tag String is present.
 > 
->      found: () -> {foo: _, bar: (int) -> _}
->   expected: () -> {foo: _, bar: (string) -> _}
-> This string comes from test:1:
->   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
+>      found: () -> {foo: _, bar: Int -> _}
+>   expected: () -> {foo: _, bar: String -> _}
+> This String comes from test:1:
+>   : [x] () -> {foo: (x) -> x, bar: (x) -> x} <: () -> {foo: (Int) -> Int, bar: (String) -> String}
 >                                                                                 ^^^^^^
-> but is used as int at test:1:
->   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: () -> {foo: (int) -> int, bar: (string) -> string}
+> but is used as Int at test:1:
+>   : [x] () -> {foo: (x) -> x, bar: (x) -> x} <: () -> {foo: (Int) -> Int, bar: (String) -> String}
 >                                                                      ^^^
 
-: [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
+: [x] () -> {foo: (x) -> x, bar: (x) -> x} <: [x, y] () -> {foo: (x) -> x, bar: (y) -> y}
 > _:0: Type error
 > 
->      found: () -> {foo: _, bar: (X) -> _}
->   expected: () -> {foo: _, bar: (Y) -> _}
-> This Y comes from test:1:
->   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
+>      found: () -> {foo: _, bar: x -> _}
+>   expected: () -> {foo: _, bar: y -> _}
+> This y comes from test:1:
+>   : [x] () -> {foo: (x) -> x, bar: (x) -> x} <: [x, y] () -> {foo: (x) -> x, bar: (y) -> y}
 >                                                                                    ^
-> but is used as X at test:1:
->   : [X] () -> {foo: (X) -> X, bar: (X) -> X} <: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y}
+> but is used as x at test:1:
+>   : [x] () -> {foo: (x) -> x, bar: (x) -> x} <: [x, y] () -> {foo: (x) -> x, bar: (y) -> y}
 >                                                                           ^
 
-: [X, Y] () -> {foo: (X) -> X, bar: (Y) -> Y} <: [X] () -> {foo: (X) -> X, bar: (X) -> X}
+: [x, y] () -> {foo: (x) -> x, bar: (y) -> y} <: [x] () -> {foo: (x) -> x, bar: (x) -> x}
 > ok
 
-# all combinations of int -> int w/ one rigid var
+# all combinations of Int -> Int w/ one rigid var
 
-: [X <: int] (X) -> (X|int) <: (int) -> int
+: [x <: Int] (x) -> (x|Int) <: (Int) -> Int
 > ok
-: (int) -> int <: [X <: int] (X) -> (X|int)
+: (Int) -> Int <: [x <: Int] (x) -> (x|Int)
 > ok
 
-: [X <: int] (X) -> X <: (int) -> int
+: [x <: Int] (x) -> x <: (Int) -> Int
 > ok
-: (int) -> int <: [X <: int] (X) -> X
+: (Int) -> Int <: [x <: Int] (x) -> x
 > _:0: Type error
 > 
->      found: (_) -> int
->   expected: (_) -> X
-> This int comes from test:1:
->   : (int) -> int <: [X <: int] (X) -> X
+>      found: (_) -> Int
+>   expected: (_) -> x
+> This Int comes from test:1:
+>   : (Int) -> Int <: [x <: Int] (x) -> x
 >              ^^^
-> but is used as X at test:1:
->   : (int) -> int <: [X <: int] (X) -> X
+> but is used as x at test:1:
+>   : (Int) -> Int <: [x <: Int] (x) -> x
 >                                       ^
 
-: [X] (X) -> (X|int) <: (int) -> int
+: [x] (x) -> (x|Int) <: (Int) -> Int
 > ok
-: (int) -> int <: [X] (X) -> (X|int)
+: (Int) -> Int <: [x] (x) -> (x|Int)
 > _:0: Type error
 > 
->      found: (int) -> _
->   expected: (X) -> _
-> This X comes from test:1:
->   : (int) -> int <: [X] (X) -> (X|int)
+>      found: Int -> _
+>   expected: x -> _
+> This x comes from test:1:
+>   : (Int) -> Int <: [x] (x) -> (x|Int)
 >                          ^
-> but is used as int at test:1:
->   : (int) -> int <: [X] (X) -> (X|int)
+> but is used as Int at test:1:
+>   : (Int) -> Int <: [x] (x) -> (x|Int)
 >      ^^^
 
-: [X] (X) -> (X) <: (int) -> int
+: [x] (x) -> (x) <: (Int) -> Int
 > ok
-: (int) -> int <: [X] (X) -> (X)
+: (Int) -> Int <: [x] (x) -> (x)
 > _:0: Type error
 > 
->      found: (int) -> _
->   expected: (X) -> _
-> This X comes from test:1:
->   : (int) -> int <: [X] (X) -> (X)
+>      found: Int -> _
+>   expected: x -> _
+> This x comes from test:1:
+>   : (Int) -> Int <: [x] (x) -> (x)
 >                          ^
-> but is used as int at test:1:
->   : (int) -> int <: [X] (X) -> (X)
+> but is used as Int at test:1:
+>   : (Int) -> Int <: [x] (x) -> (x)
 >      ^^^
 
 
 
-: [X <: int] (X) -> (X|bool) <: (int) -> bool
+: [x <: Int] (x) -> (x|Bool) <: (Int) -> Bool
 > _:0: Type error
 > 
->      found: (_) -> int
->   expected: (_) -> nothing
-> This int comes from test:1:
->   : [X <: int] (X) -> (X|bool) <: (int) -> bool
+>      found: (_) -> Int
+>   expected: (_) -> Nothing
+> This Int comes from test:1:
+>   : [x <: Int] (x) -> (x|Bool) <: (Int) -> Bool
 >                                    ^^^
-> but is used as nothing at test:1:
->   : [X <: int] (X) -> (X|bool) <: (int) -> bool
+> but is used as Nothing at test:1:
+>   : [x <: Int] (x) -> (x|Bool) <: (Int) -> Bool
 >           ^^^
-: (int) -> bool <: [X <: int] (X) -> (X|bool)
+: (Int) -> Bool <: [x <: Int] (x) -> (x|Bool)
 > ok
 
 
 
 
-: [X <: int, Y] (X) -> (Y|int) <: (int) -> int
+: [x <: Int, y] (x) -> (y|Int) <: (Int) -> Int
 > ok
 
-: (int) -> int <: [X <: int, Y] (X) -> (Y|int)
+: (Int) -> Int <: [x <: Int, y] (x) -> (y|Int)
 > ok
 
-: (int) -> int <: [] (int) -> int
+: (Int) -> Int <: [] (Int) -> Int
 > ok
 
-: [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
+: [a <: Int] (a) -> (Int, ([b] (a) -> a)) <: (Int) -> (Int, [a <: Int] (a) -> a)
 > _:0: Type error
 > 
->      found: (_) -> (_, (_) -> int)
->   expected: (_) -> (_, (_) -> nothing)
-> This int comes from test:1:
->   : [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
+>      found: (_) -> (_, (_) -> Int)
+>   expected: (_) -> (_, (_) -> Nothing)
+> This Int comes from test:1:
+>   : [a <: Int] (a) -> (Int, ([b] (a) -> a)) <: (Int) -> (Int, [a <: Int] (a) -> a)
 >                                                 ^^^
-> but is used as nothing at test:1:
->   : [A <: int] (A) -> (int, ([B] (A) -> A)) <: (int) -> (int, [A <: int] (A) -> A)
+> but is used as Nothing at test:1:
+>   : [a <: Int] (a) -> (Int, ([b] (a) -> a)) <: (Int) -> (Int, [a <: Int] (a) -> a)
 >           ^^^
 
-: (int) -> (int, [A <: int] (A) -> A) <: [A <: int] (A) -> (int, ([B] (A) -> A))
+: (Int) -> (Int, [a <: Int] (a) -> a) <: [a <: Int] (a) -> (Int, ([b] (a) -> a))
 > ok
 
-: [B <: int] (B) -> B <: [A <: int] (A) -> A
+: [b <: Int] (b) -> b <: [a <: Int] (a) -> a
 > ok
 
-: [B <: int] (B) -> B <: [A <: int, C] (A) -> A
+: [b <: Int] (b) -> b <: [a <: Int, c] (a) -> a
 > ok
 
 # Mitchell's distributivity rule, hoisted version
 # (Original is not true here, because we don't hoist foralls out of function results)
-: [A] ((A) -> A) -> ((A) -> A) <: [C] ([B] (B) -> B) -> ((C) -> C)
+: [a] ((a) -> a) -> ((a) -> a) <: [c] ([b] (b) -> b) -> ((c) -> c)
 > ok
 
 # FIXME: error message isn't good here
-: [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
+: [c] ([b] (b) -> b) -> ((c) -> c) <: [a] ((a) -> a) -> ((a) -> a)
 > _:0: Type error
 > 
->      found: ((A) -> _) -> _
->   expected: ((A) -> _) -> _
-> This A comes from test:1:
->   : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
+>      found: (a -> _) -> _
+>   expected: (a -> _) -> _
+> This a comes from test:1:
+>   : [c] ([b] (b) -> b) -> ((c) -> c) <: [a] ((a) -> a) -> ((a) -> a)
 >               ^
-> but is used as A at test:1:
->   : [C] ([B] (B) -> B) -> ((C) -> C) <: [A] ((A) -> A) -> ((A) -> A)
+> but is used as a at test:1:
+>   : [c] ([b] (b) -> b) -> ((c) -> c) <: [a] ((a) -> a) -> ((a) -> a)
 >                                               ^
 
 
 
 # scope escape check
-: [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
+: [a] ((a) -> a) -> ((a) -> a) <: ([b](b) -> b) -> ([c](c) -> c)
 > _:0: Type error
 > 
->      found: (_) -> (_) -> any
->   expected: (_) -> (_) -> nothing
-> This any comes from test:1:
->   : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
+>      found: (_) -> (_) -> Any
+>   expected: (_) -> (_) -> Nothing
+> This Any comes from test:1:
+>   : [a] ((a) -> a) -> ((a) -> a) <: ([b](b) -> b) -> ([c](c) -> c)
 >                                                           ^
-> but is used as nothing at test:1:
->   : [A] ((A) -> A) -> ((A) -> A) <: ([B](B) -> B) -> ([C](C) -> C)
+> but is used as Nothing at test:1:
+>   : [a] ((a) -> a) -> ((a) -> a) <: ([b](b) -> b) -> ([c](c) -> c)
 >                                                                 ^
 
 
 # tricky case of spec sub & rigvars (see cnrig <> [] case in ensure_upper_matches)
-: [A <: {cond: bool, ...}] (A) -> {foo: int, cond: int} | A <: [A <: {cond: bool, ...}] (A) -> {foo: int, cond: int} | A
+: [a <: {cond: Bool, ...}] (a) -> {foo: Int, cond: Int} | a <: [a <: {cond: Bool, ...}] (a) -> {foo: Int, cond: Int} | a
 > ok
 
-: [A <: {cond: bool}] A <: [A <: {cond: string}] ({cond: int} | A)
+: [a <: {cond: Bool}] a <: [a <: {cond: String}] ({cond: Int} | a)
 > ok
 
-: [B <: {cond: any}] B <: [A <: {cond: bool}] ({cond: int} | A)
+: [b <: {cond: Any}] b <: [a <: {cond: Bool}] ({cond: Int} | a)
 > ok
 
-: [A <: {cond: bool}] ((A) -> ({cond: int} | A)) <: [A <: {cond: bool}] ((A) -> ({cond: int} | A))
+: [a <: {cond: Bool}] ((a) -> ({cond: Int} | a)) <: [a <: {cond: Bool}] ((a) -> ({cond: Int} | a))
 > ok
 
 # found by fuzzing!
-: [D, A] {bar: {p: A} | A, foo: {p: D} | A} <: 
-  [D, A] {bar: {p: A} | A, foo: {p: D} | A}
+: [d, a] {bar: {p: a} | a, foo: {p: d} | a} <: 
+  [d, a] {bar: {p: a} | a, foo: {p: d} | a}
 > ok
 
-: [D <: {foo: {foo: int}}, A] ({foo: A | {foo: int}} | A | D) <:
-  [D <: {foo: {foo: int}}, A] ({foo: A | {foo: int}} | A | D)
+: [d <: {foo: {foo: Int}}, a] ({foo: a | {foo: Int}} | a | d) <:
+  [d <: {foo: {foo: Int}}, a] ({foo: a | {foo: Int}} | a | d)
 > ok
 
-: [A] ({foo: A | {foo: int}} | A) <:
-  [D <: {foo: {foo: int}}] ({foo: {foo: int}} | D)
+: [a] ({foo: a | {foo: Int}} | a) <:
+  [d <: {foo: {foo: Int}}] ({foo: {foo: Int}} | d)
 > ok
 
-: [A] (A | {foo:int, bar:A}) <: [A] (A | {foo:int, bar:int})
+: [a] (a | {foo:Int, bar:a}) <: [a] (a | {foo:Int, bar:Int})
 > ok
 
 
-: [C] (C | {bar: C}) <: [C] {bar: C}
+: [c] (c | {bar: c}) <: [c] {bar: c}
 > ok
-: [C] {bar: C} <: [C <: {bar: bool}] {bar: C}
+: [c] {bar: c} <: [c <: {bar: Bool}] {bar: c}
 > ok
-: [C] (C | {bar: C}) <: [C <: {bar: bool}] {bar: C}
+: [c] (c | {bar: c}) <: [c <: {bar: Bool}] {bar: c}
 > ok
 
 # Tricky case showing that match_sub must refreshen matchable
 # variables when the set of rigvars in the bound increases
-:  [P <: {foo: any, ...}](P) -> P
-<: [P <: {foo: any, ...}](P) -> {foo:int} | P
+:  [p <: {foo: Any, ...}](p) -> p
+<: [p <: {foo: Any, ...}](p) -> {foo:Int} | p
 > ok
 
 > STATS: fix: 0, flex: 90

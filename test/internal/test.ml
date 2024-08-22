@@ -18,7 +18,7 @@ let func a b = Cons1.Func (a, b)
 let tuple xs =
   let open Fields in
   let body = of_list ~fopen:Ext_closed (List.mapi (fun i x -> Tuple_fields.Field_positional i, Fpresent (x, noloc)) xs) in
-  Cons1.Record {tag=None; body}
+  Cons1.Record {tag=Some Anon_tag; args=[]; body}
 
 
 let dump env (t : ptyp) =
@@ -60,7 +60,7 @@ let ok = function Ok () -> () | Error _ -> failwith "nope"
 
 (* λ f, g, x . f x or g x *)
 let choosy () =
-  let env =  Env_nil and lvl = Env_level.initial in
+  let env = Env.empty and lvl = Env_level.initial in
   let fn, fp = fresh_flow lvl in
   let gn, gp = fresh_flow lvl in
   let xn, xp = fresh_flow lvl in
@@ -83,7 +83,7 @@ let choosy () =
 
 let lbs () =
   next_flexvar_id := 0;
-  let env = Env_nil and lvl = Env_level.initial in
+  let env = Env.empty and lvl = Env_level.initial in
   let fn, fp = fresh_flow lvl in
   let d1n, d1p = fresh_flow lvl in
   let d2n, d2p = fresh_flow lvl in
@@ -99,7 +99,7 @@ let lbs () =
 
 let match_bug () =
   next_flexvar_id := 0;
-  let env = Env_nil and lvl = Env_level.initial in
+  let env = Env.empty and lvl = Env_level.initial in
   let an, ap = fresh_flow lvl in
   let bn, bp = fresh_flow lvl in
   subtype env ap bn |> ok;
@@ -111,10 +111,10 @@ let match_bug () =
 
 let chain () =
   next_flexvar_id := 0;
-  let env = Env_nil and lvl = Env_level.initial in
+  let env = Env.empty and lvl = Env_level.initial in
   let a = Array.init 10 (fun _ -> fresh_flow lvl) in
   let n = Array.map fst a and p = Array.map snd a in
-  subtype env p.(5) (tcons Int) |> ok;
+  subtype env p.(5) (Tcons (c_int noloc)) |> ok;
   subtype env p.(4) n.(5) |> ok;
   subtype env p.(3) n.(4) |> ok;
   subtype env p.(8) n.(9) |> ok;
@@ -129,7 +129,7 @@ let chain () =
 
 let dirbug () =
   next_flexvar_id := 0;
-  let env = Env_nil and lvl = Env_level.initial in
+  let env = Env.empty and lvl = Env_level.initial in
   let an, _ap = fresh_flow lvl in
   let _bn, bp = fresh_flow lvl in
   let cn, cp = fresh_flow lvl in
@@ -139,7 +139,7 @@ let dirbug () =
 
 let poly () =
   next_flexvar_id := 0;
-  let env = Env_nil and _lvl = Env_level.initial in
+  let env = Env.empty and _lvl = Env_level.initial in
   let bvar ?(index=0) ?(rest) var =
     match rest with
     | None -> Tvar (Vbound {index; var; loc=noloc})
@@ -174,7 +174,7 @@ let poly () =
   ()
 
 let flexself () =
-  let env = Env_nil and lvl = Env_level.initial in
+  let env = Env.empty and lvl = Env_level.initial in
 
   (* UBvar optimisation *)
   next_flexvar_id := 0;
@@ -201,7 +201,7 @@ let flexself () =
   let an, ap = fresh_flow lvl in
   let bn, bp = fresh_flow lvl in
   let cn, cp = fresh_flow lvl in
-  subtype env (tcons Int) cn |> ok;
+  subtype env (Tcons (c_int noloc)) cn |> ok;
   subtype env bp an |> ok;
   subtype env cp an |> ok;
   subtype env ap bn |> ok;

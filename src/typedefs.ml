@@ -189,55 +189,102 @@ module Fields = struct
     with Not_found -> desc_of_ext t_loc t.fopen
 
   let empty = { fopen = Ext_open; fnames = []; fields = Map.empty }
+
+  let none = { fopen = Ext_closed; fnames = []; fields = Map.empty }
+
+  let is_empty = function
+    | { fopen = _; fnames = []; fields = _ } -> true
+    | _ -> false
 end
 
 module Cons1 = struct
   open Fields
-  type tuple_tag = string
+
+  let fixme_args (*[@alert fixme]*) = ()
+
+  (* FIXME: add the None case here? *)
+  type tuple_tag = Exp.tuple_tag =
+    | Anon_tag
+    | Struct_tag of string loc
+    | Named_tag of Exp.symbol
+
+  let tuple_tag_equal a b =
+    match a, b with
+    | Anon_tag, Anon_tag -> true
+    | Struct_tag (a,_), Struct_tag (b,_) -> String.equal a b
+    | Named_tag (a,_), Named_tag (b,_) -> String.equal a b
+    | (Struct_tag _ | Named_tag _ | Anon_tag), _ -> false
 
   type (+'neg, +'pos) cons =
     | Top
-    (* FIXME: maybe delete these once abstypes exist? *)
-    | Bool
-    | Int
-    | String
     | Record of {
         tag: tuple_tag option;
+        args: ('neg, 'pos) tyarg list;
         body: 'pos Fields.t
       }
     | Func of 'neg list * 'pos
 
+  and (+'neg, +'pos) tyarg =
+    (* neg:None == Bot, pos:None == Top *)
+    'neg option * 'pos option
+
+  let named t =
+    Record { tag = Some (Named_tag t); args = []; body = Fields.none }
+
   type (+'neg, +'pos) t = ('neg, 'pos) cons
+
+  (* FIXME: seems wrong? Some/None case can happen? *)
+  let tyarg_zip ~neg ~pos ((n1,p1) : _ tyarg) ((n2,p2) : _ tyarg) =
+    let opt_both f a b =
+      match a, b with
+      | None, None -> None
+      | Some a, Some b -> Some (f a b)
+      | _ -> intfail "expected args to agree"
+    in
+    (opt_both neg n1 n2, opt_both pos p1 p2)
 
   let equal ~neg ~pos p q =
     match p, q with
     | Top, Top -> true
-    | Bool, Bool -> true
-    | Int, Int -> true
-    | String, String -> true
-    | Record p, Record q ->
-       Option.equal (String.equal) p.tag q.tag &&
-       Fields.equal ~pos p.body q.body
+    | Record {tag=ptag; args=pargs; body=pbody},
+      Record {tag=qtag; args=qargs; body=qbody} ->
+       let arg_equal (n1,p1) (n2,p2) =
+         Option.equal neg n1 n2 && Option.equal pos p1 p2
+       in
+       Option.equal tuple_tag_equal ptag qtag &&
+       List.for_all2 arg_equal pargs qargs &&
+       Fields.equal ~pos pbody qbody
     | Func (pa, pr), Func (qa, qr) ->
        List.equal neg pa qa &&
        pos pr qr
-    | (Bool|Int|String|Record _|Func _|Top), _ -> false
+    | (Record _|Func _|Top), _ -> false
 
   let map ~neg ~pos = function
     | Top -> Top
-    | Bool -> Bool
-    | Int -> Int
-    | String -> String
-    | Record {tag; body} ->
-       Record {tag; body = Fields.map ~pos body}
+    | Record {tag; args; body} ->
+       let tyarg_map (n, p) = Option.map neg n, Option.map pos p in
+       Record {tag; args = List.map tyarg_map args; body = Fields.map ~pos body}
     | Func (args, res) ->
        let args = List.map neg args in
        let res = pos res in
        Func (args, res)
 
-  let wf ~neg ~pos = function
-    | Top | Bool | Int | String -> ()
-    | Record {tag=_; body} ->
+  let wf ~params ~neg ~pos = function
+    | Top -> ()
+    | Record {tag; args; body} ->
+       begin match tag with
+       | None | Some (Anon_tag | Struct_tag _) -> assert (args = [])
+       | Some (Named_tag (name,_)) ->
+          let wf_arg v (n,p) =
+            if v.Exp.occurs_pos = `No then assert (p = None);
+            if v.Exp.occurs_neg = `No then assert (n = None);
+            Option.iter neg n;
+            Option.iter pos p;
+          in
+          match params name with
+          | pvs -> List.iter2 wf_arg pvs args
+          | exception Not_found -> intfail "Cons.wf: %s not in env" name
+       end;
        Fields.wf ~pos body
     | Func (args, res) ->
        List.iter neg args;
@@ -246,10 +293,13 @@ module Cons1 = struct
   type field =
     | Func_arg of int
     | Func_res
+    | Named_arg of [`Neg|`Pos] * Exp.symbol * int
     | Record_field of Tuple_fields.field_name
 
   let field_is_positive = function
     | Func_arg _ -> false
+    | Named_arg (`Pos,_,_) -> true
+    | Named_arg (`Neg,_,_) -> false
     | Func_res | Record_field _ -> true
 
   let equal_field a b =
@@ -262,12 +312,19 @@ module Cons1 = struct
 
   let mapi ~neg ~pos = function
     | Top -> Top
-    | Bool -> Bool
-    | Int -> Int
-    | String -> String
-    | Record {tag; body} ->
-       let pos fn x = pos (Record_field fn) x in
-       Record {tag; body = Fields.mapi ~pos body }
+    | Record {tag; args; body} ->
+       let arg i (n, p) =
+         let tag = match tag with
+           | Some (Named_tag t) -> t
+           | _ -> intfail "args on invalid type"
+         in
+         Option.map (neg (Named_arg (`Neg, tag, i))) n,
+         Option.map (pos (Named_arg (`Pos, tag, i))) p
+       in
+       let args = List.mapi arg args in
+       let field fn x = pos (Record_field fn) x in
+       let body = Fields.mapi ~pos:field body in
+       Record {tag; args; body }
     | Func (args, res) ->
        let args = List.mapi (fun i x -> neg (Func_arg i) x) args in
        let res = pos Func_res res in
@@ -300,9 +357,10 @@ module Cons1 = struct
     match coe, c with
     | Id, c -> c
     | To_top, _ -> Top
-    | Drop_record_tag t, Record {tag=Some t'; body} ->
-       assert (t = t');
-       Record {tag=None; body}
+    | Drop_record_tag t, Record {tag=Some t'; args; body} ->
+       fixme_args;
+       assert (tuple_tag_equal t t');
+       Record {tag=None; args; body}
     | Drop_record_tag _, _ -> assert false
 
   type head_ordering =
@@ -314,11 +372,6 @@ module Cons1 = struct
     | Top, Top -> Le Id
     | _, Top -> Le To_top
     | Top, _ -> Un Incompatible
-    | Bool, Bool -> Le Id
-    | Int, Int -> Le Id
-    | String, String -> Le Id
-    | (Bool|Int|String), _
-    | _, (Bool|Int|String) -> Un Incompatible
 
     | Func (pa, _), Func (qa, _) ->
        begin match List.compare_lengths pa qa with
@@ -332,7 +385,7 @@ module Cons1 = struct
        begin match ptag, qtag with
        | None, None -> Le Id
        | Some t, None -> Le (Drop_record_tag t)
-       | Some pt, Some qt when String.equal pt qt -> Le Id
+       | Some pt, Some qt when tuple_tag_equal pt qt -> Le Id
        | _, Some qt -> Un (Expected_tag (ptag, [qt]))
        end
 
@@ -347,15 +400,13 @@ module Cons1 = struct
     | Top, Top -> Top, a_loc
     | (Top, _) | (_, Top) -> assert false
 
-    | Bool, Bool -> Bool, a_loc
-    | Int, Int -> Int, a_loc
-    | String, String -> String, a_loc
-    | (Bool|Int|String), _ | _, (Bool|Int|String) ->
-       assert false
-
     | Record a, Record b ->
-       assert (a.tag = b.tag);
-       Record {tag = a.tag; body = Fields.join ~pos (a.body, a_loc) (b.body, b_loc) },
+       fixme_args;
+       (* FIXME: Named/struct subtyping *)
+       assert (Option.equal tuple_tag_equal a.tag b.tag);
+       Record {tag = a.tag;
+               args = List.map2 (tyarg_zip ~neg ~pos) a.args b.args;
+               body = Fields.join ~pos (a.body, a_loc) (b.body, b_loc) },
        a_loc (* FIXME: which loc is best here? *)
 
     | Func (args, res), Func (args', res') ->
@@ -373,18 +424,16 @@ module Cons1 = struct
        map ~neg:(fun x -> neg (R x)) ~pos:(fun x -> pos (R x)) x
     | x, Top ->
        map ~neg:(fun x -> neg (L x)) ~pos:(fun x -> pos (L x)) x
-    | Bool, Bool -> Bool
-    | Int, Int -> Int
-    | String, String -> String
-    | (Bool|Int|String), _ | _, (Bool|Int|String) ->
-       assert false
     | Record a, Record b ->
+       fixme_args;
        let tag =
          match a.tag, b.tag with
          | None, x | x, None -> x
-         | Some t, Some t' -> assert (t = t'); a.tag
+         | Some t, Some t' -> assert (tuple_tag_equal t t'); a.tag
        in
-       Record {tag; body = Fields.meet ~pos (a.body, a_loc) (b.body, b_loc) }
+       Record {tag;
+               args = List.map2 (tyarg_zip ~neg:(fun x y -> neg (LR (x,y))) ~pos:(fun x y -> pos (LR (x,y)))) a.args b.args;
+               body = Fields.meet ~pos (a.body, a_loc) (b.body, b_loc) }
     | Func (args, res), Func (args', res') ->
        let args =
          List.map2 (fun x y -> neg (LR (x,y))) args args' in
@@ -401,17 +450,15 @@ module Cons1 = struct
   let sub ~neg ~pos (a, a_loc) (b, b_loc) =
     assert (sub_head a b = Le Id);
     match a, b with
-    | Top, Top
-    | Bool, Bool
-    | Int, Int
-    | String, String -> Ok ()
+    | Top, Top -> Ok ()
     | Func (args, res), Func (args', res') ->
        List.combine args' args
        |> List.iteri (fun i (a', a) -> neg (Func_arg i) a' a);
        pos Func_res res res';
        Ok ()
     | Record a, Record b ->
-       assert (a.tag = b.tag);
+       fixme_args; (*args*)
+       assert (Option.equal tuple_tag_equal a.tag b.tag);
        let sub_field k a b =
          match a, b with
          | _, Funknown _ -> ()
@@ -583,6 +630,27 @@ type ntyp = (pos_flexvar, flexvar) typ
 
 type gen_level = env_level option
 
+
+type decl_fields = (zero,zero) typ Fields.t
+type decl_body =
+  | Decl_primitive
+  | Decl_record of decl_fields
+  | Decl_variant of (Exp.symbol * decl_fields) list
+
+let map_decl_body ~pos = function
+  | Decl_primitive ->
+     Decl_primitive
+  | Decl_record fs ->
+     Decl_record (Fields.map ~pos fs)
+  | Decl_variant vs ->
+     Decl_variant (List.map (fun (s,fs) -> s, Fields.map ~pos fs) vs)
+
+type type_decl =
+  { name: Exp.symbol;
+    params: (Exp.variance_spec * Exp.symbol) list;
+    body: decl_body }
+
+
 type value_binding =
   { typ: ptyp;
     (* The level of the outermost unannotated lambda-bound parameter
@@ -592,22 +660,109 @@ type value_binding =
     comp_var: IR.value IR.Binder.ref
   }
 
-type env =
-  | Env_vals of { vals : value_binding SymMap.t; rest : env }
-  | Env_types of {
-     level : env_level;
-     rig_names : int SymMap.t;
-     rig_defns : rigvar_defn iarray;
-     rest : env }
-  | Env_nil
-
 (* Rigid type variables. *)
-and rigvar_defn = {
+type rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string Location.loc;
   upper : (flexvar, lower) Cons1.t loc list;
 }
+
+let n_bool loc = ("Bool", loc)
+let n_int loc = ("Int", loc)
+let n_string loc = ("String", loc)
+
+module Env = struct
+  type bindings =
+    | Env_vals of { vals : value_binding SymMap.t; rest : bindings }
+    | Env_types of {
+        level : env_level;
+        rig_names : int SymMap.t;
+        rig_defns : rigvar_defn iarray;
+        rest : bindings }
+    | Env_nil
+
+  type t =
+    { env_type_decls: type_decl SymMap.t;
+      env_level: env_level;
+      env_bindings: bindings }
+
+  let rigid_vars env lvl =
+    let rec env_at_level env lvl =
+      match env with
+      | Env_vals { vals=_; rest } -> env_at_level rest lvl
+      | Env_types tys when Env_level.equal tys.level lvl -> env
+      | Env_types tys ->
+         assert (Env_level.extends lvl tys.level); env_at_level tys.rest lvl
+      | Env_nil when Env_level.equal Env_level.initial lvl -> Env_nil
+      | Env_nil -> intfail "env level not found"
+    in
+    match env_at_level env.env_bindings lvl with
+    | Env_types tys ->
+       assert (Env_level.equal tys.level lvl); tys.rig_defns
+    | _ -> intfail "env_rigid_vars"
+
+  let rigid_var env (rv : rigvar) =
+    IArray.get (rigid_vars env rv.level) rv.var
+
+  let rigid_bound env rv =
+    (rigid_var env rv).upper
+
+  let lookup_value env (v : Exp.ident') =
+    let rec search (v : Exp.ident') = function
+      | Env_nil -> None
+      | Env_vals { vals = vs; rest; _ } 
+           when SymMap.mem v.label vs ->
+         if v.shift = 0 then Some (SymMap.find v.label vs) else
+           search { v with shift = v.shift - 1 } rest
+      | Env_types { rest; _ } | Env_vals { rest; _ } ->
+         search v rest
+    in
+    search v env.env_bindings
+
+  let lookup_decl env (s : string) =
+    SymMap.find_opt s env.env_type_decls
+
+  let level env =
+    env.env_level
+
+  let builtins =
+    (["Bool", {name = n_bool Location.noloc; params=[]; body=Decl_primitive};
+      "Int", {name = n_int Location.noloc; params=[]; body=Decl_primitive};
+      "String", {name = n_string Location.noloc; params=[]; body=Decl_primitive}]
+     : (string * type_decl) list)
+    |> List.to_seq
+    |> SymMap.of_seq
+
+  let empty =
+    { env_type_decls = builtins;
+      env_level = Env_level.initial;
+      env_bindings = Env_nil }
+
+  let extend_types env ~level ~rig_names ~rig_defns =
+    assert (Env_level.extends env.env_level level);
+    assert (not (Env_level.equal env.env_level level));
+    let env_bindings = Env_types {level; rig_names; rig_defns; rest=env.env_bindings} in
+    { env with env_level = level; env_bindings }
+
+  let extend_vals env ~vals =
+    { env with env_bindings = Env_vals { vals; rest = env.env_bindings } }
+
+  let extend_decls env decls =
+    let env_type_decls =
+      List.fold_left (fun acc (d : type_decl) ->
+        assert (not (SymMap.mem (fst d.name) acc));
+        SymMap.add (fst d.name) d acc)
+        env.env_type_decls
+        decls
+    in
+    { env with env_type_decls }
+
+  let param_variances env name =
+    (SymMap.find name env.env_type_decls).params |> List.map fst
+end
+
+type env = Env.t
 
 (*
  * Equality checks (Syntactic, not subtyping-aware, ignore locations)
@@ -689,37 +844,15 @@ let commit ~changes rest =
  * Environment ordering
  *)
 
-let rec env_at_level env lvl =
-  match env with
-  | Env_vals { vals=_; rest } -> env_at_level rest lvl
-  | Env_types tys when Env_level.equal tys.level lvl -> env
-  | Env_types tys ->
-     assert (Env_level.extends lvl tys.level); env_at_level tys.rest lvl
-  | Env_nil when Env_level.equal Env_level.initial lvl -> Env_nil
-  | Env_nil -> intfail "env level not found"
-
-let env_rigid_vars env lvl =
-  match env_at_level env lvl with
-  | Env_types tys ->
-     assert (Env_level.equal tys.level lvl); tys.rig_defns
-  | _ -> intfail "env_rigid_vars"
-
-let env_rigid_var env (rv : rigvar) =
-  IArray.get (env_rigid_vars env rv.level) rv.var
-
-let env_rigid_bound env (rv : rigvar) =
-  let r = env_rigid_var env rv in
-  r.upper
-
-let rec env_level env =
+let rec env_bindings_level (env : Env.bindings) =
   match env with
   | Env_types tys -> tys.level
-  | Env_vals vs -> env_level vs.rest
+  | Env_vals vs -> env_bindings_level vs.rest
   | Env_nil -> Env_level.initial
 
 (* visit counters: odd = visiting, even = done *)
 let fv_gen_visit_counts env fv =
-  let level = env_level env in
+  let level = Env.level env in
   assert (Env_level.extends fv.level level);
   if not (Env_level.equal fv.level level) then None
   else match fv.gen with
@@ -772,7 +905,7 @@ let rec assert_locally_closed :
   fun ix ty -> match ty with
   | Tsimple _ | Tbot _ -> ()
   | Tcons (c, _cloc) ->
-     Cons1.wf ~neg:(assert_locally_closed ix) ~pos:(assert_locally_closed ix) c
+     ignore (Cons1.map ~neg:(assert_locally_closed ix) ~pos:(assert_locally_closed ix) c)
   | Tvar v -> assert_locally_closed_var ix v
   | Tjoin (a, b, _loc) -> assert_locally_closed ix a; assert_locally_closed ix b
   | Tpoly {vars; body} ->
@@ -812,7 +945,7 @@ let close_typ_var lvl f ~ispos ~isjoin index = function
 (* Can only be used on typs without Tsimple nodes.
    (This limits it to use during parsing, which does not generate Tsimple) *)
 let rec close_typ :
-  'a 'b . env_level -> (typ_var -> ispos:bool -> isjoin:bool -> int) -> simple:('a -> 'b)  -> ispos:bool -> isjoin:bool -> int -> ('a, 'a) typ -> ('b, 'b) typ
+  'a 'b . Env_level.t -> (typ_var -> ispos:bool -> isjoin:bool -> int) -> simple:('a -> 'b)  -> ispos:bool -> isjoin:bool -> int -> ('a, 'a) typ -> ('b, 'b) typ
   = fun lvl var ~simple ~ispos ~isjoin ix ty -> match ty with
   | Tsimple z -> Tsimple (simple z)
   | Tbot _ as z -> z
@@ -850,7 +983,8 @@ let fresh_flexvar level : flexvar =
   { level; upper = Utop; lower = bottom; id; gen = Not_generalising }
 
 
-let rec env_lookup_type_var env loc name : rigvar option =
+(* FIXME dedup with check_type *)
+let rec env_lookup_type_var (env : Env.bindings) loc name : rigvar option =
   match env with
   | Env_vals vs -> env_lookup_type_var vs.rest loc name
   | Env_types ts ->
@@ -860,13 +994,11 @@ let rec env_lookup_type_var env loc name : rigvar option =
      end
   | Env_nil -> None
 
-let lookup_named_type loc = function
-  | "any" -> Some (Tcons (Top, loc))
-  | "nothing" -> Some (Tbot (Some loc))
-  | "bool" -> Some (Tcons (Bool, loc))
-  | "int" -> Some (Tcons (Int, loc))
-  | "string" -> Some (Tcons (String, loc))
-  | _ -> None
+let env_lookup_type_var env loc name = env_lookup_type_var env.Env.env_bindings loc name
+
+let c_bool loc = (Cons1.named (n_bool loc), loc)
+let c_int loc = (Cons1.named (n_int loc), loc)
+let c_string loc = (Cons1.named (n_string loc), loc)
 
 let flexvar_name fv =
   let names = [| "α"; "β"; "γ"; "δ"; "ε"; "ζ"; "η"; "θ"; "κ"; "ν"; "ξ"; "π"; "ρ" |] in
@@ -882,12 +1014,12 @@ let flexvar_name fv =
 let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   if Hashtbl.mem seen fv.id then () else begin
   Hashtbl.add seen fv.id ();
-  if not (Env_level.extends fv.level (env_level env)) then
-    intfail "wf_flexvar: %s at %d not inside env %d" (flexvar_name fv) (Env_level.to_int fv.level) (Env_level.to_int (env_level env));
-  assert (Env_level.extends fv.level (env_level env));
+  if not (Env_level.extends fv.level (Env.level env)) then
+    intfail "wf_flexvar: %s at %d not inside env %d" (flexvar_name fv) (Env_level.to_int fv.level) (Env_level.to_int (Env.level env));
+  assert (Env_level.extends fv.level (Env.level env));
   assert (Env_level.extends fv.level lvl);
   if not (Env_level.equal fv.level Env_level.initial) then
-    ignore (env_rigid_vars env fv.level);
+    ignore (Env.rigid_vars env fv.level);
   (* FIXME rectypes *)
   assert (not (List.exists (function Lflexvar v -> equal_flexvar v fv | _ -> false) fv.lower));
   wf_lower ~seen env fv.level fv.lower;
@@ -919,18 +1051,18 @@ and wf_upper ~seen env lvl = function
 
 and wf_delayed_constraint ~seen env _lvl {dy_lower; dy_upper; dy_flexvar; dy_resolved=_} =
   let lvl = dy_flexvar.level in
-  Cons1.wf ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_lower ~seen env lvl) (fst dy_lower);
-  Cons1.wf ~pos:(wf_flexvar ~seen env lvl) ~neg:(wf_lower ~seen env lvl) (fst dy_upper)
+  Cons1.wf ~params:(Env.param_variances env) ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_lower ~seen env lvl) (fst dy_lower);
+  Cons1.wf ~params:(Env.param_variances env) ~pos:(wf_flexvar ~seen env lvl) ~neg:(wf_lower ~seen env lvl) (fst dy_upper)
 
 and wf_rigvar env lvl (rv : rigvar) =
   assert (Env_level.extends rv.level lvl);
-  let rvs = env_rigid_vars env rv.level in
+  let rvs = Env.rigid_vars env rv.level in
   assert (0 <= rv.var && rv.var < IArray.length rvs)
 
 and wf_lower_part ~seen env lvl = function
   | Lflexvar v -> wf_flexvar ~seen env lvl v
   | Lrigvar v -> wf_rigvar env lvl v
-  | Lcons (c,_) -> Cons1.wf ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_lower ~seen env lvl) c
+  | Lcons (c,_) -> Cons1.wf ~params:(Env.param_variances env) ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_lower ~seen env lvl) c
 
 and wf_lower ~seen env lvl l =
   l |> List.iteri (fun i a ->
@@ -951,13 +1083,14 @@ let wf_var env ext = function
 let rec wf_typ : 'pos 'neg .
   neg:('neg -> unit) ->
   pos:('pos -> unit) ->
-  ispos:bool -> env -> (bool * int) list -> ('neg, 'pos) typ -> unit =
+  ispos:bool ->
+  env -> (bool * int) list -> ('neg, 'pos) typ -> unit =
   fun ~neg ~pos ~ispos env ext ty ->
   match ty with
   | Tsimple s -> pos s
   | Tbot _  -> ()
   | Tcons (c, _cloc) ->
-     Cons1.wf ~neg:(wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) ~pos:(wf_typ ~neg ~pos ~ispos env ext) c
+     Cons1.wf ~params:(Env.param_variances env) ~neg:(wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) ~pos:(wf_typ ~neg ~pos ~ispos env ext) c
   | Tvar v -> wf_var env ext v
   | Tjoin (a, b, _loc) ->
      wf_typ ~neg ~pos ~ispos env ext a;
@@ -972,52 +1105,88 @@ let rec wf_typ : 'pos 'neg .
        Option.iter (wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) c) vars;
      wf_typ ~neg ~pos ~ispos env ext body
 
+let wf_decl env (decl : type_decl) =
+  let wf_typ t = wf_typ ~neg:never ~pos:never ~ispos:true env [true, List.length decl.params] t in
+  match decl.body with
+  | Decl_primitive -> ()
+  | Decl_record fs -> Fields.wf ~pos:wf_typ fs
+  | Decl_variant vs ->
+     vs |> List.iter (fun (_,fs) -> Fields.wf ~pos:wf_typ fs)
 
+let wf_env env =
+  SymMap.iter (fun _ d -> wf_decl env d) env.Env.env_type_decls
 
 (*
  * Unparsing: converting a typ back to a Exp.tyexp
  *)
 
-let mktyexp t = (Some t, Location.noloc)
+let mktyexp (t : Exp.tyexp') = (Some t, Location.noloc)
 
 let named_type s : Exp.tyexp' =
-  Tnamed ({label=s; shift=0}, Location.noloc)
+  Trecord (Some (Named_tag (s, Location.noloc)), [], Exp.empty_fields)
 
-let unparse_cons ~neg ~pos (ty,_tyloc) =
+let mktyvar v = mktyexp (Ttyvar (v, Location.noloc))
+
+let mayloc t = (Some t, Location.noloc)
+
+let unparse_fields ~pos ~tag ({fields; fnames; fopen} : _ Fields.t) =
+  let open Fields in
+  let unparse_field_desc k = function
+    | Funknown l -> (k,l), Exp.Optional, None
+    | Foptional (a, l) -> (k,l.pres_loc), Exp.Optional, Some (pos a)
+    | Fpresent (a, l) -> (k,l), Exp.Mandatory, Some (pos a)
+    | Fabsent l -> (k,l), Exp.Optional, Some (mktyexp (Ttyvar ("absent", Location.noloc)))
+    | Fbroken l -> (k,l.abs_loc), Exp.Mandatory, Some (mktyexp (Ttyvar ("absent", Location.noloc)))
+  in
+  match
+    if tag = None then raise Exit;
+    List.mapi (fun i f ->
+      match f with
+      | Tuple_fields.Field_positional j when i = j ->
+         begin match Map.find f fields with
+         | Fpresent (a,_loc) -> pos a
+         | _ -> raise_notrace Exit
+         end
+      | _ -> raise_notrace Exit)
+      fnames
+  with
+  | tuple ->
+     Exp.Ftuple (tuple, fopen)
+  | exception Exit ->
+     Exp.Frecord (List.map (fun f -> unparse_field_desc f (Map.find f fields)) fnames,
+                  fopen)
+
+let unparse_cons ~env ~neg ~pos (ty,_tyloc) =
   let open Cons1 in
   let ty = match ty with
-    | Top -> named_type "any"
-    | Bool -> named_type "bool"
-    | Int -> named_type "int"
-    | String -> named_type "string"
-    | Record {tag; body = {fields; fnames; fopen}} ->
-       let open Fields in
-       let unparse_field_desc k = function
-         | Funknown l -> (k,l), Exp.Optional, None
-         | Foptional (a, l) -> (k,l.pres_loc), Exp.Optional, Some (pos a)
-         | Fpresent (a, l) -> (k,l), Exp.Mandatory, Some (pos a)
-         | Fabsent l -> (k,l), Exp.Optional, Some (mktyexp (named_type "absent"))
-         | Fbroken l -> (k,l.abs_loc), Exp.Mandatory, Some (mktyexp (named_type "absent"))
+    | Top -> named_type "Any"
+    | Record {tag; args; body} ->
+       let fs = unparse_fields ~pos ~tag body in
+       let args =
+         match tag with
+         | None | Some (Anon_tag | Struct_tag _) -> assert (args = []); []
+         | Some (Named_tag (tag,_)) ->
+            let decl = Option.get (Env.lookup_decl (fst env) tag) in
+            List.map2
+              (fun ((pvariance : Exp.variance_spec), _) (n,p) : Exp.tyarg' ->
+               match Option.map neg n, Option.map pos p with
+               | Some n, None ->
+                  if pvariance.occurs_pos = `No
+                  then Arg_gen n
+                  else Arg_neg n
+               | None, p ->
+                  let p = Option.value p ~default:(mayloc (named_type "Any")) in
+                  if pvariance.occurs_neg = `No
+                  then Arg_gen p
+                  else Arg_pos p
+               | Some neg, Some pos ->
+                  if Exp.equal_tyexp neg pos
+                  then Arg_gen pos
+                  else Arg_both {neg;pos})
+              decl.params
+              args
        in
-       let fs =
-         match
-           List.mapi (fun i f ->
-             match f with
-             | Tuple_fields.Field_positional j when i = j ->
-                begin match Map.find f fields with
-                | Fpresent (a,_loc) -> pos a
-                | _ -> raise_notrace Exit
-                end
-             | _ -> raise_notrace Exit)
-             fnames
-         with
-         | tuple ->
-            Exp.Ftuple (tuple, fopen)
-         | exception Exit ->
-            Exp.Frecord (List.map (fun f -> unparse_field_desc f (Map.find f fields)) fnames,
-                         fopen)
-       in
-       Trecord (Option.map (fun t -> t, Location.noloc) tag, fs)
+       Trecord (tag, List.map mayloc args, fs)
     | Func (args, ret) ->
        Tfunc (List.map neg args, pos ret)
   in
@@ -1031,31 +1200,31 @@ let unparse_bound_var ~env:(_,ext) index var =
       match index - List.length ext with
       | 0 -> Printf.sprintf "$%d" var
       | n -> Printf.sprintf "$%d.%d" n var in
-  mktyexp (named_type name)
+  mktyvar name
 
 let unparse_rigid_var ~env:(env,_) rv =
   let name =
-    match env_rigid_var env rv with
+    match Env.rigid_var env rv with
     | rv ->
        (* FIXME: this name might be shadowed? *)
        fst rv.name
     | exception _ ->
        Printf.sprintf "##%d.%d" (Env_level.to_int rv.level) rv.var
   in
-  mktyexp (named_type name)
+  mktyvar name
 
 let unparse_flexvar ~env:_ ~flexvar fv =
   flexvar fv;
   let name = flexvar_name fv in
   (* let name = Printf.sprintf "%s@%d" name (Env_level.to_int fv.level) in *)
-  mktyexp (named_type name)
+  mktyvar name
 
 let unparse_var ~env = function
   | Vbound {index; var; loc=_} -> unparse_bound_var ~env index var
   | Vrigid rv -> unparse_rigid_var ~env rv
 
 let unparse_joins = function
-  | [] -> mktyexp (named_type "nothing")
+  | [] -> mktyexp (named_type "Nothing")
   | [x] -> x
   | x :: xs -> List.fold_left (fun a b -> mktyexp (Exp.Tjoin (a, b))) x xs
 
@@ -1064,9 +1233,9 @@ let rec unparse_gen_typ :
              ('neg,'pos) typ -> Exp.tyexp =
   fun ~env ~neg ~pos ty -> match ty with
   | Tsimple t -> pos ~env t
-  | Tbot _ -> mktyexp (named_type "nothing")
+  | Tbot _ -> mktyexp (named_type "Nothing")
   | Tcons c ->
-     unparse_cons ~neg:(unparse_gen_typ ~env ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~env ~neg ~pos) c
+     unparse_cons ~env ~neg:(unparse_gen_typ ~env ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~env ~neg ~pos) c
   | Tvar var ->
      unparse_var ~env var
   | Tjoin (a, b, _loc) ->
@@ -1083,7 +1252,6 @@ and unparse_bounds :
   (* FIXME: this sort of freshening or shifts? *)
   (* FIXME: if freshening, use levels somehow to determine when not needed *)
   let taken name =
-    lookup_named_type Location.noloc name <> None ||
     env_lookup_type_var env Location.noloc name <> None ||
     List.exists (fun names -> IArray.exists (String.equal name) names) ext in
   let rec freshen name i =
@@ -1102,14 +1270,14 @@ and unparse_bounds :
           s, Some (unparse_gen_typ ~env:(env,ext) ~pos:neg ~neg:pos t)) vars |> IArray.to_list
 
 let unparse_join = function
-  | [] -> mktyexp (named_type "nothing")
+  | [] -> mktyexp (named_type "Nothing")
   | t :: ts ->
      List.fold_left (fun a b -> mktyexp (Exp.Tjoin (a, b))) t ts
 
 let rec unparse_lower_part ~env ~flexvar = function
   | Lflexvar fv -> unparse_flexvar ~env ~flexvar fv
   | Lrigvar rv -> unparse_rigid_var ~env rv
-  | Lcons c -> unparse_cons c ~neg:(unparse_flexvar ~env ~flexvar) ~pos:(unparse_lower ~env ~flexvar)
+  | Lcons c -> unparse_cons c ~env ~neg:(unparse_flexvar ~env ~flexvar) ~pos:(unparse_lower ~env ~flexvar)
 
 and unparse_lower ~env ~flexvar l =
   l
@@ -1125,12 +1293,12 @@ let unparse_upper ~env ~flexvar = function
          [unparse_join
            (cons |> List.map (fun c -> match c with
               | Urigvar (rv, _FIXME) -> unparse_rigid_var ~env rv
-              | Ucons c -> unparse_cons ~neg:(unparse_lower ~env ~flexvar) ~pos:(unparse_flexvar ~env ~flexvar) (c,())))])
+              | Ucons c -> unparse_cons ~env ~neg:(unparse_lower ~env ~flexvar) ~pos:(unparse_flexvar ~env ~flexvar) (c,())))])
      @ List.map (unparse_flexvar ~env ~flexvar) higher_fvs
 
-let unparse_ptyp ~flexvar ?(env=(Env_nil,[])) (t : ptyp) =
+let unparse_ptyp ~flexvar ?(env=(Env.empty,[])) (t : ptyp) =
   unparse_gen_typ ~env ~neg:(unparse_flexvar ~flexvar) ~pos:(fun ~env (Vflex fv) -> unparse_flexvar ~env ~flexvar fv) t
-let unparse_ntyp ~flexvar ?(env=(Env_nil,[])) (t : ntyp) =
+let unparse_ntyp ~flexvar ?(env=(Env.empty,[])) (t : ntyp) =
   unparse_gen_typ ~env ~neg:(fun ~env (Vflex fv) -> unparse_flexvar ~env ~flexvar fv) ~pos:(unparse_flexvar ~flexvar) t
 
 
@@ -1148,29 +1316,29 @@ let pp_exp ppf e =
   pp_doc ppf (Print.exp e)
 
 let pp_flexlb ppf t =
-  let doc = unparse_lower ~env:(Env_nil,[]) ~flexvar:ignore t in
+  let doc = unparse_lower ~env:(Env.empty,[]) ~flexvar:ignore t in
   pp_tyexp ppf doc
 
 let pp_upper ppf t =
-  let env = Env_nil, [] in
+  let env = Env.empty, [] in
   let tys = unparse_upper ~env ~flexvar:ignore t in
   let docs = List.map Print.tyexp tys in
   pp_doc ppf (PPrint.(separate (comma ^^ space) docs))
 
 let pp_flexvar ppf v =
-  let env = Env_nil, [] in
+  let env = Env.empty, [] in
   pp_tyexp ppf (unparse_flexvar ~env ~flexvar:ignore v)
 
 let pp_ntyp ppf t =
-  let env = Env_nil, [] in
+  let env = Env.empty, [] in
   pp_tyexp ppf (unparse_ntyp ~env ~flexvar:ignore t)
 
 let pp_ptyp ppf t =
-  let env = Env_nil, [] in
+  let env = Env.empty, [] in
   pp_tyexp ppf (unparse_ptyp ~env ~flexvar:ignore t)
 
 let dump_ptyp ppf t =
-  let env = Env_nil, [] in
+  let env = Env.empty, [] in
   let fvs = Hashtbl.create 20 in
   let fv_list = ref [] in
   let _name_ix = ref 0 in
@@ -1221,7 +1389,7 @@ let pp_changes ppf changes =
 let wf_ptyp env (t : ptyp) =
   try
     let seen = Hashtbl.create 10 in
-    wf_typ ~neg:(wf_flexvar ~seen env (env_level env)) ~pos:(fun (Vflex fv) -> wf_flexvar ~seen env (env_level env) fv) ~ispos:true env [] t
+    wf_typ ~neg:(wf_flexvar ~seen env (Env.level env)) ~pos:(fun (Vflex fv) -> wf_flexvar ~seen env (Env.level env) fv) ~ispos:true env [] t
   with
   | Assert_failure (file, line, _char) when file = __FILE__ ->
      intfail "Ill-formed type (%s:%d): %a" file line pp_ptyp t
@@ -1229,7 +1397,7 @@ let wf_ptyp env (t : ptyp) =
 let wf_ntyp env (t : ntyp) =
   try
     let seen = Hashtbl.create 10 in
-    wf_typ ~neg:(fun (Vflex fv) -> wf_flexvar ~seen env (env_level env) fv) ~pos:(wf_flexvar ~seen env (env_level env)) ~ispos:false env [] t
+    wf_typ ~neg:(fun (Vflex fv) -> wf_flexvar ~seen env (Env.level env) fv) ~pos:(wf_flexvar ~seen env (Env.level env)) ~ispos:false env [] t
   with
   | Assert_failure (file, line, _char) when file = __FILE__ ->
      intfail "Ill-formed type (%s:%d): %a" file line pp_ntyp t

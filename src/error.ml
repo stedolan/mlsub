@@ -1,8 +1,18 @@
 type error_kind =
   | Syntax
-  | Bad_name of [`Unknown|`Duplicate] * [`Type|`Var] * string
-  | Illformed_type of [`Join_multi_cons | `Join_not_cons_or_var | `Join_poly | `Bound_not_simple | `Bound_not_cons | `Bound_crosses_levels of string]
+  | Bad_name of [`Unknown|`Duplicate of Location.t] * [`Type|`Var] * string
+  | Illformed_type of
+      [ `Join_multi_cons
+      | `Join_not_cons_or_var
+      | `Join_poly
+      | `Bound_not_simple
+      | `Bound_not_cons
+      | `Wrong_args of string * [`Arity of int * int | `Variance of int * string * [`Pos|`Neg]]
+      | `Misused_param of Exp.variance_spec * string * [`Pos|`Neg]
+      | `Recursion of [`Not_strictly_positive of string]
+      ]
   | Conflict of [`Expr|`Pat|`Subtype] * Types.subtyping_error
+  (* FIXME: Maybe delete Unknown_constructor, it's worse than a standard type error *)
   | Illformed_pat of [`Duplicate_name of string * Location.t | `Orpat_different_names of string | `Wrong_length of int * int | `Unknown_cases | `Unknown_constructor of string]
   | Incompatible_patterns of Location.t
   | Nonexhaustive of Exp.pat list list
@@ -43,21 +53,27 @@ let pp_err input loc err : PPrint.document =
       let offs = loc.loc_start.pos_cnum - loc.loc_start.pos_bol in
       let cend =
         if loc.loc_end.pos_lnum = loc.loc_start.pos_lnum then
-          loc.loc_end.pos_cnum - loc.loc_start.pos_bol 
+          loc.loc_end.pos_cnum - loc.loc_start.pos_bol
         else
           String.length line in
       pp "%s" line ^^
       hardline ^^ pp "%*s" cend (String.make (cend-offs) '^')) loc
   in
+  let vtype = function `Pos -> "covariantly" | `Neg -> "contravariantly" in
   let context = nest 2 (hardline ^^ pp_context loc) in
   (* FIXME: more of these could use context *)
   pp_loc loc ^^ pp ": " ^^ match err with
   | Syntax -> pp "syntax error" ^^ context
   | Bad_name (err,kind,name) ->
      pp "%s %s name %s"
-       (match err with `Unknown -> "Unknown" | `Duplicate -> "Duplicate")
+       (match err with `Unknown -> "Unknown" | `Duplicate _ -> "Duplicate")
        (match kind with `Type -> "type" | `Var -> "variable")
-       name ^^ context
+       name ^^ context ^^
+     (match err with
+      | `Unknown -> empty
+      | `Duplicate loc' ->
+         hardline ^^ pp_loc loc' ^^ pp ": previously defined here" ^^
+           nest 2 (hardline ^^ pp_context loc'))
   | Illformed_type `Join_multi_cons ->
      pp "Joins may only contain one non-variable type" ^^ context
   | Illformed_type `Join_not_cons_or_var ->
@@ -68,8 +84,18 @@ let pp_err input loc err : PPrint.document =
      pp "Bounds must be simple types" ^^ context
   | Illformed_type `Bound_not_cons ->
      pp "Bounds must be constructed types" ^^ context
-  | Illformed_type (`Bound_crosses_levels n) ->
-     pp "Rigid variable %s not allowed in join with variable bound earlier" n ^^ context
+  | Illformed_type (`Wrong_args (name, problem)) ->
+     pp "The type %s " name ^^
+       (match problem with
+        | `Arity (0, _actual) -> pp "does not take arguments"
+        | `Arity (exp, actual) -> pp "takes %d arguments, not %d" exp actual
+        | `Variance (i, name, v) ->
+           pp "does not take argument %d (%s) %s" (i+1) name (vtype v))
+       ^^ context
+  | Illformed_type (`Misused_param (vspec, name, v)) ->
+     pp "The type parameter %s%s cannot be used here %s" (Print.variance_spec vspec) name (vtype v) ^^ context
+  | Illformed_type (`Recursion (`Not_strictly_positive t)) ->
+     pp "The type %s is used recursively in a non-strictly-positive position" t ^^ context
   | Bad_tuple_intro `Ext_open ->
      pp "Tuple construction cannot use '...'" ^^ context
   | Bad_tuple_intro `Opt ->
@@ -88,8 +114,10 @@ let pp_err input loc err : PPrint.document =
         | Field_extra None ->
            pp "Surplus fields are present."
         | Head (Expected_tag (tag, tags')) ->
-           let tag = match tag with None -> "no tag" | Some s -> "tag " ^ s in
-           pp "The tag should be " ^^ separate_map (pp "|") (pp "%s") tags' ^^ pp ", but %s is present." tag
+           (* FIXME reword (e.g. int vs. bool) *)
+           let tagname = function Exp.Anon_tag -> "#" | Exp.Struct_tag (s, _) | Exp.Named_tag (s, _) -> s in
+           let tag = match tag with None -> "no tag" | Some t -> "tag " ^ tagname t in
+           pp "The tag should be " ^^ separate_map (pp "|") (fun t -> pp "%s" (tagname t)) tags' ^^ pp ", but %s is present." tag
         | Head (Args `Too_few) ->
            pp "Too few arguments."
         | Head (Args `Too_many) ->

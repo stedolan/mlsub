@@ -74,11 +74,26 @@ end
 
 let pvar s = Pbind (s, (Some Pany, snd s))
 
+module TagMap = Map.Make (struct
+  type t = tuple_tag
+  let compare (a : t) (b : t) =
+    match a, b with
+    | Anon_tag, Anon_tag -> 0
+    | Struct_tag (a, _), Struct_tag (b, _) -> String.compare a b
+    | Named_tag (a, _), Named_tag (b, _) -> String.compare a b
+
+    | Anon_tag, (Struct_tag _ | Named_tag _)
+    | Struct_tag _, Named_tag _ -> -1
+
+    | Named_tag _, (Anon_tag | Struct_tag _)
+    | Struct_tag _, Anon_tag -> +1
+end)
+
 (* The result of splitting a (w+1)-size matrix along the first column *)
 type 'w split_head =
   | Sp_any of 'w pat_matrix
   | Sp_fields of 'w split_fields
-  | Sp_cases of tuple_tag list * 'w split_fields SymMap.t * 'w pat_matrix
+  | Sp_cases of tuple_tag list * 'w split_fields TagMap.t * 'w pat_matrix
 
 and 'w split_fields =
   (pat Typedefs.Fields.t Location.loc * 'w pat_row) list
@@ -120,7 +135,7 @@ let rec split_head_row :
              Sp_fields (no_fields fields)
           | Sp_cases (tags, cases, def) ->
              Sp_cases (tags,
-                       SymMap.map no_fields cases,
+                       TagMap.map no_fields cases,
                        (ps,act) :: def)
         in
         var, split
@@ -131,7 +146,7 @@ let rec split_head_row :
           | Sp_any m -> List.map (fun r -> (Fields.empty, []), r) m
           | Sp_cases (_tags, cases, _def) ->
              let other_locs =
-               SymMap.bindings cases
+               TagMap.bindings cases
                |> List.concat_map snd
                |> List.concat_map (fun ((_,l),_) -> l)
              in
@@ -139,11 +154,11 @@ let rec split_head_row :
         in
         let split = Sp_fields ((head_fields ~loc:head_loc fields, (ps, act)) :: acc_fields) in
         var, split
-     | Ptuple (Some ((tag,_) as tagloc), fields) ->
+     | Ptuple (Some tagloc, fields) ->
         let acc_tags, acc_cases, acc_def =
           match split with
           | Sp_cases (tags, cases, def) -> tags, cases, def
-          | Sp_any m -> [], SymMap.empty, m
+          | Sp_any m -> [], TagMap.empty, m
           | Sp_fields fs ->
              let other_locs =
                fs
@@ -152,13 +167,13 @@ let rec split_head_row :
              Error.fail head_loc (Incompatible_patterns other_locs)
         in
         let tail =
-          try SymMap.find tag acc_cases
+          try TagMap.find tagloc acc_cases
           with Not_found -> List.map (fun r -> (Fields.empty, []), r) acc_def
         in
         var,
         Sp_cases (
-            (if SymMap.mem tag acc_cases then acc_tags else tagloc :: acc_tags),
-            SymMap.add tag ((head_fields ~loc:head_loc fields, (ps, act)) :: tail) acc_cases,
+            (if TagMap.mem tagloc acc_cases then acc_tags else tagloc :: acc_tags),
+            TagMap.add tagloc ((head_fields ~loc:head_loc fields, (ps, act)) :: tail) acc_cases,
             acc_def)
      | Pbind ((name, _), subpat) ->
         let var =
@@ -273,7 +288,7 @@ let rec split_cases :
           let fnames, loc = collect_fields fields in
           (* FIXME loc? *)
           let fnames = Fields.map ~pos:(fun () -> ref (Tbot None)) fnames in
-          let cons = Cons1.Record {tag=None; body=fnames} in
+          let cons = Cons1.Record {tag=None; args=[]; body=fnames} in
           begin match Types.match_ptyp ~loc:matchloc env typ [cons] with
           | Ok () ->
              let ftypes = Fields.map ~pos:(fun t -> !t) fnames in
@@ -283,15 +298,16 @@ let rec split_cases :
        | Sp_cases (tags, cases, def) ->
           let rec extract_cases = function
             (* FIXME handle rigvars with tagged bounds too *)
-            | Tcons (Record {tag=Some tag; body}, _loc) -> SymMap.singleton tag body
-            | Tjoin (a, b, _loc) -> SymMap.union (fun _ _ _ -> intfail "invalid type - duplicate tag") (extract_cases a) (extract_cases b)
+            (* FIXME args *)
+            | Tcons (Record {tag=Some tag; args=[]; body}, _loc) -> TagMap.singleton tag body
+            | Tjoin (a, b, _loc) -> TagMap.union (fun _ _ _ -> intfail "invalid type - duplicate tag") (extract_cases a) (extract_cases b)
             | _ -> raise Exit
           in
           match extract_cases typ with
           | case_types ->
              let default_tags = ref [] in
              let cases =
-               SymMap.merge
+               TagMap.merge
                  (fun tag typ fields ->
                    match typ, fields with
                    | None, None -> None
@@ -300,17 +316,21 @@ let rec split_cases :
                         (tag, Fields.map ~pos:ignore typ) :: !default_tags;
                       None
                    | None, Some _ ->
-                      failwith "unknown ctor"
-                               (*
+                      (* FIXME *)
+                      let tagname = match tag with
+                        | Anon_tag -> "#"
+                        | Struct_tag (s, _) -> "#" ^ s
+                        | Named_tag (s, _) -> s
+                      in
                       Error.fail matchloc(*FIXME*)
-                        (Illformed_pat (`Unknown_constructor tag)); *)
+                        (Illformed_pat (`Unknown_constructor tagname));
                    | Some typ, Some fields ->
                       Some (split_fields typ fields))
                  case_types cases
              in
              let cases =
-               tags |> List.map (fun (tag,_) ->
-                 tag, SymMap.find tag cases)
+               tags |> List.map (fun tag ->
+                 tag, TagMap.find tag cases)
              in
              let defaults =
                match !default_tags with
@@ -328,28 +348,28 @@ let rec split_cases :
              end;
              let inferred_cases =
                cases |>
-               SymMap.map (fun fields ->
+               TagMap.map (fun fields ->
                  let fnames, loc = collect_fields fields in
                  let fields = Fields.map ~pos:(fun () -> ref (Tbot None)) fnames in
                  loc, fields)
              in
              let loc =
-               tags |> List.concat_map (fun (tag,_) ->
-                 fst (SymMap.find tag inferred_cases)) in
+               tags |> List.concat_map (fun tag ->
+                 fst (TagMap.find tag inferred_cases)) in
              let conses =
-               tags |> List.map (fun (tag,_) ->
-                 let _, fields = SymMap.find tag inferred_cases in
-                 Cons1.Record {tag=Some tag; body=fields}) in
+               tags |> List.map (fun tag ->
+                 let _, fields = TagMap.find tag inferred_cases in
+                 Cons1.Record {tag=Some tag; args=[]; body=fields}) in
              begin match Types.match_ptyp ~loc env typ conses with
              | Ok () -> ()
              | Error e -> Error.fail matchloc (Conflict (`Pat, e))
              end;
              let case_list =
                tags
-               |> List.map (fun (tag,_) ->
-                  let (_FIXME_loc, fields) = SymMap.find tag inferred_cases in
+               |> List.map (fun tag ->
+                  let (_FIXME_loc, fields) = TagMap.find tag inferred_cases in
                   let fields = Fields.map ~pos:(fun r -> !r) fields in
-                  let case = SymMap.find tag cases in
+                  let case = TagMap.find tag cases in
                   tag, split_fields fields case)
              in
              Cases (case_list, None)
@@ -362,8 +382,7 @@ let rec split_cases :
      Hashcons.mk dt
 
 let ptuple ~tag ~fopen fields =
-  Some (Ptuple (Option.map (fun t -> (t,Location.noloc)) tag,
-                Exp.of_record_fields ~fopen fields)),
+  Some (Ptuple (tag, Exp.of_record_fields ~fopen fields)),
   Location.noloc
 
 let rec counterexamples :
@@ -530,15 +549,18 @@ let compile ~cont ~actions vals orig_dt =
        compile ~vals dt
     | Bind (var, dt), (v :: _ as vals) ->
        LetVal (var, v, compile ~vals dt)
+    (* Compile singleton pattern matches as projections *)
+    | Cases ([(_tag, fs)], None), v :: vals ->
+       Project (v, compile_fields ~vals fs)
     | Cases (cases, default), v :: vals ->
        let cases =
          cases |> List.map (fun (tag, fs) ->
            let cont = compile_fields ~vals fs in
-           IR.Symbol.of_string tag, cont)
+           IR.Symbol.of_tuple_tag tag, cont)
        in
        let default =
          default |> Option.map (fun (tags, dt) ->
-           List.map (fun (tag,_fs) -> IR.Symbol.of_string tag) tags,
+           List.map (fun (tag,_fs) -> IR.Symbol.of_tuple_tag tag) tags,
            compile ~vals dt)
        in
        Match (v, cases, default)

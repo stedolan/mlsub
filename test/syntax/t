@@ -10,10 +10,10 @@ let x = 1; (let y = 2 2; {x,y})
 >   let x = 1; (let y = 2 2; {x,y})
 >                         ^
 
-fn (id : [A]. A -> A) { id(42) }
+fn (id : [a]. a -> a) { id(42) }
 > fn (<err>) { id(42) }
 > test:1: syntax error
->   fn (id : [A]. A -> A) { id(42) }
+>   fn (id : [a]. a -> a) { id(42) }
 >               ^
 
 fn (x)
@@ -23,10 +23,10 @@ fn (x)
 # paren insertion
 fn(a) { { foo: if true { fn(x) { x } } else { a } } }
 > fn (a) { {foo: if true { fn (x) { x } } else { a }} }
->   fn [A, B](a: A) -> {foo: ((B) -> B) | A} {
->     {foo: if true { fn [A_2](x: A_2) -> A_2 { x } } else { a }}
+>   fn [a, b](a: a) -> ({foo: (b -> b) | a}) {
+>     {foo: if true { fn [a_2](x: a_2) -> a_2 { x } } else { a }}
 >   }
-> [A, B] (A) -> {foo: ((B) -> B) | A}
+> [a, b] a -> {foo: (b -> b) | a}
 > let  = %yield(fun (a) ret {
 >   let k(x) = {
 >     ret((foo: x))
@@ -42,14 +42,14 @@ fn(a) { { foo: if true { fn(x) { x } } else { a } } }
 > });
 > done
 
-fn[A,B](x:A) -> A | (A) -> B { x }
-> fn [A, B](x: A) -> A | ((A) -> B) { x }
->   fn [A, B](x: A) -> A | ((A) -> B) { x }
-> [A, B] (A) -> A | ((A) -> B)
+fn[a,b](x:a) -> (a | a -> b) { x }
+> fn [a, b](x: a) -> (a | (a -> b)) { x }
+>   fn [a, b](x: a) -> (a | (a -> b)) { x }
+> [a, b] a -> a | (a -> b)
 > let  = %yield(fun (x) ret { ret(x) }); done
 
-: [A <: ([] int) -> int ] A <: int
+: [a <: ([] Int) -> Int ] a <: Int
 > test:1: Bounds must be simple types
->   : [A <: ([] int) -> int ] A <: int
+>   : [a <: ([] Int) -> Int ] a <: Int
 >           ^^^^^^^^^^^^^^^
 > STATS: fix: 3, flex: 70

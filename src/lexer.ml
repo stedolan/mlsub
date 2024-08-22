@@ -30,6 +30,8 @@ let rec lex buf =
   | "<:" -> SUBTYPE
   | ":>" -> SUPTYPE
   | '@' -> AT
+  | '+' -> PLUS
+  | '-' -> MINUS
 
   | "fn" -> FN
   | "let" -> LET
@@ -39,14 +41,14 @@ let rec lex buf =
   | "else" -> ELSE
   | "$outer" -> SHIFT
   | "match" -> MATCH
+  | "type" -> TYPE
 
-  | Plus('0'..'9') -> INT (int_of_string (lexeme buf))
+  | '0' -> ZERO
+  | Plus('0'..'9') -> NZINT (int_of_string (lexeme buf))
   | ('a'..'z'|'_'), Star('a'..'z'|'_'|'A'..'Z'|'0'..'9') ->
      SYMBOL (lexeme buf)
   | ('A'..'Z'), Star('a'..'z'|'_'|'A'..'Z'|'0'..'9') ->
      USYMBOL (lexeme buf)
-  | '\'', ('A'..'Z'), Star('a'..'z'|'_'|'A'..'Z'|'0'..'9') ->
-     QUSYMBOL (sub_lexeme buf 1 (lexeme_length buf - 1))
 
   | '@', Star('a'..'z') ->
      PRAGMA (sub_lexeme buf 1 (lexeme_length buf - 1))

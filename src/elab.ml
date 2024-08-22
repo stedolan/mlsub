@@ -272,7 +272,7 @@ module Compile = struct
        IRB.apply (exp f) (List.map exp args)
 
     | Tuple (tag, fields) ->
-       (let tag = Option.map (fun (t,_) -> IR.Symbol.of_string t) tag in
+       (let tag = Option.map IR.Symbol.of_tuple_tag tag in
         IRB.tuple tag (List.map (fun ((fn,_loc), e) -> (fn, exp e)) fields))
 
     | Proj (e, (field, _loc)) ->

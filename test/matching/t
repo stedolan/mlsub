@@ -1,42 +1,42 @@
 
-fn(x) { (Foo(), Bar, Foo{x: 42}, Baz(1)) }
-> fn (x) { (Foo, Bar, Foo{x: 42}, Baz(1)) }
->   fn (x: any) -> ('Foo, 'Bar, 'Foo{x: int}, 'Baz(int)) {
->     (Foo, Bar, Foo{x: 42}, Baz(1))
+fn(x) { (#Foo(), #Bar, #Foo{x: 42}, #Baz(1)) }
+> fn (x) { (#Foo, #Bar, #Foo{x: 42}, #Baz(1)) }
+>   fn (x: Any) -> (#Foo, #Bar, #Foo{x: Int}, #Baz(Int)) {
+>     (#Foo, #Bar, #Foo{x: 42}, #Baz(1))
 >   }
-> (any) -> ('Foo, 'Bar, 'Foo{x: int}, 'Baz(int))
+> Any -> (#Foo, #Bar, #Foo{x: Int}, #Baz(Int))
 > let  = %yield(fun (x) ret {
 >   ret((0: Foo(), 1: Bar(), 2: Foo(x: 42), 3: Baz(0: 1)))
 > });
 > done
 
 # Checking mode
-( if true { Foo(@true) } else { Bar(6) }
-  : 'Foo(bool) | 'Bar(int) )
-> (if true { Foo(@true) } else { Bar(6) } : 'Foo(bool) | 'Bar(int))
+( if true { #Foo(@true) } else { #Bar(6) }
+  : #Foo(Bool) | #Bar(Int) )
+> (if true { #Foo(@true) } else { #Bar(6) } : #Foo(Bool) | #Bar(Int))
 > typechecking error: Failure("pragma: true")
 
-({x: 42} : 'Foo{x: int})
-> ({x: 42} : 'Foo{x: int})
+({x: 42} : #Foo{x: Int})
+> ({x: 42} : #Foo{x: Int})
 > test:1: The tag should be Foo, but no tag is present.
->   ({x: 42} : 'Foo{x: int})
+>   ({x: 42} : #Foo{x: Int})
 >    ^^^^^^^
 >      found: {x: _}
->   expected: 'Foo{x: _}
-> This {x: _} is used as 'Foo{x: _} at test:1:
->   ({x: 42} : 'Foo{x: int})
+>   expected: #Foo{x: _}
+> This {x: _} is used as #Foo{x: _} at test:1:
+>   ({x: 42} : #Foo{x: Int})
 >              ^^^^^^^^^^^^
 
-(Bar{x: 42} : 'Foo{x: int})
-> (Bar{x: 42} : 'Foo{x: int})
+(#Bar{x: 42} : #Foo{x: Int})
+> (#Bar{x: 42} : #Foo{x: Int})
 > test:1: The tag should be Foo, but tag Bar is present.
->   (Bar{x: 42} : 'Foo{x: int})
->    ^^^^^^^^^^
->      found: 'Bar{x: _}
->   expected: 'Foo{x: _}
-> This 'Bar{x: _} is used as 'Foo{x: _} at test:1:
->   (Bar{x: 42} : 'Foo{x: int})
->                 ^^^^^^^^^^^^
+>   (#Bar{x: 42} : #Foo{x: Int})
+>    ^^^^^^^^^^^
+>      found: #Bar{x: _}
+>   expected: #Foo{x: _}
+> This #Bar{x: _} is used as #Foo{x: _} at test:1:
+>   (#Bar{x: 42} : #Foo{x: Int})
+>                  ^^^^^^^^^^^^
 
 #
 # Matching syntax in functions and lets
@@ -50,10 +50,10 @@ fn(x, x) { x }
 >   fn(x, x) { x }
 >      ^
 
-fn((A|B), x) { x }
-> fn ((A | B), x) { x }
->   fn [A]((A | B): 'A | 'B, x: A) -> A { x }
-> [A] ('A | 'B, A) -> A
+fn((#A|#B), x) { x }
+> fn ((#A | #B), x) { x }
+>   fn [a]((#A | #B): #A | #B, x: a) -> a { x }
+> [a] (#A | #B, a) -> a
 > let  = %yield(fun (param, x) ret {
 >   match param {
 >     A() -> {
@@ -68,11 +68,11 @@ fn((A|B), x) { x }
 
 fn(x) { let (a, b, c) = x; (c, b, a) }
 > fn (x) { let (a, b, c) = x; (c, b, a) }
->   fn [A, B, C](x: (A, B, C)) -> (C, B, A) {
->     let (a, b, c) : (A, B, C) = x;
+>   fn [a, b, c](x: (a, b, c)) -> (c, b, a) {
+>     let (a, b, c) : (a, b, c) = x;
 >     (c, b, a)
 >   }
-> [A, B, C] ((A, B, C)) -> (C, B, A)
+> [a, b, c] (a, b, c) -> (c, b, a)
 > let  = %yield(fun (x) ret {
 >   let v0, v1, v2 = x.(0, 1, 2);
 >   ret((0: v2, 1: v1, 2: v0))
@@ -135,63 +135,52 @@ fn(x) { match x, x { a, b, c => 2 } }
 >   fn(x) { match x, x { a, b, c => 2 } }
 >                        ^^^^^^^
 
-fn(x) { match x { Foo => 1 | _ => 2 } }
-> fn (x) { match x { Foo => 1 | _ => 2 } }
+fn(x) { match x { #Foo => 1 | _ => 2 } }
+> fn (x) { match x { #Foo => 1 | _ => 2 } }
 > test:1: Cannot determine which cases this pattern matches
->   fn(x) { match x { Foo => 1 | _ => 2 } }
->                                ^
-
-fn(x) { match x { (a | Foo) => 1 } }
-> fn (x) { match x { (a | Foo) => 1 } }
-> test:1: The variable a must be bound on both sides of this or-pattern
->   fn(x) { match x { (a | Foo) => 1 } }
->                     ^^^^^^^^^
-
-fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
-> fn (x) { match A(1, 2) { A(x, C) => 1 } }
-> test:1: Type error
->   fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
->                 ^^^^^^^^^
->      found: int
->   expected: 'C
-> This int comes from test:1:
->   fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
->                       ^
-> but is used as 'C at test:1:
->   fn(x) { match (A(1, 2)) { A(x,C) => 1 } }
+>   fn(x) { match x { #Foo => 1 | _ => 2 } }
 >                                 ^
 
-fn(x : 'A(int, int) | 'B(int, int)) {
+fn(x) { match x { (a | #Foo) => 1 } }
+> fn (x) { match x { (a | #Foo) => 1 } }
+> test:1: The variable a must be bound on both sides of this or-pattern
+>   fn(x) { match x { (a | #Foo) => 1 } }
+>                     ^^^^^^^^^^
+
+fn(x) { match (#A(1, 2)) { #A(x,#C) => 1 } }
+> fn (x) { match #A(1, 2) { #A(x, #C) => 1 } }
+> test:1: This type does not have a constructor #C
+>   fn(x) { match (#A(1, 2)) { #A(x,#C) => 1 } }
+>                 ^^^^^^^^^^
+
+fn(x : #A(Int, Int) | #B(Int, Int)) {
   match x {
-  | A(x, y) => (x, y)
+  | #A(x, y) => (x, y)
   | (a, b) => (a, b)
   }
 }
-> fn (x: 'A(int, int) | 'B(int, int)) {
+> fn (x: #A(Int, Int) | #B(Int, Int)) {
 >   match x {
->     | A(x, y) => (x, y)
+>     | #A(x, y) => (x, y)
 >     | (a, b) => (a, b)
 >   }
 > }
-> test:3: This pattern:
->     | A(x, y) => (x, y)
->       ^^^^^^^
-> is incompatible with the pattern at test:4:
->     | (a, b) => (a, b)
->       ^^^^^^
+> test:2: This type does not have a constructor #
+>     match x {
+>           ^
 
 
 fn(c) {
-  let a = if c {Foo{x:Foo}} else {Bar{x:Bar}};
+  let a = if c {#Foo{x:#Foo}} else {#Bar{x:#Bar}};
   (a, a.x)
 }
-> fn (c) { let a = if c { Foo{x: Foo} } else { Bar{x: Bar} }; (a, a.x) }
->   fn (c: bool) -> ('Foo{x: 'Foo} | 'Bar{x: 'Bar}, 'Foo | 'Bar) {
->     let a : 'Foo{x: 'Foo} | 'Bar{x: 'Bar} =
->     if c { Foo{x: Foo} } else { Bar{x: Bar} };
+> fn (c) { let a = if c { #Foo{x: #Foo} } else { #Bar{x: #Bar} }; (a, a.x) }
+>   fn (c: Bool) -> (#Foo{x: #Foo} | #Bar{x: #Bar}, #Foo | #Bar) {
+>     let a : #Foo{x: #Foo} | #Bar{x: #Bar} =
+>     if c { #Foo{x: #Foo} } else { #Bar{x: #Bar} };
 >     (a, a.x)
 >   }
-> (bool) -> ('Foo{x: 'Foo} | 'Bar{x: 'Bar}, 'Foo | 'Bar)
+> Bool -> (#Foo{x: #Foo} | #Bar{x: #Bar}, #Foo | #Bar)
 > let  = %yield(fun (c) ret {
 >   let k(x) = {
 >     let x2 = x.(x);
@@ -210,18 +199,18 @@ fn(c) {
 
 fn(x) {
   match x {
-  | A(_, b) => b
-  | B{foo: (C|D), bar:x} => x
+  | #A(_, b) => b
+  | #B{foo: (#C|#D), bar:x} => x
   }
 }
-> fn (x) { match x { A(_, b) => b | B{foo: (C | D), bar: x} => x } }
->   fn [A, B](x: 'A(any, A) | 'B{foo: ('C | 'D), bar: B}) -> A | B {
+> fn (x) { match x { #A(_, b) => b | #B{foo: (#C | #D), bar: x} => x } }
+>   fn [a, b](x: #A(Any, a) | #B{foo: #C | #D, bar: b}) -> (a | b) {
 >     match x {
->       | A(_, b) => b
->       | B{foo: (C | D), bar: x} => x
+>       | #A(_, b) => b
+>       | #B{foo: (#C | #D), bar: x} => x
 >     }
 >   }
-> [A, B] ('A(any, A) | 'B{foo: ('C | 'D), bar: B}) -> A | B
+> [a, b] (#A(Any, a) | #B{foo: #C | #D, bar: b}) -> a | b
 > let  = %yield(fun (x) ret {
 >   match x {
 >     A(0: v0,
@@ -246,24 +235,24 @@ fn(x) {
 
 fn(x) {
   match x {
-  | A(_, b) => b
-  | A(_, _, _) => 42
-  | B{foo: (C|D), bar:x} => x
+  | #A(_, b) => b
+  | #A(_, _, _) => 42
+  | #B{foo: (#C|#D), bar:x} => x
   }
 }
 > fn (x) {
 >   match x {
->     | A(_, b) => b
->     | A(_, _, _) => 42
->     | B{foo: (C | D), bar: x} => x
+>     | #A(_, b) => b
+>     | #A(_, _, _) => 42
+>     | #B{foo: (#C | #D), bar: x} => x
 >   }
 > }
 > test:4: This pattern:
->     | A(_, _, _) => 42
->       ^^^^^^^^^^
+>     | #A(_, _, _) => 42
+>       ^^^^^^^^^^^
 > is incompatible with the pattern at test:3:
->     | A(_, b) => b
->       ^^^^^^^
+>     | #A(_, b) => b
+>       ^^^^^^^^
 
 #
 # Regression for a reversal bug
@@ -271,13 +260,13 @@ fn(x) {
 
 fn(a, b) {
   match a, b {
-  | A, y => y
-  | B, y => y
+  | #A, y => y
+  | #B, y => y
   }
 }
-> fn (a, b) { match a, b { A, y => y | B, y => y } }
->   fn [A](a: 'A | 'B, b: A) -> A { match a, b { A, y => y | B, y => y } }
-> [A] ('A | 'B, A) -> A
+> fn (a, b) { match a, b { #A, y => y | #B, y => y } }
+>   fn [a](a: #A | #B, b: a) -> a { match a, b { #A, y => y | #B, y => y } }
+> [a] (#A | #B, a) -> a
 > let  = %yield(fun (a, b) ret {
 >   match a {
 >     A() -> {
@@ -293,14 +282,14 @@ fn(a, b) {
 
 # FIXME: badly broken
 fn() {
-  match D{x:5} {
-    D{x, y} => (x, y)
+  match #D{x:5} {
+    #D{x, y} => (x, y)
   }
 }
-> fn () { match D{x: 5} { D{x, y} => (x, y) } }
+> fn () { match #D{x: 5} { #D{x, y} => (x, y) } }
 > test:3: Unknown variable name y
->       D{x, y} => (x, y)
->                      ^
+>       #D{x, y} => (x, y)
+>                       ^
 
 
 #
@@ -309,11 +298,11 @@ fn() {
 
 fn((a @ b @ c @ (d,e), f)){(a,b,c,d,e,f)}
 > fn (((a @ b @ c @ (d, e)), f)) { (a, b, c, d, e, f) }
->   fn [A, B, C <: (A, B), D](((a @ b @ c @ (d, e)), f): (C, D)) ->
->     (C, C, C, A, B, D) {
+>   fn [a, b, c <: (a, b), d](((a @ b @ c @ (d, e)), f): (c, d)) ->
+>     (c, c, c, a, b, d) {
 >     (a, b, c, d, e, f)
 >   }
-> [A, B, C <: (A, B), D] ((C, D)) -> (C, C, C, A, B, D)
+> [a, b, c <: (a, b), d] (c, d) -> (c, c, c, a, b, d)
 > let  = %yield(fun (param) ret {
 >   let v0, v1 = param.(0, 1);
 >   let v02, v12 = v0.(0, 1);
@@ -321,10 +310,10 @@ fn((a @ b @ c @ (d,e), f)){(a,b,c,d,e,f)}
 > });
 > done
 
-fn(x) { match x { (z @ (A | B)) => z } }
-> fn (x) { match x { (z @ A | B) => z } }
->   fn [A <: 'A | 'B](x: A) -> A { match x { (z @ A | B) => z } }
-> [A <: 'A | 'B] (A) -> A
+fn(x) { match x { (z @ (#A | #B)) => z } }
+> fn (x) { match x { (z @ #A | #B) => z } }
+>   fn [a <: #A | #B](x: a) -> a { match x { (z @ #A | #B) => z } }
+> [a <: #A | #B] a -> a
 > RECHECK: Lang.Error.Fail(_)
 > 
 > _:0: Bounds must be constructed types
@@ -338,29 +327,29 @@ fn(x) { match x { (z @ (A | B)) => z } }
 
 fn(p, q) {
   match p, q {
-    | (y @ A), (z @ A)
-    | (z @ A), (y @ B)
-    | (y @ B), (z @ A) => (y,z)
-    | (z @ B), (y @ B) => (y,z)
+    | (y @ #A), (z @ #A)
+    | (z @ #A), (y @ #B)
+    | (y @ #B), (z @ #A) => (y,z)
+    | (z @ #B), (y @ #B) => (y,z)
   }
 }
 > fn (p, q) {
 >   match p, q {
->     | (y @ A), (z @ A)
->     | (z @ A), (y @ B)
->     | (y @ B), (z @ A) => (y, z)
->     | (z @ B), (y @ B) => (y, z)
+>     | (y @ #A), (z @ #A)
+>     | (z @ #A), (y @ #B)
+>     | (y @ #B), (z @ #A) => (y, z)
+>     | (z @ #B), (y @ #B) => (y, z)
 >   }
 > }
->   fn [A <: 'A | 'B, B <: 'A | 'B](p: A, q: B) -> (A | B, A | B) {
+>   fn [a <: #A | #B, b <: #A | #B](p: a, q: b) -> (a | b, a | b) {
 >     match p, q {
->       | (y @ A), (z @ A)
->       | (z @ A), (y @ B)
->       | (y @ B), (z @ A) => (y, z)
->       | (z @ B), (y @ B) => (y, z)
+>       | (y @ #A), (z @ #A)
+>       | (z @ #A), (y @ #B)
+>       | (y @ #B), (z @ #A) => (y, z)
+>       | (z @ #B), (y @ #B) => (y, z)
 >     }
 >   }
-> [A <: 'A | 'B, B <: 'A | 'B] (A, B) -> (A | B, A | B)
+> [a <: #A | #B, b <: #A | #B] (a, b) -> (a | b, a | b)
 > RECHECK: Lang.Error.Fail(_)
 > 
 > _:0: Bounds must be constructed types
@@ -401,44 +390,48 @@ fn(p, q) {
 
 # Grammar ambiguity requires parens on return type
 # (otherwise function body is misread as fields)
-fn(x : 'A | 'B | 'C(int) | 'D{x:int}) -> int {
-  match x { A => 1 | B() => 2 | C(x) => 3 | D{x:foo, y:bar} | E(foo,bar) => 5 }
+fn(x : #A | #B | #C(Int) | #D{x:Int}) -> Int {
+  match x { #A => 1 | #B() => 2 | #C(x) => 3 | #D{x:foo, y:bar} | #E(foo,bar) => 5 }
 }
-> fn (x: 'A | 'B | 'C(int) | 'D{x: int}) -> int {
+> fn (x: #A | #B | #C(Int) | #D{x: Int}) -> Int {
 >   match x {
->     | A => 1
->     | B => 2
->     | C(x) => 3
->     | D{x: foo, y: bar}
->     | E(foo, bar) => 5
+>     | #A => 1
+>     | #B => 2
+>     | #C(x) => 3
+>     | #D{x: foo, y: bar}
+>     | #E(foo, bar) => 5
 >   }
 > }
-> typechecking error: Failure("unknown ctor")
+> test:2: This type does not have a constructor #E
+>     match x { #A => 1 | #B() => 2 | #C(x) => 3 | #D{x:foo, y:bar} | #E(foo,bar) => 5 }
+>           ^
 
 # FIXME the exhaustivity checking is kinda broken here as types change
 # Should either report an unused pat on case 2 or unhandled (B,B)
 fn (x) {
   match x {
-  | (A, A) => 1
-  | (A, B) => 2
-  | (B, A) => 3
+  | (#A, #A) => 1
+  | (#A, #B) => 2
+  | (#B, #A) => 3
   }
 }
-> fn (x) { match x { (A, A) => 1 | (A, B) => 2 | (B, A) => 3 } }
->   fn (x: ('A | 'B, 'A)) -> int {
+> fn (x) { match x { (#A, #A) => 1 | (#A, #B) => 2 | (#B, #A) => 3 } }
+>   fn (x: (#A | #B, #A)) -> Int {
 >     match x {
->       | (A, A) => 1
->       | (A, B) => 2
->       | (B, A) => 3
+>       | (#A, #A) => 1
+>       | (#A, #B) => 2
+>       | (#B, #A) => 3
 >     }
 >   }
-> (('A | 'B, 'A)) -> int
-> RECHECK: Failure("unknown ctor")
+> (#A | #B, #A) -> Int
+> RECHECK: Lang.Error.Fail(_)
 > 
-> typechecking error: Failure("unknown ctor")
-> ELAB: Failure("unknown ctor")
+> test:2: This type does not have a constructor #B
+>     match x {
+>           ^
+> ELAB: Lang.Error.Fail(_)
 > 
-> ELABINF: Failure("unknown ctor")
+> ELABINF: Lang.Error.Fail(_)
 > 
 > let  = %yield(fun (x) ret {
 >   let v0, v1 = x.(0, 1);
@@ -454,11 +447,8 @@ fn (x) {
 >       }
 >     };
 >     B() -> {
->       match v1 {
->         A() -> {
->           ret(3)
->         }
->       }
+>       let  = v1.();
+>       ret(3)
 >     }
 >   }
 > });
@@ -467,9 +457,9 @@ fn (x) {
 
 let make = fn (x) {
   if x.good {
-    Good{foo: x.foo, bar: x.bar}
+    #Good{foo: x.foo, bar: x.bar}
   } else {
-    Bad{foo: x.foo}
+    #Bad{foo: x.foo}
   }
 };
 fn (x) {
@@ -477,7 +467,7 @@ fn (x) {
   (y.foo, y.bar)
 }
 > let make =
-> fn (x) { if x.good { Good{foo: x.foo, bar: x.bar} } else { Bad{foo: x.foo} } };
+> fn (x) { if x.good { #Good{foo: x.foo, bar: x.bar} } else { #Bad{foo: x.foo} } };
 > fn (x) {
 >   let y = make(x);
 >   (y.foo, y.bar)
@@ -485,58 +475,58 @@ fn (x) {
 > test:10: The field 'bar' is missing.
 >     (y.foo, y.bar)
 >             ^^^^^
->      found: 'Bad{foo: _}
+>      found: #Bad{foo: _}
 >   expected: {bar: _, ...}
-> This 'Bad{foo: _} comes from test:5:
->       Bad{foo: x.foo}
->       ^^^^^^^^^^^^^^^
+> This #Bad{foo: _} comes from test:5:
+>       #Bad{foo: x.foo}
+>       ^^^^^^^^^^^^^^^^
 > but is used as {bar: _, ...} at test:10:
 >     (y.foo, y.bar)
 >               ^^^
 
 let make = fn (x) {
   if x.good {
-    Good{foo: x.foo, bar: x.bar}
+    #Good{foo: x.foo, bar: x.bar}
   } else {
-    Bad{foo: x.foo}
+    #Bad{foo: x.foo}
   }
 };
 let use = fn (y) {
   match y {
-  | Good{foo: bar, ...} => bar
-  | Bad{foo: bar, ...} => bar
+  | #Good{foo: bar, ...} => bar
+  | #Bad{foo: bar, ...} => bar
   }
 };
 fn (x) { use(make(x)) }
 > let make =
-> fn (x) { if x.good { Good{foo: x.foo, bar: x.bar} } else { Bad{foo: x.foo} } };
+> fn (x) { if x.good { #Good{foo: x.foo, bar: x.bar} } else { #Bad{foo: x.foo} } };
 > let use =
-> fn (y) { match y { Good{foo: bar, ...} => bar | Bad{foo: bar, ...} => bar } };
+> fn (y) { match y { #Good{foo: bar, ...} => bar | #Bad{foo: bar, ...} => bar } };
 > fn (x) {
 >   use(make(x))
 > }
 >   let make :
->     [A, B] ({good: bool, foo: B, bar: A, ...}) ->
->     'Good{foo: B, bar: A} | 'Bad{foo: B} =
->   fn [A, B](x: {good: bool, foo: B, bar: A, ...}) ->
->     'Good{foo: B, bar: A} | 'Bad{foo: B} {
+>     [a, b] ({good: Bool, foo: b, bar: a, ...}) ->
+>     #Good{foo: b, bar: a} | #Bad{foo: b} =
+>   fn [a, b](x: {good: Bool, foo: b, bar: a, ...}) ->
+>     (#Good{foo: b, bar: a} | #Bad{foo: b}) {
 >     if x.good {
->       Good{foo: x.foo, bar: x.bar}
+>       #Good{foo: x.foo, bar: x.bar}
 >     } else {
->       Bad{foo: x.foo}
+>       #Bad{foo: x.foo}
 >     }
 >   };
->   let use : [A, B] ('Good{foo: A, ...} | 'Bad{foo: B, ...}) -> A | B =
->   fn [A, B](y: 'Good{foo: A, ...} | 'Bad{foo: B, ...}) -> A | B {
+>   let use : [a, b] (#Good{foo: a, ...} | #Bad{foo: b, ...}) -> a | b =
+>   fn [a, b](y: #Good{foo: a, ...} | #Bad{foo: b, ...}) -> (a | b) {
 >     match y {
->       | Good{foo: bar, ...} => bar
->       | Bad{foo: bar, ...} => bar
+>       | #Good{foo: bar, ...} => bar
+>       | #Bad{foo: bar, ...} => bar
 >     }
 >   };
->   fn [A](x: {good: bool, foo: A, bar: any, ...}) -> A {
+>   fn [a](x: {good: Bool, foo: a, bar: Any, ...}) -> a {
 >     use(make(x))
 >   }
-> [A] ({good: bool, foo: A, bar: any, ...}) -> A
+> [a] ({good: Bool, foo: a, bar: Any, ...}) -> a
 > let make =
 >   fun (x) ret {
 >     let good = x.(good);
@@ -567,38 +557,38 @@ fn (x) { use(make(x)) }
 > done
 
 
-fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
+fn(a : (#T|#F),b : #T|#F,c : #T|#F) {
   match (a, b, c) {
-  | (T, T, _)
-  | (_, T, T)
-  | (T, _, T) => true
+  | (#T, #T, _)
+  | (_, #T, #T)
+  | (#T, _, #T) => true
 
-  | (F, F, _)
-  | (_, F, F)
-  | (F, _, F) => false
+  | (#F, #F, _)
+  | (_, #F, #F)
+  | (#F, _, #F) => false
   }
 }
-> fn (a: 'T | 'F, b: 'T | 'F, c: 'T | 'F) {
+> fn (a: #T | #F, b: #T | #F, c: #T | #F) {
 >   match (a, b, c) {
->     | (T, T, _)
->     | (_, T, T)
->     | (T, _, T) => true
->     | (F, F, _)
->     | (_, F, F)
->     | (F, _, F) => false
+>     | (#T, #T, _)
+>     | (_, #T, #T)
+>     | (#T, _, #T) => true
+>     | (#F, #F, _)
+>     | (_, #F, #F)
+>     | (#F, _, #F) => false
 >   }
 > }
->   fn (a: 'T | 'F, b: 'T | 'F, c: 'T | 'F) -> bool {
+>   fn (a: #T | #F, b: #T | #F, c: #T | #F) -> Bool {
 >     match (a, b, c) {
->       | (T, T, _)
->       | (_, T, T)
->       | (T, _, T) => true
->       | (F, F, _)
->       | (_, F, F)
->       | (F, _, F) => false
+>       | (#T, #T, _)
+>       | (_, #T, #T)
+>       | (#T, _, #T) => true
+>       | (#F, #F, _)
+>       | (_, #F, #F)
+>       | (#F, _, #F) => false
 >     }
 >   }
-> ('T | 'F, 'T | 'F, 'T | 'F) -> bool
+> (#T | #F, #T | #F, #T | #F) -> Bool
 > let  = %yield(fun (a, b, c) ret {
 >   let v0, v1, v2 = (0: a, 1: b, 2: c).(0, 1, 2);
 >   match v0 {
@@ -654,115 +644,115 @@ fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
 > });
 > done
 
-fn(a : ('T|'F),b : 'T|'F,c : 'T|'F) {
+fn(a : (#T|#F),b : #T|#F,c : #T|#F) {
   match (a, b, c) {
-  | (T, T, _)
-  | (T, _, T) => true
+  | (#T, #T, _)
+  | (#T, _, #T) => true
 
-  | (_, F, F)
-  | (F, _, F) => false
+  | (_, #F, #F)
+  | (#F, _, #F) => false
   }
 }
-> fn (a: 'T | 'F, b: 'T | 'F, c: 'T | 'F) {
+> fn (a: #T | #F, b: #T | #F, c: #T | #F) {
 >   match (a, b, c) {
->     | (T, T, _)
->     | (T, _, T) => true
->     | (_, F, F)
->     | (F, _, F) => false
+>     | (#T, #T, _)
+>     | (#T, _, #T) => true
+>     | (_, #F, #F)
+>     | (#F, _, #F) => false
 >   }
 > }
 > test:2: Some cases of this pattern-match are missing:
 >     match (a, b, c) {
 >           ^^^^^^^^^
 > The following cases are unhandled:
-> | (F, F, T)
-> | (F, T, T)
+> | (#F, #F, #T)
+> | (#F, #T, #T)
 
-fn(x : ('A|'B|'C), y : ('A|'B|'C)) {
+fn(x : (#A|#B|#C), y : (#A|#B|#C)) {
   match x, y {
-    A, A => 1
+    #A, #A => 1
   }
 }
-> fn (x: 'A | 'B | 'C, y: 'A | 'B | 'C) { match x, y { A, A => 1 } }
+> fn (x: #A | #B | #C, y: #A | #B | #C) { match x, y { #A, #A => 1 } }
 > test:2: Some cases of this pattern-match are missing:
 >     match x, y {
 >           ^^^^
 > The following cases are unhandled:
-> | A, B | C
-> | B | C, _
+> | #A, (#B | #C)
+> | (#B | #C), _
 
-fn (x : (('A(int,int)|'B{x:string,y:string}|'C|'D|'E), 'B|'C|'D)) {
+fn (x : ((#A(Int,Int)|#B{x:String,y:String}|#C|#D|#E), #B|#C|#D)) {
   match x {
-  | (A(_,_)|B{...}, C|D)
-  | (C, C)
-  | (D, C) => 1
+  | (#A(_,_)|#B{...}, #C|#D)
+  | (#C, #C)
+  | (#D, #C) => 1
   }
 }
-> fn (x: ('A(int, int) | 'B{x: string, y: string} | 'C | 'D | 'E, 'B | 'C | 'D)) {
+> fn (x: (#A(Int, Int) | #B{x: String, y: String} | #C | #D | #E, #B | #C | #D)) {
 >   match x {
->     | ((A(_, _) | B{...}), (C | D))
->     | (C, C)
->     | (D, C) => 1
+>     | ((#A(_, _) | #B{...}), (#C | #D))
+>     | (#C, #C)
+>     | (#D, #C) => 1
 >   }
 > }
 > test:2: Some cases of this pattern-match are missing:
 >     match x {
 >           ^
 > The following cases are unhandled:
-> | (A(_, _), B)
-> | (B{x: _, y: _}, B)
-> | (C, (B | D))
-> | (D, (B | D))
-> | (E, _)
+> | (#A(_, _), #B)
+> | (#B{x: _, y: _}, #B)
+> | (#C, (#B | #D))
+> | (#D, (#B | #D))
+> | (#E, _)
 
-fn(x : 'A(int, 'P|'Q|'R) | 'B(int, 'P|'Q|'R)) {
+fn(x : #A(Int, #P|#Q|#R) | #B(Int, #P|#Q|#R)) {
   match {averylongnameinanexpression: {averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression, {x:0,y:5}.y {
-  | A(x, P|Q), y => 1
-  | B(x, P|Q), y => 1
+  | #A(x, #P|#Q), y => 1
+  | #B(x, #P|#Q), y => 1
   }
 }
-> fn (x: 'A(int, ('P | 'Q | 'R)) | 'B(int, ('P | 'Q | 'R))) {
+> fn (x: #A(Int, #P | #Q | #R) | #B(Int, #P | #Q | #R)) {
 >   match
 >     {averylongnameinanexpression: {averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression,
 >     {x: 0, y: 5}.y
 >   {
->     | A(x, (P | Q)), y => 1
->     | B(x, (P | Q)), y => 1
+>     | #A(x, (#P | #Q)), y => 1
+>     | #B(x, (#P | #Q)), y => 1
 >   }
 > }
 > test:2: Some cases of this pattern-match are missing:
 >     match {averylongnameinanexpression: {averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression, {x:0,y:5}.y {
 >           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 > The following cases are unhandled:
-> | A(_, R), _
-> | B(_, R), _
+> | #A(_, #R), _
+> | #B(_, #R), _
 
 let calls_any = fn(f) {
-  (f(Foo), f(Bar), f(Baz))
+  (f(#Foo), f(#Bar), f(#Baz))
 };
 let use = fn(x) {
   match x {
-  | Foo => 1
-  | Bar => 2
+  | #Foo => 1
+  | #Bar => 2
   }
 };
 calls_any(use)
-> let calls_any = fn (f) { (f(Foo), f(Bar), f(Baz)) };
-> let use = fn (x) { match x { Foo => 1 | Bar => 2 } };
+> let calls_any = fn (f) { (f(#Foo), f(#Bar), f(#Baz)) };
+> let use = fn (x) { match x { #Foo => 1 | #Bar => 2 } };
 > calls_any(use)
 > test:10: The tag should be Foo|Bar, but tag Baz is present.
 >   calls_any(use)
 >             ^^^
->      found: ('Foo | 'Bar) -> _
->   expected: ('Baz) -> _
-> This 'Baz comes from test:2:
->     (f(Foo), f(Bar), f(Baz))
->                        ^^^
-> but is used as 'Foo | 'Bar at test:6,test:7:
->     | Foo => 1
->       ^^^
->     | Bar => 2
->       ^^^
+>      found: (#Foo | #Bar) -> _
+>   expected: #Baz -> _
+> This #Baz comes from test:2:
+>     (f(#Foo), f(#Bar), f(#Baz))
+>                          ^^^^
+> but is used as #Foo | #Bar at test:6,test:7:
+>     | #Foo => 1
+>       ^^^^
+>     | #Bar => 2
+>       ^^^^
 
 # codegen test for single-case matches
 fn(x) {
@@ -773,12 +763,12 @@ fn(x) {
   }
 }
 > fn (x) { match x { (a, b, c) => (let c2 = match c { y => y }; (c2, b, a)) } }
->   fn [A, B, C](x: (A, B, C)) -> (C, B, A) {
+>   fn [a, b, c](x: (a, b, c)) -> (c, b, a) {
 >     match x {
->       | (a, b, c) => (let c2 : C = match c { y => y }; (c2, b, a))
+>       | (a, b, c) => (let c2 : c = match c { y => y }; (c2, b, a))
 >     }
 >   }
-> [A, B, C] ((A, B, C)) -> (C, B, A)
+> [a, b, c] (a, b, c) -> (c, b, a)
 > let  = %yield(fun (x) ret {
 >   let v0, v1, v2 = x.(0, 1, 2);
 >   ret((0: v2, 1: v1, 2: v0))
@@ -787,26 +777,28 @@ fn(x) {
 
 fn(x, y) {
   match x, y {
-  | A, A => 1
-  | A, B => 2
-  | B, A => 3
+  | #A, #A => 1
+  | #A, #B => 2
+  | #B, #A => 3
   }
 }
-> fn (x, y) { match x, y { A, A => 1 | A, B => 2 | B, A => 3 } }
->   fn (x: 'A | 'B, y: 'A) -> int {
+> fn (x, y) { match x, y { #A, #A => 1 | #A, #B => 2 | #B, #A => 3 } }
+>   fn (x: #A | #B, y: #A) -> Int {
 >     match x, y {
->       | A, A => 1
->       | A, B => 2
->       | B, A => 3
+>       | #A, #A => 1
+>       | #A, #B => 2
+>       | #B, #A => 3
 >     }
 >   }
-> ('A | 'B, 'A) -> int
-> RECHECK: Failure("unknown ctor")
+> (#A | #B, #A) -> Int
+> RECHECK: Lang.Error.Fail(_)
 > 
-> typechecking error: Failure("unknown ctor")
-> ELAB: Failure("unknown ctor")
+> test:2: This type does not have a constructor #B
+>     match x, y {
+>           ^^^^
+> ELAB: Lang.Error.Fail(_)
 > 
-> ELABINF: Failure("unknown ctor")
+> ELABINF: Lang.Error.Fail(_)
 > 
 > let  = %yield(fun (x, y) ret {
 >   match x {
@@ -821,36 +813,33 @@ fn(x, y) {
 >       }
 >     };
 >     B() -> {
->       match y {
->         A() -> {
->           ret(3)
->         }
->       }
+>       let  = y.();
+>       ret(3)
 >     }
 >   }
 > });
 > done
 
 # Compilation & errors with default cases
-fn (x : 'A | 'B | 'C | 'D | 'E, y) -> int {
+fn (x : #A | #B | #C | #D | #E, y) -> Int {
   match x, y {
-  | A, (A | B) => 1
-  | _, (A | B) => 2
+  | #A, (#A | #B) => 1
+  | _, (#A | #B) => 2
   }
 }
-> fn (x: 'A | 'B | 'C | 'D | 'E, y) -> int {
+> fn (x: #A | #B | #C | #D | #E, y) -> Int {
 >   match x, y {
->     | A, (A | B) => 1
->     | _, (A | B) => 2
+>     | #A, (#A | #B) => 1
+>     | _, (#A | #B) => 2
 >   }
 > }
->   fn (x: 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
+>   fn (x: #A | #B | #C | #D | #E, y: #A | #B) -> Int {
 >     match x, y {
->       | A, (A | B) => 1
->       | _, (A | B) => 2
+>       | #A, (#A | #B) => 1
+>       | _, (#A | #B) => 2
 >     }
 >   }
-> ('A | 'B | 'C | 'D | 'E, 'A | 'B) -> int
+> (#A | #B | #C | #D | #E, #A | #B) -> Int
 > let  = %yield(fun (x, y) ret {
 >   match x {
 >     A() -> {
@@ -877,24 +866,23 @@ fn (x : 'A | 'B | 'C | 'D | 'E, y) -> int {
 > });
 > done
 
-# FIXME: gets the right answer, but needs parens in printing
-fn (x : 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
+fn (x : #A | #B | #C | #D | #E, y: #A | #B) -> Int {
   match x, y {
-  | A, (A | B) => 1
-  | _, (A) => 2
+  | #A, (#A | #B) => 1
+  | _, (#A) => 2
   }
 }
-> fn (x: 'A | 'B | 'C | 'D | 'E, y: 'A | 'B) -> int {
+> fn (x: #A | #B | #C | #D | #E, y: #A | #B) -> Int {
 >   match x, y {
->     | A, (A | B) => 1
->     | _, A => 2
+>     | #A, (#A | #B) => 1
+>     | _, #A => 2
 >   }
 > }
 > test:2: Some cases of this pattern-match are missing:
 >     match x, y {
 >           ^^^^
 > The following cases are unhandled:
-> | B | C | D | E, B
+> | (#B | #C | #D | #E), #B
 
 
 # end

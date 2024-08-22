@@ -58,14 +58,14 @@ let run_cmd s =
       | _ -> println "MISMATCH"
      end;
      let open Typedefs in
-     begin match Check.elab_gen Env_nil ~loc:Location.noloc ~mode:(Check.fresh_gen_mode ()) None (fun env -> let a, b = Check.infer env ~mode:(Check.fresh_gen_mode ()) e in a, b, None, ()) with
+     begin match Check.elab_gen Env.empty ~loc:Location.noloc ~mode:(Check.fresh_gen_mode ()) None (fun env -> let a, b = Check.infer env ~mode:(Check.fresh_gen_mode ()) e in a, b, None, ()) with
      | t, (poly, etyped), _, () ->
         begin
         (* let poly, _ty, elab = Elab.elaborate Env_nil elab in *)
         poly |> Option.iter (fun _poly ->
           pprintln PPrint.(string "WEAKPOLY" (* FIXME  ^^ Print.typolybounds poly*)));
 
-        let elab = Elab.Elaborate.exp (Env_nil,[]) etyped in
+        let elab = Elab.Elaborate.exp (Env.empty,[]) etyped in
         pprintln ~width:80 (PPrint.(nest 2 (blank 2 ^^ Print.exp elab)));
 
         let elab_rendered = to_string (Print.exp elab) in
@@ -76,8 +76,8 @@ let run_cmd s =
         | _ -> println "MISMATCH_ELAB"
         end;
 
-        let env0 = Env_nil in
-        let te = Typedefs.unparse_ptyp ~flexvar:ignore (*Env_nil*) t in
+        let env0 = Env.empty in
+        let te = Typedefs.unparse_ptyp ~flexvar:ignore (*Env.empty*) t in
         pprintln (Print.tyexp te);
         begin try
           wf_ptyp env0 t;
@@ -97,10 +97,10 @@ let run_cmd s =
             println "ELAB: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
         end;
         begin try
-          let t', _ty, _gen, _comp = Check.elab_gen Env_nil ~loc:Location.noloc ~mode:(Check.fresh_gen_mode ()) None (fun env -> let a, b = Check.infer env ~mode:(Check.fresh_gen_mode ()) elab in a, b, None, ()) in
+          let t', _ty, _gen, _comp = Check.elab_gen Env.empty ~loc:Location.noloc ~mode:(Check.fresh_gen_mode ()) None (fun env -> let a, b = Check.infer env ~mode:(Check.fresh_gen_mode ()) elab in a, b, None, ()) in
           let te' = Typedefs.unparse_ptyp ~flexvar:ignore t' in
-          Types.subtype Env_nil t' (Check.typ_of_tyexp Env_nil te) |> Error.or_raise `Subtype Location.noloc;
-          Types.subtype Env_nil t (Check.typ_of_tyexp Env_nil te') |> Error.or_raise `Subtype Location.noloc;
+          Types.subtype Env.empty t' (Check.typ_of_tyexp Env.empty te) |> Error.or_raise `Subtype Location.noloc;
+          Types.subtype Env.empty t (Check.typ_of_tyexp Env.empty te') |> Error.or_raise `Subtype Location.noloc;
           ()
         with e ->
           println "ELABINF: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
@@ -121,20 +121,24 @@ let run_cmd s =
      end
   | Ok (`Prog p) ->
      let rendered = to_string (Print.prog p) in
-     println "%s" rendered;
+     (* println "%s" rendered; *)
      begin match Parse.parse_string ("{ " ^  rendered ^ " }") with
      | exception e -> println "MISMATCH: %s" (Printexc.to_string e)
      | Ok (`Prog p') when Exp.equal_prog p p' -> ()
      | Ok (`Prog p') -> println "MISMATCH %s" (to_string ~width:1000 (Print.prog p'))
      | _ -> println "MISMATCH"
      end;
-     println "PROG UNCHECKED"
+     begin match Check_decl.check_prog p with
+     | env, decls -> List.iter (fun d -> pprintln (Print.decl (Check_decl.unparse_type_decl ~env d))) decls
+     | exception e -> pexn e
+     end
   | Ok (`Sub (t1, t2)) ->
+     let module Env = Typedefs.Env in
      (match
-       let t1 = Check.typ_of_tyexp Env_nil t1 in
-       let t2 = Check.typ_of_tyexp Env_nil t2 in
+       let t1 = Check.typ_of_tyexp Env.empty t1 in
+       let t2 = Check.typ_of_tyexp Env.empty t2 in
        (*PPrint.(ToChannel.pretty 1. 80 stdout (Typedefs.pr_typ Pos t1 ^^ string " <: " ^^ Typedefs.pr_typ Neg t2 ^^ hardline));*)
-       Types.subtype Env_nil t1 t2 |> Error.or_raise `Subtype Location.noloc
+       Types.subtype Env.empty t1 t2 |> Error.or_raise `Subtype Location.noloc
      with
       | () -> println "ok"
       | exception e -> pexn e)

@@ -55,7 +55,10 @@ let precedence : exp' -> precedence = function
   | If _ | Match _ -> Term
 
 let ty_precedence : tyexp' -> precedence = function
-  | Tnamed _ | Trecord _ -> Term
+  | Ttyvar _ -> Term
+  | Trecord (Some (Named_tag ("_", _)), [], _) -> Infix
+  | Trecord (_,_,Ftuple _) -> Term
+  | Trecord (_,_,Frecord _) -> Infix
   | Tjoin _ -> Infix
   | _ -> Exp
 
@@ -93,7 +96,13 @@ let fields ~tcomma f = function
      let fs = List.map (function
        | ((s,_loc), m, Some x) -> field_name s ^^ mand_flag m ^^ string ":" ^^ break 1 ^^ f x
        | ((s,_loc), m, None) -> field_name s ^^ mand_flag m) fs in
-     braces (sep comma (fs @ ext_flag ext))
+     braces (sep (ifflat comma empty) (fs @ ext_flag ext))
+
+(* FIXME syntax *)
+let tuple_tag = function
+  | Anon_tag -> string "#"
+  | Struct_tag t -> string "#" ^^ symbol t
+  | Named_tag t -> symbol t
 
 let rec exp ~prec e =
   match e with
@@ -124,8 +133,10 @@ and exp_ e =
        op "=" ^^ group (exp e) ^^
        string ";") ^^ break 1 ^^ exp body*)
   | Tuple (None, t) -> fields ~tcomma:true (exp ~prec:Exp) t
-  | Tuple (Some tag, Ftuple ([],Ext_closed)) -> symbol tag
-  | Tuple (Some tag, t) -> symbol tag ^^ fields ~tcomma:false (exp ~prec:Exp) t
+  | Tuple (Some Anon_tag, Ftuple ([], Ext_closed)) -> parens empty
+  | Tuple (Some tag, Ftuple ([],Ext_closed)) -> tuple_tag tag
+  | Tuple (Some Anon_tag, (Ftuple _ as t)) -> fields ~tcomma:true (exp ~prec:Exp) t
+  | Tuple (Some tag, t) -> tuple_tag tag ^^ fields ~tcomma:false (exp ~prec:Exp) t
   | App (f, args) ->
      let args = List.map (function
        | (Some s, x) -> string s ^^ string ":" ^^ space ^^ exp ~prec x
@@ -152,7 +163,7 @@ and fndef ~name (poly, params, ty, body) =
      (match ty with
       | None -> empty
       | Some ty ->
-         indent (blank 1 ^^ group (string "->" ^^ break 1 ^^ group (tyexp ~prec:Exp ty))))) ^^
+         indent (blank 1 ^^ group (string "->" ^^ break 1 ^^ group (tyexp ~prec:Term ty))))) ^^
     block body
 
 and block e =
@@ -199,8 +210,9 @@ and pat_ p =
   | Pbind (s, (Some Pany, _)) -> symbol s
   | Pbind (s, p) -> symbol s ^^ op "@" ^^ pat ~prec:Infix p
   | Ptuple (None, ts) -> fields ~tcomma:true (pat ~prec:Term) ts
-  | Ptuple (Some tag, Ftuple ([],Ext_closed)) -> symbol tag
-  | Ptuple (Some tag, ts) -> symbol tag ^^ fields ~tcomma:false (pat ~prec:Term) ts
+  | Ptuple (Some Anon_tag, (Ftuple _ as ts)) -> fields ~tcomma:true (pat ~prec:Term) ts
+  | Ptuple (Some tag, Ftuple ([],Ext_closed)) -> tuple_tag tag
+  | Ptuple (Some tag, ts) -> tuple_tag tag ^^ fields ~tcomma:false (pat ~prec:Term) ts
   | Por (p, q) -> pat ~prec p ^^ op "|" ^^ pat ~prec q
 
 and tyexp ~prec t =
@@ -212,15 +224,47 @@ and tyexp ~prec t =
 and tyexp_ t =
   let prec = ty_precedence t in
   match t with
-  | Tnamed s -> ident s
-  | Trecord (None, fs) -> fields ~tcomma:true (tyexp ~prec:Exp) fs
-  | Trecord (Some tag, Ftuple ([],Ext_closed)) -> qsymbol tag
-  | Trecord (Some tag, fs) -> qsymbol tag ^^ fields ~tcomma:false (tyexp ~prec:Term) fs
+  | Trecord (tag, args, fs) ->
+     let tag' =
+       match tag, fs with
+       | None, _ -> empty
+       | Some Anon_tag, Ftuple _ -> empty
+       | Some t, _ -> tuple_tag t
+     in
+     let args =
+       let tyarg = function
+         | None, _ -> string "<err>"
+         | Some (Arg_pos t), _ -> string "+" ^^ tyexp ~prec:Exp t
+         | Some (Arg_neg t), _ -> string "-" ^^ tyexp ~prec:Exp t
+         | Some (Arg_gen t), _ -> tyexp ~prec:Exp t
+         | Some (Arg_both {neg;pos}), _ -> string "-" ^^ tyexp ~prec:Exp neg ^^ break 1 ^^ string "+" ^^ tyexp ~prec:Exp pos
+       in
+       match args with
+       | [] -> empty
+       | args ->
+          brackets (separate_map (comma ^^ break 1) tyarg args)
+     in
+     let fs =
+       match tag, fs with
+       | Some Anon_tag, Ftuple _ ->
+          fields ~tcomma:true (tyexp ~prec:Exp) fs
+       | Some _, Ftuple ([], Ext_closed) -> empty
+       | Some _, _ -> fields ~tcomma:false (tyexp ~prec:Exp) fs
+       | None, _ -> fields ~tcomma:true (tyexp ~prec:Exp) fs
+     in
+     group (tag' ^^ args) ^^ fs
   | Tfunc (args, ret) ->
-     parens (sep comma (List.map (tyexp ~prec:Exp) args)) ^^
-       space ^^ group (string "->" ^^ break 1 ^^ group (tyexp ~prec:Exp ret))
+     let args =
+       match args with
+       | [arg] -> tyexp ~prec:Term arg
+       | args ->
+          parens (sep comma (List.map (tyexp ~prec:Exp) args))
+     in
+     args ^^ space ^^ group (string "->" ^^ break 1 ^^ group (tyexp ~prec:Exp ret))
   | Tforall (bounds, body) ->
       typolybounds bounds ^^ space ^^ tyexp ~prec:Exp body
+  | Ttyvar v ->
+     symbol v
   | Tjoin (s, t) -> tyexp ~prec s ^^ op "|" ^^ tyexp ~prec t
 
 and argtype ~pos fn ty =
@@ -236,11 +280,41 @@ and typolybounds bs =
 
 let exp = exp ~prec:Max
 let tyexp = tyexp ~prec:Max
-let pat = pat ~prec:Max
+let pat = pat ~prec:Term
+
+let variance_spec v =
+  match v.occurs_neg, v.occurs_pos with
+  | `No, `No -> "0 "
+  | `No, `Strict -> "+"
+  | `No, `Yes -> "++"
+  | `Yes, `No -> "-"
+  | `Yes, `Strict -> "+-"
+  | `Yes, `Yes -> "++-"
+
+let decl_ty_param ((v, s) : Exp.variance_spec option * symbol) =
+  match v with
+  | None -> symbol s
+  | Some v ->
+     string (variance_spec v) ^^ symbol s
+
+let decl_ty_params = function
+  | [] -> empty
+  | ps -> brackets (separate_map (comma ^^ break 1) decl_ty_param ps)
+
+let decl_ty_body = function
+  | Dty_record (fs,_) ->
+     fields ~tcomma:false tyexp fs
+  | Dty_variant vs ->
+     let variant (s, (fs,_)) = symbol s ^^ fields ~tcomma:false tyexp fs in
+     (* FIXME share code with Match? *)
+     braces' (indent (break 1 ^^ ifflat empty (string "| ") ^^ separate_map (break 1 ^^ string "| ") variant vs) ^^ break 1)
 
 let decl = function
   | None, _ -> string "<err>"
   | Some (Dfn (s, def)), _ ->
      fndef ~name:(Some s) def
+  | Some (Dtype (s, ps, body)), _ ->
+     string "type" ^^ space ^^ symbol s ^^ decl_ty_params ps ^^ decl_ty_body body
+
 
 let prog p = separate hardline (List.map decl p)
