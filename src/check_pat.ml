@@ -241,7 +241,7 @@ let rec split_cases :
 
      let collect_fields (fields : _ split_fields) : unit Fields.t loc =
        List.fold_left (fun (acc, acc_loc) ((fs, loc), _) ->
-         (Fields.meet (acc, acc_loc) (fs, loc)
+         (Types.Fields.meet (acc, acc_loc) (fs, loc)
            ~pos:(function L () -> () | R _ -> () | LR ((), _) -> ())),
          (acc_loc @ loc) )
          (Fields.empty, [])
