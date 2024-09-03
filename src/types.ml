@@ -1137,18 +1137,18 @@ let log_changes = ref false
 let verbose_types = match Sys.getenv "VERBOSE_TYPES" with _ -> true | exception Not_found -> false
 
 module Promotion (P : sig
-  type ('n, 'p) t
+  type t
   val map : 
     neg:(mode:[ `Elab | `Poly ] ->
-         ext:int list -> ('p1, 'n1) typ -> ('p2,'n2) typ) ->
+         ext:int list -> ntyp -> ntyp) ->
     pos:(mode:[ `Elab | `Poly ] ->
-         ext:int list -> ('n1, 'p1) typ -> ('n2, 'p2) typ) ->
-    ('n1, 'p1) t -> ('n2, 'p2) t
+         ext:int list -> ptyp -> ptyp) ->
+    t -> t
 end) = struct
 
-let promote_exn ~policy ~rigvars ~env (ty : (flexvar, lower) P.t) : _ * (flexvar, lower) P.t =
+let promote_exn ~policy ~rigvars ~env (ty : P.t) : _ * P.t =
   (* Format.printf "ELAB %a{\n%a}@." dump_ptyp orig_ty pp_elab_req erq; *)
-  let rec fixpoint visit (prev_ty : (flexvar, lower) P.t) =
+  let rec fixpoint visit (prev_ty : P.t) =
     (* if verbose_types then Format.printf "FIX: %a" dump_ptyp prev_ty; *)
     if visit > 99 then intfail "looping?";
     let changes = ref [] in

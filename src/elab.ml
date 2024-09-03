@@ -4,43 +4,43 @@ open Typedefs
 open Exp
 open Location
 
-type ('n,'p) elab_typ =
-  | Elab_ptyp of ('n, 'p) typ
-  | Elab_ntyp of ('p, 'n) typ
+type elab_typ =
+  | Elab_ptyp of ptyp
+  | Elab_ntyp of ntyp
 
-type ('n,'p) typed_exp = ('n, 'p) typed_exp' mayloc and ('n, 'p) typed_exp' =
+type typed_exp = typed_exp' mayloc and typed_exp' =
   | Lit of literal loc
   | Var of ident * value_binding (* Is this right? *)
-  | Fn of ('n, 'p) typed_func_def
-  | FnDef of symbol * IR.value IR.Binder.t * ('n, 'p) typed_func_def * ('n, 'p) typed_exp
-  | App of ('n,'p) typed_exp * ('n,'p) typed_exp list (* FIXME: restore/preserve parameter names? *)
-  | Tuple of tuple_tag option * (field_name loc * ('n,'p) typed_exp) list
-  | Let of typed_pat * Check_pat.ex_split * ('n,'p) elab_typ * ('n,'p) typed_exp * ('n,'p) typed_exp Check_pat.action
-  | Seq of ('n,'p) typed_exp * ('n, 'p) typed_exp
-  | Proj of ('n, 'p) typed_exp * symbol
-  | If of ('n, 'p) typed_exp * ('n, 'p) typed_exp * ('n, 'p) typed_exp
-  | Match of ('n, 'p) typed_exp list loc * Check_pat.ex_split * ('n, 'p) typed_case list
-  | Typed of ('n, 'p) typed_exp * ('n, 'p) elab_typ
+  | Fn of typed_func_def
+  | FnDef of symbol * IR.value IR.Binder.t * typed_func_def * typed_exp
+  | App of typed_exp * typed_exp list (* FIXME: restore/preserve parameter names? *)
+  | Tuple of tuple_tag option * (field_name loc * typed_exp) list
+  | Let of typed_pat * Check_pat.ex_split * elab_typ * typed_exp * typed_exp Check_pat.action
+  | Seq of typed_exp * typed_exp
+  | Proj of typed_exp * symbol
+  | If of typed_exp * typed_exp * typed_exp
+  | Match of typed_exp list loc * Check_pat.ex_split * typed_case list
+  | Typed of typed_exp * elab_typ
   | Pragma of string
 
-and ('n, 'p) typed_case = typed_pat list list loc * ('n, 'p) typed_exp Check_pat.action
+and typed_case = typed_pat list list loc * typed_exp Check_pat.action
 
-and ('n, 'p) typed_func_def =
-  ('n, 'p) typed_polybounds option * ('n, 'p) typed_parameters * Check_pat.ex_split * ('n, 'p) typ option * ('n, 'p) typed_exp Check_pat.action
+and typed_func_def =
+  typed_polybounds option * typed_parameters * Check_pat.ex_split * ptyp option * typed_exp Check_pat.action
 
-and ('n, 'p) typed_parameters =
-  (typed_pat * ('p, 'n) typ option) list
+and typed_parameters =
+  (typed_pat * ntyp option) list
 
 and typed_pat = pat
 
-and ('n, 'p) typed_polybounds =
-  (string Location.loc * ('p,'n) typ option) IArray.t
+and typed_polybounds =
+  (string Location.loc * ntyp option) IArray.t
 
 let map_elab_typ ~neg ~pos ~ext = function
   | Elab_ptyp t -> Elab_ptyp (pos ~ext t)
   | Elab_ntyp t -> Elab_ntyp (neg ~ext t)
 
-let rec typed_map_typs_exp ~neg ~pos ~ext (e : _ typed_exp) =
+let rec typed_map_typs_exp ~neg ~pos ~ext (e : typed_exp) =
   match e with
   | None, _ as e -> e
   | Some e, loc -> Some (typed_map_typs_exp' ~neg ~pos ~ext e), loc
@@ -106,12 +106,12 @@ let wf_typed_exp env t =
   |> ignore
 
 module Elaborate = struct
-  let rec exp env (e : _ typed_exp) : exp =
+  let rec exp env (e : typed_exp) : exp =
     match e with
     | None, l -> None, l
     | Some e, l -> Some (exp' env e), l
 
-  and exp' env : _ typed_exp' -> exp' = function
+  and exp' env : typed_exp' -> exp' = function
     | Lit l -> Lit l
     | Var ((id,loc),_v) -> Var (id, loc)
     | Fn fn -> Fn (fndef env fn)
@@ -256,13 +256,13 @@ module Compile = struct
     | Some (Pbind (v,_)), _ -> Some (fst v : string)
     | _ -> None
 
-  let rec exp (e : _ typed_exp) : IRB.exp =
+  let rec exp (e : typed_exp) : IRB.exp =
     match e with
     | None, _loc -> IRB.trap "type error?"
     | Some e, _loc ->
        exp' e
 
-  and exp' : _ typed_exp' -> IRB.exp = function
+  and exp' : typed_exp' -> IRB.exp = function
     | Lit (l, _) -> IRB.literal l
     | Var (_, v) -> IRB.var v.comp_var
     | Typed (e, _ty) -> exp e
@@ -319,7 +319,7 @@ module Compile = struct
     | Pragma _ ->
        intfail "unknown pragma"
 
-  and func_def ((_poly,params,psplit,_ret,body) : _ typed_func_def) : IR.value =
+  and func_def ((_poly,params,psplit,_ret,body) : typed_func_def) : IR.value =
     let actions = [| { body with rhs = exp body.rhs } |] in
     let params =
       List.map (fun (pat, _) ->

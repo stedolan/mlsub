@@ -8,8 +8,6 @@ open Error
 let unit loc = tcons (Record {tag=Some Anon_tag; args=[]; body={fnames=[]; fields=FieldMap.empty; fopen=Ext_closed}}, loc)
 
 open Elab
-type typed_exp = (flexvar, lower) Elab.typed_exp
-type typed_exp' = (flexvar, lower) Elab.typed_exp'
 
 type generalisation_mode = {
   mutable gen_level_acc: env_level option;
@@ -26,7 +24,7 @@ let mark_var_use_at_level ~(mode : generalisation_mode) lvl =
        Some (Env_level.min l1 l2)
 
 module Promotion = Types.Promotion (struct
-  type ('n,'p) t = ('n,'p) typ * ('n,'p) Elab.typed_exp
+  type t = ptyp * Elab.typed_exp
   let map ~neg ~pos (ty, typed_exp) =
     let ty = pos ~mode:`Poly ~ext:[] ty in
     let typed_exp = typed_map_typs_exp typed_exp ~ext:[]
@@ -36,7 +34,7 @@ module Promotion = Types.Promotion (struct
     (ty, typed_exp)
 end)
 
-let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level option * 'rest) : ptyp * (_ typed_polybounds option * typed_exp) * bool * 'rest =
+let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level option * 'rest) : ptyp * (typed_polybounds option * typed_exp) * bool * 'rest =
   let rigvars', rig_names =
     match poly with
     | None -> IArray.empty, SymMap.empty
@@ -381,7 +379,7 @@ and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * typed_exp =
   wf_ptyp env !ty;
   !ty, e
 
-and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * _ typed_func_def =
+and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_func_def =
    let ty, (typed_poly, typed_fn), _generalised, (act, split) =
      elab_gen env ~loc ~mode poly (fun env ->
        let check_ty ~ispos ty =

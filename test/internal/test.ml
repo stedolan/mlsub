@@ -27,7 +27,7 @@ let dump env (t : ptyp) =
   Types.log_changes := true;
   let t_orig = t in
   let module Promotion = Types.Promotion (struct
-    type ('n,'p) t = ('n,'p) typ
+    type t = ptyp
     let map ~neg:_ ~pos t =
       let t = pos ~mode:`Poly ~ext:[] t in
       dump t_orig;
