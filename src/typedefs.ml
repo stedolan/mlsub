@@ -1008,11 +1008,13 @@ let rec close_typ :
             body = close_typ ~neg ~pos lvl ix body}
 
 let next_flexvar_id = ref 0
-let fresh_flexvar level : flexvar =
+
+let fresh_flexvar' level upper : flexvar =
   let id = !next_flexvar_id in
   incr next_flexvar_id;
-  { level; upper = Utop; lower = bottom; id; gen = Not_generalising }
+  { level; upper; lower = bottom; id; gen = Not_generalising }
 
+let fresh_flexvar level = fresh_flexvar' level Utop
 
 (* FIXME dedup with check_type *)
 let rec env_lookup_type_var (env : Env.bindings) loc name : rigvar option =

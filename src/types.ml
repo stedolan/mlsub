@@ -156,7 +156,7 @@ let lower_contains_fv fv lower =
 
 let lower_of_rigid_bound env rv : lower =
   Env.rigid_bound env rv
-  |> List.map (fun (c,cloc) -> Lcons (c, if cloc = Location.noloc then rv.loc else cloc))
+  |> List.map (fun (c,cloc) -> Lcons (c, if cloc == Location.noloc then rv.loc else cloc))
 
 (* Check whether a flex-flex constraint α ≤ β is already present via an upper bound of α *)
 let rec has_flex_upper (pv : flexvar) nv =
@@ -563,9 +563,7 @@ let rec instantiate_flex env vars (body : ptyp) : ptyp =
       | None -> Utop
       | Some t -> ntyp_to_upper ~simple:true env (open_typ ~neg:fvpos ~pos:fvneg 0 t) in
     assert (fv.upper = Utop && fv.lower = []);
-    (* b need not be matchable, so we need to subtype_lpu rather
-       than using it directly as fv.upper *)
-    subtype_lpu ~changes:(ref []) env (Lflexvar fv) b)
+    fv_set_upper ~changes:(ref []) fv b)
     fvars vars;
   open_typ ~neg:fvneg ~pos:fvpos 0 body
 
@@ -575,7 +573,7 @@ and ptyp_to_lower ~simple env : ptyp -> lower = function
      let conses =
        conses |> List.map (fun (cons, loc) ->
          Lcons (Cons1.map cons
-                  ~neg:(ntyp_to_flexvar ~simple env)
+                  ~neg:(ntyp_to_fresh_flexvar ~simple env)
                   ~pos:(ptyp_to_lower ~simple env),
                 loc))
      in
@@ -590,16 +588,16 @@ and ptyp_to_lower ~simple env : ptyp -> lower = function
      let body = instantiate_flex env vars body in
      ptyp_to_lower ~simple env body
 
-(* Result is not necessarily matchable, so cannot be used directly as fv.upper *)
 and ntyp_to_upper ~simple env : ntyp -> upper = function
   | Tsimple t -> Uflexvar t
   | t when is_ttop t -> Utop
   | Tcvj (conses, vars, loc) ->
      let conses =
        conses |> List.map (fun (cons, _loc) ->
+         (* FIXME: is matchability assumed for the ptyp_to_lower bits? *)
          Ucons (Cons1.map cons
                   ~neg:(ptyp_to_lower ~simple env)
-                  ~pos:(ntyp_to_flexvar ~simple env)))
+                  ~pos:(ntyp_to_fresh_flexvar ~simple env)))
      in
      let vars =
        vars |> List.map (function
@@ -630,14 +628,9 @@ and ntyp_to_upper ~simple env : ntyp -> upper = function
      let body = open_typ ~neg ~pos 0 body in
      ntyp_to_upper ~simple env body
 
-and ntyp_to_flexvar ~simple env (t : ntyp) =
-  match ntyp_to_upper ~simple env t with
-  | Utop -> fresh_flexvar (Env.level env)
-  | Uflexvar v -> v
-  | Ugen _ as u ->
-     let fv = fresh_flexvar (Env.level env) in
-     noerror (fun () -> subtype_lpu ~changes:(ref []) env (Lflexvar fv) u);
-     fv
+and ntyp_to_fresh_flexvar ~simple env t =
+  fresh_flexvar' (Env.level env) (ntyp_to_upper ~simple env t)
+
 
 (*
  * Subtyping on typs (polymorphism)

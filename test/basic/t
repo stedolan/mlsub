@@ -2246,4 +2246,4 @@ fn (z) { go(z).foo.baz }
 > done
 
 
-> STATS: fix: 125, flex: 1425
+> STATS: fix: 125, flex: 1338

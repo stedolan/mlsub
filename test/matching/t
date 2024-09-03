@@ -870,4 +870,4 @@ fn (x : #A | #B | #C | #D | #E, y: #A | #B) -> Int {
 
 
 # end
-> STATS: fix: 13, flex: 221
+> STATS: fix: 13, flex: 243
