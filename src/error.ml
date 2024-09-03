@@ -10,6 +10,8 @@ type error_kind =
       | `Wrong_args of string * [`Arity of int * int | `Variance of int * string * [`Pos|`Neg]]
       | `Misused_param of Exp.variance_spec * string * [`Pos|`Neg]
       | `Recursion of [`Not_strictly_positive of string]
+      | `Close_error of Types.close_typ_err
+      | `Join_of_ty_param
       ]
   | Conflict of [`Expr|`Pat|`Subtype] * Types.subtyping_error
   (* FIXME: Maybe delete Unknown_constructor, it's worse than a standard type error *)
@@ -35,13 +37,7 @@ let or_raise kind loc = function
 let pp_err input loc err : PPrint.document =
   let open PPrint in
   let pp fmt = Format.ksprintf PPrint.utf8string fmt in
-  let pp_ty ~env t =
-    Typedefs.unparse_gen_typ t
-      ~env
-      ~neg:(fun ~env:_ () -> Typedefs.(mktyexp (named_type "_")))
-      ~pos:(fun ~env:_ () -> Typedefs.(mktyexp (named_type "_")))
-    |> Print.tyexp
-  in
+  let pp_ty = Typedefs.fmt_unit_typ in
   let pp_loc (loc : Location.t) =
     (* FIXME character numbers also *)
     separate_map (pp ",") (fun (loc : Location.span) ->
@@ -96,12 +92,19 @@ let pp_err input loc err : PPrint.document =
      pp "The type parameter %s%s cannot be used here %s" (Print.variance_spec vspec) name (vtype v) ^^ context
   | Illformed_type (`Recursion (`Not_strictly_positive t)) ->
      pp "The type %s is used recursively in a non-strictly-positive position" t ^^ context
+  | Illformed_type (`Close_error Join_contravariant) ->
+     pp "This type contains a contravariant join of a polymorphic variable" ^^ context
+  | Illformed_type (`Close_error Join_bad_scoping) ->
+     pp "This type contains a scope-escaping join of a polymorphic variable" ^^ context
+  | Illformed_type `Join_of_ty_param ->
+     pp "Type definitions may not use joins of type parameters" ^^ context
   | Bad_tuple_intro `Ext_open ->
      pp "Tuple construction cannot use '...'" ^^ context
   | Bad_tuple_intro `Opt ->
      pp "Tuple construction cannot use optional fields" ^^ context
   | Conflict (_kind, err) ->
      let env = err.env in
+     let env' = (fst err.env, []) in
      let conflict =
        match err.err with
         | Head Incompatible ->
@@ -127,8 +130,8 @@ let pp_err input loc err : PPrint.document =
      in
      conflict ^^
      nest 2 (hardline ^^ pp_context loc) ^^
-     nest 2 (hardline ^^ pp "   found:" ^^ group (nest 3 (break 1 ^^ pp_ty ~env err.lhs))) ^^
-     nest 2 (hardline ^^ pp "expected:" ^^ group (nest 3 (break 1 ^^ pp_ty ~env err.rhs))) ^^
+     nest 2 (hardline ^^ pp "   found:" ^^ group (nest 3 (break 1 ^^ pp_ty ~env:env' err.lhs))) ^^
+     nest 2 (hardline ^^ pp "expected:" ^^ group (nest 3 (break 1 ^^ pp_ty ~env:env' err.rhs))) ^^
      (match err.located with
       | ((lty,lloc),(rty,rloc)) ->
          let lty = nest 4 (break 1 ^^ pp_ty ~env lty) ^^ break 1 in

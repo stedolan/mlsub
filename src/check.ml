@@ -5,12 +5,11 @@ open Typedefs
 open Types
 open Error
 
-let tcons = Check_type.tcons
-let unit loc = tcons loc (Record {tag=Some Anon_tag; args=[]; body={fnames=[]; fields=FieldMap.empty; fopen=Ext_closed}})
+let unit loc = tcons (Record {tag=Some Anon_tag; args=[]; body={fnames=[]; fields=FieldMap.empty; fopen=Ext_closed}}, loc)
 
 open Elab
-type typed_exp = (flexvar, pos_flexvar) Elab.typed_exp
-type typed_exp' = (flexvar, pos_flexvar) Elab.typed_exp'
+type typed_exp = (flexvar, lower) Elab.typed_exp
+type typed_exp' = (flexvar, lower) Elab.typed_exp'
 
 type generalisation_mode = {
   mutable gen_level_acc: env_level option;
@@ -29,8 +28,8 @@ let mark_var_use_at_level ~(mode : generalisation_mode) lvl =
 module Promotion = Types.Promotion (struct
   type ('n,'p) t = ('n,'p) typ * ('n,'p) Elab.typed_exp
   let map ~neg ~pos (ty, typed_exp) =
-    let ty = pos ~mode:`Poly ~index:0 ty in
-    let typed_exp = typed_map_typs_exp typed_exp ~index:0
+    let ty = pos ~mode:`Poly ~ext:[] ty in
+    let typed_exp = typed_map_typs_exp typed_exp ~ext:[]
                 ~neg:(neg ~mode:`Elab)
                 ~pos:(pos ~mode:`Elab)
     in
@@ -46,6 +45,7 @@ let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level
   let env', _rigvars = enter_rigid env rigvars' rig_names in
   let orig_ty, typed_exp, gen_level, rest = fn env' in
   wf_ptyp env' orig_ty;
+  wf_typed_exp env' typed_exp;
   let can_generalise =
     match gen_level with
     | None -> true
@@ -55,8 +55,14 @@ let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level
        false
   in
   let policy = if can_generalise then `Generalise loc else `Hoist env in
-  let bvars, (ty, typed_exp) = Promotion.promote ~policy ~rigvars:rigvars' ~env:env' (orig_ty, typed_exp) in
-  if Vector.length bvars = 0 then
+  let bvars, (ty, typed_exp) =
+    try Promotion.promote_exn ~policy ~rigvars:rigvars' ~env:env' (orig_ty, typed_exp)
+    with Types.CloseError (err,errloc) ->
+      (* FIXME: locations and explanations here are poor *)
+      let loc = Option.value errloc ~default:loc in
+      fail loc (Illformed_type (`Close_error err))
+  in
+  if Array.length bvars = 0 then
     ty, (None, typed_exp), can_generalise, rest
   else
     let next_name = ref 0 in
@@ -70,7 +76,7 @@ let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level
       match Typedefs.env_lookup_type_var env' Location.noloc name with
       | None -> name, Location.noloc
       | Some _ -> mkname () in
-    let bounds = bvars |> Vector.to_array |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex r -> mkname (), Some r) |> IArray.of_array in
+    let bounds = bvars |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex r -> mkname (), Some r) |> IArray.of_array in
     let tpoly = Tpoly { vars = bounds; body = ty } in
     wf_ptyp env tpoly;
     tpoly,
@@ -82,12 +88,12 @@ let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level
    This improves elaborations but is a bit of a hack.
    Decide whether to keep it! *)
 let elab_ptyp = function
-  | Tsimple (Vflex v) -> Elab_ntyp (Tsimple v)
+  | Tsimple [Lflexvar v] -> Elab_ntyp (Tsimple v)
   | ty -> Elab_ptyp ty
 
 let fresh_flow env : ntyp * ptyp =
   let fv = fresh_flexvar (Env.level env) in
-  Tsimple fv, Tsimple (Vflex fv)
+  Tsimple fv, Tsimple [Lflexvar fv]
 
 (* "Simultaneous Input and Output", e.g. sec 6.4 of Bidirectional Typing *)
 type ty_mode =
@@ -116,10 +122,10 @@ let inspect_cons cons ty =
   | Tpoly _ ->
      (* FIXME: maybe make this impossible? *)
      Iother
-  (* FIXME: Tcons/Tjoin selection *)
-  | Tcons (c,cloc) ->
+  (* FIXME: multiple compatible cons? *)
+  | Tcvj ([c,cloc],[],_loc) ->
      (match Cons1.sub_head cons c with Le _ -> Imatches (c,cloc) | Un _ -> Iother)
-  | Tbot _ | Tvar _ | Tjoin _ -> Iother
+  | _ -> Iother
 
 let typ_of_tyexp env ty =
   Check_type.typ_of_tyexp ~lookup:Check_type.default_lookup_fn ~env ty
@@ -164,7 +170,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      Typed (e, elab_ptyp t)
 
   | If ((_,loc) as e, ifso, ifnot) ->
-     let e = check env ~mode e (checking (Tcons (c_bool loc))) in
+     let e = check env ~mode e (checking (tcons (c_bool loc))) in
      let ifso = check env ~mode ifso ty in
      let ifnot = check env ~mode ifnot ty in
      If (e, ifso, ifnot)
@@ -213,9 +219,9 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
           let econs = Cons1.map econs
             ~neg:never
             ~pos:(fun (_e,r) ->
-              let p = ref (Tbot None) in
+              let p = ref (tbot None) in
               r := Some { ty_inferred = Some p;
-                          ty_checked = Tcons (Top, Location.noloc) };
+                          ty_checked = tcons (Top, Location.noloc) };
               p)
           in
           let fields =
@@ -228,7 +234,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
           let econs = Cons1.map econs
                         ~neg:never
                         ~pos:(fun r -> !r) in
-          inferred (tcons eloc econs);
+          inferred (tcons (econs, eloc));
           fields
      in
      Tuple (tag, fields)
@@ -236,7 +242,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
   | Proj (e, (field, loc)) ->
      let ty, e = infer env ~mode e in
      let f = Field_named field in
-     let r = ref (Tbot None) in
+     let r = ref (tbot None) in
      let tyf =
        match
         match_ptyp ~loc:eloc env ty
@@ -333,8 +339,8 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
 
   | App (f, args) ->
      let fty, f = infer env ~mode f in
-     let tyargs = List.map (fun _ -> ref (Tcons (Top, Location.noloc))) args in
-     let tyret = ref (Tbot None) in
+     let tyargs = List.map (fun _ -> ref (tcons (Top, Location.noloc))) args in
+     let tyret = ref (tbot None) in
      let () =
        match match_ptyp ~loc:eloc env fty [Func (tyargs, tyret)] with
        | Ok () -> ()
@@ -363,14 +369,14 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
   | Pragma ("true"|"false" as b) when match inspect_cons (fst (c_bool eloc)) ty with Imatches (Record _,_) -> true | _ -> false ->
      Pragma b
   | Pragma "bot" ->
-     inferred (Tbot (Some eloc));
+     inferred (tbot (Some eloc));
      Pragma "bot"
   | Pragma s -> failwith ("pragma: " ^ s)
 
 
 and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * typed_exp =
-  let ty = ref (Tbot (Some (Location.fixme "inference"))) in
-  let ty_mode = { ty_inferred = Some ty; ty_checked = Tcons (Top, Location.noloc) } in
+  let ty = ref (tbot (Some (Location.fixme "inference"))) in
+  let ty_mode = { ty_inferred = Some ty; ty_checked = tcons (Top, Location.noloc) } in
   let e = check env ~mode e ty_mode in
   wf_ptyp env !ty;
   !ty, e
@@ -378,12 +384,20 @@ and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * typed_exp =
 and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * _ typed_func_def =
    let ty, (typed_poly, typed_fn), _generalised, (act, split) =
      elab_gen env ~loc ~mode poly (fun env ->
+       let check_ty ~ispos ty =
+         let ty = typ_of_tyexp env ty in
+         (* check for contravariant joins *)
+         begin try ignore (close_typ_poly_exn ~ispos (Env.level env) ty)
+         with Types.CloseError (err,loc) ->
+           let loc = Option.value loc ~default:eloc in
+           fail loc (Illformed_type (`Close_error err))
+         end;
+         ty
+       in
        let params = List.map (fun (p, ty) ->
          match ty with
          | Some ty ->
-            let ty = typ_of_tyexp env ty in
-            (* check for contravariant joins *)
-            ignore (close_typ_rigid ~ispos:false (Env.level env) ty);
+            let ty = check_ty ~ispos:false ty in
             (ty,ty), p, None
          | None ->
             fresh_flow env, p, Some (Env.level env)) params in
@@ -398,23 +412,21 @@ and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * _ type
        let res, body =
          match ret with
          | Some ty ->
-            let ty = typ_of_tyexp env ty in
-            ignore (close_typ_rigid ~ispos:true (Env.level env) ty);
+            let ty = check_ty ~ispos:true ty in
             ty, check env' ~mode:bmode body (checking ty)
          | None ->
             infer env' ~mode:bmode body in
        let _ = List.map (fun ((tn,tp),_,_) -> wf_ntyp env tn; wf_ptyp env tp) params in
        (* FIXME params or ptys? What happens if they disagree? *)
-       tcons eloc (Func (List.map (fun ((tn,_tp),_,_) -> tn) params, res)),
+       tcons (Func (List.map (fun ((tn,_tp),_,_) -> tn) params, res), eloc),
        body,
        bmode.gen_level_acc,
        (act, split)) in
    let tparams, tret =
      (* FIXME awful hack *)
      match ty with
-     | Tcons (Func (t,r), _loc)
-     | Tpoly { body = Tcons (Func (t,r), _loc); _ } -> t,r
-     (* FIXME Tjoin/Tcons *)
+     | Tcvj ([Func (t,r),_], [], _loc)
+     | Tpoly { body = Tcvj ([Func (t,r),_],[], _loc); _ } -> t,r
      | _ -> intfail "wuh?"
    in
    let params = List.map2 (fun (p, _) t -> (p, Some t)) params tparams in
@@ -434,9 +446,9 @@ and infer_lit = function
      infer_lit' loc l,
      Lit (l, loc)
 and infer_lit' loc = function
-  | Bool _ -> Tcons (c_bool loc)
-  | Int _ -> Tcons (c_int loc)
-  | String _ -> Tcons (c_string loc)
+  | Bool _ -> tcons (c_bool loc)
+  | Int _ -> tcons (c_int loc)
+  | String _ -> tcons (c_string loc)
 
 and check_rhs env ~mode pty e =
   match pty with

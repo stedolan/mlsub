@@ -1386,7 +1386,7 @@ fn (x, wid : (([a] a -> a) -> Int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
 >   fn (x, wid : (([a] a -> a) -> Int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
 >                                                                            ^
 >      found: (_) -> Any
->   expected: (_) -> Nothing
+>   expected: [a] (_) -> Nothing
 > This Any comes from test:1:
 >   fn (x, wid : (([a] a -> a) -> Int)) { let f = fn(a){{x:x(a),y:a}.y}; wid(f) }
 >                      ^
@@ -1438,14 +1438,14 @@ fn (x, wid : (([a <: {foo:Int}] a -> a | {foo:Int,bar:String}) -> Int)) { let f 
 > }
 >   fn [a, b <: {foo: Int, bar: String}](
 >     x: ({foo: Int} | a) -> b,
->     wid: ([a_2 <: {foo: Int}] a_2 -> a_2 | {foo: Int, bar: String}) -> Int
+>     wid: ([a_2 <: {foo: Int}] a_2 -> {foo: Int, bar: String} | a_2) -> Int
 >   ) -> Int {
 >     let f : ({foo: Int} | a) -> b = fn (a: {foo: Int} | a) -> b { x(a) };
 >     wid(f)
 >   }
 > [a, b <: {foo: Int, bar: String}] (
 >   ({foo: Int} | a) -> b,
->   ([a_2 <: {foo: Int}] a_2 -> a_2 | {foo: Int, bar: String}) -> Int
+>   ([a_2 <: {foo: Int}] a_2 -> {foo: Int, bar: String} | a_2) -> Int
 > ) -> Int
 > let  = %yield(fun (x, wid) ret {
 >   let f = fun (a) ret2 { let x2 = x(a); ret2(x2) };
@@ -1460,11 +1460,11 @@ fn (x, wid : (([a <: {foo:Int}] a -> a | {foo:Int,bar:String}) -> Int)) { wid(fn
 > }
 >   fn (
 >     x: ({foo: Int}) -> {foo: Int, bar: String},
->     wid: ([a <: {foo: Int}] a -> a | {foo: Int, bar: String}) -> Int
+>     wid: ([a <: {foo: Int}] a -> {foo: Int, bar: String} | a) -> Int
 >   ) -> Int {
 >     wid(fn (a) { x(a) })
 >   }
-> (({foo: Int}) -> {foo: Int, bar: String}, ([a <: {foo: Int}] a -> a | {foo: Int, bar: String}) -> Int) -> Int
+> (({foo: Int}) -> {foo: Int, bar: String}, ([a <: {foo: Int}] a -> {foo: Int, bar: String} | a) -> Int) -> Int
 > let  = %yield(fun (x, wid) ret {
 >   let x2 = wid(fun (a) ret2 { let x2 = x(a); ret2(x2) });
 >   ret(x2)
@@ -1477,11 +1477,11 @@ fn (x, wid : (([a <: {foo:Int}] a -> a | {foo:Int,bar:String}) -> Int)) { wid(x)
 > }
 >   fn (
 >     x: ({foo: Int}) -> {foo: Int, bar: String},
->     wid: ([a <: {foo: Int}] a -> a | {foo: Int, bar: String}) -> Int
+>     wid: ([a <: {foo: Int}] a -> {foo: Int, bar: String} | a) -> Int
 >   ) -> Int {
 >     wid(x)
 >   }
-> (({foo: Int}) -> {foo: Int, bar: String}, ([a <: {foo: Int}] a -> a | {foo: Int, bar: String}) -> Int) -> Int
+> (({foo: Int}) -> {foo: Int, bar: String}, ([a <: {foo: Int}] a -> {foo: Int, bar: String} | a) -> Int) -> Int
 > let  = %yield(fun (x, wid) ret { let x2 = wid(x); ret(x2) }); done
 
 fn(f) { (fn(x) { 5 })(f(10)) }
@@ -1641,15 +1641,15 @@ fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
 # type validity may require sorting rigvars
 (@bot : [a, b] ((a) -> b) -> [a_2] (a_2, a) -> a | a_2)
 > (@bot : [a, b] (a -> b) -> [a_2] (a_2, a) -> a | a_2)
->   (@bot : [a, b] (a -> b) -> [a_2] (a_2, a) -> a | a_2)
-> [a, b] (a -> b) -> [a_2] (a_2, a) -> a | a_2
-> @bot
+> test:1: This type contains a scope-escaping join of a polymorphic variable
+>   (@bot : [a, b] ((a) -> b) -> [a_2] (a_2, a) -> a | a_2)
+>                                                  ^^^^^^^
 
 (@bot : [a, b] ((a) -> b) -> [a_2] (a_2, a) -> a_2 | a)
 > (@bot : [a, b] (a -> b) -> [a_2] (a_2, a) -> a_2 | a)
->   (@bot : [a, b] (a -> b) -> [a_2] (a_2, a) -> a_2 | a)
-> [a, b] (a -> b) -> [a_2] (a_2, a) -> a_2 | a
-> @bot
+> test:1: This type contains a scope-escaping join of a polymorphic variable
+>   (@bot : [a, b] ((a) -> b) -> [a_2] (a_2, a) -> a_2 | a)
+>                                                  ^^^^^^^
 
 # curried choose variants. Note hoisting in last case.
 fn (a) { fn(b) { if true { a } else { b } } }
@@ -2246,4 +2246,4 @@ fn (z) { go(z).foo.baz }
 > done
 
 
-> STATS: fix: 125, flex: 1667
+> STATS: fix: 125, flex: 1409

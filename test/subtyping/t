@@ -20,7 +20,7 @@
 > _:0: Type error
 > 
 >      found: Int -> _
->   expected: a -> _
+>   expected: [a] a -> _
 > This a comes from test:1:
 >   : (Int) -> Int <: [a] (a) -> a
 >                          ^
@@ -55,8 +55,8 @@
 : [x] () -> {foo: (x) -> x, bar: (x) -> x} <: [x, y] () -> {foo: (x) -> x, bar: (y) -> y}
 > _:0: Type error
 > 
->      found: () -> {foo: _, bar: x -> _}
->   expected: () -> {foo: _, bar: y -> _}
+>      found: () -> {foo: _, bar: (_) -> _}
+>   expected: [x, y] () -> {foo: _, bar: y -> _}
 > This y comes from test:1:
 >   : [x] () -> {foo: (x) -> x, bar: (x) -> x} <: [x, y] () -> {foo: (x) -> x, bar: (y) -> y}
 >                                                                                    ^
@@ -80,7 +80,7 @@
 > _:0: Type error
 > 
 >      found: (_) -> Int
->   expected: (_) -> x
+>   expected: [x <: _] (_) -> x
 > This Int comes from test:1:
 >   : (Int) -> Int <: [x <: Int] (x) -> x
 >              ^^^
@@ -94,7 +94,7 @@
 > _:0: Type error
 > 
 >      found: Int -> _
->   expected: x -> _
+>   expected: [x] x -> _
 > This x comes from test:1:
 >   : (Int) -> Int <: [x] (x) -> (x|Int)
 >                          ^
@@ -108,7 +108,7 @@
 > _:0: Type error
 > 
 >      found: Int -> _
->   expected: x -> _
+>   expected: [x] x -> _
 > This x comes from test:1:
 >   : (Int) -> Int <: [x] (x) -> (x)
 >                          ^
@@ -148,7 +148,7 @@
 > _:0: Type error
 > 
 >      found: (_) -> (_, (_) -> Int)
->   expected: (_) -> (_, (_) -> Nothing)
+>   expected: (_) -> (_, [a <: _] (_) -> Nothing)
 > This Int comes from test:1:
 >   : [a <: Int] (a) -> (Int, ([b] (a) -> a)) <: (Int) -> (Int, [a <: Int] (a) -> a)
 >                                                 ^^^
@@ -170,17 +170,29 @@
 : [a] ((a) -> a) -> ((a) -> a) <: [c] ([b] (b) -> b) -> ((c) -> c)
 > ok
 
-# FIXME: error message isn't good here
 : [c] ([b] (b) -> b) -> ((c) -> c) <: [a] ((a) -> a) -> ((a) -> a)
 > _:0: Type error
 > 
->      found: (a -> _) -> _
->   expected: (a -> _) -> _
-> This a comes from test:1:
+>      found: ([b] b -> _) -> _
+>   expected: [a] (a -> _) -> _
+> This b comes from test:1:
 >   : [c] ([b] (b) -> b) -> ((c) -> c) <: [a] ((a) -> a) -> ((a) -> a)
 >               ^
 > but is used as a at test:1:
 >   : [c] ([b] (b) -> b) -> ((c) -> c) <: [a] ((a) -> a) -> ((a) -> a)
+>                                               ^
+
+# same, but with name collision
+: [c] ([a] (a) -> a) -> ((c) -> c) <: [a] ((a) -> a) -> ((a) -> a)
+> _:0: Type error
+> 
+>      found: ([a] a -> _) -> _
+>   expected: [a_2] (a_2 -> _) -> _
+> This a comes from test:1:
+>   : [c] ([a] (a) -> a) -> ((c) -> c) <: [a] ((a) -> a) -> ((a) -> a)
+>               ^
+> but is used as a_2 at test:1:
+>   : [c] ([a] (a) -> a) -> ((c) -> c) <: [a] ((a) -> a) -> ((a) -> a)
 >                                               ^
 
 
@@ -190,7 +202,7 @@
 > _:0: Type error
 > 
 >      found: (_) -> (_) -> Any
->   expected: (_) -> (_) -> Nothing
+>   expected: (_) -> [c] (_) -> Nothing
 > This Any comes from test:1:
 >   : [a] ((a) -> a) -> ((a) -> a) <: ([b](b) -> b) -> ([c](c) -> c)
 >                                                           ^
@@ -242,4 +254,4 @@
 <: [p <: {foo: Any, ...}](p) -> {foo:Int} | p
 > ok
 
-> STATS: fix: 0, flex: 90
+> STATS: fix: 0, flex: 89

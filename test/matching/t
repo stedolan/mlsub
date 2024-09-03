@@ -314,14 +314,6 @@ fn(x) { match x { (z @ (#A | #B)) => z } }
 > fn (x) { match x { (z @ #A | #B) => z } }
 >   fn [a <: #A | #B](x: a) -> a { match x { (z @ #A | #B) => z } }
 > [a <: #A | #B] a -> a
-> RECHECK: Lang.Error.Fail(_)
-> 
-> _:0: Bounds must be constructed types
-> 
-> ELAB: Lang.Error.Fail(_)
-> 
-> ELABINF: Lang.Error.Fail(_)
-> 
 > let  = %yield(fun (x) ret { match x { A() -> { ret(x) }; B() -> { ret(x) } } });
 > done
 
@@ -350,14 +342,6 @@ fn(p, q) {
 >     }
 >   }
 > [a <: #A | #B, b <: #A | #B] (a, b) -> (a | b, a | b)
-> RECHECK: Lang.Error.Fail(_)
-> 
-> _:0: Bounds must be constructed types
-> 
-> ELAB: Lang.Error.Fail(_)
-> 
-> ELABINF: Lang.Error.Fail(_)
-> 
 > let  = %yield(fun (p, q) ret {
 >   let case(y, z) = {
 >     ret((0: y, 1: z))
@@ -886,4 +870,4 @@ fn (x : #A | #B | #C | #D | #E, y: #A | #B) -> Int {
 
 
 # end
-> STATS: fix: 13, flex: 246
+> STATS: fix: 13, flex: 221

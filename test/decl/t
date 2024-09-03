@@ -41,6 +41,16 @@
 >   { type A[a,a] { } }
 >            ^
 
+{ type A[a] { foo: (a|Int) -> Int } }
+> test:1: Type definitions may not use joins of type parameters
+>   { type A[a] { foo: (a|Int) -> Int } }
+>                       ^^^^^
+
+{ type A[a] { foo: Int -> (a|Int) } }
+> test:1: Type definitions may not use joins of type parameters
+>   { type A[a] { foo: Int -> (a|Int) } }
+>                             ^^^^^^^
+
 { type A[a] { foo: (a,a), bar: a -> #P } }
 > type A[+-a]{foo: (a, a), bar: a -> #P}
 

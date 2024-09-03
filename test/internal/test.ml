@@ -29,14 +29,14 @@ let dump env (t : ptyp) =
   let module Promotion = Types.Promotion (struct
     type ('n,'p) t = ('n,'p) typ
     let map ~neg:_ ~pos t =
-      let t = pos ~mode:`Poly ~index:0 t in
+      let t = pos ~mode:`Poly ~ext:[] t in
       dump t_orig;
       t
   end) in
-  let bvars, t = Promotion.promote ~policy:(`Generalise noloc) ~rigvars:IArray.empty ~env t_orig in
+  let bvars, t = Promotion.promote_exn ~policy:(`Generalise noloc) ~rigvars:IArray.empty ~env t_orig in
   dump t;
   Types.log_changes := false;
-  Vector.iteri bvars (fun ix v -> match v with
+  bvars |> Array.iteri (fun ix v -> match v with
   | Gen_rigid _ -> assert false
   | Gen_flex r ->
     PPrint.ToChannel.pretty 1. 120 stdout PPrint.(utf8string (Printf.sprintf "  $%d ≤ " ix) ^^ group (Print.tyexp (unparse_ntyp ~flexvar:nope r)) ^^ hardline));
@@ -44,17 +44,17 @@ let dump env (t : ptyp) =
 
 let fresh_flow lvl =
   let fv = fresh_flexvar lvl in
-  Tsimple fv, Tsimple (Vflex fv)
+  Tsimple fv, Tsimple [Lflexvar fv]
 
 
 let match_as_fn env f =
-  let arg = ref (Tcons (Top, Location.noloc)) in
-  let ret = ref (Tbot None) in
+  let arg = ref (tcons (Top, Location.noloc)) in
+  let ret = ref (tbot None) in
   match_ptyp ~loc:Location.noloc env f [func [arg] ret]
   |> function Ok () -> !arg, !ret
             | _ -> assert false
 
-let tcons cons = Tcons (cons, Location.noloc)
+let tcons cons = tcons (cons, Location.noloc)
 
 let ok = function Ok () -> () | Error _ -> failwith "nope"
 
@@ -105,7 +105,7 @@ let match_bug () =
   subtype env ap bn |> ok;
   let b1, b2 = match_as_fn env bp in
   let a1, a2 = match_as_fn env ap in
-  subtype env a2 (Tbot None) |> ok;
+  subtype env a2 (tbot None) |> ok;
   dump env (tcons (func [a1; b1; an] (tcons (tuple [a2; b2; bp]))))
 
 
@@ -114,13 +114,13 @@ let chain () =
   let env = Env.empty and lvl = Env_level.initial in
   let a = Array.init 10 (fun _ -> fresh_flow lvl) in
   let n = Array.map fst a and p = Array.map snd a in
-  subtype env p.(5) (Tcons (c_int noloc)) |> ok;
+  subtype env p.(5) (Typedefs.tcons (c_int noloc)) |> ok;
   subtype env p.(4) n.(5) |> ok;
   subtype env p.(3) n.(4) |> ok;
   subtype env p.(8) n.(9) |> ok;
   subtype env p.(5) n.(6) |> ok;
   subtype env p.(0) n.(1) |> ok;
-  subtype env p.(3) (Tcons (Top, Location.noloc)) |> ok;
+  subtype env p.(3) (tcons Top) |> ok;
   subtype env p.(2) n.(3) |> ok;
   subtype env p.(1) n.(2) |> ok;
   subtype env p.(7) n.(8) |> ok;
@@ -142,8 +142,10 @@ let poly () =
   let env = Env.empty and _lvl = Env_level.initial in
   let bvar ?(index=0) ?(rest) var =
     match rest with
-    | None -> Tvar (Vbound {index; var; loc=noloc})
-    | Some rest -> Tjoin (rest, Tvar(Vbound{index; var; loc=noloc}), None) in
+    | None -> tvar (Vbound {index; var; loc=noloc})
+    | Some (Tcvj (c,vs,loc)) -> Tcvj (c,vs@[Vbound{index; var; loc=noloc}],loc)
+    | _ -> assert false
+  in
   let t1 () =
     Tpoly {vars = IArray.of_array [| ("A",noloc), None; ("B",noloc), None |];
            body= tcons (func
@@ -154,22 +156,23 @@ let poly () =
   let t2 () =
     Tpoly {vars = IArray.of_array [| ("X",noloc), None |];
            body = tcons (func [bvar 0] (tcons (func [bvar 0] (bvar 0))))} in
+  (* FIXME illformed now
   let t3 () =
     Tpoly {vars = IArray.of_array [| ("P",noloc), None |];
            body = tcons (func [bvar 0] (
              Tpoly {vars=IArray.of_array [| ("Q",noloc), None |];
-                    body = tcons (func [bvar 0] (bvar ~rest:(bvar ~index:1 0) 0))}))} in
+                    body = tcons (func [bvar 0] (bvar ~rest:(bvar ~index:1 0) 0))}))} in *)
   print_endline "t1 = t2";
   subtype env (t1 ()) (t2 ()) |> ok;
   subtype env (t2 ()) (t1 ()) |> ok;
   print_endline "t3 <= t1, t2";
-  subtype env (t3 ()) (t2 ()) |> ok;
-  subtype env (t3 ()) (t1 ()) |> ok;
-  let sub =
+(*  subtype env (t3 ()) (t2 ()) |> ok;
+  subtype env (t3 ()) (t1 ()) |> ok; *)
+(*  let sub =
     match subtype env (t1 ()) (t3 ()) with
     | Ok () -> true
     | Error _ -> false in
-  Printf.printf "t1 <= t3: %b\n" sub;
+  Printf.printf "t1 <= t3: %b\n" sub;*)
 (*  subtype env (t2 ()) (t3 ()) |> ok;*)
   ()
 
@@ -201,7 +204,7 @@ let flexself () =
   let an, ap = fresh_flow lvl in
   let bn, bp = fresh_flow lvl in
   let cn, cp = fresh_flow lvl in
-  subtype env (Tcons (c_int noloc)) cn |> ok;
+  subtype env (Typedefs.tcons (c_int noloc)) cn |> ok;
   subtype env bp an |> ok;
   subtype env cp an |> ok;
   subtype env ap bn |> ok;

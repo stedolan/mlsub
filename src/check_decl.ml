@@ -226,8 +226,14 @@ let check_prog (program : Exp.decl list) =
         | Dty_record fs -> Decl_record (ck_fields fs)
         | Dty_variant vs -> Decl_variant (List.map (fun (s, fs) -> s, ck_fields fs) vs)
       in
-      (* FIXME: close_typ_rigid has the wrong Tjoin rules *)
-      let body = Typedefs.map_decl_body ~pos:(close_typ_rigid ~ispos:true (Env.level env)) body in
+      let body =
+        let nojoin ((_,_,tyloc) as ty) =
+          if is_varjoin ty then
+            let loc = Option.value tyloc ~default:(snd d.name) in
+            fail loc (Illformed_type `Join_of_ty_param)
+        in
+        Typedefs.map_decl_body ~pos:(close_typ ~neg:nojoin ~pos:nojoin (Env.level env) 0) body
+      in
       d, body)
     in
     let rec compute_variance () =
@@ -265,70 +271,75 @@ let check_prog (program : Exp.decl list) =
       in
       let rec walk ~decl var ~index (ty : (zero,zero) Typedefs.typ) =
         match ty with
-        | Tbot _ -> ()
-        | Tvar (Vrigid _) -> assert false
-        | Tvar (Vbound v) when v.index <> index -> ()
-        | Tvar (Vbound v) ->
-           found_parameter ~loc:v.loc ~decl var v.var
-        | Tjoin (p, q, _) ->
-           walk ~decl var ~index p;
-           walk ~decl var ~index q
         | Tpoly { vars; body } ->
            vars |> IArray.iter (fun (_, bound) -> Option.iter (walk ~decl (vneg var) ~index:(index + 1)) bound);
            walk ~decl var ~index:(index + 1) body
         | Tsimple _ -> .
-        | Tcons (Record {tag=Some (Named_tag t); args; body}, loc) ->
-           assert (Typedefs.Fields.is_empty body);
-           let params =
-             match SymTbl.find tbl t with
-             | decl' ->
-                found_recursion ~loc var decl';
-                List.map (fun (p : param_state) -> p.var_found) decl'.params
-             | exception Not_found ->
-                let decl' = Option.get (Typedefs.Env.lookup_decl env (fst t)) in
-                List.map fst decl'.params
+        | Tcvj (conses, vars, _loc) ->
+           let walk_cons = function
+             | Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc ->
+                assert (Typedefs.Fields.is_empty body);
+                let params =
+                  match SymTbl.find tbl t with
+                  | decl' ->
+                     found_recursion ~loc var decl';
+                     List.map (fun (p : param_state) -> p.var_found) decl'.params
+                  | exception Not_found ->
+                     let decl' = Option.get (Typedefs.Env.lookup_decl env (fst t)) in
+                     List.map fst decl'.params
+                in
+                List.iter2
+                  (fun (param : Exp.variance_spec) ((neg, pos) : _ Typedefs.Cons1.tyarg) ->
+                    begin match param.occurs_neg with
+                    | `No -> ()
+                    | `Yes -> Option.iter (walk ~decl (vneg var) ~index) neg
+                    end;
+                    begin match param.occurs_pos with
+                    | `No -> ()
+                    | `Strict -> Option.iter (walk ~decl var ~index) pos
+                    | `Yes -> Option.iter (walk ~decl (vpos var) ~index) pos
+                    end)
+                  params args
+             | cons, _loc ->
+                ignore (Typedefs.Cons1.map ~neg:(walk ~decl (vneg var) ~index) ~pos:(walk ~decl var ~index) cons)
            in
-           List.iter2
-             (fun (param : Exp.variance_spec) ((neg, pos) : _ Typedefs.Cons1.tyarg) ->
-               begin match param.occurs_neg with
-               | `No -> ()
-               | `Yes -> Option.iter (walk ~decl (vneg var) ~index) neg
-               end;
-               begin match param.occurs_pos with
-               | `No -> ()
-               | `Strict -> Option.iter (walk ~decl var ~index) pos
-               | `Yes -> Option.iter (walk ~decl (vpos var) ~index) pos
-               end)
-             params args
-        | Tcons (cons, _loc) ->
-           ignore (Typedefs.Cons1.map ~neg:(walk ~decl (vneg var) ~index) ~pos:(walk ~decl var ~index) cons)
+           let walk_var : Typedefs.typ_var -> unit = function
+             | Vrigid _ -> assert false
+             | Vbound v when v.index <> index -> ()
+             | Vbound v ->
+                found_parameter ~loc:v.loc ~decl var v.var
+           in
+           List.iter walk_cons conses;
+           List.iter walk_var vars
       in
       decl_types |> List.iter (fun (decl, body) ->
-        ignore (Typedefs.map_decl_body ~pos:(fun x -> walk ~decl Vpos_strict ~index:0 x; Tbot None) body));
+        ignore (Typedefs.map_decl_body ~pos:(fun x -> walk ~decl Vpos_strict ~index:0 x; Typedefs.tbot None) body));
       if !changed then compute_variance ()
     in
     compute_variance ();
 
     let rec trim_args : 'z. (zero,zero) Typedefs.typ -> ('z,'z) Typedefs.typ =
       function
-      | Tbot _ | Tvar _ as ty -> ty
       | Tsimple _ -> .
-      | Tjoin (a, b, loc) -> Tjoin (trim_args a, trim_args b, loc)
       | Tpoly {vars; body} ->
          let vars = IArray.map (fun (v,bound) -> v,Option.map trim_args bound) vars in
          let body = trim_args body in
          Tpoly {vars; body}
-      | Tcons (Record {tag=Some (Named_tag t); args; body}, loc) when SymTbl.mem tbl t ->
-         let decl = SymTbl.find tbl t in
-         let trim_arg (param : param_state) (n,p) =
-           (if param.var_found.occurs_neg = `No then None else Option.map trim_args n),
-           (if param.var_found.occurs_pos = `No then None else Option.map trim_args p)
+      | Tcvj (conses, vars, loc) ->
+         let trim_cons = function
+           | (Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc) when SymTbl.mem tbl t ->
+              let decl = SymTbl.find tbl t in
+              let trim_arg (param : param_state) (n,p) =
+                (if param.var_found.occurs_neg = `No then None else Option.map trim_args n),
+                (if param.var_found.occurs_pos = `No then None else Option.map trim_args p)
+              in
+              let args = List.map2 trim_arg decl.params args in
+              let body = Typedefs.Fields.map ~pos:trim_args body in
+              (Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc)
+           | (cons, loc) ->
+              (Typedefs.Cons1.map ~neg:trim_args ~pos:trim_args cons, loc)
          in
-         let args = List.map2 trim_arg decl.params args in
-         let body = Typedefs.Fields.map ~pos:trim_args body in
-         Tcons (Record {tag=Some (Named_tag t); args; body}, loc)
-      | Tcons (cons, loc) ->
-         Tcons (Typedefs.Cons1.map ~neg:trim_args ~pos:trim_args cons, loc)
+         Tcvj (List.map trim_cons conses, vars, loc)
     in
 
     decl_types
@@ -358,7 +369,6 @@ let check_prog (program : Exp.decl list) =
     | Either.Left ((s,_loc), _, _) -> Some (Option.get (Typedefs.Env.lookup_decl env s))
     | Either.Right _ -> None)
 
-
 let unparse_type_decl ~env (d : Typedefs.type_decl) : Exp.decl =
   let Typedefs.{name; params; body} = d in
   let params = List.map (fun (v,p) -> Some v, p) params in
@@ -373,7 +383,11 @@ let unparse_type_decl ~env (d : Typedefs.type_decl) : Exp.decl =
         ~tag:(Some ())
     in
     let body =
-      let getrv loc var = Typedefs.Tvar (Vrigid {level=Typedefs.Env.level env; loc; var}) in
+      let getrv (conses, vars, loc) vars' =
+        let open Typedefs in
+        let vars = vars @ (List.map (fun (var,loc) -> Vrigid {level=Env.level env;loc;var}) vars') in
+        Tcvj (conses, vars, loc)
+      in
       let openrig t = Typedefs.open_typ ~neg:getrv ~pos:getrv 0 t in
       Typedefs.map_decl_body body ~pos:openrig in
     match body with

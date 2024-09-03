@@ -605,18 +605,25 @@ type typ_var =
   | Vbound of {index: int; var:int; loc: Location.t}
   | Vrigid of rigvar
 
-type pos_flexvar =
-  | Vflex of flexvar
+let compare_typ_var a b =
+  match a, b with
+  | Vrigid _, Vbound _ -> 1
+  | Vbound _, Vrigid _ -> -1
+  | Vrigid a, Vrigid b ->
+     begin match Env_level.compare a.level b.level with
+     | 0 -> compare a.var b.var
+     | n -> n
+     end
+  | Vbound a, Vbound b ->
+     begin match compare b.index a.index with
+     | 0 -> compare a.var b.var
+     | n -> n
+     end
 
-(* FIXME: enforce tjoin invariants, especially in neg types *)
 type (+'neg, +'pos) typ =
   | Tsimple of 'pos
-  (* Top is a Tcons but Bot has a special repr *)
-  | Tbot of Location.t option
-  | Tcons of ('neg, 'pos) cons_typ
-  | Tvar of typ_var
-  | Tjoin of ('neg, 'pos) typ * ('neg, 'pos) typ * Location.t option
-     (* No Tpoly allowed under a Tjoin *)
+  | Tcvj of ('neg, 'pos) tcvj
+  (* No Tpoly allowed under a join involving vars *)
   | Tpoly of ('neg, 'pos) poly_typ
 and (+'neg, +'pos) cons_typ = (('pos, 'neg) typ, ('neg, 'pos) typ) Cons1.t Location.loc
 and (+'neg, +'pos) poly_typ =
@@ -625,8 +632,34 @@ and (+'neg, +'pos) poly_typ =
     vars : (string Location.loc * ('pos, 'neg) typ option) iarray;
     body : ('neg, 'pos) typ }
 
-type ptyp = (flexvar, pos_flexvar) typ
-type ntyp = (pos_flexvar, flexvar) typ
+and ('neg,'pos) tcvj =
+  ('neg, 'pos) cons_typ list * typ_var list * Location.t option
+
+let tbot loc = Tcvj ([], [], loc)
+let ttop loc = Tcvj ([Top, loc], [], Some loc)
+let tcons (cons,loc) = Tcvj ([cons,loc], [], Some loc)
+let tvar v =
+  let loc = match v with Vbound v -> v.loc | Vrigid v -> v.loc in
+  Tcvj ([], [v], Some loc)
+
+let is_ttop = function
+  | Tcvj([Top, _], _, _) -> true
+  | _ -> false
+
+let is_tbot = function
+  | Tcvj([], [], _) -> true
+  | _ -> false
+
+let is_varjoin : _ tcvj -> bool = function
+  | _, [], _ -> false
+  | [], [_var], _ -> false
+  | _ -> true
+
+let gen_zero : (zero, zero) typ -> ('a, 'b) typ = Obj.magic
+
+
+type ptyp = (flexvar, lower) typ
+type ntyp = (lower, flexvar) typ
 
 type gen_level = env_level option
 
@@ -895,86 +928,84 @@ let fv_gen_visit_neg env visit fv k =
  * Opening/closing of binders
  *)
 
-(* Assert that a typ contains no Vbound *)
-let assert_locally_closed_var ix = function
-  | Vrigid _ -> ()
-  | Vbound {index; _} -> assert (index < ix)
-
-let rec assert_locally_closed :
-  'a 'b . int -> ('a, 'b) typ -> unit =
-  fun ix ty -> match ty with
-  | Tsimple _ | Tbot _ -> ()
-  | Tcons (c, _cloc) ->
-     ignore (Cons1.map ~neg:(assert_locally_closed ix) ~pos:(assert_locally_closed ix) c)
-  | Tvar v -> assert_locally_closed_var ix v
-  | Tjoin (a, b, _loc) -> assert_locally_closed ix a; assert_locally_closed ix b
-  | Tpoly {vars; body} ->
-     let ix = ix + 1 in
-     vars |> IArray.iter (fun (_, b) -> Option.iter (assert_locally_closed ix) b);
-     assert_locally_closed ix body
-
-let open_typ_var f ix = function
-  | Vbound {index; var; loc} when index >= ix ->
-     assert (index = ix);
-     let res = f loc var in
-     assert_locally_closed ix res;
-     res
-  | v -> Tvar v
+let is_locally_closed ix t =
+  let var ix = function
+    | Vrigid _ -> ()
+    | Vbound {index; _} ->
+       if index >= ix then raise Exit
+  in
+  let rec check : 'a 'b . int -> ('a,'b) typ -> unit =
+    fun ix ty -> match ty with
+    | Tsimple _ -> ()
+    | Tcvj (conses, vars, _loc) ->
+       List.iter (fun (c,_loc) -> 
+         ignore (Cons1.map ~neg:(check ix) ~pos:(check ix) c)) conses;
+       List.iter (var ix) vars
+    | Tpoly {vars; body} ->
+       let ix = ix + 1 in
+       vars |> IArray.iter (fun (_, b) -> Option.iter (check ix) b);
+       check ix body
+  in
+  match check ix t with
+  | () -> true
+  | exception Exit -> false
 
 let rec open_typ :
   'neg 'pos .
-    neg:(Location.t -> int -> ('pos, 'neg) typ) ->
-    pos:(Location.t -> int -> ('neg, 'pos) typ) ->
-    int -> ('neg, 'pos) typ -> ('neg, 'pos) typ =
+  neg:(('pos,'neg) tcvj -> int loc list -> ('pos, 'neg) typ) ->
+  pos:(('neg,'pos) tcvj -> int loc list -> ('neg, 'pos) typ) ->
+  int -> ('neg,'pos) typ -> ('neg,'pos) typ =
   fun ~neg ~pos ix t -> match t with
-  | (Tsimple _ | Tbot _) as s -> s
-  | Tcons (c, cloc) ->
-     Tcons (Cons1.map ~neg:(open_typ ~neg:pos ~pos:neg ix) ~pos:(open_typ ~neg ~pos ix) c, cloc)
-  | Tvar v -> open_typ_var pos ix v
-  | Tjoin (a,b,loc) -> Tjoin (open_typ ~neg ~pos ix a, open_typ ~neg ~pos ix b, loc)
+  | Tsimple _ as s -> s
+  | Tcvj (conses, vars, loc) ->
+     let conses = List.map (fun (c,cloc) ->
+       Cons1.map ~neg:(open_typ ~neg:pos ~pos:neg ix) ~pos:(open_typ ~neg ~pos ix) c, cloc) conses in
+     let opened, rest =
+       vars |> List.partition_map (function
+         | Vbound b when b.index >= ix ->
+           assert (b.index = ix);
+           Left (b.var, b.loc)
+         | v -> Right v)
+     in
+     begin match opened with
+     | [] -> Tcvj (conses, rest, loc)
+     | opened -> pos (conses, rest, loc) opened
+     end
   | Tpoly {vars; body} ->
      let ix = ix + 1 in
      Tpoly {vars = IArray.map (fun (n, b) -> n, Option.map (open_typ ~neg:pos ~pos:neg ix) b) vars;
             body = open_typ ~neg ~pos ix body}
 
-let close_typ_var lvl f ~ispos ~isjoin index = function
-  | Vrigid {level; loc; _} as v when Env_level.equal lvl level ->
-     Vbound {index; var = f v ~ispos ~isjoin; loc}
-  | v -> v
-
-(* Can only be used on typs without Tsimple nodes.
-   (This limits it to use during parsing, which does not generate Tsimple) *)
 let rec close_typ :
-  'a 'b . Env_level.t -> (typ_var -> ispos:bool -> isjoin:bool -> int) -> simple:('a -> 'b)  -> ispos:bool -> isjoin:bool -> int -> ('a, 'a) typ -> ('b, 'b) typ
-  = fun lvl var ~simple ~ispos ~isjoin ix ty -> match ty with
-  | Tsimple z -> Tsimple (simple z)
-  | Tbot _ as z -> z
-  | Tcons (c, cloc) -> Tcons (Cons1.map ~neg:(close_typ lvl var ~simple ~ispos:(not ispos) ~isjoin:false ix) ~pos:(close_typ lvl var ~simple ~ispos ~isjoin:false ix) c, cloc)
-  | Tvar v -> Tvar (close_typ_var lvl var ~ispos ~isjoin ix v)
-  | Tjoin (a, b, loc) ->
-     Tjoin(close_typ lvl var ~simple ~ispos ~isjoin:true ix a,
-           close_typ lvl var ~simple ~ispos ~isjoin:true ix b,
-           loc)
+  'neg 'pos .
+  neg:(('pos,'neg) tcvj -> unit) ->
+  pos:(('neg,'pos) tcvj -> unit) ->
+  Env_level.t -> int -> ('neg, 'pos) typ -> ('neg,'pos) typ =
+  fun ~neg ~pos lvl ix t -> match t with
+  | Tsimple _ as s -> s
+  | Tcvj ((conses, vars, loc) as orig) ->
+     let conses =
+       conses |> List.map (fun (c, cloc) ->
+         (Cons1.map ~neg:(close_typ ~neg:pos ~pos:neg lvl ix) ~pos:(close_typ ~neg ~pos lvl ix) c, cloc))
+     in
+     let found_close = ref false in
+     let vars =
+       vars |> List.map (function
+         | Vrigid rv when Env_level.extends lvl rv.level ->
+            assert (Env_level.equal lvl rv.level);
+            found_close := true;
+            Vbound {index=ix; var=rv.var; loc=rv.loc}
+         | Vrigid _ as v -> v
+         | Vbound b as v ->
+            assert (b.index < ix);
+            v)
+     in
+     if !found_close then pos orig;
+     Tcvj (conses, vars, loc)
   | Tpoly {vars; body} ->
-     assert (not isjoin);
      let ix = ix + 1 in
-     Tpoly {vars = IArray.map (fun (n, b) -> n, Option.map (close_typ lvl var ~simple ~ispos:(not ispos) ~isjoin:false ix) b) vars;
-            body = close_typ lvl var ~simple ~ispos ~isjoin:false ix body}
-
-let diag x = (x, x)
-let xs = diag []
-let ys = (fst xs, snd xs)
-
-let gen_zero : (zero, zero) typ -> ('a, 'b) typ = Obj.magic
-
-let close_typ_rigid ~ispos level ty =
-  let close_var v ~ispos ~isjoin =
-    if isjoin && not ispos then failwith "contravariant join";
-    match v with
-    | Vrigid v when Env_level.equal v.level level -> v.var
-    | _ -> intfail "close_typ_rigid: not a rigid variable" in
-  close_typ level close_var ~simple:never ~ispos ~isjoin:false 0 ty |> gen_zero
-
+     Tpoly {vars = IArray.map (fun (n, b) -> n, Option.map (close_typ ~neg:pos ~pos:neg lvl ix) b) vars;
+            body = close_typ ~neg ~pos lvl ix body}
 
 let next_flexvar_id = ref 0
 let fresh_flexvar level : flexvar =
@@ -1084,29 +1115,59 @@ let rec wf_typ : 'pos 'neg .
   neg:('neg -> unit) ->
   pos:('pos -> unit) ->
   ispos:bool ->
-  env -> (bool * int) list -> ('neg, 'pos) typ -> unit =
-  fun ~neg ~pos ~ispos env ext ty ->
+  env -> int option -> (bool option * int) list -> ('neg, 'pos) typ -> unit =
+  fun ~neg ~pos ~ispos env bmin ext ty ->
   match ty with
   | Tsimple s -> pos s
-  | Tbot _  -> ()
-  | Tcons (c, _cloc) ->
-     Cons1.wf ~params:(Env.param_variances env) ~neg:(wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) ~pos:(wf_typ ~neg ~pos ~ispos env ext) c
-  | Tvar v -> wf_var env ext v
-  | Tjoin (a, b, _loc) ->
-     wf_typ ~neg ~pos ~ispos env ext a;
-     wf_typ ~neg ~pos ~ispos env ext b
+  | Tcvj ((conses, vars, _loc) as cvj) ->
+     let posbound =
+       vars
+       |> List.filter_map (function
+         | Vrigid _ -> None
+         | Vbound v ->
+            assert (v.index < List.length ext);
+            bmin |> Option.iter (fun min -> assert (min <= v.index));
+            let (bind, count) = List.nth ext v.index in
+            assert (v.var < count);
+            match bind with
+            | None ->
+               (* e.g. Elab-bound variable *)
+               None
+            | Some pol when pol = ispos ->
+               (* covariant usage *)
+               Some v.index
+            | Some _ ->
+               (* contravariant usage *)
+               assert (not (is_varjoin cvj));
+               None)
+     in
+     let bmin =
+       match posbound with
+       | [] -> bmin
+       | v :: vs ->
+          assert (List.for_all (fun v' -> v = v') vs);
+          Some v
+     in
+     conses |> List.iteri (fun i (c, _) ->
+       conses |> List.iteri (fun j (d, _) ->
+         if i <> j then assert (Cons1.incomparable_head c d)));
+     conses |> List.iter (fun (c, _loc) -> Cons1.wf c
+       ~params:(Env.param_variances env)
+       ~neg:(wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env bmin ext)
+       ~pos:(wf_typ ~neg ~pos ~ispos env bmin ext))
   | Tpoly {vars; body} ->
      let n_unique_vars = IArray.to_list vars |> List.map fst |> List.map fst |> List.sort_uniq String.compare |> List.length in
      assert (n_unique_vars = IArray.length vars);
-     let ext = (ispos, IArray.length vars) :: ext in
+     let ext = (Some ispos, IArray.length vars) :: ext in
+     let bmin = Option.map ((+) 1) bmin in
      IArray.iter (fun (_, c) ->
        (* FIXME: constraints on c. Can it be e.g. Tsimple?
           Prob not same binder either. *)
-       Option.iter (wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env ext) c) vars;
-     wf_typ ~neg ~pos ~ispos env ext body
+       Option.iter (wf_typ ~neg:pos ~pos:neg ~ispos:(not ispos) env bmin ext) c) vars;
+     wf_typ ~neg ~pos ~ispos env bmin ext body
 
 let wf_decl env (decl : type_decl) =
-  let wf_typ t = wf_typ ~neg:never ~pos:never ~ispos:true env [true, List.length decl.params] t in
+  let wf_typ t = wf_typ ~neg:never ~pos:never ~ispos:true env None [None, List.length decl.params] t in
   match decl.body with
   | Decl_primitive -> ()
   | Decl_record fs -> Fields.wf ~pos:wf_typ fs
@@ -1228,27 +1289,7 @@ let unparse_joins = function
   | [x] -> x
   | x :: xs -> List.fold_left (fun a b -> mktyexp (Exp.Tjoin (a, b))) x xs
 
-let rec unparse_gen_typ :
-  'neg 'pos . env:(_ * _) -> neg:(env:(env*_) -> 'neg -> Exp.tyexp) -> pos:(env:(env*_) -> 'pos -> Exp.tyexp) ->
-             ('neg,'pos) typ -> Exp.tyexp =
-  fun ~env ~neg ~pos ty -> match ty with
-  | Tsimple t -> pos ~env t
-  | Tbot _ -> mktyexp (named_type "Nothing")
-  | Tcons c ->
-     unparse_cons ~env ~neg:(unparse_gen_typ ~env ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~env ~neg ~pos) c
-  | Tvar var ->
-     unparse_var ~env var
-  | Tjoin (a, b, _loc) ->
-     mktyexp (Exp.Tjoin (unparse_gen_typ ~env ~neg ~pos a,
-                         unparse_gen_typ ~env ~neg ~pos b))
-  | Tpoly { vars; body } ->
-     let env, bounds = unparse_bounds ~env ~neg ~pos vars in
-     mktyexp (Exp.Tforall(bounds, unparse_gen_typ ~env ~neg ~pos body))
-
-and unparse_bounds :
-  'neg 'pos . env:_ -> neg:(env:(env*_) -> 'neg -> Exp.tyexp) -> pos:(env:(env*_) -> 'pos -> Exp.tyexp) ->
-             (string Location.loc * ('pos,'neg) typ option) iarray -> _ * Exp.typolybounds =
-  fun ~env:(env,ext) ~neg ~pos vars ->
+let freshen_name (env, ext) name =
   (* FIXME: this sort of freshening or shifts? *)
   (* FIXME: if freshening, use levels somehow to determine when not needed *)
   let taken name =
@@ -1257,15 +1298,39 @@ and unparse_bounds :
   let rec freshen name i =
     let p = Printf.sprintf "%s_%d" name i in
     if not (taken p) then p else freshen name (i + 1) in
-  let freshen name =
-    if not (taken name) then name else freshen name 2 in
-  let vars = IArray.map (fun ((s,l), b) -> (freshen s,l), b) vars in
+  if not (taken name) then name else freshen name 2
+
+let rec unparse_gen_typ :
+  'neg 'pos . env:(_ * _) -> neg:(env:(env*_) -> 'neg -> Exp.tyexp) -> pos:(env:(env*_) -> 'pos -> Exp.tyexp) ->
+             ('neg,'pos) typ -> Exp.tyexp =
+  fun ~env ~neg ~pos ty -> match ty with
+  | Tsimple t -> pos ~env t
+  | Tcvj (conses, vars, _loc) ->
+     let joinands =
+       List.map (unparse_cons ~env ~neg:(unparse_gen_typ ~env ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~env ~neg ~pos)) conses
+       @ List.map (unparse_var ~env) vars
+     in
+     begin match joinands with
+     | [] -> mktyexp (named_type "Nothing")
+     | j :: js ->
+        let tjoin a b = mktyexp (Exp.Tjoin (a, b)) in
+        List.fold_left tjoin j js
+     end
+  | Tpoly { vars; body } ->
+     let env, bounds = unparse_bounds ~env ~neg ~pos vars in
+     mktyexp (Exp.Tforall(bounds, unparse_gen_typ ~env ~neg ~pos body))
+
+and unparse_bounds :
+  'neg 'pos . env:_ -> neg:(env:(env*_) -> 'neg -> Exp.tyexp) -> pos:(env:(env*_) -> 'pos -> Exp.tyexp) ->
+             (string Location.loc * ('pos,'neg) typ option) iarray -> _ * Exp.typolybounds =
+  fun ~env:(env,ext) ~neg ~pos vars ->
+  let vars = IArray.map (fun ((s,l), b) -> (freshen_name (env,ext) s,l), b) vars in
   let ext = IArray.map (fun ((s,_),_) -> s) vars :: ext in
   (env,ext), IArray.map (fun ((s,_), bound) ->
        let s = (s, Location.noloc) in
        match bound with
-       | None | Some (Tcons (Top, _)) ->
-          s, None
+       | None -> s, None
+       | Some t when is_ttop t -> s, None
        | Some t ->
           s, Some (unparse_gen_typ ~env:(env,ext) ~pos:neg ~neg:pos t)) vars |> IArray.to_list
 
@@ -1297,9 +1362,9 @@ let unparse_upper ~env ~flexvar = function
      @ List.map (unparse_flexvar ~env ~flexvar) higher_fvs
 
 let unparse_ptyp ~flexvar ?(env=(Env.empty,[])) (t : ptyp) =
-  unparse_gen_typ ~env ~neg:(unparse_flexvar ~flexvar) ~pos:(fun ~env (Vflex fv) -> unparse_flexvar ~env ~flexvar fv) t
+  unparse_gen_typ ~env ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_lower ~flexvar) t
 let unparse_ntyp ~flexvar ?(env=(Env.empty,[])) (t : ntyp) =
-  unparse_gen_typ ~env ~neg:(fun ~env (Vflex fv) -> unparse_flexvar ~env ~flexvar fv) ~pos:(unparse_flexvar ~flexvar) t
+  unparse_gen_typ ~env ~neg:(unparse_lower ~flexvar) ~pos:(unparse_flexvar ~flexvar) t
 
 
 
@@ -1336,6 +1401,16 @@ let pp_ntyp ppf t =
 let pp_ptyp ppf t =
   let env = Env.empty, [] in
   pp_tyexp ppf (unparse_ptyp ~env ~flexvar:ignore t)
+
+let fmt_unit_typ ~env t =
+  unparse_gen_typ t
+    ~env
+    ~neg:(fun ~env:_ () -> (mktyexp (named_type "_")))
+      ~pos:(fun ~env:_ () -> (mktyexp (named_type "_")))
+  |> Print.tyexp
+
+let pp_unit_typ ~env ppf t =
+  pp_doc ppf (fmt_unit_typ ~env t)
 
 let dump_ptyp ppf t =
   let env = Env.empty, [] in
@@ -1386,18 +1461,18 @@ let pp_changes ppf changes =
   Format.fprintf ppf "]"
 
 
-let wf_ptyp env (t : ptyp) =
+let wf_ptyp ?(ext=[]) env (t : ptyp) =
   try
     let seen = Hashtbl.create 10 in
-    wf_typ ~neg:(wf_flexvar ~seen env (Env.level env)) ~pos:(fun (Vflex fv) -> wf_flexvar ~seen env (Env.level env) fv) ~ispos:true env [] t
+    wf_typ ~neg:(wf_flexvar ~seen env (Env.level env)) ~pos:(wf_lower ~seen env (Env.level env)) ~ispos:true env None ext t
   with
   | Assert_failure (file, line, _char) when file = __FILE__ ->
      intfail "Ill-formed type (%s:%d): %a" file line pp_ptyp t
 
-let wf_ntyp env (t : ntyp) =
+let wf_ntyp ?(ext=[]) env (t : ntyp) =
   try
     let seen = Hashtbl.create 10 in
-    wf_typ ~neg:(fun (Vflex fv) -> wf_flexvar ~seen env (Env.level env) fv) ~pos:(wf_flexvar ~seen env (Env.level env)) ~ispos:false env [] t
+    wf_typ ~neg:(wf_lower ~seen env (Env.level env)) ~pos:(wf_flexvar ~seen env (Env.level env)) ~ispos:false env None ext t
   with
   | Assert_failure (file, line, _char) when file = __FILE__ ->
      intfail "Ill-formed type (%s:%d): %a" file line pp_ntyp t

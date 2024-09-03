@@ -6,31 +6,21 @@ open Typedefs
 module FieldMap = Tuple_fields.FieldMap
 
 let syn_tjoin loc (a : (_, _) typ) (b : (_, _) typ) =
-  let rec check_cons cons = function
-    | Tjoin (a, b, _loc) -> check_cons cons a; check_cons cons b
-    | Tsimple _ -> intfail "syn_tjoin: Tsimple"
-    | Tvar _ -> ()
-    | Tbot _ -> fail loc (Illformed_type `Join_multi_cons)
-    | Tcons (c, _) ->
-       if not (Cons1.incomparable_head c cons) then
-         fail loc (Illformed_type `Join_multi_cons)
-    | Tpoly _ ->
-       fail loc (Illformed_type `Join_poly)
-  in
-  let rec check_join p = function
-    | Tjoin (a, b, _) -> check_join p a; check_join p b
-    | Tsimple _ -> intfail "syn_tjoin: Tsimple"
-    | Tvar _ -> ()
-    | Tbot _ -> fail loc (Illformed_type `Join_multi_cons)
-    | Tcons (c, _) -> check_cons c p
-    | Tpoly _ ->
-       fail loc (Illformed_type `Join_poly)
-  in
-  check_join a b;
-  Tjoin (a, b, Some loc)
-
-let tcons loc cons =
-  Tcons (cons, loc)
+  match a, b with
+  | Tsimple _, _ | _, Tsimple _ -> intfail "syn_tjoin: Tsimple"
+  | Tpoly _, _ | _, Tpoly _ ->
+     fail loc (Illformed_type `Join_poly)
+  | Tcvj (cons_a, var_a, _loc_a),
+    Tcvj (cons_b, var_b, _loc_b) ->
+     if
+       cons_a |> List.exists (fun (ca,_) ->
+         cons_b |> List.exists (fun (cb,_) ->
+           not (Cons1.incomparable_head ca cb)))
+     then
+       fail loc (Illformed_type `Join_multi_cons);
+     let cons = cons_a @ cons_b in
+     let vars = var_a @ List.filter (fun v -> not (List.exists (fun v' -> compare_typ_var v v' = 0) var_a)) var_b in
+     Tcvj (cons, vars, Some loc)
 
 type lookup_fn =
   env:env -> string loc -> tyarg list -> type_decl option
@@ -45,13 +35,13 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
   fun ~lookup ~env loc ty -> match ty with
   | Ttyvar (name, loc) ->
      begin match env_lookup_type_var env loc name with
-     | Some v -> Tvar (Vrigid v)
+     | Some v -> tvar (Vrigid v)
      | None -> fail loc (Bad_name (`Unknown, `Type, name))
      end
   | Trecord (Some (Named_tag ("Any", _)), [], _) ->
-     Tcons (Top, loc)
+     tcons (Top, loc)
   | Trecord (Some (Named_tag ("Nothing", _)), [], _) ->
-     Tbot (Some loc)
+     tbot (Some loc)
   | Trecord (tag, args, fields) ->
      let check_arg name (v, (argname,_loc)) (i, arg) =
        let check p loc = function
@@ -94,15 +84,20 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
              List.map2 (check_arg name) decl.params (List.mapi (fun i x -> i,x) args)
      in
      let body = typs_of_fields ~lookup ~env (fields,loc) in
-     tcons loc (Record {tag; args; body})
+     tcons (Record {tag; args; body}, loc)
   | Tfunc (args, res) ->
-     tcons loc (Func (List.map (typ_of_tyexp ~lookup ~env) args, typ_of_tyexp ~lookup ~env res))
+     tcons (Func (List.map (typ_of_tyexp ~lookup ~env) args, typ_of_tyexp ~lookup ~env res), loc)
   | Tjoin (a, b) ->
      syn_tjoin loc (typ_of_tyexp ~lookup ~env a) (typ_of_tyexp ~lookup ~env b)
   | Tforall (vars, body) ->
      let vars, name_ix = enter_polybounds ~lookup ~env vars in
      let env, _rigvars = Types.enter_rigid env vars name_ix in
-     let body = close_typ_rigid ~ispos:true (Env.level env) (typ_of_tyexp ~lookup ~env body) in
+     let body =
+       try Types.close_typ_poly_exn ~ispos:true (Env.level env) (typ_of_tyexp ~lookup ~env body)
+       with Types.CloseError (err, errloc) ->
+         let loc = Option.value errloc ~default:loc in
+         fail loc (Illformed_type (`Close_error err))
+     in
      Tpoly { vars; body }
 
 and typs_of_fields : 'a 'b . lookup:lookup_fn -> env:env -> tyexp fields loc -> ('a,'b) typ Fields.t =
@@ -146,14 +141,18 @@ and enter_polybounds : 'a 'b . lookup:lookup_fn -> env:env -> typolybounds -> (s
     vars
     |> List.map (fun (name,_) -> {name; upper=[Top,Location.noloc]})
     |> IArray.of_list in
-  let mkbound rig_names _loc bound =
+  let mkbound rig_names loc bound =
     match bound with
     | None -> None
     | Some b ->
        let temp_env = Env.extend_types env ~level ~rig_names ~rig_defns:stubs in
-       let bound = close_typ_rigid ~ispos:false level (typ_of_tyexp ~lookup ~env:temp_env b) in
-       (* FIXME: Tcons / Tjoin *)
-       begin match bound with Tcons _ -> () | _ -> fail (snd b) (Illformed_type `Bound_not_cons) end;
+       let bound =
+         try Types.close_typ_poly_exn ~ispos:false level (typ_of_tyexp ~lookup ~env:temp_env b)
+         with Types.CloseError (err,errloc) ->
+           let loc = Option.value errloc ~default:loc in
+           fail loc (Illformed_type (`Close_error err))
+       in
+       begin match bound with Tcvj (_,[],_) -> () | _ -> fail (snd b) (Illformed_type `Bound_not_cons) end;
        if not (Types.check_simple bound) then fail (snd b) (Illformed_type `Bound_not_simple);
        Some bound
   in

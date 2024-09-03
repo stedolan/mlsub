@@ -44,12 +44,12 @@ fn(a) { { foo: if true { fn(x) { x } } else { a } } }
 
 fn[a,b](x:a) -> (a | a -> b) { x }
 > fn [a, b](x: a) -> (a | (a -> b)) { x }
->   fn [a, b](x: a) -> (a | (a -> b)) { x }
-> [a, b] a -> a | (a -> b)
+>   fn [a, b](x: a) -> ((a -> b) | a) { x }
+> [a, b] a -> (a -> b) | a
 > let  = %yield(fun (x) ret { ret(x) }); done
 
 : [a <: ([] Int) -> Int ] a <: Int
 > test:1: Bounds must be simple types
 >   : [a <: ([] Int) -> Int ] a <: Int
 >           ^^^^^^^^^^^^^^^
-> STATS: fix: 3, flex: 70
+> STATS: fix: 3, flex: 48

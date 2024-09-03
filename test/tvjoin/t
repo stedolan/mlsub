@@ -1,0 +1,195 @@
+# generated with:
+# for i in ["fn" + b1 + "{ fn" + b2 + "{ if true { " + v1 + " } else { " + v2 + " } } }" for b1 in ["[a](x:a)", "(x)"] for b2 in ["[b](y:b)", "(y)"] for v1, v2 in [("{foo:x}","y"),("{foo:y}","x"),("x","y")] ]: print(i + "\n> ?\n")
+
+fn[a](x:a){ fn[b](y:b){ if true { {foo:x} } else { y } } }
+> fn [a](x: a) { fn [b](y: b) { if true { {foo: x} } else { y } } }
+>   fn [a](x: a) -> ([b] b -> {foo: a} | b) {
+>     fn [b](y: b) -> ({foo: a} | b) {
+>       if true {
+>         {foo: x}
+>       } else {
+>         y
+>       }
+>     }
+>   }
+> [a] a -> [b] b -> {foo: a} | b
+> let  = %yield(fun (x) ret {
+>   ret(fun (y) ret2 {
+>     match <true> {
+>       true() -> {
+>         ret2((foo: x))
+>       };
+>       false() -> {
+>         ret2(y)
+>       }
+>     }
+>   })
+> });
+> done
+
+fn[a](x:a){ fn[b](y:b){ if true { {foo:y} } else { x } } }
+> fn [a](x: a) { fn [b](y: b) { if true { {foo: y} } else { x } } }
+> test:1: This type contains a scope-escaping join of a polymorphic variable
+>   fn[a](x:a){ fn[b](y:b){ if true { {foo:y} } else { x } } }
+>   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+fn[a](x:a){ fn[b](y:b){ if true { x } else { y } } }
+> fn [a](x: a) { fn [b](y: b) { if true { x } else { y } } }
+> test:1: This type contains a scope-escaping join of a polymorphic variable
+>   fn[a](x:a){ fn[b](y:b){ if true { x } else { y } } }
+>   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+fn[a](x:a){ fn(y){ if true { {foo:x} } else { y } } }
+> fn [a](x: a) { fn (y) { if true { {foo: x} } else { y } } }
+>   fn [a](x: a) -> ([b] b -> {foo: a} | b) {
+>     fn [b](y: b) -> ({foo: a} | b) {
+>       if true {
+>         {foo: x}
+>       } else {
+>         y
+>       }
+>     }
+>   }
+> [a] a -> [b] b -> {foo: a} | b
+> let  = %yield(fun (x) ret {
+>   ret(fun (y) ret2 {
+>     match <true> {
+>       true() -> {
+>         ret2((foo: x))
+>       };
+>       false() -> {
+>         ret2(y)
+>       }
+>     }
+>   })
+> });
+> done
+
+fn[a](x:a){ fn(y){ if true { {foo:y} } else { x } } }
+> fn [a](x: a) { fn (y) { if true { {foo: y} } else { x } } }
+> test:1: This type contains a scope-escaping join of a polymorphic variable
+>   fn[a](x:a){ fn(y){ if true { {foo:y} } else { x } } }
+>   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+fn[a](x:a){ fn(y){ if true { x } else { y } } }
+> fn [a](x: a) { fn (y) { if true { x } else { y } } }
+> test:1: This type contains a scope-escaping join of a polymorphic variable
+>   fn[a](x:a){ fn(y){ if true { x } else { y } } }
+>   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+fn(x){ fn[b](y:b){ if true { {foo:x} } else { y } } }
+> fn (x) { fn [b](y: b) { if true { {foo: x} } else { y } } }
+>   fn [a](x: a) -> ([b] b -> {foo: a} | b) {
+>     fn [b](y: b) -> ({foo: a} | b) {
+>       if true {
+>         {foo: x}
+>       } else {
+>         y
+>       }
+>     }
+>   }
+> [a] a -> [b] b -> {foo: a} | b
+> let  = %yield(fun (x) ret {
+>   ret(fun (y) ret2 {
+>     match <true> {
+>       true() -> {
+>         ret2((foo: x))
+>       };
+>       false() -> {
+>         ret2(y)
+>       }
+>     }
+>   })
+> });
+> done
+
+fn(x){ fn[b](y:b){ if true { {foo:y} } else { x } } }
+> fn (x) { fn [b](y: b) { if true { {foo: y} } else { x } } }
+> test:1: This type contains a scope-escaping join of a polymorphic variable
+>   fn(x){ fn[b](y:b){ if true { {foo:y} } else { x } } }
+>          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+fn(x){ fn[b](y:b){ if true { x } else { y } } }
+> fn (x) { fn [b](y: b) { if true { x } else { y } } }
+> test:1: This type contains a scope-escaping join of a polymorphic variable
+>   fn(x){ fn[b](y:b){ if true { x } else { y } } }
+>          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+fn(x){ fn(y){ if true { {foo:x} } else { y } } }
+> fn (x) { fn (y) { if true { {foo: x} } else { y } } }
+>   fn [a, b](x: a) -> (b -> {foo: a} | b) {
+>     fn (y: b) -> ({foo: a} | b) {
+>       if true {
+>         {foo: x}
+>       } else {
+>         y
+>       }
+>     }
+>   }
+> [a, b] a -> b -> {foo: a} | b
+> let  = %yield(fun (x) ret {
+>   ret(fun (y) ret2 {
+>     match <true> {
+>       true() -> {
+>         ret2((foo: x))
+>       };
+>       false() -> {
+>         ret2(y)
+>       }
+>     }
+>   })
+> });
+> done
+
+fn(x){ fn(y){ if true { {foo:y} } else { x } } }
+> fn (x) { fn (y) { if true { {foo: y} } else { x } } }
+>   fn [a, b](x: a) -> (b -> {foo: b} | a) {
+>     fn (y: b) -> ({foo: b} | a) {
+>       if true {
+>         {foo: y}
+>       } else {
+>         x
+>       }
+>     }
+>   }
+> [a, b] a -> b -> {foo: b} | a
+> let  = %yield(fun (x) ret {
+>   ret(fun (y) ret2 {
+>     match <true> {
+>       true() -> {
+>         ret2((foo: y))
+>       };
+>       false() -> {
+>         ret2(x)
+>       }
+>     }
+>   })
+> });
+> done
+
+fn(x){ fn(y){ if true { x } else { y } } }
+> fn (x) { fn (y) { if true { x } else { y } } }
+>   fn [a, b](x: a) -> (b -> a | b) {
+>     fn (y: b) -> (a | b) {
+>       if true {
+>         x
+>       } else {
+>         y
+>       }
+>     }
+>   }
+> [a, b] a -> b -> a | b
+> let  = %yield(fun (x) ret {
+>   ret(fun (y) ret2 {
+>     match <true> {
+>       true() -> {
+>         ret2(x)
+>       };
+>       false() -> {
+>         ret2(y)
+>       }
+>     }
+>   })
+> });
+> done
+> STATS: fix: 11, flex: 139

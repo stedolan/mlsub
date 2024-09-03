@@ -255,8 +255,8 @@ let rec split_cases :
        let ftype (_, (ty : _ Fields.field_desc)) =
          match ty with
          | Fpresent (ty, _) | Foptional (ty, _) -> ty, lvl
-         | Funknown loc -> Tcons (Top, loc), lvl
-         | Fabsent abs_loc -> Tbot (Some abs_loc), lvl
+         | Funknown loc -> tcons (Top, loc), lvl
+         | Fabsent abs_loc -> tbot (Some abs_loc), lvl
          | Fbroken {abs_loc; pres_loc} ->
             Error.fail pres_loc (Incompatible_patterns abs_loc)
        in
@@ -287,7 +287,7 @@ let rec split_cases :
        | Sp_fields fields ->
           let fnames, loc = collect_fields fields in
           (* FIXME loc? *)
-          let fnames = Fields.map ~pos:(fun () -> ref (Tbot None)) fnames in
+          let fnames = Fields.map ~pos:(fun () -> ref (tbot None)) fnames in
           let cons = Cons1.Record {tag=None; args=[]; body=fnames} in
           begin match Types.match_ptyp ~loc:matchloc env typ [cons] with
           | Ok () ->
@@ -296,11 +296,16 @@ let rec split_cases :
           | Error e -> Error.fail loc (Conflict (`Pat, e))
           end
        | Sp_cases (tags, cases, def) ->
-          let rec extract_cases = function
+          let extract_cases = function
             (* FIXME handle rigvars with tagged bounds too *)
             (* FIXME args *)
-            | Tcons (Record {tag=Some tag; args=[]; body}, _loc) -> TagMap.singleton tag body
-            | Tjoin (a, b, _loc) -> TagMap.union (fun _ _ _ -> intfail "invalid type - duplicate tag") (extract_cases a) (extract_cases b)
+            | Tcvj (conses, [], _loc) ->
+               let tags = conses |> List.map (function
+                  | Cons1.Record {tag=Some tag; args=[]; body}, _loc ->
+                     TagMap.singleton tag body
+                  | _ -> raise Exit)
+               in
+               List.fold_left (TagMap.union (fun _ _ _ -> assert false)) TagMap.empty tags
             | _ -> raise Exit
           in
           match extract_cases typ with
@@ -350,7 +355,7 @@ let rec split_cases :
                cases |>
                TagMap.map (fun fields ->
                  let fnames, loc = collect_fields fields in
-                 let fields = Fields.map ~pos:(fun () -> ref (Tbot None)) fnames in
+                 let fields = Fields.map ~pos:(fun () -> ref (tbot None)) fnames in
                  loc, fields)
              in
              let loc =

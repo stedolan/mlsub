@@ -36,68 +36,74 @@ and typed_pat = pat
 and ('n, 'p) typed_polybounds =
   (string Location.loc * ('p,'n) typ option) IArray.t
 
-let map_elab_typ ~neg ~pos ~index = function
-  | Elab_ptyp t -> Elab_ptyp (pos ~index t)
-  | Elab_ntyp t -> Elab_ntyp (neg ~index t)
+let map_elab_typ ~neg ~pos ~ext = function
+  | Elab_ptyp t -> Elab_ptyp (pos ~ext t)
+  | Elab_ntyp t -> Elab_ntyp (neg ~ext t)
 
-let rec typed_map_typs_exp ~neg ~pos ~index (e : _ typed_exp) =
+let rec typed_map_typs_exp ~neg ~pos ~ext (e : _ typed_exp) =
   match e with
   | None, _ as e -> e
-  | Some e, loc -> Some (typed_map_typs_exp' ~neg ~pos ~index e), loc
+  | Some e, loc -> Some (typed_map_typs_exp' ~neg ~pos ~ext e), loc
 
-and typed_map_typs_exp' ~neg ~pos ~index = function
+and typed_map_typs_exp' ~neg ~pos ~ext = function
   | Lit _ as e -> e
   | Var _ as e -> e (* FIXME value_binding? *)
   | Fn fndef ->
-     Fn (typed_map_func_def ~neg ~pos ~index fndef)
+     Fn (typed_map_func_def ~neg ~pos ~ext fndef)
   | FnDef (s, vb, fndef, body) ->
-     FnDef (s, vb, typed_map_func_def ~neg ~pos ~index fndef, typed_map_typs_exp ~neg ~pos ~index body)
+     FnDef (s, vb, typed_map_func_def ~neg ~pos ~ext fndef, typed_map_typs_exp ~neg ~pos ~ext body)
   | App (f, args) ->
-     App (typed_map_typs_exp ~neg ~pos ~index f,
-          List.map (fun x -> typed_map_typs_exp ~neg ~pos ~index x) args)
+     App (typed_map_typs_exp ~neg ~pos ~ext f,
+          List.map (fun x -> typed_map_typs_exp ~neg ~pos ~ext x) args)
   | Tuple (tag, fs) ->
-     Tuple (tag, List.map (fun (fn, x) -> fn, typed_map_typs_exp ~neg ~pos ~index x) fs)
+     Tuple (tag, List.map (fun (fn, x) -> fn, typed_map_typs_exp ~neg ~pos ~ext x) fs)
   | Let (p, split, ty, e, body) ->
      (* FIXME binding? *)
-     Let (p, split, map_elab_typ ~neg ~pos ~index ty, typed_map_typs_exp ~neg ~pos ~index e, typed_map_typs_action ~neg ~pos ~index body)
+     Let (p, split, map_elab_typ ~neg ~pos ~ext ty, typed_map_typs_exp ~neg ~pos ~ext e, typed_map_typs_action ~neg ~pos ~ext body)
   | Seq (e1, e2) ->
-     Seq (typed_map_typs_exp ~neg ~pos ~index e1,
-          typed_map_typs_exp ~neg ~pos ~index e2)
+     Seq (typed_map_typs_exp ~neg ~pos ~ext e1,
+          typed_map_typs_exp ~neg ~pos ~ext e2)
   | Proj (e, s) ->
-     Proj (typed_map_typs_exp ~neg ~pos ~index e, s)
+     Proj (typed_map_typs_exp ~neg ~pos ~ext e, s)
   | If (cond, ifso, ifnot) ->
-     If (typed_map_typs_exp ~neg ~pos ~index cond,
-         typed_map_typs_exp ~neg ~pos ~index ifso,
-         typed_map_typs_exp ~neg ~pos ~index ifnot)
+     If (typed_map_typs_exp ~neg ~pos ~ext cond,
+         typed_map_typs_exp ~neg ~pos ~ext ifso,
+         typed_map_typs_exp ~neg ~pos ~ext ifnot)
   | Match ((es,matchloc), split, cases) ->
-     Match ((List.map (typed_map_typs_exp ~neg ~pos ~index) es, matchloc),
+     Match ((List.map (typed_map_typs_exp ~neg ~pos ~ext) es, matchloc),
             split,
-            List.map (fun (pats, e) -> pats, typed_map_typs_action ~neg ~pos ~index e) cases)
+            List.map (fun (pats, e) -> pats, typed_map_typs_action ~neg ~pos ~ext e) cases)
   | Typed (e, ty) ->
-     Typed (typed_map_typs_exp ~neg ~pos ~index e, map_elab_typ ~neg ~pos ~index ty)
+     Typed (typed_map_typs_exp ~neg ~pos ~ext e, map_elab_typ ~neg ~pos ~ext ty)
   | Pragma _ as e -> e
 
 
-and typed_map_typs_action ~neg ~pos ~index Check_pat.{ rhs; id; pat_loc; bindings } =
-  let rhs = typed_map_typs_exp ~neg ~pos ~index rhs in
+and typed_map_typs_action ~neg ~pos ~ext Check_pat.{ rhs; id; pat_loc; bindings } =
+  let rhs = typed_map_typs_exp ~neg ~pos ~ext rhs in
   let map_binding (vb : value_binding) =
     (* FIXME what's wrong with this? *)
-    (*{ vb with typ = pos ~index vb.typ }*) vb in
+    (*{ vb with typ = pos ~ext vb.typ }*) vb in
   let bindings = Option.map (fun (b : Check_pat.act_bindings) -> { b with bindings = SymMap.map map_binding b.Check_pat.bindings }) bindings in
   Check_pat.{ rhs; id; pat_loc; bindings }
 
-and typed_map_func_def ~neg ~pos ~index (poly, params, psplit, ret, body) =
-  let poly, index =
+and typed_map_func_def ~neg ~pos ~ext (poly, params, psplit, ret, body) =
+  let poly, ext =
     match poly with
-    | None -> None, index
+    | None -> None, ext
     | Some bounds ->
-       let index = index + 1 in
-       Some (IArray.map (fun (n, b) -> n, Option.map (neg ~index) b) bounds), index
+       let ext = IArray.length bounds :: ext in
+       Some (IArray.map (fun (n, b) -> n, Option.map (neg ~ext) b) bounds), ext
   in
-  let params = List.map (fun (p, ty) -> p, Option.map (neg ~index) ty) params in
-  let ret = Option.map (pos ~index) ret in
-  let body = typed_map_typs_action ~neg ~pos ~index body in
+  let params = List.map (fun (p, ty) -> p, Option.map (neg ~ext) ty) params in
+  let ret = Option.map (pos ~ext) ret in
+  let body = typed_map_typs_action ~neg ~pos ~ext body in
   poly, params, psplit, ret, body
+
+let wf_typed_exp env t =
+  typed_map_typs_exp ~ext:[] t
+    ~neg:(fun ~ext t -> wf_ntyp ~ext:(List.map (fun x -> None, x) ext) env t; t)
+    ~pos:(fun ~ext t -> wf_ptyp ~ext:(List.map (fun x -> None, x) ext) env t; t)
+  |> ignore
 
 module Elaborate = struct
   let rec exp env (e : _ typed_exp) : exp =
@@ -153,7 +159,7 @@ module Elaborate = struct
          env, None
       | Some bounds ->
          let env, poly =
-           unparse_bounds ~env ~pos:(fun ~env (Vflex fv) -> unparse_flexvar ~env ~flexvar:ignore fv) ~neg:(unparse_flexvar ~flexvar:ignore) bounds
+           unparse_bounds ~env ~pos:(unparse_lower ~flexvar:ignore) ~neg:(unparse_flexvar ~flexvar:ignore) bounds
          in
          env, Some poly
     in

@@ -80,42 +80,33 @@ fn[a,b <: a](x : b) -> a { x }
 # contravariant join checks
 fn[a,b](x : a|b) -> (a|b) {x}
 > fn [a, b](x: a | b) -> (a | b) { x }
-> typechecking error: Failure("contravariant join")
+> test:1: This type contains a contravariant join of a polymorphic variable
+>   fn[a,b](x : a|b) -> (a|b) {x}
+>               ^^^
 
 fn[a,b](x : (a|b) -> a) { fn(a){x(a)} }
 > fn [a, b](x: (a | b) -> a) { fn (a) { x(a) } }
->   fn [a, b](x: (a | b) -> a) -> ((a | b) -> a) { fn (a: a | b) -> a { x(a) } }
-> [a, b] ((a | b) -> a) -> (a | b) -> a
-> RECHECK: Failure("contravariant join")
-> 
-> typechecking error: Failure("contravariant join")
-> ELAB: Failure("contravariant join")
-> 
-> ELABINF: Failure("contravariant join")
-> 
-> let  = %yield(fun (x) ret { ret(fun (a) ret2 { let x2 = x(a); ret2(x2) }) });
-> done
+> test:1: This type contains a contravariant join of a polymorphic variable
+>   fn[a,b](x : (a|b) -> a) { fn(a){x(a)} }
+>                ^^^
 
 fn[a,b](x) -> ((a|b) -> a) {x}
 > fn [a, b](x) -> ((a | b) -> a) { x }
-> typechecking error: Failure("contravariant join")
+> test:1: This type contains a contravariant join of a polymorphic variable
+>   fn[a,b](x) -> ((a|b) -> a) {x}
+>                   ^^^
 
 fn[a,b](x) -> (a|b) {x}
 > fn [a, b](x) -> (a | b) { x }
->   fn [a, b](x: a | b) -> (a | b) { x }
-> [a, b] (a | b) -> a | b
-> RECHECK: Failure("contravariant join")
-> 
-> typechecking error: Failure("contravariant join")
-> ELAB: Failure("contravariant join")
-> 
-> ELABINF: Failure("contravariant join")
-> 
-> let  = %yield(fun (x) ret { ret(x) }); done
+> test:1: This type contains a contravariant join of a polymorphic variable
+>   fn[a,b](x) -> (a|b) {x}
+>                 ^^^^^
 
 fn[a,b](f : (a|b) -> a, x: b) -> ((a|b) -> a, b) { (f,x) }
 > fn [a, b](f: (a | b) -> a, x: b) -> ((a | b) -> a, b) { (f, x) }
-> typechecking error: Failure("contravariant join")
+> test:1: This type contains a contravariant join of a polymorphic variable
+>   fn[a,b](f : (a|b) -> a, x: b) -> ((a|b) -> a, b) { (f,x) }
+>                                      ^^^
 
 fn (f,x) { (fn(f, x) { let y = f(f(x)); (f, x) })(f,x) }
 > fn (f, x) { (fn (f, x) { let y = f(f(x)); (f, x) })(f, x) }
@@ -446,7 +437,7 @@ let wid = fn (id: [b]({foo:b}) -> b) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x
 >   let wid = fn (id: [b]({foo:b}) -> b) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
 >                                                                                                   ^
 >      found: (_) -> Any
->   expected: (_) -> Nothing
+>   expected: [b] (_) -> Nothing
 > This Any comes from test:1:
 >   let wid = fn (id: [b]({foo:b}) -> b) { id({foo:5}) }; fn(f) { let g = (fn(x){f(x); x.foo}); wid(g) }
 >                              ^
@@ -502,7 +493,7 @@ let wid = fn (id: [b,a <: {foo:b}](a) -> b) { id({foo:5}) }; fn(f) { let g = (fn
 >   let wid = fn (id: [b,a <: {foo:b}](a) -> b) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
 >                                                                                                                        ^
 >      found: (_) -> Any
->   expected: (_) -> Nothing
+>   expected: [b, a <: _] (_) -> Nothing
 > This Any comes from test:1:
 >   let wid = fn (id: [b,a <: {foo:b}](a) -> b) { id({foo:5}) }; fn(f) { let g = (fn(x){let z = f({bar:x}); x.foo}); wid(g) }
 >                                  ^
@@ -638,15 +629,15 @@ fn[a,b](x : [x <: b](x|a) -> x) -> (a -> a|b) { x }
 # FIXME: delete these tests? it's fine now
 (@bot : [a] [b] ({foo: b} | a))
 > (@bot : [a] [b] {foo: b} | a)
->   (@bot : [a] [b] {foo: b} | a)
-> [a] [b] {foo: b} | a
-> @bot
+> test:1: This type contains a scope-escaping join of a polymorphic variable
+>   (@bot : [a] [b] ({foo: b} | a))
+>                   ^^^^^^^^^^^^^^
 
 (@bot : [a, b] (Int, [c] ({foo: Int | c} | b)))
 > (@bot : [a, b] (Int, [c] {foo: Int | c} | b))
->   (@bot : [a, b] (Int, [c] {foo: Int | c} | b))
-> [a, b] (Int, [c] {foo: Int | c} | b)
-> @bot
+> test:1: This type contains a scope-escaping join of a polymorphic variable
+>   (@bot : [a, b] (Int, [c] ({foo: Int | c} | b)))
+>                            ^^^^^^^^^^^^^^^^^^^^
 
 (@bot : [a <: [b]Int]Int)
 > (@bot : [a <: [b] Int] Int)
@@ -777,11 +768,11 @@ fn[p, q <: {foo:p}] (x) -> ([a, b <: {bar: q}, c <: {x:b, y:q}] (a, b, c) -> (a,
 > }
 >   fn [p, q <: {foo: p}](
 >     x: (Any, {bar: q}, {x: {bar: q}, y: q}) -> (Nothing, (p, q), Nothing)
->   ) -> ([a, b <: {bar: q}, c <: {x: b, y: q}] (a, b, c) -> (a, b | (p, q), c)) {
+>   ) -> ([a, b <: {bar: q}, c <: {x: b, y: q}] (a, b, c) -> (a, (p, q) | b, c)) {
 >     x
 >   }
 > [p, q <: {foo: p}] ((Any, {bar: q}, {x: {bar: q}, y: q}) -> (Nothing, (p, q), Nothing)) ->
-> [a, b <: {bar: q}, c <: {x: b, y: q}] (a, b, c) -> (a, b | (p, q), c)
+> [a, b <: {bar: q}, c <: {x: b, y: q}] (a, b, c) -> (a, (p, q) | b, c)
 > let  = %yield(fun (x) ret { ret(x) }); done
 
 # more approx_ntyp
@@ -848,7 +839,7 @@ fn[a <: {foo:Int}, b <: {bar:Int}](x) -> ({a:a, b:{foo:Int}|b}) {
 >   let splat = fn (x) { {a: x, b: x} };
 >   splat(x)
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1465}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1164}
 
 
 # weirdness: non-monotonicity wrt annotations
@@ -860,7 +851,7 @@ fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> ({a:{bar:Bool}|a, b:{foo:Int}|b, c:{fo
 >   ({a: {bar: Bool} | a, b: {foo: Int} | b, c: {foo: Int}}) {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1470}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1169}
 
 fn[a <: {foo:Int,...}, b <: {bar:Bool,...}](x) -> ({a:{bar:Bool,...}|a, b:{foo:Int,...}|b, c:Any}) {
   {a:x, b:x, c:x}
@@ -869,7 +860,7 @@ fn[a <: {foo:Int,...}, b <: {bar:Bool,...}](x) -> ({a:{bar:Bool,...}|a, b:{foo:I
 >   ({a: {bar: Bool, ...} | a, b: {foo: Int, ...} | b, c: Any}) {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int, ...} <= {foo: _1479, ...}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int, ...} <= {foo: _1178, ...}
 
 
 # FIXME: spec_sub_rigid_pos should remove one of the variables here
@@ -880,7 +871,7 @@ fn[a <: {foo:Int,...}, b <: {bar:Bool,...}](x) -> ({a:{bar:Bool,...}|a, b:{foo:I
 >   ({a: {bar: Bool, ...} | a, b: {foo: Int, ...} | a | b, c: Any}) {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {bar: Bool, ...} <= {bar: _1484, ...}
+> typechecking error: unimplemented: unresolved delayed constraints: {bar: Bool, ...} <= {bar: _1183, ...}
 
 fn[a](x: Any, y:a) { if true {x} else {y} }
 > fn [a](x: Any, y: a) { if true { x } else { y } }
@@ -1125,14 +1116,14 @@ fn [a](x:a, f:[b <: a](b) -> b) { x }
 # Not sure it's worth the effort, though
 fn[a <: {foo:Int}](x:a, y:{foo:Int}) { if true {x} else {y} }
 > fn [a <: {foo: Int}](x: a, y: {foo: Int}) { if true { x } else { y } }
->   fn [a <: {foo: Int}](x: a, y: {foo: Int}) -> (a | {foo: Int}) {
+>   fn [a <: {foo: Int}](x: a, y: {foo: Int}) -> ({foo: Int} | a) {
 >     if true {
 >       x
 >     } else {
 >       y
 >     }
 >   }
-> [a <: {foo: Int}] (a, {foo: Int}) -> a | {foo: Int}
+> [a <: {foo: Int}] (a, {foo: Int}) -> {foo: Int} | a
 > let  = %yield(fun (x, y) ret {
 >   match <true> {
 >     true() -> {
@@ -1148,7 +1139,7 @@ fn[a <: {foo:Int}](x:a, y:{foo:Int}) { if true {x} else {y} }
 # multi RV upper bounds tests
 fn[a <: {foo:Int}](x) -> (a,{foo:Int}) { (x,x) }
 > fn [a <: {foo: Int}](x) -> (a, {foo: Int}) { (x, x) }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1968}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1559}
 
 # ensure_rigvars_present gets this one
 fn mkdup[a]() -> (a -> (a, a)) { fn(x) { (x,x) } }
@@ -1218,7 +1209,7 @@ fn (x: {foo:{bar:{baz:Bool}}}) -> ({foo:{bar:{baz:Int}}}) {
 #
 fn [a <: {foo:{bar:Int}}] (x) -> ({foo:Int}, a) { (x,x) }
 > fn [a <: {foo: {bar: Int}}](x) -> ({foo: Int}, a) { (x, x) }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: {bar: Int}} <= {foo: _2031}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: {bar: Int}} <= {foo: _1608}
 
 fn ch[a](x:a,y:a) -> (a,a) { if true {(x,x)} else {(y,y)} }
 fn [a <: {foo:{bar:Int}}] (x, y:a) -> ({foo:Bool}, a) { ch(x,y) }
@@ -1318,4 +1309,4 @@ fn [a <: ({foo:Int,...},Int)](x : a) -> (#Tag{bar:Bool,...},Int) { x }
 >                                            ^^^^^^^^^^^^^^^^^^
 
 
-> STATS: fix: 91, flex: 2045
+> STATS: fix: 91, flex: 1620
