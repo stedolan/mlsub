@@ -243,7 +243,7 @@ fn[b <: {foo:Int}] (x) { (x : b) }
 
 (fn() { @true } : [a]() -> Bool)
 > ((fn () { @true }) : [a] () -> Bool)
->   ((fn () { @true }) : [a] () -> Bool)
+>   ((fn [a]() -> Bool { @true }) : [a] () -> Bool)
 > [a] () -> Bool
 > let  = %yield(fun () ret { ret(<true>) }); done
 
@@ -260,7 +260,8 @@ fn(id, x) { (id(x), id(5)) }
 
 (fn(id, x) { (id(x), id(5)) } : [a]([b](b) -> b, a) -> (a,Int))
 > ((fn (id, x) { (id(x), id(5)) }) : [a] ([b] b -> b, a) -> (a, Int))
->   ((fn (id, x) { (id(x), id(5)) }) : [a] ([b] b -> b, a) -> (a, Int))
+>   ((fn [a](id: [b] b -> b, x: a) -> (a, Int) { (id(x), id(5)) }) :
+>     [a] ([b] b -> b, a) -> (a, Int))
 > [a] ([b] b -> b, a) -> (a, Int)
 > let  = %yield(fun (id, x) ret {
 >   let x2 = id(5);
@@ -413,7 +414,7 @@ let wid = fn (id: [b]({foo:b}) -> b) { id({foo:5}) }; fn(f) { wid(fn(x){f(5); x.
 >   let wid : ([b] ({foo: b}) -> b) -> Int =
 >   fn (id: [b] ({foo: b}) -> b) -> Int { id({foo: 5}) };
 >   fn (f: Int -> ()) -> Int {
->     wid(fn (x) { f(5); x.foo })
+>     wid(fn [b](x: {foo: b}) -> b { f(5); x.foo })
 >   }
 > (Int -> ()) -> Int
 > let wid = fun (id) ret { let x = id((foo: 5)); ret(x) };
@@ -454,7 +455,7 @@ let wid = fn (id: [b]({foo:b}) -> b) { id({foo:5}) }; fn(f) { wid(fn(x){f(x); x.
 >   let wid : ([b] ({foo: b}) -> b) -> Int =
 >   fn (id: [b] ({foo: b}) -> b) -> Int { id({foo: 5}) };
 >   fn (f: ({foo: Any}) -> ()) -> Int {
->     wid(fn (x) { f(x); x.foo })
+>     wid(fn [b](x: {foo: b}) -> b { f(x); x.foo })
 >   }
 > (({foo: Any}) -> ()) -> Int
 > let wid = fun (id) ret { let x = id((foo: 5)); ret(x) };
@@ -472,7 +473,7 @@ let wid = fn (id: [b]({foo:b}) -> b) { id({foo:5}) }; fn(f : (Any) -> ()) { wid(
 >   let wid : ([b] ({foo: b}) -> b) -> Int =
 >   fn (id: [b] ({foo: b}) -> b) -> Int { id({foo: 5}) };
 >   fn (f: Any -> ()) -> Int {
->     wid(fn (x) { f(x); x.foo })
+>     wid(fn [b](x: {foo: b}) -> b { f(x); x.foo })
 >   }
 > (Any -> ()) -> Int
 > let wid = fun (id) ret { let x = id((foo: 5)); ret(x) };
@@ -509,7 +510,7 @@ let wid = fn (id: [b,a <: {foo:b}](a) -> b) { id({foo:5}) }; fn(f) { wid(fn(x){l
 >   let wid : ([b, a <: {foo: b}] a -> b) -> Int =
 >   fn (id: [b, a <: {foo: b}] a -> b) -> Int { id({foo: 5}) };
 >   fn (f: ({bar: {foo: Any}}) -> Any) -> Int {
->     wid(fn (x) { let z : Any = f({bar: x}); x.foo })
+>     wid(fn [b, a <: {foo: b}](x: a) -> b { let z : Any = f({bar: x}); x.foo })
 >   }
 > (({bar: {foo: Any}}) -> Any) -> Int
 > let wid = fun (id) ret { let x = id((foo: 5)); ret(x) };
@@ -531,7 +532,7 @@ let wid = fn (id: [b,a <: {foo:b}](a) -> b) { id({foo:5}) }; fn(f : (Any) -> Str
 >   let wid : ([b, a <: {foo: b}] a -> b) -> Int =
 >   fn (id: [b, a <: {foo: b}] a -> b) -> Int { id({foo: 5}) };
 >   fn (f: Any -> String) -> Int {
->     wid(fn (x) { let z : String = f({bar: x}); x.foo })
+>     wid(fn [b, a <: {foo: b}](x: a) -> b { let z : String = f({bar: x}); x.foo })
 >   }
 > (Any -> String) -> Int
 > let wid = fun (id) ret { let x = id((foo: 5)); ret(x) };
@@ -590,7 +591,7 @@ fn(f) { fn(id: [a] (a) -> a) { id(fn(y) { let x = f(y); y }) } }
 
 (fn(x) {(fn(y){y})(x)} : [a] (a) -> a)
 > ((fn (x) { (fn (y) { y })(x) }) : [a] a -> a)
->   ((fn (x) { (fn [a](y: a) -> a { y })(x) }) : [a] a -> a)
+>   ((fn [a](x: a) -> a { (fn [a_2](y: a_2) -> a_2 { y })(x) }) : [a] a -> a)
 > [a] a -> a
 > let  = %yield(fun (x) ret { let x2 = fun (y) ret2 { ret2(y) }(x); ret(x2) });
 > done
@@ -606,7 +607,7 @@ let id = fn(y) { y }; (fn[a](x : a) {id(x)})
 let id = fn(y) { y }; (fn(x) {id(x)} : [a] (a) -> a)
 > let id = fn (y) { y }; ((fn (x) { id(x) }) : [a] a -> a)
 >   let id : [a] a -> a = fn [a](y: a) -> a { y };
->   ((fn (x) { id(x) }) : [a] a -> a)
+>   ((fn [a](x: a) -> a { id(x) }) : [a] a -> a)
 > [a] a -> a
 > let id = fun (y) ret { ret(y) };
 > let  = %yield(fun (x) ret { let x2 = id(x); ret(x2) });
@@ -695,7 +696,7 @@ let f = fn[a](id: [b](a, b) -> (a, b), x:a){id(x,1)}; fn(z){ f(fn(a,b){(a,b)}, i
 >   let f : [a] ([b] (a, b) -> (a, b), a) -> (a, Int) =
 >   fn [a](id: [b] (a, b) -> (a, b), x: a) -> (a, Int) { id(x, 1) };
 >   fn [a](z: {cond: Bool, a: a, b: a, ...}) -> (a, Int) {
->     f(fn (a, b) { (a, b) }, if z.cond { z.a } else { z.b })
+>     f(fn [b](a: a, b: b) -> (a, b) { (a, b) }, if z.cond { z.a } else { z.b })
 >   }
 > [a] ({cond: Bool, a: a, b: a, ...}) -> (a, Int)
 > let f = fun (id, x) ret { let x2 = id(x, 1); ret(x2) };
@@ -839,7 +840,7 @@ fn[a <: {foo:Int}, b <: {bar:Int}](x) -> ({a:a, b:{foo:Int}|b}) {
 >   let splat = fn (x) { {a: x, b: x} };
 >   splat(x)
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1164}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1194}
 
 
 # weirdness: non-monotonicity wrt annotations
@@ -851,7 +852,7 @@ fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> ({a:{bar:Bool}|a, b:{foo:Int}|b, c:{fo
 >   ({a: {bar: Bool} | a, b: {foo: Int} | b, c: {foo: Int}}) {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1169}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1199}
 
 fn[a <: {foo:Int,...}, b <: {bar:Bool,...}](x) -> ({a:{bar:Bool,...}|a, b:{foo:Int,...}|b, c:Any}) {
   {a:x, b:x, c:x}
@@ -860,7 +861,7 @@ fn[a <: {foo:Int,...}, b <: {bar:Bool,...}](x) -> ({a:{bar:Bool,...}|a, b:{foo:I
 >   ({a: {bar: Bool, ...} | a, b: {foo: Int, ...} | b, c: Any}) {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int, ...} <= {foo: _1178, ...}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int, ...} <= {foo: _1208, ...}
 
 
 # FIXME: spec_sub_rigid_pos should remove one of the variables here
@@ -871,7 +872,7 @@ fn[a <: {foo:Int,...}, b <: {bar:Bool,...}](x) -> ({a:{bar:Bool,...}|a, b:{foo:I
 >   ({a: {bar: Bool, ...} | a, b: {foo: Int, ...} | a | b, c: Any}) {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {bar: Bool, ...} <= {bar: _1183, ...}
+> typechecking error: unimplemented: unresolved delayed constraints: {bar: Bool, ...} <= {bar: _1213, ...}
 
 fn[a](x: Any, y:a) { if true {x} else {y} }
 > fn [a](x: Any, y: a) { if true { x } else { y } }
@@ -1139,7 +1140,7 @@ fn[a <: {foo:Int}](x:a, y:{foo:Int}) { if true {x} else {y} }
 # multi RV upper bounds tests
 fn[a <: {foo:Int}](x) -> (a,{foo:Int}) { (x,x) }
 > fn [a <: {foo: Int}](x) -> (a, {foo: Int}) { (x, x) }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1559}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1589}
 
 # ensure_rigvars_present gets this one
 fn mkdup[a]() -> (a -> (a, a)) { fn(x) { (x,x) } }
@@ -1209,7 +1210,7 @@ fn (x: {foo:{bar:{baz:Bool}}}) -> ({foo:{bar:{baz:Int}}}) {
 #
 fn [a <: {foo:{bar:Int}}] (x) -> ({foo:Int}, a) { (x,x) }
 > fn [a <: {foo: {bar: Int}}](x) -> ({foo: Int}, a) { (x, x) }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: {bar: Int}} <= {foo: _1608}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: {bar: Int}} <= {foo: _1638}
 
 fn ch[a](x:a,y:a) -> (a,a) { if true {(x,x)} else {(y,y)} }
 fn [a <: {foo:{bar:Int}}] (x, y:a) -> ({foo:Bool}, a) { ch(x,y) }
@@ -1309,4 +1310,4 @@ fn [a <: ({foo:Int,...},Int)](x : a) -> (#Tag{bar:Bool,...},Int) { x }
 >                                            ^^^^^^^^^^^^^^^^^^
 
 
-> STATS: fix: 91, flex: 1620
+> STATS: fix: 91, flex: 1650

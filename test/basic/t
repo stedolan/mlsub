@@ -1400,7 +1400,7 @@ fn (x : (Any)->(), wid : (([a] a -> a) -> Int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 >   wid(fn (a) { {x: x(a), y: a}.y })
 > }
 >   fn (x: Any -> (), wid: ([a] a -> a) -> Int) -> Int {
->     wid(fn (a) { {x: x(a), y: a}.y })
+>     wid(fn [a](a: a) -> a { {x: x(a), y: a}.y })
 >   }
 > (Any -> (), ([a] a -> a) -> Int) -> Int
 > let  = %yield(fun (x, wid) ret {
@@ -1417,7 +1417,7 @@ fn (x : (Any)->(), wid : (([a] a -> a) -> Int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 fn (x, wid : (([a] a -> a) -> Int)) { wid(fn(a){{x:x(a),y:a}.y}) }
 > fn (x, wid: ([a] a -> a) -> Int) { wid(fn (a) { {x: x(a), y: a}.y }) }
 >   fn (x: Any -> Any, wid: ([a] a -> a) -> Int) -> Int {
->     wid(fn (a) { {x: x(a), y: a}.y })
+>     wid(fn [a](a: a) -> a { {x: x(a), y: a}.y })
 >   }
 > (Any -> Any, ([a] a -> a) -> Int) -> Int
 > let  = %yield(fun (x, wid) ret {
@@ -1462,7 +1462,7 @@ fn (x, wid : (([a <: {foo:Int}] a -> a | {foo:Int,bar:String}) -> Int)) { wid(fn
 >     x: ({foo: Int}) -> {foo: Int, bar: String},
 >     wid: ([a <: {foo: Int}] a -> {foo: Int, bar: String} | a) -> Int
 >   ) -> Int {
->     wid(fn (a) { x(a) })
+>     wid(fn [a <: {foo: Int}](a: a) -> ({foo: Int, bar: String} | a) { x(a) })
 >   }
 > (({foo: Int}) -> {foo: Int, bar: String}, ([a <: {foo: Int}] a -> {foo: Int, bar: String} | a) -> Int) -> Int
 > let  = %yield(fun (x, wid) ret {
@@ -2246,4 +2246,4 @@ fn (z) { go(z).foo.baz }
 > done
 
 
-> STATS: fix: 125, flex: 1409
+> STATS: fix: 125, flex: 1425

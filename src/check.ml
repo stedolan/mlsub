@@ -24,63 +24,15 @@ let mark_var_use_at_level ~(mode : generalisation_mode) lvl =
        Some (Env_level.min l1 l2)
 
 module Promotion = Types.Promotion (struct
-  type t = ptyp * Elab.typed_exp
-  let map ~neg ~pos (ty, typed_exp) =
+  type t = ptyp * Elab.typed_action
+  let map ~neg ~pos (ty, act) =
     let ty = pos ~mode:`Poly ~ext:[] ty in
-    let typed_exp = typed_map_typs_exp typed_exp ~ext:[]
+    let act = typed_map_typs_action act ~ext:[]
                 ~neg:(neg ~mode:`Elab)
                 ~pos:(pos ~mode:`Elab)
     in
-    (ty, typed_exp)
+    (ty, act)
 end)
-
-let elab_gen (env:env) ~loc ~mode poly (fn : env -> ptyp * typed_exp * env_level option * 'rest) : ptyp * (typed_polybounds option * typed_exp) * bool * 'rest =
-  let rigvars', rig_names =
-    match poly with
-    | None -> IArray.empty, SymMap.empty
-    | Some poly -> Check_type.enter_polybounds ~lookup:Check_type.default_lookup_fn ~env poly in
-
-  let env', _rigvars = enter_rigid env rigvars' rig_names in
-  let orig_ty, typed_exp, gen_level, rest = fn env' in
-  wf_ptyp env' orig_ty;
-  wf_typed_exp env' typed_exp;
-  let can_generalise =
-    match gen_level with
-    | None -> true
-    | Some lvl when Env_level.equal lvl (Env.level env') -> true
-    | lvl ->
-       mark_var_use_at_level ~mode lvl;
-       false
-  in
-  let policy = if can_generalise then `Generalise loc else `Hoist env in
-  let bvars, (ty, typed_exp) =
-    try Promotion.promote_exn ~policy ~rigvars:rigvars' ~env:env' (orig_ty, typed_exp)
-    with Types.CloseError (err,errloc) ->
-      (* FIXME: locations and explanations here are poor *)
-      let loc = Option.value errloc ~default:loc in
-      fail loc (Illformed_type (`Close_error err))
-  in
-  if Array.length bvars = 0 then
-    ty, (None, typed_exp), can_generalise, rest
-  else
-    let next_name = ref 0 in
-    let rec mkname () =
-      let n = !next_name in
-      incr next_name;
-      let name = match n with
-        | n when n < 26 -> Printf.sprintf "%c" (Char.chr (Char.code 'a' + n))
-        | n -> Printf.sprintf "t_%d" (n-26) in
-      (* NB: look up env', to ensure no collisions with rigvars *)
-      match Typedefs.env_lookup_type_var env' Location.noloc name with
-      | None -> name, Location.noloc
-      | Some _ -> mkname () in
-    let bounds = bvars |> Array.map (function Gen_rigid rv -> IArray.get rigvars' rv.var | Gen_flex r -> mkname (), Some r) |> IArray.of_array in
-    let tpoly = Tpoly { vars = bounds; body = ty } in
-    wf_ptyp env tpoly;
-    tpoly,
-    (Some bounds, typed_exp),
-    can_generalise,
-    rest
 
 (* FIXME:
    This improves elaborations but is a bit of a hack.
@@ -102,18 +54,13 @@ let checking ty =
   { ty_checked = ty;
     ty_inferred = None }
 
-let inspect_poly ty =
-  match ty.ty_checked with
-  | Tpoly p -> Some p
-  | _ -> None
-
 type inspect_result =
   | Imatches of (ptyp, ntyp) Cons1.t loc
   (* FIXME: add Ifailed for when a Cons clearly does not match? *)
   | Iother
 
-let inspect_cons cons ty =
-  match ty.ty_checked with
+let inspect_cons' cons ty =
+  match ty with
   | Tsimple _ ->
      (* bidirectional checking does not look inside Tsimple *)
      Iother
@@ -125,8 +72,40 @@ let inspect_cons cons ty =
      (match Cons1.sub_head cons c with Le _ -> Imatches (c,cloc) | Un _ -> Iother)
   | _ -> Iother
 
+let inspect_cons cons ty = inspect_cons' cons ty.ty_checked
+
+let inspect_poly_func env params ty =
+  let poly, ty =
+    match ty.ty_checked with
+    | Tpoly {vars; body} ->
+       (* rigvars not in scope in body, so no rig_names *)
+       let env', open_rvs = enter_rigid env vars SymMap.empty in
+       (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
+       Some (vars, env'), open_rvs body
+    | ty -> None, ty
+  in
+  match inspect_cons' (Cons1.Func (params, ())) ty with
+  | Imatches (Func (ptypes, rtype), _) ->
+     Some (poly, ptypes, rtype)
+  | _ ->
+     None
+
 let typ_of_tyexp env ty =
   Check_type.typ_of_tyexp ~lookup:Check_type.default_lookup_fn ~env ty
+
+let mk_action (act : _ Check_pat.action) body : Elab.typed_action =
+  let act_bindings, act_comp_bindings =
+    match act.bindings with
+    | None -> SymMap.empty, `Unused
+    | Some {bindings; shared_cont = sc} ->
+       SymMap.map (fun vb -> elab_ptyp vb.typ, vb.comp_var) bindings,
+       match sc with
+       | None -> `Once
+       | Some sc -> `Shared sc
+  in
+  { act_body = body;
+    act_bindings;
+    act_comp_bindings }
 
 let rec check env ~(mode : generalisation_mode) e (ty : ty_mode) : typed_exp =
   wf_ntyp env ty.ty_checked;
@@ -158,7 +137,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      | Some v ->
         mark_var_use_at_level ~mode v.gen_level;
         inferred v.typ;
-        Var ((id,loc), v)
+        Var ((id,loc), v.comp_var)
      end
 
   | Typed (e, ty) ->
@@ -263,28 +242,23 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      let act = Util.as_singleton act in
      let env = extend_env env act in
      let body = check env ~mode body ty in
-     Let (p, split, elab_ptyp pty, e, { act with rhs = body })
+     Let (p, split, elab_ptyp pty, e, mk_action act body)
 
   | Seq (e1, e2) ->
      let e1 = check env ~mode e1 (checking (unit eloc)) in
      let e2 = check env ~mode e2 ty in
      Seq (e1, e2)
 
-  (* FIXME should I combine Tpoly and Func? *)
   | Fn ((poly, params, ret, body) as fndef) ->
-     begin match inspect_poly ty with
-     | Some {vars; body} ->
-        (* rigvars not in scope in body, so no rig_names *)
-        let env', open_rigvars = enter_rigid env vars SymMap.empty in
-        let body = open_rigvars body in
-        check' env' ~mode eloc e (checking body)
-        (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
-     | None ->
-        let target_ty = Cons1.Func (List.map (fun (k,_) -> k,()) params, ()) in
-        match poly, inspect_cons target_ty ty with
-       | None, Imatches (Func (ptypes, rtype), _) ->
-          (* If poly <> None, then we should infer & subtype *)
-          (* FIXME: do we need another level here? Does hoisting break things? *)
+     begin match poly, lazy (inspect_poly_func env params ty) with
+     | None, lazy (Some (typoly, ptypes, rtype)) ->
+        let poly, env =
+          match typoly with
+          | Some (vars, env) ->
+             let poly = (IArray.map (function (_,None) as b -> b | (s, Some t) -> s, Some (Elab_ptyp t)) vars) in
+             Some poly, env
+          | None -> None, env
+        in
           let param_list =
             List.map2 (fun (pat, pty) ty ->
               let ty_level =
@@ -317,9 +291,30 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
           in
           let body = check env' ~mode body (checking ret_type) in
           (* FIXME: is this wrong? What if the annotations names have changed? *)
-          (* FIXME: insert / keep type annotations? *)
-          Fn (None, List.map (fun (p, _) -> p, None) params, split, None (*FIXME ret_type?*), {act with rhs = body })
-       | _ ->
+          let fndef =
+            match poly with
+            | None ->
+               (* FIXME: keep type annotations here too? *)
+               (None,
+                List.map (fun (p, _) -> p, None) params,
+                split,
+                None (*FIXME ret_type?*),
+                mk_action act body)
+            | Some poly ->
+               let fndef : typed_func_def =
+                 (None,
+                  List.map2 (fun (p, _) ty -> p, Some (elab_ptyp ty)) params ptypes,
+                  split,
+                  Some (Elab_ntyp rtype) (*FIXME ret_type?*),
+                  mk_action act body)
+               in
+               let close ~ext t =
+                 close_typ ~neg:ignore ~pos:ignore (Env.level env) (List.length ext) t in
+               let (_, params, psplit, ret, body) = typed_map_func_def ~neg:close ~pos:close ~ext:[] fndef in
+               (Some poly, params, psplit, ret, body)
+          in
+          Fn fndef
+       | _, _ ->
           let ty, tfndef = infer_func_def env ~loc:eloc ~mode eloc fndef in
           inferred ty;
           Fn tfndef
@@ -357,7 +352,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      let actions =
        List.map2 (fun act (_, exp) ->
          let env = extend_env env act in
-         { act with rhs = check env ~mode exp ty })
+         (mk_action act (check env ~mode exp ty)))
          actions cases
      in
      Match ((es, matchloc),
@@ -380,46 +375,101 @@ and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * typed_exp =
   !ty, e
 
 and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_func_def =
-   let ty, (typed_poly, typed_fn), _generalised, (act, split) =
-     elab_gen env ~loc ~mode poly (fun env ->
-       let check_ty ~ispos ty =
-         let ty = typ_of_tyexp env ty in
-         (* check for contravariant joins *)
-         begin try ignore (close_typ_poly_exn ~ispos (Env.level env) ty)
-         with Types.CloseError (err,loc) ->
-           let loc = Option.value loc ~default:eloc in
-           fail loc (Illformed_type (`Close_error err))
-         end;
-         ty
-       in
-       let params = List.map (fun (p, ty) ->
-         match ty with
-         | Some ty ->
-            let ty = check_ty ~ispos:false ty in
-            (ty,ty), p, None
-         | None ->
-            fresh_flow env, p, Some (Env.level env)) params in
-       let param_ptyps = List.map (fun (((_tn, tp), _p, gen_level)) -> tp, gen_level) params in
-       let case : case =
-         ([List.map (fun ((_ty, p, _lvl)) -> p) params], eloc), body in
-       let act, split = Check_pat.split_cases ~matchloc:eloc env param_ptyps [case] in
-       let act = Util.as_singleton act in
-       let env' = extend_env env act in
+   let ty, typed_poly, _generalised, (act, split) =
 
-       let bmode = fresh_gen_mode () in
-       let res, body =
-         match ret with
-         | Some ty ->
-            let ty = check_ty ~ispos:true ty in
-            ty, check env' ~mode:bmode body (checking ty)
-         | None ->
-            infer env' ~mode:bmode body in
-       let _ = List.map (fun ((tn,tp),_,_) -> wf_ntyp env tn; wf_ptyp env tp) params in
-       (* FIXME params or ptys? What happens if they disagree? *)
-       tcons (Func (List.map (fun ((tn,_tp),_,_) -> tn) params, res), eloc),
-       body,
-       bmode.gen_level_acc,
-       (act, split)) in
+  let rigvars', rig_names =
+    match poly with
+    | None -> IArray.empty, SymMap.empty
+    | Some poly -> Check_type.enter_polybounds ~lookup:Check_type.default_lookup_fn ~env poly in
+
+  let env', _rigvars = enter_rigid env rigvars' rig_names in
+  let check_ty ~ispos ty =
+    let ty = typ_of_tyexp env' ty in
+    (* check for contravariant joins *)
+    begin try ignore (close_typ_poly_exn ~ispos (Env.level env') ty)
+    with Types.CloseError (err,loc) ->
+      let loc = Option.value loc ~default:eloc in
+      fail loc (Illformed_type (`Close_error err))
+    end;
+    ty
+  in
+  let orig_ty, typed_exp, gen_level, act, split =
+    let params = List.map (fun (p, ty) ->
+      match ty with
+      | Some ty ->
+         let ty = check_ty ~ispos:false ty in
+         (ty,ty), p, None
+      | None ->
+         fresh_flow env', p, Some (Env.level env')) params in
+    let param_ptyps = List.map (fun (((_tn, tp), _p, gen_level)) -> tp, gen_level) params in
+    let case : case =
+      ([List.map (fun ((_ty, p, _lvl)) -> p) params], eloc), body in
+    let act, split = Check_pat.split_cases ~matchloc:eloc env' param_ptyps [case] in
+    let act = Util.as_singleton act in
+    let env' = extend_env env' act in
+
+    let bmode = fresh_gen_mode () in
+    let res, body =
+      match ret with
+      | Some ty ->
+         let ty = check_ty ~ispos:true ty in
+         ty, check env' ~mode:bmode body (checking ty)
+      | None ->
+         infer env' ~mode:bmode body in
+    let _ = List.map (fun ((tn,tp),_,_) -> wf_ntyp env' tn; wf_ptyp env' tp) params in
+    (* FIXME params or ptys? What happens if they disagree? *)
+    tcons (Func (List.map (fun ((tn,_tp),_,_) -> tn) params, res), eloc),
+    body,
+    bmode.gen_level_acc,
+    act,
+    split
+  in
+  wf_ptyp env' orig_ty;
+  wf_typed_exp env' typed_exp;
+  let can_generalise =
+    match gen_level with
+    | None -> true
+    | Some lvl when Env_level.equal lvl (Env.level env') -> true
+    | lvl ->
+       mark_var_use_at_level ~mode lvl;
+       false
+  in
+  let policy = if can_generalise then `Generalise loc else `Hoist env in
+  let act = mk_action act typed_exp in
+  let bvars, (ty, act) =
+    try Promotion.promote_exn ~policy ~rigvars:rigvars' ~env:env' (orig_ty, act)
+    with Types.CloseError (err,errloc) ->
+      (* FIXME: locations and explanations here are poor *)
+      let loc = Option.value errloc ~default:loc in
+      fail loc (Illformed_type (`Close_error err))
+  in
+  if Array.length bvars = 0 then
+    ty, None, can_generalise, (act, split)
+  else
+    let next_name = ref 0 in
+    let rec mkname () =
+      let n = !next_name in
+      incr next_name;
+      let name = match n with
+        | n when n < 26 -> Printf.sprintf "%c" (Char.chr (Char.code 'a' + n))
+        | n -> Printf.sprintf "t_%d" (n-26) in
+      (* NB: look up env', to ensure no collisions with rigvars *)
+      match Typedefs.env_lookup_type_var env' Location.noloc name with
+      | None -> name, Location.noloc
+      | Some _ -> mkname () in
+    let bounds = bvars
+      |> Array.map (function
+        | Gen_rigid rv -> IArray.get rigvars' rv.var
+        | Gen_flex r when is_ttop r -> mkname (), None
+        | Gen_flex r -> mkname (), Some r)
+      |> IArray.of_array in
+    let tpoly = Tpoly { vars = bounds; body = ty } in
+    wf_ptyp env tpoly;
+    tpoly,
+    (Some (IArray.map (function (_,None) as b -> b | (s, Some t) -> s, Some (Elab_ntyp t)) bounds)),
+    can_generalise,
+    (act, split)
+   in
    let tparams, tret =
      (* FIXME awful hack *)
      match ty with
@@ -427,13 +477,13 @@ and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_
      | Tpoly { body = Tcvj ([Func (t,r),_],[], _loc); _ } -> t,r
      | _ -> intfail "wuh?"
    in
-   let params = List.map2 (fun (p, _) t -> (p, Some t)) params tparams in
+   let params = List.map2 (fun (p, _) t -> (p, Some (Elab_ntyp t))) params tparams in
    ty,
    (typed_poly,
     params,
     split,
-    Some tret,
-    { act with rhs = typed_fn })
+    Some (Elab_ptyp tret),
+    act)
 
 and extend_env env act =
   let vals = (Option.get act.Check_pat.bindings).bindings in

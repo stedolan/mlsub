@@ -10,12 +10,12 @@ type elab_typ =
 
 type typed_exp = typed_exp' mayloc and typed_exp' =
   | Lit of literal loc
-  | Var of ident * value_binding (* Is this right? *)
+  | Var of ident * IR.value IR.Binder.ref
   | Fn of typed_func_def
   | FnDef of symbol * IR.value IR.Binder.t * typed_func_def * typed_exp
   | App of typed_exp * typed_exp list (* FIXME: restore/preserve parameter names? *)
   | Tuple of tuple_tag option * (field_name loc * typed_exp) list
-  | Let of typed_pat * Check_pat.ex_split * elab_typ * typed_exp * typed_exp Check_pat.action
+  | Let of typed_pat * Check_pat.ex_split * elab_typ * typed_exp * typed_action
   | Seq of typed_exp * typed_exp
   | Proj of typed_exp * symbol
   | If of typed_exp * typed_exp * typed_exp
@@ -23,18 +23,23 @@ type typed_exp = typed_exp' mayloc and typed_exp' =
   | Typed of typed_exp * elab_typ
   | Pragma of string
 
-and typed_case = typed_pat list list loc * typed_exp Check_pat.action
+and typed_case = typed_pat list list loc * typed_action
 
 and typed_func_def =
-  typed_polybounds option * typed_parameters * Check_pat.ex_split * ptyp option * typed_exp Check_pat.action
+  typed_polybounds option * typed_parameters * Check_pat.ex_split * elab_typ option * typed_action
 
 and typed_parameters =
-  (typed_pat * ntyp option) list
+  (typed_pat * elab_typ option) list
+
+and typed_action =
+  { act_body: typed_exp;
+    act_bindings: (elab_typ * IR.value IR.Binder.ref) SymMap.t;
+    act_comp_bindings: [`Unused | `Once | `Shared of Check_pat.shared_cont] }
 
 and typed_pat = pat
 
 and typed_polybounds =
-  (string Location.loc * ntyp option) IArray.t
+  (string Location.loc * elab_typ option) IArray.t
 
 let map_elab_typ ~neg ~pos ~ext = function
   | Elab_ptyp t -> Elab_ptyp (pos ~ext t)
@@ -47,7 +52,7 @@ let rec typed_map_typs_exp ~neg ~pos ~ext (e : typed_exp) =
 
 and typed_map_typs_exp' ~neg ~pos ~ext = function
   | Lit _ as e -> e
-  | Var _ as e -> e (* FIXME value_binding? *)
+  | Var (id, v) -> Var (id, v)
   | Fn fndef ->
      Fn (typed_map_func_def ~neg ~pos ~ext fndef)
   | FnDef (s, vb, fndef, body) ->
@@ -77,14 +82,13 @@ and typed_map_typs_exp' ~neg ~pos ~ext = function
      Typed (typed_map_typs_exp ~neg ~pos ~ext e, map_elab_typ ~neg ~pos ~ext ty)
   | Pragma _ as e -> e
 
+and typed_map_value_binding ~pos ~ext (vb : value_binding) =
+  { vb with typ = pos ~ext vb.typ }
 
-and typed_map_typs_action ~neg ~pos ~ext Check_pat.{ rhs; id; pat_loc; bindings } =
-  let rhs = typed_map_typs_exp ~neg ~pos ~ext rhs in
-  let map_binding (vb : value_binding) =
-    (* FIXME what's wrong with this? *)
-    (*{ vb with typ = pos ~ext vb.typ }*) vb in
-  let bindings = Option.map (fun (b : Check_pat.act_bindings) -> { b with bindings = SymMap.map map_binding b.Check_pat.bindings }) bindings in
-  Check_pat.{ rhs; id; pat_loc; bindings }
+and typed_map_typs_action ~neg ~pos ~ext { act_body; act_bindings; act_comp_bindings } =
+  let act_body = typed_map_typs_exp ~neg ~pos ~ext act_body in
+  let act_bindings = SymMap.map (fun (ty, r) -> map_elab_typ ~neg ~pos ~ext ty, r) act_bindings in
+  { act_body; act_bindings; act_comp_bindings }
 
 and typed_map_func_def ~neg ~pos ~ext (poly, params, psplit, ret, body) =
   let poly, ext =
@@ -92,10 +96,10 @@ and typed_map_func_def ~neg ~pos ~ext (poly, params, psplit, ret, body) =
     | None -> None, ext
     | Some bounds ->
        let ext = IArray.length bounds :: ext in
-       Some (IArray.map (fun (n, b) -> n, Option.map (neg ~ext) b) bounds), ext
+       Some (IArray.map (fun (n, b) -> n, Option.map (map_elab_typ ~pos ~neg ~ext) b) bounds), ext
   in
-  let params = List.map (fun (p, ty) -> p, Option.map (neg ~ext) ty) params in
-  let ret = Option.map (pos ~ext) ret in
+  let params = List.map (fun (p, ty) -> p, Option.map (map_elab_typ ~pos ~neg ~ext) ty) params in
+  let ret = Option.map (map_elab_typ ~neg ~pos ~ext) ret in
   let body = typed_map_typs_action ~neg ~pos ~ext body in
   poly, params, psplit, ret, body
 
@@ -122,7 +126,7 @@ module Elaborate = struct
     | Tuple (tag, fs) ->
        Tuple (tag, tuple env fs)
     | Let (p, _split, ty, e, body) ->
-       Let (p, Some (typ env ty), exp env e, exp env body.rhs)
+       Let (p, Some (typ env ty), exp env e, exp env body.act_body)
     | Seq (e1, e2) ->
        Seq (exp env e1, exp env e2)
     | Proj (e, s) ->
@@ -146,7 +150,7 @@ module Elaborate = struct
            f, Mandatory, Some (exp env e))
     |> Exp.of_record_fields ~fopen:Ext_closed
 
-  and case env (ps, e) = (ps, exp env e.rhs)
+  and case env (ps, e) = (ps, exp env e.act_body)
 
   and typ env = function
     | Elab_ptyp t -> unparse_ptyp ~flexvar:ignore ~env t
@@ -158,15 +162,15 @@ module Elaborate = struct
       | None ->
          env, None
       | Some bounds ->
-         let env, poly =
-           unparse_bounds ~env ~pos:(unparse_lower ~flexvar:ignore) ~neg:(unparse_flexvar ~flexvar:ignore) bounds
+         let env, poly = 
+           unparse_bounds ~env ~bound:(fun ~env -> typ env) bounds
          in
          env, Some poly
     in
     poly,
-    List.map (fun (p, t) -> p, Option.map (unparse_ntyp ~flexvar:ignore ~env) t) params,
-    Option.map (unparse_ptyp ~flexvar:ignore ~env) ret,
-    exp env body.rhs
+    List.map (fun (p, t) -> p, Option.map (typ env) t) params,
+    Option.map (typ env) ret,
+    exp env body.act_body
 
 end
 
@@ -264,7 +268,7 @@ module Compile = struct
 
   and exp' : typed_exp' -> IRB.exp = function
     | Lit (l, _) -> IRB.literal l
-    | Var (_, v) -> IRB.var v.comp_var
+    | Var (_, v) -> IRB.var v
     | Typed (e, _ty) -> exp e
     | If (cond, ifso, ifnot) ->
        fun k ->
@@ -291,18 +295,15 @@ module Compile = struct
 
     | Match ((es,_loc), split, cases) ->
        fun k ->
-         let actions = List.map (fun (_pats, act) ->
-                           {act with Check_pat.rhs = exp act.Check_pat.rhs}) cases in
-         let actions = Array.of_list actions in
-         IRB.maybe_dup_cont ~uses:(Array.length actions) k @@ fun k ->
+         IRB.maybe_dup_cont ~uses:(List.length cases) k @@ fun k ->
+         let actions = List.map (fun (_pats, act) -> action act k) cases |> Array.of_list in
          IRB.eval_cont_list (List.map (fun e -> exp e) es) @@ fun vals ->
-         Check_pat.compile ~cont:k ~actions vals split
+         Check_pat.compile ~actions vals split
 
     | Let (_p, split, _ty, e, act) ->
        fun k ->
-         let actions = [| { act with Check_pat.rhs = exp act.Check_pat.rhs } |] in
          IRB.eval_cont (exp e) @@ fun e ->
-         Check_pat.compile ~cont:k ~actions [e] split
+         Check_pat.compile ~actions:[| action act k |] [e] split
 
     | Fn def ->
        fun k -> IRB.apply_cont k (func_def def)
@@ -319,8 +320,13 @@ module Compile = struct
     | Pragma _ ->
        intfail "unknown pragma"
 
+  and action (act : typed_action) k : Check_pat.compiled_action =
+    let body = exp act.act_body k in
+    match act.act_comp_bindings with
+    | `Unused -> Act_unused
+    | `Once -> Act_unshared body
+    | `Shared sc -> Act_shared (body, sc)
   and func_def ((_poly,params,psplit,_ret,body) : typed_func_def) : IR.value =
-    let actions = [| { body with rhs = exp body.rhs } |] in
     let params =
       List.map (fun (pat, _) ->
         IR.Binder.fresh ?name:(pat_name pat) ()) params
@@ -328,5 +334,5 @@ module Compile = struct
     let ret = IR.Binder.fresh () in
     Lambda(params,
            ret,
-           Check_pat.compile ~cont:(IRB.Named_cont (IR.Binder.ref ret)) ~actions (List.map IR.var params) psplit)
+           Check_pat.compile  ~actions:[| action body (IRB.Named_cont (IR.Binder.ref ret))|] (List.map IR.var params) psplit)
 end

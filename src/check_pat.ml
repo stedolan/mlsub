@@ -6,10 +6,11 @@ module Fields = Typedefs.Fields
 
 type bindings = Typedefs.value_binding SymMap.t
 
+type shared_cont = (IR.cont IR.Binder.t * (string * IR.value IR.Binder.t) list)
+
 type act_bindings =
   { bindings: bindings;
-    shared_cont:
-      (IR.cont IR.Binder.t * (string * IR.value IR.Binder.t) list) option }
+    shared_cont: shared_cont option }
 
 type 'rhs action = {
   rhs: 'rhs;
@@ -525,12 +526,12 @@ let split_cases ~matchloc env (typs : (ptyp * Typedefs.gen_level) list) (cases :
   end;
   actions, Ex (typs, dtree)
 
-(* FIXME: Check dedups cont. Should that happen here instead? *)
-let compile ~cont ~actions vals orig_dt =
-  let actions = actions |> Array.map (fun act ->
-    { act with rhs = act.rhs cont })
-  in
+type compiled_action =
+  | Act_unused
+  | Act_unshared of IR.comp
+  | Act_shared of IR.comp * (IR.cont IR.Binder.t * (string * IR.value IR.Binder.t) list)
 
+let compile ~actions vals orig_dt =
   let rec compile :
      type w . vals:(w, IR.value) Clist.t -> w dectree -> IR.comp =
     fun ~vals dt -> compile_tree ~vals dt.tree
@@ -539,13 +540,13 @@ let compile ~cont ~actions vals orig_dt =
     fun ~vals dt ->
     match dt, vals with
     | Done (bindings, act), [] ->
-       begin match actions.(act.id).bindings with
-       | None -> assert false
-       | Some { bindings = _; shared_cont = Some (lbl, args) } ->
+       begin match actions.(act.id) with
+       | Act_unused -> assert false
+       | Act_shared (_, (lbl, args)) ->
           Jump (IR.Binder.ref lbl,
                 List.map (fun (v,_) -> IR.Var (SymMap.find v bindings)) args)
-       | Some { bindings = _; shared_cont = None } ->
-          actions.(act.id).rhs
+       | Act_unshared rhs ->
+          rhs
        end
     | Failure, [] ->
        (* FIXME better error *)
@@ -592,9 +593,9 @@ let compile ~cont ~actions vals orig_dt =
   let code = compile ~vals dt in
   List.fold_right
     (fun act acc ->
-      match act.bindings with
-      | Some {bindings=_; shared_cont = Some (label, names)} ->
-         IR.LetCont (label, List.map snd names, act.rhs, acc)
+      match act with
+      | Act_shared (rhs, (label, names)) ->
+         IR.LetCont (label, List.map snd names, rhs, acc)
       | _ -> acc)
     (Array.to_list actions)
     code

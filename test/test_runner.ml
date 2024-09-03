@@ -58,13 +58,17 @@ let run_cmd s =
       | _ -> println "MISMATCH"
      end;
      let open Typedefs in
-     begin match Check.elab_gen Env.empty ~loc:Location.noloc ~mode:(Check.fresh_gen_mode ()) None (fun env -> let a, b = Check.infer env ~mode:(Check.fresh_gen_mode ()) e in a, b, None, ()) with
-     | t, (poly, etyped), _, () ->
+     let check e =
+       let fndef = None, [], None, e in
+       let wrapped : Exp.exp = Some (Fn fndef), Location.noloc in
+       match Check.infer Env.empty ~mode:(Check.fresh_gen_mode ()) wrapped with
+       | Tcvj([Func ([], r), _], [], _),
+         (Some (Fn (None, [], _, _, { act_body = rhs; _ })), _) ->  r, rhs
+       | _ -> failwith "unexpected inference result (weak poly?)"
+     in
+     begin match check e with
+     | t, etyped ->
         begin
-        (* let poly, _ty, elab = Elab.elaborate Env_nil elab in *)
-        poly |> Option.iter (fun _poly ->
-          pprintln PPrint.(string "WEAKPOLY" (* FIXME  ^^ Print.typolybounds poly*)));
-
         let elab = Elab.Elaborate.exp (Env.empty,[]) etyped in
         pprintln ~width:80 (PPrint.(nest 2 (blank 2 ^^ Print.exp elab)));
 
@@ -97,7 +101,7 @@ let run_cmd s =
             println "ELAB: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
         end;
         begin try
-          let t', _ty, _gen, _comp = Check.elab_gen Env.empty ~loc:Location.noloc ~mode:(Check.fresh_gen_mode ()) None (fun env -> let a, b = Check.infer env ~mode:(Check.fresh_gen_mode ()) elab in a, b, None, ()) in
+          let t', _ty = check elab in
           let te' = Typedefs.unparse_ptyp ~flexvar:ignore t' in
           Types.subtype Env.empty t' (Check.typ_of_tyexp Env.empty te) |> Error.or_raise `Subtype Location.noloc;
           Types.subtype Env.empty t (Check.typ_of_tyexp Env.empty te') |> Error.or_raise `Subtype Location.noloc;

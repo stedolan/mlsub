@@ -744,7 +744,7 @@ module Env = struct
   let lookup_value env (v : Exp.ident') =
     let rec search (v : Exp.ident') = function
       | Env_nil -> None
-      | Env_vals { vals = vs; rest; _ } 
+      | Env_vals { vals = vs; rest; _ }
            when SymMap.mem v.label vs ->
          if v.shift = 0 then Some (SymMap.find v.label vs) else
            search { v with shift = v.shift - 1 } rest
@@ -938,7 +938,7 @@ let is_locally_closed ix t =
     fun ix ty -> match ty with
     | Tsimple _ -> ()
     | Tcvj (conses, vars, _loc) ->
-       List.iter (fun (c,_loc) -> 
+       List.iter (fun (c,_loc) ->
          ignore (Cons1.map ~neg:(check ix) ~pos:(check ix) c)) conses;
        List.iter (var ix) vars
     | Tpoly {vars; body} ->
@@ -1317,22 +1317,21 @@ let rec unparse_gen_typ :
         List.fold_left tjoin j js
      end
   | Tpoly { vars; body } ->
-     let env, bounds = unparse_bounds ~env ~neg ~pos vars in
+     let env, bounds = unparse_bounds ~bound:(unparse_gen_typ ~neg:pos ~pos:neg) ~env vars in
      mktyexp (Exp.Tforall(bounds, unparse_gen_typ ~env ~neg ~pos body))
 
 and unparse_bounds :
-  'neg 'pos . env:_ -> neg:(env:(env*_) -> 'neg -> Exp.tyexp) -> pos:(env:(env*_) -> 'pos -> Exp.tyexp) ->
-             (string Location.loc * ('pos,'neg) typ option) iarray -> _ * Exp.typolybounds =
-  fun ~env:(env,ext) ~neg ~pos vars ->
+  'b . env:_ -> bound:(env:(env*_) -> 'b -> Exp.tyexp) ->
+             (string Location.loc * 'b option) iarray -> _ * Exp.typolybounds =
+  fun ~env:(env,ext) ~bound vars ->
   let vars = IArray.map (fun ((s,l), b) -> (freshen_name (env,ext) s,l), b) vars in
   let ext = IArray.map (fun ((s,_),_) -> s) vars :: ext in
-  (env,ext), IArray.map (fun ((s,_), bound) ->
+  (env,ext), IArray.map (fun ((s,_), boundopt) ->
        let s = (s, Location.noloc) in
-       match bound with
+       match boundopt with
        | None -> s, None
-       | Some t when is_ttop t -> s, None
        | Some t ->
-          s, Some (unparse_gen_typ ~env:(env,ext) ~pos:neg ~neg:pos t)) vars |> IArray.to_list
+          s, Some (bound ~env:(env,ext) t)) vars |> IArray.to_list
 
 let unparse_join = function
   | [] -> mktyexp (named_type "Nothing")
