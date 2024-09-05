@@ -83,8 +83,8 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
              Some (Named_tag decl.name),
              List.map2 (check_arg name) decl.params (List.mapi (fun i x -> i,x) args)
      in
-     let body = typs_of_fields ~lookup ~env (fields,loc) in
-     tcons (Record {tag; args; body}, loc)
+     let body, fopen = typs_of_fields ~lookup ~env (fields,loc) in
+     tcons (Record {tag; args; body; fopen}, loc)
   | Tfunc (args, res) ->
      tcons (Func (List.map (typ_of_tyexp ~lookup ~env) args, typ_of_tyexp ~lookup ~env res), loc)
   | Tjoin (a, b) ->
@@ -100,7 +100,7 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
      in
      Tpoly { vars; body }
 
-and typs_of_fields : 'a 'b . lookup:lookup_fn -> env:env -> tyexp fields loc -> ('a,'b) typ Fields.t =
+and typs_of_fields : 'a 'b . lookup:lookup_fn -> env:env -> tyexp fields loc -> ('a,'b) typ Fields.t * Exp.extensible_flag =
   fun ~lookup ~env (fields,loc) ->
   let fields, fopen = Exp.record_fields ~loc fields in
   let fnames = List.map (fun ((f,_), _, _) -> f) fields in
@@ -123,7 +123,7 @@ and typs_of_fields : 'a 'b . lookup:lookup_fn -> env:env -> tyexp fields loc -> 
     FieldMap.empty
     fields
   in
-  {fields; fnames; fopen}
+  {fields; fnames}, fopen
 
 and enter_polybounds : 'a 'b . lookup:lookup_fn -> env:env -> typolybounds -> (string Location.loc * ('a,'b) typ option) iarray * int SymMap.t =
   fun ~lookup ~env vars ->

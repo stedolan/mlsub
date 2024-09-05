@@ -220,7 +220,14 @@ let check_prog (program : Exp.decl list) =
       cs |> List.map (fun (d : type_decl_state) ->
       let open Typedefs in
       let env = env_with_params ~env (d.params |> List.map (fun (x:param_state) -> x.name)) in
-      let ck_fields = Check_type.typs_of_fields ~lookup ~env in
+      let ck_fields fs =
+        let ts, fopen = Check_type.typs_of_fields ~lookup ~env fs in
+        begin match fopen with
+        | Ext_closed -> ()
+        | Ext_open -> fail (snd fs) (Illformed_type `Must_be_closed)
+        end;
+        ts
+      in
       let body =
         match d.body with
         | Dty_record fs -> Decl_record (ck_fields fs)
@@ -277,7 +284,7 @@ let check_prog (program : Exp.decl list) =
         | Tsimple _ -> .
         | Tcvj (conses, vars, _loc) ->
            let walk_cons = function
-             | Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc ->
+             | Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body; fopen=_}, loc ->
                 assert (Typedefs.Fields.is_empty body);
                 let params =
                   match SymTbl.find tbl t with
@@ -327,7 +334,7 @@ let check_prog (program : Exp.decl list) =
          Tpoly {vars; body}
       | Tcvj (conses, vars, loc) ->
          let trim_cons = function
-           | (Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc) when SymTbl.mem tbl t ->
+           | (Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body; fopen}, loc) when SymTbl.mem tbl t ->
               let decl = SymTbl.find tbl t in
               let trim_arg (param : param_state) (n,p) =
                 (if param.var_found.occurs_neg = `No then None else Option.map trim_args n),
@@ -335,7 +342,7 @@ let check_prog (program : Exp.decl list) =
               in
               let args = List.map2 trim_arg decl.params args in
               let body = Typedefs.Fields.map ~pos:trim_args body in
-              (Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc)
+              (Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body; fopen}, loc)
            | (cons, loc) ->
               (Typedefs.Cons1.map ~neg:trim_args ~pos:trim_args cons, loc)
          in
@@ -376,6 +383,7 @@ let unparse_type_decl ~env (d : Typedefs.type_decl) : Exp.decl =
   let body : Exp.type_decl_body =
     let unparse_fields =
       Typedefs.unparse_fields
+        ~fopen:Ext_closed
         ~pos:(Typedefs.unparse_gen_typ
                 ~env:(env,[])
                 ~neg:(fun ~env:_ -> never)

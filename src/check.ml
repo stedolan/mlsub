@@ -5,7 +5,7 @@ open Typedefs
 open Types
 open Error
 
-let unit loc = tcons (Record {tag=Some Anon_tag; args=[]; body={fnames=[]; fields=FieldMap.empty; fopen=Ext_closed}}, loc)
+let unit loc = tcons (Record {tag=Some Anon_tag; args=[]; body={fnames=[]; fields=FieldMap.empty}; fopen=Ext_closed}, loc)
 
 open Elab
 
@@ -167,7 +167,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      let exp_fields =
        res_fields
        |> List.map (fun ((f,floc), e, r) -> f, Fields.Fpresent ((e,r), floc))
-       |> Fields.of_list ~fopen:Ext_closed
+       |> Fields.of_list
      in
      let infer_typed env ((_,loc) as e) =
        let ty, e = infer env ~mode e in
@@ -175,7 +175,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      in
      let fields =
        (* FIXME args *)
-       let econs = Cons1.Record {tag; args=[]; body=exp_fields} in
+       let econs = Cons1.Record {tag; args=[]; body=exp_fields; fopen=Ext_closed} in
        match inspect_cons econs ty with
        | Imatches (Record _ as ty, tyloc) ->
           (* FIXME this should updated inferred type too! *)
@@ -227,7 +227,8 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
                    args = []; (* FIXME *)
                    body = {
                        fields = FieldMap.singleton f (Fields.Fpresent (r, loc));
-                       fnames = [Field_named field]; fopen = Ext_open } }]
+                       fnames = [Field_named field]};
+                   fopen = Ext_open }]
        with
        | Ok () -> !r
        | Error c -> fail eloc (Conflict (`Expr, c)) in

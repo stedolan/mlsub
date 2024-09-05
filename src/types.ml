@@ -208,18 +208,21 @@ and ntyp_to_fresh_flexvar ~simple env t =
 
 module Fields = struct
   include Typedefs.Fields
-  let merge ~fdef ~f (a, a_loc) (b, b_loc) =
-    let def_a = desc_of_ext a_loc a.fopen in
-    let def_b = desc_of_ext b_loc b.fopen in
-    let fopen = fdef a.fopen b.fopen in
-    let def = desc_of_ext a_loc fopen in
-    let is_default x = equal_field_desc (fun _ _ -> assert false) def x in
-    assert (is_default (f def_a def_b));
+  let merge ~f (a, a_def) (b, b_def) =
     let seen = Table.create 10 in
     let merge_field fn a b =
-      let r = f (Option.value a ~default:def_a) (Option.value b ~default:def_b) in
-      if not (is_default r) then
-        Table.add seen fn ();
+      let a =
+        match a with
+        | Some a -> a
+        | None -> a_def fn
+      in
+      let b =
+        match b with
+        | Some b -> b
+        | None -> b_def fn
+      in
+      let r = f a b in
+      Table.add seen fn ();
       (* OPT: Consider dropping the field entirely if it's default with a_loc *)
       Some r
     in
@@ -234,14 +237,11 @@ module Fields = struct
       let b_names = List.filter check_name b.fnames in
       a_names @ b_names
     in
-    let r = { fields; fnames; fopen } in
+    let r = { fields; fnames } in
     wf ~pos:ignore r; r
 
   let join ~pos a b =
     merge a b
-      ~fdef:(fun a b -> match a, b with
-          | Exp.Ext_closed, Exp.Ext_closed -> Exp.Ext_closed
-          | _, _ -> Exp.Ext_open)
       ~f:(fun a b -> match a, b with
          | (Funknown _ as x), _
          | _, (Funknown _ as x) -> x
@@ -264,9 +264,6 @@ module Fields = struct
   let meet ~pos a b =
     let open One_or_two in
     merge a b
-      ~fdef:(fun a b -> match a, b with
-          | Exp.Ext_open, Exp.Ext_open -> Exp.Ext_open
-          | _, _ -> Exp.Ext_closed)
       ~f:(fun a b -> match a, b with
           | x, Funknown _ ->
              field_desc_map (fun x -> pos (L x)) x
@@ -288,12 +285,19 @@ module Fields = struct
           | (Fabsent _ as a), (Foptional _ | Fabsent _) ->
              a)
 
-  let sub ~f (a,a_loc) (b,b_loc) =
-    let def_a = desc_of_ext a_loc a.fopen in
-    let def_b = desc_of_ext b_loc b.fopen in
-    f None def_a def_b;
+  let sub ~f (a,a_def) (b,b_def) =
     let sub_field fn a b =
-      f (Some fn) (Option.value a ~default:def_a) (Option.value b ~default:def_b);
+      let a =
+        match a with
+        | Some x -> x
+        | None -> a_def fn
+      in
+      let b =
+        match b with
+        | Some x -> x
+        | None -> b_def fn
+      in
+      f (Some fn) a b;
       None
     in
     ignore (Map.merge sub_field a.fields b.fields)
@@ -311,10 +315,10 @@ module Cons1 = struct
     match coe, c with
     | Id, c -> c
     | To_top, _ -> Top
-    | Drop_record_tag t, Record {tag=Some t'; args; body} ->
+    | Drop_record_tag t, Record {tag=Some t'; args; body; fopen} ->
        fixme_args;
        assert (tuple_tag_equal t t');
-       Record {tag=None; args; body}
+       Record {tag=None; args; body; fopen}
     | Drop_record_tag _, _ -> assert false
 
   (* FIXME: seems wrong? Some/None case can happen? *)
@@ -327,6 +331,9 @@ module Cons1 = struct
     in
     (opt_both neg n1 n2, opt_both pos p1 p2)
 
+  let record_def loc fopen =
+    fun _fn -> desc_of_ext loc fopen
+
   let join ~env:_ ~neg ~pos (a, a_loc) (b, b_loc) =
     assert (sub_head a b = Le Id);
     match a, b with
@@ -337,9 +344,17 @@ module Cons1 = struct
        fixme_args;
        (* FIXME: Named/struct subtyping *)
        assert (Option.equal tuple_tag_equal a.tag b.tag);
+       let a_def = record_def a_loc a.fopen in
+       let b_def = record_def b_loc b.fopen in
+       let fopen =
+         match a.fopen, b.fopen with
+         | Exp.Ext_closed, Exp.Ext_closed -> Exp.Ext_closed
+         | _, _ -> Exp.Ext_open
+       in 
        Record {tag = a.tag;
                args = List.map2 (tyarg_zip ~neg ~pos) a.args b.args;
-               body = Fields.join ~pos (a.body, a_loc) (b.body, b_loc) },
+               body = Fields.join ~pos (a.body, a_def) (b.body, b_def);
+               fopen },
        a_loc (* FIXME: which loc is best here? *)
 
     | Func (args, res), Func (args', res') ->
@@ -364,9 +379,17 @@ module Cons1 = struct
          | None, x | x, None -> x
          | Some t, Some t' -> assert (tuple_tag_equal t t'); a.tag
        in
+       let a_def _fn = desc_of_ext a_loc a.fopen in
+       let b_def _fn = desc_of_ext b_loc b.fopen in
+       let fopen =
+         match a.fopen, b.fopen with
+         | Exp.Ext_open, Exp.Ext_open -> Exp.Ext_open
+         | _, _ -> Exp.Ext_closed
+       in
        Record {tag;
                args = List.map2 (tyarg_zip ~neg:(fun x y -> neg (LR (x,y))) ~pos:(fun x y -> pos (LR (x,y)))) a.args b.args;
-               body = Fields.meet ~pos (a.body, a_loc) (b.body, b_loc) }
+               body = Fields.meet ~pos (a.body, a_def) (b.body, b_def);
+               fopen }
     | Func (args, res), Func (args', res') ->
        let args =
          List.map2 (fun x y -> neg (LR (x,y))) args args' in
@@ -410,7 +433,12 @@ module Cons1 = struct
             (* failed to be absent *)
             raise (SubError (Field_extra (k, la, lb)))
        in
-       begin match Fields.sub ~f:sub_field (a.body,a_loc) (b.body,b_loc) with
+       let a_def = record_def a_loc a.fopen in
+       let b_def = record_def b_loc b.fopen in
+       begin match
+         sub_field None (desc_of_ext a_loc a.fopen) (desc_of_ext b_loc b.fopen);
+         Fields.sub ~f:sub_field (a.body,a_def) (b.body,b_def)
+       with
        | () -> Ok ()
        | exception (SubError e) -> Error e
        end

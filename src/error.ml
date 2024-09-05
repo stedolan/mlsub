@@ -12,6 +12,7 @@ type error_kind =
       | `Recursion of [`Not_strictly_positive of string]
       | `Close_error of Types.close_typ_err
       | `Join_of_ty_param
+      | `Must_be_closed
       ]
   | Conflict of [`Expr|`Pat|`Subtype] * Types.subtyping_error
   (* FIXME: Maybe delete Unknown_constructor, it's worse than a standard type error *)
@@ -98,6 +99,8 @@ let pp_err input loc err : PPrint.document =
      pp "This type contains a scope-escaping join of a polymorphic variable" ^^ context
   | Illformed_type `Join_of_ty_param ->
      pp "Type definitions may not use joins of type parameters" ^^ context
+  | Illformed_type `Must_be_closed ->
+     pp "This type cannot use '...'" ^^ context
   | Bad_tuple_intro `Ext_open ->
      pp "Tuple construction cannot use '...'" ^^ context
   | Bad_tuple_intro `Opt ->
