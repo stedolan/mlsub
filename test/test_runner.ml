@@ -133,7 +133,7 @@ let run_cmd s =
      | _ -> println "MISMATCH"
      end;
      begin match Check_decl.check_prog p with
-     | env, decls -> List.iter (fun d -> pprintln (Print.decl (Check_decl.unparse_type_decl ~env d))) decls
+     | env, decls -> List.iter (fun d -> pprintln (Print.decl (Check_decl.unparse_decl ~env d))) decls
      | exception e -> pexn e
      end
   | Ok (`Sub (t1, t2)) ->

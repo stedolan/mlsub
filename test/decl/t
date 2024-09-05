@@ -150,4 +150,17 @@ type Nop[g] { rec: Nop[g -> g] }
 > type Bar(Int, Qux)
 > type Baz[+a, +b]{ Baz_A(a) | Baz_B{foo: (a, b, Bar)} }
 > type Nop[0 g]{rec: Nop[Any]}
+
+#
+# Functions using declared types
+#
+
+{
+type Foo{ a: Int, b: Int }
+fn f(x: Foo) { if true {x} else { {a: 4} } }
+}
+> type Foo{a: Int, b: Int}
+> fn f(x: Foo) -> ({a?: Int}) { if true { x } else { {a: 4} } }
+# fn g(x:Foo) { x.a }
+
 > STATS: fix: 0, flex: 0

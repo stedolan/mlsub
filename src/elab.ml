@@ -41,6 +41,10 @@ and typed_pat = pat
 and typed_polybounds =
   (string Location.loc * elab_typ option) IArray.t
 
+type typed_decl =
+  | Dfn of symbol * typed_func_def
+  | Dtype of Typedefs.type_decl
+
 let map_elab_typ ~neg ~pos ~ext = function
   | Elab_ptyp t -> Elab_ptyp (pos ~ext t)
   | Elab_ntyp t -> Elab_ntyp (neg ~ext t)

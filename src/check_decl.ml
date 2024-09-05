@@ -123,16 +123,7 @@ let env_with_params ~env (params : Exp.symbol list) : Typedefs.env =
   in
   Env.extend_types env ~level ~rig_names ~rig_defns
 
-let check_prog (program : Exp.decl list) =
-  let program_parts =
-    program
-    |> List.map (function
-      | None, loc -> fail loc Syntax
-      | Some (Exp.Dfn (s, fndef)), _loc -> Either.Right (s, fndef)
-      | Some (Exp.Dtype (s, ps, body)), _loc -> Either.Left (s, ps, body))
-  in
-  let types, fns = List.partition_map Fun.id program_parts in
-  ignore fns;
+let check_type_decls types =
   let table = SymTbl.create 10 in
   types |> List.iteri (fun decl_index ((name,loc) as s, params, body) ->
     match SymTbl.find table s with
@@ -371,10 +362,35 @@ let check_prog (program : Exp.decl list) =
     |> Typedefs.Env.extend_decls env) Typedefs.Env.empty
   in
   Typedefs.wf_env env;
-  env,
-  program_parts |> List.filter_map (function
-    | Either.Left ((s,_loc), _, _) -> Some (Option.get (Typedefs.Env.lookup_decl env s))
-    | Either.Right _ -> None)
+  env
+
+let check_prog (program : Exp.decl list) =
+  let types =
+    program
+    |> List.filter_map (function
+      | None, loc -> fail loc Syntax
+      | Some (Exp.Dtype (s, ps, body)), _loc -> Some (s, ps, body)
+      | Some (Exp.Dfn _), _ -> None)
+  in
+  let env = check_type_decls types in
+  let env, prog_rev =
+    List.fold_left
+      (fun (env, acc) decl ->
+        let env, (decl : Elab.typed_decl) =
+          match decl with
+          | None, loc -> fail loc Syntax
+          | Some (Exp.Dtype ((s,_), _, _)), _ ->
+             env, Dtype (Option.get (Typedefs.Env.lookup_decl env s))
+          | Some (Exp.Dfn (s, fndef)), loc ->
+             let mode = Check.fresh_gen_mode () in
+             let _ty, tfndef = Check.infer_func_def env ~loc:(snd s) ~mode loc fndef in
+             env, Dfn (s, tfndef)
+        in
+        env, decl :: acc)
+      (env, [])
+      program
+  in
+  env, List.rev prog_rev
 
 let unparse_type_decl ~env (d : Typedefs.type_decl) : Exp.decl =
   let Typedefs.{name; params; body} = d in
@@ -407,3 +423,11 @@ let unparse_type_decl ~env (d : Typedefs.type_decl) : Exp.decl =
        Dty_variant (vs |> List.map (fun (s,fs) -> s, (unparse_fields fs, Location.noloc)))
   in
   Some (Dtype (name, params, body)), Location.noloc
+
+let unparse_decl ~env (d : Elab.typed_decl) : Exp.decl =
+  match d with
+  | Dtype d ->
+     unparse_type_decl ~env d
+  | Dfn (s, fndef) ->
+     let fndef = Elab.Elaborate.fndef (env, []) fndef in
+     Some (Dfn (s, fndef)), Location.noloc
