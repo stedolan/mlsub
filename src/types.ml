@@ -655,9 +655,9 @@ let rec match_sub ~changes env (p : lower_part) ((cn : (lower, lower -> unit) up
             ignore coe; (* FIXME: pass this to meet to avoid recomputing? *)
             (* cons_a assumed already matchable, cons_b must be freshened *)
             let cons_a =
-              if not !found_new_rv then cons_a
+              if not !found_new_rv && Either.is_left coe then cons_a
               else
-                (* New rigvars means matchable variables must be re-freshened *)
+                (* New rigvars or changed ctor means matchable variables must be re-freshened *)
                 Cons1.map cons_a
                   ~neg:(fun x -> join_lower ~changes env pv.level bottom x)
                   ~pos:(fun x -> let v = fresh_flexvar pv.level in noerror (fun () -> subtype_flex_flex ~changes env v x); v)

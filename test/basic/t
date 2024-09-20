@@ -2245,5 +2245,43 @@ fn (z) { go(z).foo.baz }
 > });
 > done
 
+# matchability failure in meet
+# (need to refreshen when vars are duplicated due to reuse of a ctor)
+# FIXME: drop the extra 'c' variable?
+{
+fn g(x : #Foo{foo:{p:Int,...}} | #Bar{foo:{q:String,...}}) { () }
+fn f(x) {
+  let y = x.foo;
+  g(x);
+  y
+}
+fn h() { f(#Foo{foo:{p:1}}) }
+}
+> fn g(x: #Foo{foo: {p: Int, ...}} | #Bar{foo: {q: String, ...}}) -> () { () }
+> fn f[a <: {p: Int, ...}, b <: {q: String, ...}, c](x: #Foo{foo: a} | #Bar{foo: b}) -> (a | b | c) {
+>   let y : a | b | c = x.foo;
+>   g(x);
+>   y
+> }
+> fn h() -> ({p: Int}) { f(#Foo{foo: {p: 1}}) }
 
-> STATS: fix: 125, flex: 1338
+# easier case of above: no need to refreshen
+{
+fn g(x : #Foo{foo:{p:Int,...}} | #Bar{foo:{q:String,...}}) { () }
+fn f(x) {
+  g(x);
+  let y = x.foo;
+  y
+}
+fn h() { f(#Foo{foo:{p:1}}) }
+}
+> fn g(x: #Foo{foo: {p: Int, ...}} | #Bar{foo: {q: String, ...}}) -> () { () }
+> fn f[a <: {p: Int, ...}, b <: {q: String, ...}](x: #Foo{foo: a} | #Bar{foo: b}) -> (a | b) {
+>   g(x);
+>   let y : a | b = x.foo;
+>   y
+> }
+> fn h() -> ({p: Int}) { f(#Foo{foo: {p: 1}}) }
+
+
+> STATS: fix: 129, flex: 1370
