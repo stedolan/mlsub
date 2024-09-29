@@ -160,7 +160,188 @@ type Foo{ a: Int, b: Int }
 fn f(x: Foo) { if true {x} else { {a: 4} } }
 }
 > type Foo{a: Int, b: Int}
-> fn f(x: Foo) -> ({a?: Int}) { if true { x } else { {a: 4} } }
+> fn f(x: Foo) -> ({a: Int, b?: Int}) { if true { x } else { {a: 4} } }
 # fn g(x:Foo) { x.a }
 
-> STATS: fix: 0, flex: 0
+{
+type Foo[a] {a: a, b: a -> ()}
+fn f[a,b,c,d](x: Foo[-a +b], y:Foo[-c +d]) { if true {x} else {y} }
+}
+> type Foo[+-a]{a: a, b: a -> ()}
+> fn f[a, b, c, d](x: Foo[-a +b], y: Foo[-c +d]) -> Foo[+b | d] { if true { x } else { y } }
+
+{
+type Foo[a] {a: a}
+fn f[a](x : Foo[a]) { x }
+fn ign(x) { 1 }
+fn h(x) { ign(f(x)) }
+fn g(x) { let _ = f(x); let _ = f(x); 1 }
+}
+> type Foo[+a]{a: a}
+> fn f[a](x: Foo[a]) -> Foo[a] { x }
+> fn ign(x: Any) -> Int { 1 }
+> fn h(x: Foo[Any]) -> Int { ign(f(x)) }
+> fn g[a](x: Foo[a]) -> Int { let _ : Foo[a] = f(x); let _ : Foo[a] = f(x); 1 }
+
+{
+fn con[a](f : a -> ()) { f }
+fn f(x) { (con(x), con(x)) }
+}
+> fn con[a](f: a -> ()) -> (a -> ()) { f }
+> fn f[a, b](x: (a | b) -> ()) -> (a -> (), b -> ()) { (con(x), con(x)) }
+
+{
+type Foo[a] {b: a -> ()}
+fn f[a](x : Foo[a]) { x }
+fn h(x) { let _ = f(x); 1 }
+fn g(x) { (f(x), f(x)) }
+}
+> type Foo[-a]{b: a -> ()}
+> fn f[a](x: Foo[a]) -> Foo[a] { x }
+> fn h[a](x: Foo[a]) -> Int { let _ : Foo[a] = f(x); 1 }
+> fn g[a, b](x: Foo[a | b]) -> (Foo[a], Foo[b]) { (f(x), f(x)) }
+
+
+{
+type Foo[a] {a: a, b: a -> ()}
+fn f[a](x : Foo[a]) { x }
+fn h(x) { let _ = f(x); 1 }
+fn g(x) { (f(x), f(x)) }
+}
+> type Foo[+-a]{a: a, b: a -> ()}
+> fn f[a](x: Foo[a]) -> Foo[a] { x }
+> fn h[a](x: Foo[a]) -> Int { let _ : Foo[a] = f(x); 1 }
+> fn g[a, b, c](x: Foo[-(a | b | c) +a]) -> (Foo[-b +(a | b)], Foo[-c +(a | c)]) { (f(x), f(x)) }
+
+{
+type Foo[a] {a:a, b: a -> ()}
+fn f[a,b](x : Foo[+a]) -> Foo[+b] { x }
+}
+> test:3: Type error
+>   fn f[a,b](x : Foo[+a]) -> Foo[+b] { x }
+>                                       ^
+>      found: Foo[-(_) +a]
+>   expected: Foo[-(_) +b]
+> This a comes from test:3:
+>   fn f[a,b](x : Foo[+a]) -> Foo[+b] { x }
+>                      ^
+> but is used as b at test:3:
+>   fn f[a,b](x : Foo[+a]) -> Foo[+b] { x }
+>                                  ^
+
+
+# meet, covariant arg
+{
+type Foo[a] {b: a}
+fn f(x : Foo[Int]) { 1 }
+fn p(x) { (x.b, f(x)) }
+fn q(x) { (f(x), x.b) }
+}
+> type Foo[+a]{b: a}
+> fn f(x: Foo[Int]) -> Int { 1 }
+> fn p[a <: Int](x: Foo[Int]{b: a}) -> (a, Int) { (x.b, f(x)) }
+> fn q[a <: Int](x: Foo[Int]{b: a}) -> (Int, a) { (f(x), x.b) }
+
+# meet, contravariant arg
+{
+type Foo[a] {b: a -> ()}
+fn f(x : Foo[Int]) { 1 }
+fn p(x) { (x.b, f(x)) }
+fn q(x) { (f(x), x.b) }
+}
+> type Foo[-a]{b: a -> ()}
+> fn f(x: Foo[Int]) -> Int { 1 }
+> fn p[a <: Int -> ()](x: Foo[Int]{b: a}) -> (a, Int) { (x.b, f(x)) }
+> fn q[a <: Int -> ()](x: Foo[Int]{b: a}) -> (Int, a) { (f(x), x.b) }
+
+# meet, invariant arg
+{
+type Foo[a] {a:a, b: a -> ()}
+fn f(x : Foo[{p:Int,...}]) { x.b }
+fn g(x : {a: {q:Int,...}, ...}) { x }
+fn gg(x) { let z = g(x); x }
+fn h(x) { (f(x), g(x)) }
+fn i(x) { (g(x), f(x)) }
+fn hh(x) { (f(x), gg(x)) }
+fn ii(x) { (gg(x), f(x)) }
+fn hhh(x) { (f(x), gg(x), x.b) }
+fn iii(x) { (x.b, gg(x), f(x)) }
+}
+> type Foo[+-a]{a: a, b: a -> ()}
+> fn f(x: Foo[{p: Int, ...}]) -> (({p: Int, ...}) -> ()) { x.b }
+> fn g(x: {a: {q: Int, ...}, ...}) -> ({a: {q: Int, ...}, ...}) { x }
+> fn gg[a <: {a: {q: Int, ...}, ...}](x: a) -> a { let z : {a: {q: Int, ...}, ...} = g(x); x }
+> fn h(x: Foo[{p: Int, ...}]{a: {p: Int, q: Int, ...}}) -> (({p: Int, ...}) -> (), {a: {q: Int, ...}, ...}) {
+>   (f(x), g(x))
+> }
+> fn i(x: Foo[{p: Int, ...}]{a: {p: Int, q: Int, ...}}) -> ({a: {q: Int, ...}, ...}, ({p: Int, ...}) -> ()) {
+>   (g(x), f(x))
+> }
+> fn hh[a <: Foo[{p: Int, ...}]{a: {p: Int, q: Int, ...}}](x: a) -> (({p: Int, ...}) -> (), a) { (f(x), gg(x)) }
+> fn ii[a <: Foo[{p: Int, ...}]{a: {p: Int, q: Int, ...}}](x: a) -> (a, ({p: Int, ...}) -> ()) { (gg(x), f(x)) }
+> fn hhh[a <: ({p: Int, ...}) -> (), b <: Foo[{p: Int, ...}]{a: {p: Int, q: Int, ...}, b: a}](x: b) ->
+>   (({p: Int, ...}) -> (), b, a) {
+>   (f(x), gg(x), x.b)
+> }
+> fn iii[a <: ({p: Int, ...}) -> (), b <: Foo[{p: Int, ...}]{b: a, a: {p: Int, q: Int, ...}}](x: b) ->
+>   (a, b, ({p: Int, ...}) -> ()) {
+>   (x.b, gg(x), f(x))
+> }
+
+# FIXME: this is broken due to the bad modelling of absent fields as Funknown
+# FIXME: now this is broken due to closed supertypes
+{
+type Foo {a:Int, b: Int}
+fn f(x : Foo) { x.b }
+fn g(x : {a: Int}) { x }
+fn h(x) { (f(x), g(x)) }
+}
+> type Foo{a: Int, b: Int}
+> fn f(x: Foo) -> Int { x.b }
+> fn g(x: {a: Int}) -> ({a: Int}) { x }
+> fn h(x: Foo{a: Int}) -> (Int, {a: Int}) { (f(x), g(x)) }
+> ELAB:  
+> 
+> test:5: A surplus field 'b' is present.
+>   fn h(x) { (f(x), g(x)) }
+>                      ^
+>      found: Foo{a: _}
+>   expected: {a: _}
+> This Foo{a: _} comes from test:2:
+>   type Foo {a:Int, b: Int}
+>                    ^
+> but is used as {a: _} at _:0:
+
+# France example
+# FIXME: do version of this with nominal types once intro form exists
+{
+fn f(x: #S{foo:Int} | #T{foo:Bool}) { 5 }
+fn g(x) { let z = f(x); x.foo }
+fn s(x) { g(#S{foo: x}) }
+fn t(x) { g(#T{foo: x}) }
+}
+> fn f(x: #S{foo: Int} | #T{foo: Bool}) -> Int { 5 }
+> fn g[a <: Int, b <: Bool](x: #S{foo: a} | #T{foo: b}) -> (a | b) { let z : Int = f(x); x.foo }
+> fn s[a <: Int](x: a) -> a { g(#S{foo: x}) }
+> fn t[a <: Bool](x: a) -> a { g(#T{foo: x}) }
+
+
+{
+type Foo[a] { p: a, q: a}
+fn f[a](x: Foo[a]) { x }
+fn g(x) { (x.p, f(x)) }
+}
+> type Foo[+a]{p: a, q: a}
+> fn f[a](x: Foo[a]) -> Foo[a] { x }
+> fn g[a, b](x: Foo[b]{p: a}) -> (a, Foo[a | b]) { (x.p, f(x)) }
+
+{
+type Foo { p: Int }
+fn f[a <: Int](x : Foo{p : a}) { x.p }
+fn g(x) { (x.p, f(x)) }
+}
+> type Foo{p: Int}
+> fn f[a <: Int](x: Foo{p: a}) -> a { x.p }
+> fn g[a <: Int](x: Foo{p: a}) -> (a, a) { (x.p, f(x)) }
+
+> STATS: fix: 17, flex: 226

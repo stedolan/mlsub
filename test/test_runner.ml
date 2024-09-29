@@ -133,8 +133,14 @@ let run_cmd s =
      | _ -> println "MISMATCH"
      end;
      begin match Check_decl.check_prog p with
-     | env, decls -> List.iter (fun d -> pprintln (Print.decl (Check_decl.unparse_decl ~env d))) decls
      | exception e -> pexn e
+     | env, decls ->
+        let decls = List.map (Check_decl.unparse_decl ~env) decls in
+        List.iter (fun d -> pprintln (Print.decl d)) decls;
+        begin match Check_decl.check_prog decls with
+        | _ -> ()
+        | exception e -> println "ELAB:  \n"; pexn e
+        end
      end
   | Ok (`Sub (t1, t2)) ->
      let module Env = Typedefs.Env in

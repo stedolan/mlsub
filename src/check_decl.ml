@@ -290,12 +290,12 @@ let check_type_decls types =
                   (fun (param : Exp.variance_spec) ((neg, pos) : _ Typedefs.Cons1.tyarg) ->
                     begin match param.occurs_neg with
                     | `No -> ()
-                    | `Yes -> Option.iter (walk ~decl (vneg var) ~index) neg
+                    | `Yes -> (walk ~decl (vneg var) ~index) neg
                     end;
                     begin match param.occurs_pos with
                     | `No -> ()
-                    | `Strict -> Option.iter (walk ~decl var ~index) pos
-                    | `Yes -> Option.iter (walk ~decl (vpos var) ~index) pos
+                    | `Strict -> (walk ~decl var ~index) pos
+                    | `Yes -> (walk ~decl (vpos var) ~index) pos
                     end)
                   params args
              | cons, _loc ->
@@ -328,8 +328,8 @@ let check_type_decls types =
            | (Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body; fopen}, loc) when SymTbl.mem tbl t ->
               let decl = SymTbl.find tbl t in
               let trim_arg (param : param_state) (n,p) =
-                (if param.var_found.occurs_neg = `No then None else Option.map trim_args n),
-                (if param.var_found.occurs_pos = `No then None else Option.map trim_args p)
+                (if param.var_found.occurs_neg = `No then Typedefs.tbot (Some loc) else trim_args n),
+                (if param.var_found.occurs_pos = `No then Typedefs.ttop loc else trim_args p)
               in
               let args = List.map2 trim_arg decl.params args in
               let body = Typedefs.Fields.map ~pos:trim_args body in
@@ -381,10 +381,13 @@ let check_prog (program : Exp.decl list) =
           | None, loc -> fail loc Syntax
           | Some (Exp.Dtype ((s,_), _, _)), _ ->
              env, Dtype (Option.get (Typedefs.Env.lookup_decl env s))
-          | Some (Exp.Dfn (s, fndef)), loc ->
+          | Some (Exp.Dfn ((s,sloc), fndef)), loc ->
              let mode = Check.fresh_gen_mode () in
-             let _ty, tfndef = Check.infer_func_def env ~loc:(snd s) ~mode loc fndef in
-             env, Dfn (s, tfndef)
+             let typ, tfndef = Check.infer_func_def env ~loc:sloc ~mode loc fndef in
+             let cvar = IR.Binder.fresh ~name:s () in
+             let binding = Typedefs.{typ; gen_level = mode.gen_level_acc; comp_var = IR.Binder.ref cvar} in
+             let env = Typedefs.Env.extend_vals env ~vals:(Typedefs.SymMap.singleton s binding) in
+             env, Dfn ((s,sloc), tfndef)
         in
         env, decl :: acc)
       (env, [])

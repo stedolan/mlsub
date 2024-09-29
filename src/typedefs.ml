@@ -70,6 +70,10 @@ module Fields = struct
     let fields = Map.mapi (fun fn x -> field_desc_map (pos fn) x) t.fields in
     { t with fields }
 
+  let mapi_desc ~pos t =
+    let fields = Map.mapi (fun fn x -> pos fn x) t.fields in
+    { t with fields }
+
   let wf ~pos {fields; fnames} =
     let remaining =
       List.fold_left (fun fields fn ->
@@ -102,6 +106,8 @@ module Fields = struct
   let is_empty = function
     | { fnames = []; fields = _ } -> true
     | _ -> false
+
+  let mem f t = Map.mem f t.fields
 end
 
 module Cons1 = struct
@@ -118,19 +124,20 @@ module Cons1 = struct
     | Named_tag (a,_), Named_tag (b,_) -> String.equal a b
     | (Struct_tag _ | Named_tag _ | Anon_tag), _ -> false
 
-  type (+'neg, +'pos) cons =
+  type (+'neg, +'pos) cons_record =
+    { tag: tuple_tag option;
+      args: ('neg, 'pos) tyarg list;
+      body: 'pos Fields.t;
+      fopen: Exp.extensible_flag }
+
+  and (+'neg, +'pos) cons =
     | Top
-    | Record of {
-        tag: tuple_tag option;
-        args: ('neg, 'pos) tyarg list;
-        body: 'pos Fields.t;
-        fopen: Exp.extensible_flag
-      }
+    | Record of ('neg,'pos) cons_record
     | Func of 'neg list * 'pos
 
   and (+'neg, +'pos) tyarg =
     (* neg:None == Bot, pos:None == Top *)
-    'neg option * 'pos option
+    'neg * 'pos
 
   let named t =
     Record { tag = Some (Named_tag t); args = []; body = Fields.empty; fopen = Ext_closed }
@@ -143,7 +150,7 @@ module Cons1 = struct
     | Record {tag=ptag; args=pargs; body=pbody; fopen=popen},
       Record {tag=qtag; args=qargs; body=qbody; fopen=qopen} ->
        let arg_equal (n1,p1) (n2,p2) =
-         Option.equal neg n1 n2 && Option.equal pos p1 p2
+         neg n1 n2 && pos p1 p2
        in
        Option.equal tuple_tag_equal ptag qtag &&
        List.for_all2 arg_equal pargs qargs &&
@@ -157,7 +164,7 @@ module Cons1 = struct
   let map ~neg ~pos = function
     | Top -> Top
     | Record {tag; args; body; fopen} ->
-       let tyarg_map (n, p) = Option.map neg n, Option.map pos p in
+       let tyarg_map (n, p) = neg n, pos p in
        Record {tag; args = List.map tyarg_map args; body = Fields.map ~pos body; fopen}
     | Func (args, res) ->
        let args = List.map neg args in
@@ -170,11 +177,11 @@ module Cons1 = struct
        begin match tag with
        | None | Some (Anon_tag | Struct_tag _) -> assert (args = [])
        | Some (Named_tag (name,_)) ->
-          let wf_arg v (n,p) =
-            if v.Exp.occurs_pos = `No then assert (p = None);
-            if v.Exp.occurs_neg = `No then assert (n = None);
-            Option.iter neg n;
-            Option.iter pos p;
+          let wf_arg _v (n,p) =
+            (*if v.Exp.occurs_pos = `No then assert (p = None);
+            if v.Exp.occurs_neg = `No then assert (n = None);*)
+            neg n;
+            pos p;
           in
           match params name with
           | pvs -> List.iter2 wf_arg pvs args
@@ -188,7 +195,7 @@ module Cons1 = struct
   type field =
     | Func_arg of int
     | Func_res
-    | Named_arg of [`Neg|`Pos] * Exp.symbol * int
+    | Named_arg of [`Neg|`Pos] * string * int
     | Record_field of Tuple_fields.field_name
 
   let field_is_positive = function
@@ -203,18 +210,20 @@ module Cons1 = struct
     | Func_res, Func_res -> true
     | Record_field a, Record_field b ->
        Tuple_fields.equal_field_name a b
-    | _ -> false
+    | Named_arg (p, s, i), Named_arg (p', s', i') ->
+       p = p' && s = s' && i = i'
+    | (Func_arg _ | Func_res | Record_field _ | Named_arg _), _ -> false
 
   let mapi ~neg ~pos = function
     | Top -> Top
     | Record {tag; args; body; fopen} ->
        let arg i (n, p) =
          let tag = match tag with
-           | Some (Named_tag t) -> t
+           | Some (Named_tag (t,_)) -> t
            | _ -> intfail "args on invalid type"
          in
-         Option.map (neg (Named_arg (`Neg, tag, i))) n,
-         Option.map (pos (Named_arg (`Pos, tag, i))) p
+         (neg (Named_arg (`Neg, tag, i))) n,
+         (pos (Named_arg (`Pos, tag, i))) p
        in
        let args = List.mapi arg args in
        let field fn x = pos (Record_field fn) x in
@@ -587,6 +596,14 @@ module Env = struct
 
   let param_variances env name =
     (SymMap.find name env.env_type_decls).params |> List.map fst
+
+  let get_decl_fields env (s : string) =
+    match lookup_decl env s with
+    | None -> intfail "unbound decl %s" s
+    | Some {name=_; params=_; body = Decl_primitive } ->
+       Fields.empty
+    | Some {name=_; params=_; body = Decl_variant _} -> unimp "variant fields"
+    | Some {name=_; params=_; body = Decl_record fs} -> fs
 end
 
 type env = Env.t
@@ -1024,19 +1041,28 @@ let unparse_cons ~env ~neg ~pos (ty,_tyloc) =
          | None | Some (Anon_tag | Struct_tag _) -> assert (args = []); []
          | Some (Named_tag (tag,_)) ->
             let decl = Option.get (Env.lookup_decl (fst env) tag) in
+            (* FIXME: Top/Bot in syntax? *)
+            fixme;
+            let is_top = function
+              | Some (Exp.Trecord (Some (Named_tag ("Any", _)), [], _)), _  -> true
+              | _ -> false
+            in
+            let is_bot = function
+              | Some (Exp.Trecord (Some (Named_tag ("Nothing", _)), [], _)), _  -> true
+              | _ -> false
+            in
             List.map2
               (fun ((pvariance : Exp.variance_spec), _) (n,p) : Exp.tyarg' ->
-               match Option.map neg n, Option.map pos p with
-               | Some n, None ->
-                  if pvariance.occurs_pos = `No
-                  then Arg_gen n
-                  else Arg_neg n
-               | None, p ->
-                  let p = Option.value p ~default:(mayloc (named_type "Any")) in
+               match neg n, pos p with
+               | n, p when is_bot n ->
                   if pvariance.occurs_neg = `No
                   then Arg_gen p
                   else Arg_pos p
-               | Some neg, Some pos ->
+               | n, p when is_top p ->
+                  if pvariance.occurs_pos = `No
+                  then Arg_gen n
+                  else Arg_neg n
+               | neg, pos ->
                   if Exp.equal_tyexp neg pos
                   then Arg_gen pos
                   else Arg_both {neg;pos})

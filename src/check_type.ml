@@ -55,19 +55,19 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
        | Some arg, loc ->
           match arg with
           | Arg_pos t ->
-             None, Some (ok_pos loc t)
+             tbot (Some loc), (ok_pos loc t)
           | Arg_neg t ->
-             Some (ok_neg loc t), None
+             (ok_neg loc t), ttop loc
           | Arg_both {neg;pos} ->
-             Some (ok_neg loc neg), Some (ok_pos loc pos)
+             (ok_neg loc neg), (ok_pos loc pos)
           | Arg_gen t ->
              let ty = typ_of_tyexp ~lookup ~env t in
              (match v.occurs_neg with
-              | `No -> None
-              | `Yes -> Some ty),
+              | `No -> tbot (Some loc)
+              | `Yes -> ty),
              (match v.occurs_pos with
-              | `No -> None
-              | `Yes | `Strict -> Some ty)
+              | `No -> ttop loc
+              | `Yes | `Strict -> ty)
      in
      let tag, args =
        match tag with

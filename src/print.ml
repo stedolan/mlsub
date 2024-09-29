@@ -237,7 +237,7 @@ and tyexp_ t =
          | Some (Arg_pos t), _ -> string "+" ^^ tyexp ~prec:Exp t
          | Some (Arg_neg t), _ -> string "-" ^^ tyexp ~prec:Exp t
          | Some (Arg_gen t), _ -> tyexp ~prec:Exp t
-         | Some (Arg_both {neg;pos}), _ -> string "-" ^^ tyexp ~prec:Exp neg ^^ break 1 ^^ string "+" ^^ tyexp ~prec:Exp pos
+         | Some (Arg_both {neg;pos}), _ -> string "-" ^^ tyexp ~prec:Term neg ^^ break 1 ^^ string "+" ^^ tyexp ~prec:Term pos
        in
        match args with
        | [] -> empty

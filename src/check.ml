@@ -178,9 +178,39 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
        let econs = Cons1.Record {tag; args=[]; body=exp_fields; fopen=Ext_closed} in
        match inspect_cons econs ty with
        | Imatches (Record _ as ty, tyloc) ->
+fixme;
+let subtype_cons env ~neg ~pos (cp,cploc) (cn,cnloc) =
+  let wrap_err k err = wrap_cons_err (cp, cploc) (cn, cnloc) k err in
+  let cp' =
+    match Cons1.sub_head cp cn with
+    | Un err -> raise (SubtypeError (make_err env (Head err) (cp,cploc) (cn,cnloc)))
+    | Le Id -> cp
+    | Le To_top -> Top
+    | Le _ -> raise Exit (* FIXME: handle some cases? *)
+  in
+  match
+    Cons1.sub ~env (cp',cploc) (cn,cnloc)
+      ~neg:(fun k a b ->
+        try neg a b
+        with SubtypeError err -> raise (SubtypeError (wrap_err k err)))
+      ~pos:(fun k a b ->
+        try pos a b
+        with SubtypeError err -> raise (SubtypeError (wrap_err k err)))
+  with
+  | Ok () -> ()
+  | Error err ->
+     let err =
+       match err with
+       | Field_missing (name, ploc, nloc) ->
+          make_err env (Field_missing name) (cp, ploc) (cn, nloc)
+       | Field_extra (name, ploc, nloc) ->
+          make_err env (Field_extra name) (cp, ploc) (cn, nloc)
+     in
+     raise (SubtypeError err)
+in
           (* FIXME this should updated inferred type too! *)
           begin match
-            Types.subtype_cons env (econs,eloc) (ty,tyloc)
+            subtype_cons env (econs,eloc) (ty,tyloc)
               ~neg:(fun _ _ -> assert false)
               ~pos:(fun (_, r) ty -> r := Some (checking ty))
           with
