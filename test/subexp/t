@@ -837,7 +837,7 @@ fn[a <: {foo:Int}, b <: {bar:Int}](x) -> ({a:a, b:{foo:Int}|b}) {
 >   let splat = fn (x) { {a: x, b: x} };
 >   splat(x)
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1156}
+> typechecking error: unimplemented: unresolved delayed constraints
 
 
 # weirdness: non-monotonicity wrt annotations
@@ -849,7 +849,7 @@ fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> ({a:{bar:Bool}|a, b:{foo:Int}|b, c:{fo
 >   ({a: {bar: Bool} | a, b: {foo: Int} | b, c: {foo: Int}}) {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1161}
+> typechecking error: unimplemented: unresolved delayed constraints
 
 fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> ({a:{bar:Bool}|a, b:{foo:Int}|b, c:Any}) {
   {a:x, b:x, c:x}
@@ -858,7 +858,7 @@ fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> ({a:{bar:Bool}|a, b:{foo:Int}|b, c:Any
 >   ({a: {bar: Bool} | a, b: {foo: Int} | b, c: Any}) {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1171}
+> typechecking error: unimplemented: unresolved delayed constraints
 
 
 # FIXME: spec_sub_rigid_pos should remove one of the variables here
@@ -869,7 +869,7 @@ fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> ({a:{bar:Bool}|a, b:{foo:Int}|a|b, c:A
 >   ({a: {bar: Bool} | a, b: {foo: Int} | a | b, c: Any}) {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {bar: Bool} <= {bar: _1176}
+> typechecking error: unimplemented: unresolved delayed constraints
 
 fn[a](x: Any, y:a) { if true {x} else {y} }
 > fn [a](x: Any, y: a) { if true { x } else { y } }
@@ -1137,7 +1137,7 @@ fn[a <: {foo:Int}](x:a, y:{foo:Int}) { if true {x} else {y} }
 # multi RV upper bounds tests
 fn[a <: {foo:Int}](x) -> (a,{foo:Int}) { (x,x) }
 > fn [a <: {foo: Int}](x) -> (a, {foo: Int}) { (x, x) }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1531}
+> typechecking error: unimplemented: unresolved delayed constraints
 
 # ensure_rigvars_present gets this one
 fn mkdup[a]() -> (a -> (a, a)) { fn(x) { (x,x) } }
@@ -1207,7 +1207,7 @@ fn (x: {foo:{bar:{baz:Bool}}}) -> ({foo:{bar:{baz:Int}}}) {
 #
 fn [a <: {foo:{bar:Int}}] (x) -> ({foo:Int}, a) { (x,x) }
 > fn [a <: {foo: {bar: Int}}](x) -> ({foo: Int}, a) { (x, x) }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: {bar: Int}} <= {foo: _1574}
+> typechecking error: unimplemented: unresolved delayed constraints
 
 fn ch[a](x:a,y:a) -> (a,a) { if true {(x,x)} else {(y,y)} }
 fn [a <: {foo:{bar:Int}}] (x, y:a) -> ({foo:Bool}, a) { ch(x,y) }

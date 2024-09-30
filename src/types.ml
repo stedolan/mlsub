@@ -1442,10 +1442,10 @@ and promote_upper :
            begin match List.find_opt (fun d -> not d.dy_resolved) ds with
            | None ->
               Either.Right (Some (promote_rigvar s r));
-           | Some dy ->
+           | Some _dy ->
               (* FIXME: It would be sound to drop these variables. Would that be weird? *)
-              unimp "unresolved delayed constraints: %a <= %a"
-                pp_ptyp (Tsimple [Lcons dy.dy_lower]) pp_upper (Ugen {cons=([Ucons (fst dy.dy_upper)], snd dy.dy_upper);higher_fvs=[]})
+              unimp "unresolved delayed constraints"
+(*                pp_ptyp (Tsimple [Lcons dy.dy_lower]) pp_upper (Ugen {cons=([Ucons (fst dy.dy_upper)], snd dy.dy_upper);higher_fvs=[]})*)
               (* Either.Right None *)
            end
         | Ucons c ->
