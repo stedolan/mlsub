@@ -16,16 +16,16 @@ fn(x) { (#Foo(), #Bar, #Foo{x: 42}, #Baz(1)) }
 > (if true { #Foo(@true) } else { #Bar(6) } : #Foo(Bool) | #Bar(Int))
 > typechecking error: Failure("pragma: true")
 
-({x: 42} : #Foo{x: Int})
-> ({x: 42} : #Foo{x: Int})
-> test:1: The tag should be Foo, but no tag is present.
->   ({x: 42} : #Foo{x: Int})
->    ^^^^^^^
->      found: {x: _}
+(#{x: 42} : #Foo{x: Int})
+> (#{x: 42} : #Foo{x: Int})
+> test:1: The tag should be Foo, but tag # is present.
+>   (#{x: 42} : #Foo{x: Int})
+>    ^^^^^^^^
+>      found: #{x: _}
 >   expected: #Foo{x: _}
-> This {x: _} is used as #Foo{x: _} at test:1:
->   ({x: 42} : #Foo{x: Int})
->              ^^^^^^^^^^^^
+> This #{x: _} is used as #Foo{x: _} at test:1:
+>   (#{x: 42} : #Foo{x: Int})
+>               ^^^^^^^^^^^^
 
 (#Bar{x: 42} : #Foo{x: Int})
 > (#Bar{x: 42} : #Foo{x: Int})
@@ -676,23 +676,23 @@ fn (x : ((#A(Int,Int)|#B{x:String,y:String}|#C|#D|#E), #B|#C|#D)) {
 > | (#E, _)
 
 fn(x : #A(Int, #P|#Q|#R) | #B(Int, #P|#Q|#R)) {
-  match {averylongnameinanexpression: {averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression, {x:0,y:5}.y {
+  match #{averylongnameinanexpression: #{averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression, #{x:0,y:5}.y {
   | #A(x, #P|#Q), y => 1
   | #B(x, #P|#Q), y => 1
   }
 }
 > fn (x: #A(Int, #P | #Q | #R) | #B(Int, #P | #Q | #R)) {
 >   match
->     {averylongnameinanexpression: {averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression,
->     {x: 0, y: 5}.y
+>     #{averylongnameinanexpression: #{averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression,
+>     #{x: 0, y: 5}.y
 >   {
 >     | #A(x, (#P | #Q)), y => 1
 >     | #B(x, (#P | #Q)), y => 1
 >   }
 > }
 > test:2: Some cases of this pattern-match are missing:
->     match {averylongnameinanexpression: {averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression, {x:0,y:5}.y {
->           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>     match #{averylongnameinanexpression: #{averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression, #{x:0,y:5}.y {
+>           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 > The following cases are unhandled:
 > | #A(_, #R), _
 > | #B(_, #R), _

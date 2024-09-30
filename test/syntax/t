@@ -21,12 +21,12 @@ fn (x)
 
 
 # paren insertion
-fn(a) { { foo: if true { fn(x) { x } } else { a } } }
-> fn (a) { {foo: if true { fn (x) { x } } else { a }} }
->   fn [a, b](a: a) -> ({foo: (b -> b) | a}) {
->     {foo: if true { fn [a_2](x: a_2) -> a_2 { x } } else { a }}
+fn(a) { #{ foo: if true { fn(x) { x } } else { a } } }
+> fn (a) { #{foo: if true { fn (x) { x } } else { a }} }
+>   fn [a, b](a: a) -> (#{foo: (b -> b) | a}) {
+>     #{foo: if true { fn [a_2](x: a_2) -> a_2 { x } } else { a }}
 >   }
-> [a, b] a -> {foo: (b -> b) | a}
+> [a, b] a -> #{foo: (b -> b) | a}
 > let  = %yield(fun (a) ret {
 >   let k(x) = {
 >     ret((foo: x))

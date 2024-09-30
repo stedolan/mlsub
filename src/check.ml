@@ -183,9 +183,10 @@ let subtype_cons env ~neg ~pos (cp,cploc) (cn,cnloc) =
   let cp' =
     match Cons1.sub_head cp cn with
     | Un err -> raise (SubtypeError (make_err env (Head err) (cp,cploc) (cn,cnloc)))
-    | Le Id -> cp
-    | Le To_top -> Top
-    | Le _ -> raise Exit (* FIXME: handle some cases? *)
+    | Le Id -> assert (tag <> None); cp
+    | Le To_top -> assert (tag <> None); Top
+    | Le (Drop_record_tag _) ->
+       (match cp with Record {tag=Some (Anon_tag | Struct_tag _);args;body} -> Record{tag=None;args;body} | _ -> assert false)
   in
   match
     Cons1.sub ~env (cp',cploc) (cn,cnloc)
@@ -222,6 +223,7 @@ in
             | Some ty -> check env ~mode e ty
             | None -> infer_typed env e)
        | _ ->
+          fixme; (* give a proper error *) assert (tag <> None);
           let econs = Cons1.map econs
             ~neg:never
             ~pos:(fun (_e,r) ->
