@@ -18,7 +18,7 @@ let func a b = Cons1.Func (a, b)
 let tuple xs =
   let open Fields in
   let body = of_list (List.mapi (fun i x -> Tuple_fields.Field_positional i, Fpresent (x, noloc)) xs) in
-  Cons1.Record {tag=Some Anon_tag; args=[]; body; fopen=Ext_closed}
+  Cons1.Record {tag=Some Anon_tag; args=[]; body}
 
 
 let dump env (t : ptyp) =

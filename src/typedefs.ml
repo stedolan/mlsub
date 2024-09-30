@@ -127,8 +127,7 @@ module Cons1 = struct
   type (+'neg, +'pos) cons_record =
     { tag: tuple_tag option;
       args: ('neg, 'pos) tyarg list;
-      body: 'pos Fields.t;
-      fopen: Exp.extensible_flag }
+      body: 'pos Fields.t }
 
   and (+'neg, +'pos) cons =
     | Top
@@ -140,21 +139,20 @@ module Cons1 = struct
     'neg * 'pos
 
   let named t =
-    Record { tag = Some (Named_tag t); args = []; body = Fields.empty; fopen = Ext_closed }
+    Record { tag = Some (Named_tag t); args = []; body = Fields.empty }
 
   type (+'neg, +'pos) t = ('neg, 'pos) cons
 
   let equal ~neg ~pos p q =
     match p, q with
     | Top, Top -> true
-    | Record {tag=ptag; args=pargs; body=pbody; fopen=popen},
-      Record {tag=qtag; args=qargs; body=qbody; fopen=qopen} ->
+    | Record {tag=ptag; args=pargs; body=pbody},
+      Record {tag=qtag; args=qargs; body=qbody} ->
        let arg_equal (n1,p1) (n2,p2) =
          neg n1 n2 && pos p1 p2
        in
        Option.equal tuple_tag_equal ptag qtag &&
        List.for_all2 arg_equal pargs qargs &&
-       popen = qopen &&
        Fields.equal ~pos pbody qbody
     | Func (pa, pr), Func (qa, qr) ->
        List.equal neg pa qa &&
@@ -163,9 +161,9 @@ module Cons1 = struct
 
   let map ~neg ~pos = function
     | Top -> Top
-    | Record {tag; args; body; fopen} ->
+    | Record {tag; args; body} ->
        let tyarg_map (n, p) = neg n, pos p in
-       Record {tag; args = List.map tyarg_map args; body = Fields.map ~pos body; fopen}
+       Record {tag; args = List.map tyarg_map args; body = Fields.map ~pos body}
     | Func (args, res) ->
        let args = List.map neg args in
        let res = pos res in
@@ -173,7 +171,7 @@ module Cons1 = struct
 
   let wf ~params ~neg ~pos = function
     | Top -> ()
-    | Record {tag; args; body; fopen=_} ->
+    | Record {tag; args; body} ->
        begin match tag with
        | None | Some (Anon_tag | Struct_tag _) -> assert (args = [])
        | Some (Named_tag (name,_)) ->
@@ -216,7 +214,7 @@ module Cons1 = struct
 
   let mapi ~neg ~pos = function
     | Top -> Top
-    | Record {tag; args; body; fopen} ->
+    | Record {tag; args; body} ->
        let arg i (n, p) =
          let tag = match tag with
            | Some (Named_tag (t,_)) -> t
@@ -228,7 +226,7 @@ module Cons1 = struct
        let args = List.mapi arg args in
        let field fn x = pos (Record_field fn) x in
        let body = Fields.mapi ~pos:field body in
-       Record {tag; args; body; fopen}
+       Record {tag; args; body}
     | Func (args, res) ->
        let args = List.mapi (fun i x -> neg (Func_arg i) x) args in
        let res = pos Func_res res in
@@ -1003,7 +1001,7 @@ let mktyvar v = mktyexp (Ttyvar (v, Location.noloc))
 
 let mayloc t = (Some t, Location.noloc)
 
-let unparse_fields ~pos ~tag ~fopen ({fields; fnames} : _ Fields.t) =
+let unparse_fields ~pos ~tag ({fields; fnames} : _ Fields.t) =
   let open Fields in
   let unparse_field_desc k = function
     | Funknown l -> (k,l), Exp.Optional, None
@@ -1025,17 +1023,16 @@ let unparse_fields ~pos ~tag ~fopen ({fields; fnames} : _ Fields.t) =
       fnames
   with
   | tuple ->
-     Exp.Ftuple (tuple, fopen)
+     Exp.Ftuple tuple
   | exception Exit ->
-     Exp.Frecord (List.map (fun f -> unparse_field_desc f (Map.find f fields)) fnames,
-                  fopen)
+     Exp.Frecord (List.map (fun f -> unparse_field_desc f (Map.find f fields)) fnames)
 
 let unparse_cons ~env ~neg ~pos (ty,_tyloc) =
   let open Cons1 in
   let ty = match ty with
     | Top -> named_type "Any"
-    | Record {tag; args; body; fopen} ->
-       let fs = unparse_fields ~pos ~tag ~fopen body in
+    | Record {tag; args; body} ->
+       let fs = unparse_fields ~pos ~tag body in
        let args =
          match tag with
          | None | Some (Anon_tag | Struct_tag _) -> assert (args = []); []

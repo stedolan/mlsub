@@ -85,37 +85,25 @@ fn(x) { let (a, b, c) = x; (c, b, a) }
 
 fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
 > fn (x) { match x { (_, _) => 1 | (_, _, _) => 2 } }
-> test:1: This pattern:
+> test:1: This pattern is unused
 >   fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
 >                                  ^^^^^^^
-> is incompatible with the pattern at test:1:
->   fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
->                     ^^^^^
 
 fn(x) { match x { (_,_,_) => 1 | (_,_) => 2 } }
 > fn (x) { match x { (_, _, _) => 1 | (_, _) => 2 } }
-> test:1: This pattern:
->   fn(x) { match x { (_,_,_) => 1 | (_,_) => 2 } }
->                     ^^^^^^^
-> is incompatible with the pattern at test:1:
+> test:1: This pattern is unused
 >   fn(x) { match x { (_,_,_) => 1 | (_,_) => 2 } }
 >                                    ^^^^^
 
-fn(x) { match x { {p,q: qq,...} => 1 | {p,r} => 2 } }
-> fn (x) { match x { {p, q: qq, ...} => 1 | {p, r} => 2 } }
-> test:1: This pattern:
->   fn(x) { match x { {p,q: qq,...} => 1 | {p,r} => 2 } }
->                        ^
-> is incompatible with the pattern at test:1:
->   fn(x) { match x { {p,q: qq,...} => 1 | {p,r} => 2 } }
->                                          ^^^^^
+fn(x) { match x { {p,q: qq} => 1 | {p,r} => 2 } }
+> fn (x) { match x { {p, q: qq} => 1 | {p, r} => 2 } }
+> test:1: This pattern is unused
+>   fn(x) { match x { {p,q: qq} => 1 | {p,r} => 2 } }
+>                                      ^^^^^
 
 fn(x) { match x { {p,r} => 1 | {p,q: qq} => 2 } }
 > fn (x) { match x { {p, r} => 1 | {p, q: qq} => 2 } }
-> test:1: This pattern:
->   fn(x) { match x { {p,r} => 1 | {p,q: qq} => 2 } }
->                        ^
-> is incompatible with the pattern at test:1:
+> test:1: This pattern is unused
 >   fn(x) { match x { {p,r} => 1 | {p,q: qq} => 2 } }
 >                                  ^^^^^^^^^
 
@@ -247,12 +235,9 @@ fn(x) {
 >     | #B{foo: (#C | #D), bar: x} => x
 >   }
 > }
-> test:4: This pattern:
+> test:4: This pattern is unused
 >     | #A(_, _, _) => 42
 >       ^^^^^^^^^^^
-> is incompatible with the pattern at test:3:
->     | #A(_, b) => b
->       ^^^^^^^^
 
 #
 # Regression for a reversal bug
@@ -460,11 +445,11 @@ fn (x) {
 >     (y.foo, y.bar)
 >             ^^^^^
 >      found: #Bad{foo: _}
->   expected: {bar: _, ...}
+>   expected: {bar: _}
 > This #Bad{foo: _} comes from test:5:
 >       #Bad{foo: x.foo}
 >       ^^^^^^^^^^^^^^^^
-> but is used as {bar: _, ...} at test:10:
+> but is used as {bar: _} at test:10:
 >     (y.foo, y.bar)
 >               ^^^
 
@@ -477,22 +462,22 @@ let make = fn (x) {
 };
 let use = fn (y) {
   match y {
-  | #Good{foo: bar, ...} => bar
-  | #Bad{foo: bar, ...} => bar
+  | #Good{foo: bar, bar: z} => bar
+  | #Bad{foo: bar} => bar
   }
 };
 fn (x) { use(make(x)) }
 > let make =
 > fn (x) { if x.good { #Good{foo: x.foo, bar: x.bar} } else { #Bad{foo: x.foo} } };
 > let use =
-> fn (y) { match y { #Good{foo: bar, ...} => bar | #Bad{foo: bar, ...} => bar } };
+> fn (y) { match y { #Good{foo: bar, bar: z} => bar | #Bad{foo: bar} => bar } };
 > fn (x) {
 >   use(make(x))
 > }
 >   let make :
->     [a, b] ({good: Bool, foo: b, bar: a, ...}) ->
+>     [a, b] ({good: Bool, foo: b, bar: a}) ->
 >     #Good{foo: b, bar: a} | #Bad{foo: b} =
->   fn [a, b](x: {good: Bool, foo: b, bar: a, ...}) ->
+>   fn [a, b](x: {good: Bool, foo: b, bar: a}) ->
 >     (#Good{foo: b, bar: a} | #Bad{foo: b}) {
 >     if x.good {
 >       #Good{foo: x.foo, bar: x.bar}
@@ -500,17 +485,17 @@ fn (x) { use(make(x)) }
 >       #Bad{foo: x.foo}
 >     }
 >   };
->   let use : [a, b] (#Good{foo: a, ...} | #Bad{foo: b, ...}) -> a | b =
->   fn [a, b](y: #Good{foo: a, ...} | #Bad{foo: b, ...}) -> (a | b) {
+>   let use : [a, b] (#Good{foo: a, bar: Any} | #Bad{foo: b}) -> a | b =
+>   fn [a, b](y: #Good{foo: a, bar: Any} | #Bad{foo: b}) -> (a | b) {
 >     match y {
->       | #Good{foo: bar, ...} => bar
->       | #Bad{foo: bar, ...} => bar
+>       | #Good{foo: bar, bar: z} => bar
+>       | #Bad{foo: bar} => bar
 >     }
 >   };
->   fn [a](x: {good: Bool, foo: a, bar: Any, ...}) -> a {
+>   fn [a](x: {good: Bool, foo: a, bar: Any}) -> a {
 >     use(make(x))
 >   }
-> [a] ({good: Bool, foo: a, bar: Any, ...}) -> a
+> [a] ({good: Bool, foo: a, bar: Any}) -> a
 > let make =
 >   fun (x) ret {
 >     let good = x.(good);
@@ -529,7 +514,8 @@ fn (x) { use(make(x)) }
 > let use =
 >   fun (y) ret {
 >     match y {
->       Good(foo: foo) -> {
+>       Good(foo: foo,
+>       bar: bar) -> {
 >         ret(foo)
 >       };
 >       Bad(foo: foo) -> {
@@ -667,14 +653,14 @@ fn(x : (#A|#B|#C), y : (#A|#B|#C)) {
 
 fn (x : ((#A(Int,Int)|#B{x:String,y:String}|#C|#D|#E), #B|#C|#D)) {
   match x {
-  | (#A(_,_)|#B{...}, #C|#D)
+  | (#A(_,_)|#B{}, #C|#D)
   | (#C, #C)
   | (#D, #C) => 1
   }
 }
 > fn (x: (#A(Int, Int) | #B{x: String, y: String} | #C | #D | #E, #B | #C | #D)) {
 >   match x {
->     | ((#A(_, _) | #B{...}), (#C | #D))
+>     | ((#A(_, _) | #B{}), (#C | #D))
 >     | (#C, #C)
 >     | (#D, #C) => 1
 >   }
@@ -870,4 +856,4 @@ fn (x : #A | #B | #C | #D | #E, y: #A | #B) -> Int {
 
 
 # end
-> STATS: fix: 13, flex: 243
+> STATS: fix: 13, flex: 254

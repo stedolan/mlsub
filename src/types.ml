@@ -344,11 +344,16 @@ module Cons1 = struct
   open Fields
   include Typedefs.Cons1
 
-  let record_def ~env ~loc {tag; args=_; body=_; fopen} =
+  let record_def ~env ~loc {tag; args=_; body=_} =
     let decl = lazy (
        match tag with
        | Some (Named_tag (s, _)) -> Some (Typedefs.Env.get_decl_fields env s)
        | None | Some (Anon_tag | Struct_tag _) -> None)
+    in
+    let fopen : Exp.extensible_flag =
+      match tag with
+      | None -> Ext_open
+      | Some _ -> Ext_closed
     in
     fun fn ->
     match Lazy.force decl with
@@ -365,7 +370,7 @@ module Cons1 = struct
     match coe, c with
     | Id, c -> c
     | To_top, _ -> Top
-    | Drop_record_tag t, Record ({tag=Some t'; args; body; fopen} as r) ->
+    | Drop_record_tag t, Record ({tag=Some t'; args; body} as r) ->
        assert (tuple_tag_equal t t');
        let body =
          match t with
@@ -393,7 +398,7 @@ module Cons1 = struct
                      (fun t -> Type_shape.of_typ ~env ~shape t)
                 | ty, _ -> ty)
        in
-       Record {tag=None; args=[]; body; fopen}
+       Record {tag=None; args=[]; body}
     | Drop_record_tag _, _ -> assert false
 
   let join ~env ~neg ~pos (a, a_loc) (b, b_loc) =
@@ -406,18 +411,12 @@ module Cons1 = struct
        assert (Option.equal tuple_tag_equal a.tag b.tag);
        let a_def = record_def ~env ~loc:a_loc a in
        let b_def = record_def ~env ~loc:b_loc b in
-       let fopen =
-         match a.fopen, b.fopen with
-         | Exp.Ext_closed, Exp.Ext_closed -> Exp.Ext_closed
-         | _, _ -> Exp.Ext_open
-       in
        let tyarg_join ((n1,p1) : _ tyarg) ((n2,p2) : _ tyarg) =
          (neg n1 n2, pos p1 p2)
        in
        Record {tag = a.tag;
                args = List.map2 tyarg_join a.args b.args;
-               body = Fields.join ~pos (a.body, a_def) (b.body, b_def);
-               fopen },
+               body = Fields.join ~pos (a.body, a_def) (b.body, b_def) },
        a_loc (* FIXME: which loc is best here? *)
 
     | Func (args, res), Func (args', res') ->
@@ -472,10 +471,7 @@ module Cons1 = struct
        in
        let a_def = record_def ~env ~loc:a_loc a in
        let b_def = record_def ~env ~loc:b_loc b in
-       begin match
-         sub_field None (desc_of_ext a_loc a.fopen) (desc_of_ext b_loc b.fopen);
-         Fields.sub ~f:sub_field (a.body,a_def) (b.body,b_def)
-       with
+       begin match Fields.sub ~f:sub_field (a.body,a_def) (b.body,b_def) with
        | () -> Ok ()
        | exception (SubError e) -> Error e
        end
@@ -626,7 +622,6 @@ let rec meet_cons ~changes env lvl ~must_freshen (cons_a, a_loc) (cons_b, b_loc)
 
   | Record ({tag = None; _} as rec_a),
     Record ({tag = Some (Named_tag sym); _} as rec_b) ->
-     assert (rec_b.fopen = Ext_closed); (* FIXME enforce *)
      (* must expand fields on left *)
      let decl_params = (Option.get (Env.lookup_decl env (fst sym))).params in
      let decl_fields = Env.get_decl_fields env (fst sym) in
@@ -657,20 +652,17 @@ let rec meet_cons ~changes env lvl ~must_freshen (cons_a, a_loc) (cons_b, b_loc)
      let b_def = Cons1.record_def ~env ~loc:b_loc rec_b in
      Cons1.Record {tag = Some (Named_tag sym);
              args;
-             body = Fields.meet ~pos:meet_pos (a_body, a_def) (rec_b.body, b_def);
-             fopen = Ext_closed }
+             body = Fields.meet ~pos:meet_pos (a_body, a_def) (rec_b.body, b_def) }
 
   | Record ({tag = Some (Named_tag sym); _} as rec_a),
     Record ({tag = None; _} as rec_b) ->
      let decl_fields = Env.get_decl_fields env (fst sym) in
      assert (rec_b.args = []);
-     assert (rec_a.fopen = Ext_closed); (* FIXME: enforce this in wf *)
      let a_def = expand_field ~env ~loc:a_loc decl_fields rec_a.args in
      let b_def = Cons1.record_def ~env ~loc:b_loc rec_b in
      Record {tag = Some (Named_tag sym);
              args = rec_a.args;
-             body = Fields.meet ~pos:meet_pos (rec_a.body, a_def) (rec_b.body, b_def);
-             fopen = Ext_closed }
+             body = Fields.meet ~pos:meet_pos (rec_a.body, a_def) (rec_b.body, b_def) }
 
   | Record ({tag = Some (Named_tag a_sym); _} as rec_a),
     Record ({tag = Some (Named_tag b_sym); _} as rec_b) ->
@@ -680,8 +672,7 @@ let rec meet_cons ~changes env lvl ~must_freshen (cons_a, a_loc) (cons_b, b_loc)
      let b_def = record_def ~env ~loc:b_loc rec_b in
      Record { tag = Some (Named_tag a_sym);
               args = List.map2 tyarg rec_a.args rec_b.args;
-              body = Fields.meet ~pos:meet_pos (rec_a.body, a_def) (rec_b.body, b_def);
-              fopen = Ext_closed }
+              body = Fields.meet ~pos:meet_pos (rec_a.body, a_def) (rec_b.body, b_def) }
 
   | Record a, Record b ->
      (* struct/struct, struct/none, none/struct *)
@@ -700,15 +691,9 @@ let rec meet_cons ~changes env lvl ~must_freshen (cons_a, a_loc) (cons_b, b_loc)
      in
      let a_def = record_def ~env ~loc:a_loc a in
      let b_def = record_def ~env ~loc:b_loc b in
-     let fopen =
-       match a.fopen, b.fopen with
-       | Exp.Ext_open, Exp.Ext_open -> Exp.Ext_open
-       | _, _ -> Exp.Ext_closed
-     in
      Record {tag;
              args = [];
-             body = Fields.meet ~pos:meet_pos (a.body, a_def) (b.body, b_def);
-             fopen }
+             body = Fields.meet ~pos:meet_pos (a.body, a_def) (b.body, b_def) }
 
   | Record _, Func _ | Func _, Record _ -> assert false
 

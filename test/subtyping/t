@@ -212,7 +212,7 @@
 
 
 # tricky case of spec sub & rigvars (see cnrig <> [] case in ensure_upper_matches)
-: [a <: {cond: Bool, ...}] (a) -> {foo: Int, cond: Int} | a <: [a <: {cond: Bool, ...}] (a) -> {foo: Int, cond: Int} | a
+: [a <: {cond: Bool}] (a) -> {foo: Int, cond: Int} | a <: [a <: {cond: Bool}] (a) -> {foo: Int, cond: Int} | a
 > ok
 
 : [a <: {cond: Bool}] a <: [a <: {cond: String}] ({cond: Int} | a)
@@ -250,8 +250,8 @@
 
 # Tricky case showing that match_sub must refreshen matchable
 # variables when the set of rigvars in the bound increases
-:  [p <: {foo: Any, ...}](p) -> p
-<: [p <: {foo: Any, ...}](p) -> {foo:Int} | p
+:  [p <: {foo: Any}](p) -> p
+<: [p <: {foo: Any}](p) -> {foo:Int} | p
 > ok
 
 > STATS: fix: 0, flex: 80

@@ -5,7 +5,7 @@ open Typedefs
 open Types
 open Error
 
-let unit loc = tcons (Record {tag=Some Anon_tag; args=[]; body={fnames=[]; fields=FieldMap.empty}; fopen=Ext_closed}, loc)
+let unit loc = tcons (Record {tag=Some Anon_tag; args=[]; body={fnames=[]; fields=FieldMap.empty}}, loc)
 
 open Elab
 
@@ -154,8 +154,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
 
   | Tuple (tag, fields) ->
      begin match tag with Some (Named_tag _)  -> unimp "named tag intro" | _ -> () end;
-     let fields, fopen = Exp.record_fields ~loc:eloc fields in
-     if fopen = Ext_open then fail eloc (Bad_tuple_intro `Ext_open);
+     let fields = Exp.record_fields ~loc:eloc fields in
      let res_fields = List.map (fun ((f,floc), m, e) ->
        if m = Optional then fail floc (Bad_tuple_intro `Opt);
        let e = match f, e with
@@ -175,7 +174,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      in
      let fields =
        (* FIXME args *)
-       let econs = Cons1.Record {tag; args=[]; body=exp_fields; fopen=Ext_closed} in
+       let econs = Cons1.Record {tag; args=[]; body=exp_fields} in
        match inspect_cons econs ty with
        | Imatches (Record _ as ty, tyloc) ->
 fixme;
@@ -257,8 +256,7 @@ in
                    args = []; (* FIXME *)
                    body = {
                        fields = FieldMap.singleton f (Fields.Fpresent (r, loc));
-                       fnames = [Field_named field]};
-                   fopen = Ext_open }]
+                       fnames = [Field_named field]} }]
        with
        | Ok () -> !r
        | Error c -> fail eloc (Conflict (`Expr, c)) in

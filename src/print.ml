@@ -77,18 +77,14 @@ let field_name = function
   | Field_positional n -> string (Printf.sprintf "%d" n)
   | Field_named s -> string s
 
-let ext_flag = function
-  | Ext_open -> [string "..."]
-  | Ext_closed -> []
-
 let fields ~tcomma f = function
-  | Ftuple ([x],Ext_closed) when tcomma ->
+  | Ftuple [x] when tcomma ->
      (* Trailing comma required to disambiguate *)
      parens (sep ~trail:true comma [f x])
-  | Ftuple (fs, ext) ->
+  | Ftuple fs ->
      let fs = List.map f fs in
-     parens (sep comma (fs @ ext_flag ext))
-  | Frecord (fs, ext) ->
+     parens (sep comma fs)
+  | Frecord fs ->
      let mand_flag = function
        | Mandatory -> empty
        | Optional -> string "?"
@@ -96,7 +92,7 @@ let fields ~tcomma f = function
      let fs = List.map (function
        | ((s,_loc), m, Some x) -> field_name s ^^ mand_flag m ^^ string ":" ^^ break 1 ^^ f x
        | ((s,_loc), m, None) -> field_name s ^^ mand_flag m) fs in
-     braces (sep (ifflat comma empty) (fs @ ext_flag ext))
+     braces (sep (ifflat comma empty) fs)
 
 (* FIXME syntax *)
 let tuple_tag = function
@@ -133,8 +129,8 @@ and exp_ e =
        op "=" ^^ group (exp e) ^^
        string ";") ^^ break 1 ^^ exp body*)
   | Tuple (None, t) -> fields ~tcomma:true (exp ~prec:Exp) t
-  | Tuple (Some Anon_tag, Ftuple ([], Ext_closed)) -> parens empty
-  | Tuple (Some tag, Ftuple ([],Ext_closed)) -> tuple_tag tag
+  | Tuple (Some Anon_tag, Ftuple []) -> parens empty
+  | Tuple (Some tag, Ftuple []) -> tuple_tag tag
   | Tuple (Some Anon_tag, (Ftuple _ as t)) -> fields ~tcomma:true (exp ~prec:Exp) t
   | Tuple (Some tag, t) -> tuple_tag tag ^^ fields ~tcomma:false (exp ~prec:Exp) t
   | App (f, args) ->
@@ -211,7 +207,7 @@ and pat_ p =
   | Pbind (s, p) -> symbol s ^^ op "@" ^^ pat ~prec:Infix p
   | Ptuple (None, ts) -> fields ~tcomma:true (pat ~prec:Term) ts
   | Ptuple (Some Anon_tag, (Ftuple _ as ts)) -> fields ~tcomma:true (pat ~prec:Term) ts
-  | Ptuple (Some tag, Ftuple ([],Ext_closed)) -> tuple_tag tag
+  | Ptuple (Some tag, Ftuple []) -> tuple_tag tag
   | Ptuple (Some tag, ts) -> tuple_tag tag ^^ fields ~tcomma:false (pat ~prec:Term) ts
   | Por (p, q) -> pat ~prec p ^^ op "|" ^^ pat ~prec q
 
@@ -248,7 +244,7 @@ and tyexp_ t =
        match tag, fs with
        | Some Anon_tag, Ftuple _ ->
           fields ~tcomma:true (tyexp ~prec:Exp) fs
-       | Some _, Ftuple ([], Ext_closed) -> empty
+       | Some _, Ftuple [] -> empty
        | Some _, _ -> fields ~tcomma:false (tyexp ~prec:Exp) fs
        | None, _ -> fields ~tcomma:true (tyexp ~prec:Exp) fs
      in

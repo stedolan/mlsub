@@ -84,25 +84,19 @@ field_name:
 | f = INT
   { Field_positional f }
 
-%inline ext_dots:
-|      { Ext_closed }
-| DOTS { Ext_open }
-
 fields_paren_items1(X):
-| DOTS
-  { [], Ext_open }
 | f = X; ioption(COMMA)
-  { [f], Ext_closed }
+  { [f] }
 | f = X; COMMA; fs = fields_paren_items1(X)
-  { (f::fst fs), snd fs }
+  { (f::fs) }
 
 fields_paren_items(X):
-| e = ext_dots
-  { [], false, e }
+|
+  { [], false }
 | f = X; c = ioption(COMMA)
-  { [f], Option.is_some c, Ext_closed }
+  { [f], Option.is_some c }
 | f = X; COMMA; fs = fields_paren_items1(X)
-  { (f::fst fs), false, snd fs }
+  { (f::fs), false }
 
 fields_brace_item(X):
 | f = loc(field_name); m = mand_flag; COLON; e = X
@@ -111,28 +105,26 @@ fields_brace_item(X):
   { f, m, None }
 
 fields_brace_items1(X):
-| DOTS
-  { [], Ext_open }
 | f = fields_brace_item(X); ioption(COMMA)
-  { [f], Ext_closed }
+  { [f] }
 | f = fields_brace_item(X); ioption(COMMA); fs = fields_brace_items1(X)
-  { (f::fst fs), snd fs }
+  { (f::fs) }
 
 fields_brace_items(X):
 | 
-  { [], Ext_closed }
+  { [] }
 | fs = fields_brace_items1(X)
   { fs }
 
 %inline fields_parens(X):
 | LPAR; xs = fields_paren_items(X); RPAR
   { match xs with
-    | [x] as xs, false, e -> Some x, Ftuple (xs, e)
-    | xs, _, e -> None, Ftuple (xs, e) }
+    | [x] as xs, false -> Some x, Ftuple xs
+    | xs, _ -> None, Ftuple xs }
 
 %inline fields_braces(X):
 | LBRACE; xs = fields_brace_items(X); RBRACE
-  { Frecord (fst xs, snd xs) }
+  { Frecord xs }
 
 fields(X):
 | fs = fields_parens(X) { fs }
@@ -265,7 +257,7 @@ tyexp_:
 | t = tyterm_
   { t }
 | LPAR; t = fields_paren_items(tyexp); RPAR; ARROW; r = tyexp
-  { let (t, _, _FIXME_e) = t in
+  { let (t, _) = t in
     Tfunc (t, r) }
 | t = tyatomic; ARROW; r = tyexp
   { Tfunc ([t], r) }

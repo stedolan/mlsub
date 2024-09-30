@@ -35,11 +35,11 @@ fn[a](x : a) { if x.cond {x} else {x} }
 >   fn[a](x : a) { if x.cond {x} else {x} }
 >                     ^^^^^^
 >      found: a
->   expected: {cond: _, ...}
+>   expected: {cond: _}
 > This a comes from test:1:
 >   fn[a](x : a) { if x.cond {x} else {x} }
 >             ^
-> but is used as {cond: _, ...}
+> but is used as {cond: _}
 
 fn[a <: {cond:Bool}](x : a) { if x.cond {x} else {x} }
 > fn [a <: {cond: Bool}](x: a) { if x.cond { x } else { x } }
@@ -695,10 +695,10 @@ let f = fn[a](id: [b](a, b) -> (a, b), x:a){id(x,1)}; fn(z){ f(fn(a,b){(a,b)}, i
 > }
 >   let f : [a] ([b] (a, b) -> (a, b), a) -> (a, Int) =
 >   fn [a](id: [b] (a, b) -> (a, b), x: a) -> (a, Int) { id(x, 1) };
->   fn [a](z: {cond: Bool, a: a, b: a, ...}) -> (a, Int) {
+>   fn [a](z: {cond: Bool, a: a, b: a}) -> (a, Int) {
 >     f(fn [b](a: a, b: b) -> (a, b) { (a, b) }, if z.cond { z.a } else { z.b })
 >   }
-> [a] ({cond: Bool, a: a, b: a, ...}) -> (a, Int)
+> [a] ({cond: Bool, a: a, b: a}) -> (a, Int)
 > let f = fun (id, x) ret { let x2 = id(x, 1); ret(x2) };
 > let  = %yield(fun (z) ret {
 >   let k(x) = {
@@ -777,43 +777,40 @@ fn[p, q <: {foo:p}] (x) -> ([a, b <: {bar: q}, c <: {x:b, y:q}] (a, b, c) -> (a,
 > let  = %yield(fun (x) ret { ret(x) }); done
 
 # more approx_ntyp
-let f = fn (f: [b <: {foo:Int,...}, a <: {bar:b}](a) -> a|b, g) { g(f) }; fn() { (fn(x){x})(f) }
-> let f = fn (f: [b <: {foo: Int, ...}, a <: {bar: b}] a -> a | b, g) { g(f) };
+let f = fn (f: [b <: {foo:Int}, a <: {bar:b}](a) -> a|b, g) { g(f) }; fn() { (fn(x){x})(f) }
+> let f = fn (f: [b <: {foo: Int}, a <: {bar: b}] a -> a | b, g) { g(f) };
 > fn () {
 >   (fn (x) { x })(f)
 > }
 >   let f :
->     [a <: {foo: Int, ...}, b <: {bar: a}, c] (
->       [b_2 <: {foo: Int, ...}, a_2 <: {bar: b_2}] a_2 -> a_2 | b_2,
+>     [a <: {foo: Int}, b <: {bar: a}, c] (
+>       [b_2 <: {foo: Int}, a_2 <: {bar: b_2}] a_2 -> a_2 | b_2,
 >       (b -> a | b) -> c
 >     ) -> c =
->   fn [a <: {foo: Int, ...}, b <: {bar: a}, c](
->     f: [b_2 <: {foo: Int, ...}, a_2 <: {bar: b_2}] a_2 -> a_2 | b_2,
+>   fn [a <: {foo: Int}, b <: {bar: a}, c](
+>     f: [b_2 <: {foo: Int}, a_2 <: {bar: b_2}] a_2 -> a_2 | b_2,
 >     g: (b -> a | b) -> c
 >   ) -> c {
 >     g(f)
 >   };
->   fn [a <: {foo: Int, ...}, b <: {bar: a}, c]() ->
->     ((({bar: {foo: Int, ...}}) -> Nothing, (b -> a | b) -> c) -> c) {
+>   fn [a <: {foo: Int}, b <: {bar: a}, c]() ->
+>     ((({bar: {foo: Int}}) -> Nothing, (b -> a | b) -> c) -> c) {
 >     (fn [a_2](x: a_2) -> a_2 { x })(f)
 >   }
-> [a <: {foo: Int, ...}, b <: {bar: a}, c] () -> (({bar: {foo: Int, ...}}) -> Nothing, (b -> a | b) -> c) -> c
+> [a <: {foo: Int}, b <: {bar: a}, c] () -> (({bar: {foo: Int}}) -> Nothing, (b -> a | b) -> c) -> c
 > let f = fun (f, g) ret { let x = g(f); ret(x) };
 > let  = %yield(fun () ret { let x = fun (x) ret2 { ret2(x) }(f); ret(x) });
 > done
 
-fn (f: [b <: {foo:Int,...}, a <: {bar:b}](a) -> a|b, g) { g(f) }
-> fn (f: [b <: {foo: Int, ...}, a <: {bar: b}] a -> a | b, g) { g(f) }
->   fn [a <: {foo: Int, ...}, b <: {bar: a}, c](
->     f: [b_2 <: {foo: Int, ...}, a_2 <: {bar: b_2}] a_2 -> a_2 | b_2,
+fn (f: [b <: {foo:Int}, a <: {bar:b}](a) -> a|b, g) { g(f) }
+> fn (f: [b <: {foo: Int}, a <: {bar: b}] a -> a | b, g) { g(f) }
+>   fn [a <: {foo: Int}, b <: {bar: a}, c](
+>     f: [b_2 <: {foo: Int}, a_2 <: {bar: b_2}] a_2 -> a_2 | b_2,
 >     g: (b -> a | b) -> c
 >   ) -> c {
 >     g(f)
 >   }
-> [a <: {foo: Int, ...}, b <: {bar: a}, c] (
->   [b_2 <: {foo: Int, ...}, a_2 <: {bar: b_2}] a_2 -> a_2 | b_2,
->   (b -> a | b) -> c
-> ) -> c
+> [a <: {foo: Int}, b <: {bar: a}, c] ([b_2 <: {foo: Int}, a_2 <: {bar: b_2}] a_2 -> a_2 | b_2, (b -> a | b) -> c) -> c
 > let  = %yield(fun (f, g) ret { let x = g(f); ret(x) }); done
 
 # wfrig check in ensure_upper_matches
@@ -840,7 +837,7 @@ fn[a <: {foo:Int}, b <: {bar:Int}](x) -> ({a:a, b:{foo:Int}|b}) {
 >   let splat = fn (x) { {a: x, b: x} };
 >   splat(x)
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1148}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1156}
 
 
 # weirdness: non-monotonicity wrt annotations
@@ -852,27 +849,27 @@ fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> ({a:{bar:Bool}|a, b:{foo:Int}|b, c:{fo
 >   ({a: {bar: Bool} | a, b: {foo: Int} | b, c: {foo: Int}}) {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1153}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1161}
 
-fn[a <: {foo:Int,...}, b <: {bar:Bool,...}](x) -> ({a:{bar:Bool,...}|a, b:{foo:Int,...}|b, c:Any}) {
+fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> ({a:{bar:Bool}|a, b:{foo:Int}|b, c:Any}) {
   {a:x, b:x, c:x}
 }
-> fn [a <: {foo: Int, ...}, b <: {bar: Bool, ...}](x) ->
->   ({a: {bar: Bool, ...} | a, b: {foo: Int, ...} | b, c: Any}) {
+> fn [a <: {foo: Int}, b <: {bar: Bool}](x) ->
+>   ({a: {bar: Bool} | a, b: {foo: Int} | b, c: Any}) {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int, ...} <= {foo: _1162, ...}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1171}
 
 
 # FIXME: spec_sub_rigid_pos should remove one of the variables here
-fn[a <: {foo:Int,...}, b <: {bar:Bool,...}](x) -> ({a:{bar:Bool,...}|a, b:{foo:Int,...}|a|b, c:Any}) {
+fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> ({a:{bar:Bool}|a, b:{foo:Int}|a|b, c:Any}) {
   {a:x, b:x, c:x}
 }
-> fn [a <: {foo: Int, ...}, b <: {bar: Bool, ...}](x) ->
->   ({a: {bar: Bool, ...} | a, b: {foo: Int, ...} | a | b, c: Any}) {
+> fn [a <: {foo: Int}, b <: {bar: Bool}](x) ->
+>   ({a: {bar: Bool} | a, b: {foo: Int} | a | b, c: Any}) {
 >   {a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints: {bar: Bool, ...} <= {bar: _1167, ...}
+> typechecking error: unimplemented: unresolved delayed constraints: {bar: Bool} <= {bar: _1176}
 
 fn[a](x: Any, y:a) { if true {x} else {y} }
 > fn [a](x: Any, y: a) { if true { x } else { y } }
@@ -946,13 +943,13 @@ fn(x, y) {
 >   let z = ch(x, y).bar;
 >   (x.bar, y.bar)
 > }
->   fn [a, b](x: {bar: a, ...}, y: {bar: b, ...}) -> (a, b) {
+>   fn [a, b](x: {bar: a}, y: {bar: b}) -> (a, b) {
 >     let ch : [x] (x, x) -> x =
 >     fn [x](a: x, b: x) -> x { if true { a } else { b } };
 >     let z : Any = ch(x, y).bar;
 >     (x.bar, y.bar)
 >   }
-> [a, b] ({bar: a, ...}, {bar: b, ...}) -> (a, b)
+> [a, b] ({bar: a}, {bar: b}) -> (a, b)
 > let  = %yield(fun (x, y) ret {
 >   let ch =
 >     fun (a, b) ret2 {
@@ -984,13 +981,13 @@ fn(y) {
 >   let z = ch({bar: true}, y).bar;
 >   (y.bar : Int)
 > }
->   fn (y: {bar: Int, ...}) -> Int {
+>   fn (y: {bar: Int}) -> Int {
 >     let ch : [x] (x, x) -> x =
 >     fn [x](a: x, b: x) -> x { if true { a } else { b } };
 >     let z : Any = ch({bar: true}, y).bar;
 >     (y.bar : Int)
 >   }
-> ({bar: Int, ...}) -> Int
+> ({bar: Int}) -> Int
 > let  = %yield(fun (y) ret {
 >   let ch =
 >     fun (a, b) ret2 {
@@ -1140,7 +1137,7 @@ fn[a <: {foo:Int}](x:a, y:{foo:Int}) { if true {x} else {y} }
 # multi RV upper bounds tests
 fn[a <: {foo:Int}](x) -> (a,{foo:Int}) { (x,x) }
 > fn [a <: {foo: Int}](x) -> (a, {foo: Int}) { (x, x) }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1522}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: Int} <= {foo: _1531}
 
 # ensure_rigvars_present gets this one
 fn mkdup[a]() -> (a -> (a, a)) { fn(x) { (x,x) } }
@@ -1210,7 +1207,7 @@ fn (x: {foo:{bar:{baz:Bool}}}) -> ({foo:{bar:{baz:Int}}}) {
 #
 fn [a <: {foo:{bar:Int}}] (x) -> ({foo:Int}, a) { (x,x) }
 > fn [a <: {foo: {bar: Int}}](x) -> ({foo: Int}, a) { (x, x) }
-> typechecking error: unimplemented: unresolved delayed constraints: {foo: {bar: Int}} <= {foo: _1565}
+> typechecking error: unimplemented: unresolved delayed constraints: {foo: {bar: Int}} <= {foo: _1574}
 
 fn ch[a](x:a,y:a) -> (a,a) { if true {(x,x)} else {(y,y)} }
 fn [a <: {foo:{bar:Int}}] (x, y:a) -> ({foo:Bool}, a) { ch(x,y) }
@@ -1267,46 +1264,46 @@ fn [a <: {foo:Int}](x : a) -> ({foo:Bool}) { x }
 >   fn [a <: {foo:Int}](x : a) -> ({foo:Bool}) { x }
 >                                       ^^^^
 
-fn [a <: {foo:Int,...}](x : a) -> ({bar:Bool,...}) { x }
-> fn [a <: {foo: Int, ...}](x: a) -> ({bar: Bool, ...}) { x }
+fn [a <: {foo:Int}](x : a) -> ({bar:Bool}) { x }
+> fn [a <: {foo: Int}](x: a) -> ({bar: Bool}) { x }
 > test:1: The field 'bar' is missing.
->   fn [a <: {foo:Int,...}](x : a) -> ({bar:Bool,...}) { x }
->                                                        ^
->      found: {foo: _, ...}
->   expected: {bar: _, ...}
-> This {foo: _, ...} comes from test:1:
->   fn [a <: {foo:Int,...}](x : a) -> ({bar:Bool,...}) { x }
->            ^^^^^^^^^^^^^
-> but is used as {bar: _, ...} at test:1:
->   fn [a <: {foo:Int,...}](x : a) -> ({bar:Bool,...}) { x }
->                                       ^^^
+>   fn [a <: {foo:Int}](x : a) -> ({bar:Bool}) { x }
+>                                                ^
+>      found: {foo: _}
+>   expected: {bar: _}
+> This {foo: _} comes from test:1:
+>   fn [a <: {foo:Int}](x : a) -> ({bar:Bool}) { x }
+>            ^^^^^^^^^
+> but is used as {bar: _} at test:1:
+>   fn [a <: {foo:Int}](x : a) -> ({bar:Bool}) { x }
+>                                   ^^^
 
-fn [a <: {foo:Int,...}](x : a) -> (#Tag{bar:Bool,...}) { x }
-> fn [a <: {foo: Int, ...}](x: a) -> (#Tag{bar: Bool, ...}) { x }
+fn [a <: {foo:Int}](x : a) -> (#Tag{bar:Bool}) { x }
+> fn [a <: {foo: Int}](x: a) -> (#Tag{bar: Bool}) { x }
 > test:1: The tag should be Tag, but no tag is present.
->   fn [a <: {foo:Int,...}](x : a) -> (#Tag{bar:Bool,...}) { x }
->                                                            ^
+>   fn [a <: {foo:Int}](x : a) -> (#Tag{bar:Bool}) { x }
+>                                                    ^
 >      found: a
->   expected: #Tag{bar: _, ...}
+>   expected: #Tag{bar: _}
 > This a comes from test:1:
->   fn [a <: {foo:Int,...}](x : a) -> (#Tag{bar:Bool,...}) { x }
->                               ^
-> but is used as #Tag{bar: _, ...} at test:1:
->   fn [a <: {foo:Int,...}](x : a) -> (#Tag{bar:Bool,...}) { x }
->                                     ^^^^^^^^^^^^^^^^^^^^
+>   fn [a <: {foo:Int}](x : a) -> (#Tag{bar:Bool}) { x }
+>                           ^
+> but is used as #Tag{bar: _} at test:1:
+>   fn [a <: {foo:Int}](x : a) -> (#Tag{bar:Bool}) { x }
+>                                 ^^^^^^^^^^^^^^^^
 
-fn [a <: ({foo:Int,...},Int)](x : a) -> (#Tag{bar:Bool,...},Int) { x }
-> fn [a <: ({foo: Int, ...}, Int)](x: a) -> (#Tag{bar: Bool, ...}, Int) { x }
+fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
+> fn [a <: ({foo: Int}, Int)](x: a) -> (#Tag{bar: Bool}, Int) { x }
 > test:1: The tag should be Tag, but no tag is present.
->   fn [a <: ({foo:Int,...},Int)](x : a) -> (#Tag{bar:Bool,...},Int) { x }
->                                                                      ^
->      found: ({foo: _, ...}, _)
->   expected: (#Tag{bar: _, ...}, _)
-> This {foo: _, ...} comes from test:1:
->   fn [a <: ({foo:Int,...},Int)](x : a) -> (#Tag{bar:Bool,...},Int) { x }
->             ^^^^^^^^^^^^^
-> but is used as #Tag{bar: _, ...} at test:1:
->   fn [a <: ({foo:Int,...},Int)](x : a) -> (#Tag{bar:Bool,...},Int) { x }
->                                            ^^^^^^^^^^^^^^^^^^
+>   fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
+>                                                              ^
+>      found: ({foo: _}, _)
+>   expected: (#Tag{bar: _}, _)
+> This {foo: _} comes from test:1:
+>   fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
+>             ^^^^^^^^^
+> but is used as #Tag{bar: _} at test:1:
+>   fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
+>                                        ^^^^^^^^^^^^^^
 
-> STATS: fix: 91, flex: 1576
+> STATS: fix: 91, flex: 1585

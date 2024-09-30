@@ -24,30 +24,30 @@ type extensible_flag =
   | Ext_closed
 
 type 'a fields =
-  | Ftuple of 'a list * extensible_flag
-  | Frecord of (Tuple_fields.field_name loc * mand_flag * 'a option) list * extensible_flag
+  | Ftuple of 'a list
+  | Frecord of (Tuple_fields.field_name loc * mand_flag * 'a option) list
 
-let empty_fields = Ftuple ([], Ext_closed)
+let empty_fields = Ftuple []
 
 let map_fields ?(loc=Fun.id) f = function
-  | Ftuple (x,ext) -> Ftuple (List.mapi (fun i x -> f (Tuple_fields.Field_positional i, Mandatory) x) x, ext)
-  | Frecord (fs,ext) -> Frecord (List.map (fun ((s,sloc),m,x) -> (s,loc sloc), m, Option.map (f (s,m)) x) fs, ext)
+  | Ftuple x -> Ftuple (List.mapi (fun i x -> f (Tuple_fields.Field_positional i, Mandatory) x) x)
+  | Frecord fs -> Frecord (List.map (fun ((s,sloc),m,x) -> (s,loc sloc), m, Option.map (f (s,m)) x) fs)
 
 (* FIXME: is this a better repr? *)
 let record_fields ~loc = function
-  | Ftuple (xs, ext) ->
-     List.mapi (fun i x -> (Tuple_fields.Field_positional i, loc), Mandatory, Some x) xs, ext
-  | Frecord (fields, ext) -> fields, ext
+  | Ftuple xs ->
+     List.mapi (fun i x -> (Tuple_fields.Field_positional i, loc), Mandatory, Some x) xs
+  | Frecord fields -> fields
 
-let of_record_fields ~fopen fs =
+let of_record_fields fs =
   match
     List.mapi (fun i x ->
       match x with
       | (Tuple_fields.Field_positional j, _), Mandatory, Some x when i = j -> x
       | _ -> raise_notrace Exit) fs
   with
-  | ts -> Ftuple (ts, fopen)
-  | exception Exit -> Frecord (fs, fopen)
+  | ts -> Ftuple ts
+  | exception Exit -> Frecord fs
 
 type exp = exp' mayloc and exp' =
   (* 42 or "hello" *)
