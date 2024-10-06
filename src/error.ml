@@ -19,7 +19,7 @@ type error_kind =
   | Illformed_pat of [`Duplicate_name of string * Location.t | `Orpat_different_names of string | `Wrong_length of int * int | `Unknown_cases | `Unknown_constructor of string]
   | Incompatible_patterns of Location.t
   | Nonexhaustive of Exp.pat list list
-  | Bad_tuple_intro of [`Ext_open | `Opt]
+  | Bad_tuple_intro of [`Tag of Exp.tuple_tag option * Exp.tuple_tag list | `Opt]
   | Unused_pattern
 
 type t = Location.t * error_kind
@@ -101,8 +101,15 @@ let pp_err input loc err : PPrint.document =
      pp "Type definitions may not use joins of type parameters" ^^ context
   | Illformed_type `Must_be_closed ->
      pp "This type cannot use '...'" ^^ context
-  | Bad_tuple_intro `Ext_open ->
-     pp "Tuple construction cannot use '...'" ^^ context
+  | Bad_tuple_intro (`Tag (tag, options)) ->
+     (match tag, options with
+      | None, [] -> pp "Expected a record tag"
+      | None, others ->
+         pp "Expected a record tag " ^^ separate_map (pp "|") Print.tuple_tag others
+      | Some tag, others ->
+         pp "Unexpected record tag " ^^ Print.tuple_tag tag ^^
+           pp ", expected " ^^ separate_map (pp "|") Print.tuple_tag others)
+       ^^ context
   | Bad_tuple_intro `Opt ->
      pp "Tuple construction cannot use optional fields" ^^ context
   | Conflict (_kind, err) ->

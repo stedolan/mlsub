@@ -14,7 +14,20 @@ fn(x) { (#Foo(), #Bar, #Foo{x: 42}, #Baz(1)) }
 ( if true { #Foo(@true) } else { #Bar(6) }
   : #Foo(Bool) | #Bar(Int) )
 > (if true { #Foo(@true) } else { #Bar(6) } : #Foo(Bool) | #Bar(Int))
-> typechecking error: Failure("pragma: true")
+>   (if true { #Foo(@true) } else { #Bar(6) } : #Foo(Bool) | #Bar(Int))
+> #Foo(Bool) | #Bar(Int)
+> let k(x) = {
+>   let  = %yield(x);
+>   done
+> };
+> match <true> {
+>   true() -> {
+>     k(Foo(0: <true>))
+>   };
+>   false() -> {
+>     k(Bar(0: 6))
+>   }
+> }
 
 (#{x: 42} : #Foo{x: Int})
 > (#{x: 42} : #Foo{x: Int})
@@ -856,4 +869,4 @@ fn (x : #A | #B | #C | #D | #E, y: #A | #B) -> Int {
 
 
 # end
-> STATS: fix: 13, flex: 254
+> STATS: fix: 13, flex: 242

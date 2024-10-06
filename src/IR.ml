@@ -117,7 +117,7 @@ type cont = [`Cont]
 type value =
   | Literal of Exp.literal
   | Var of value Binder.ref
-  | Tuple of tag option * (field * value) list
+  | Tuple of tag * (field * value) list
   | Lambda of value Binder.t list * cont Binder.t * comp
 
 and comp =
@@ -243,9 +243,7 @@ let pp origc =
        pp "<false>"
     | Var v ->
        pp "%s" (deref vname v)
-    | Tuple (None, fields) ->
-       pp "@,@[(%a)@]" (pp_fields (value env)) fields
-    | Tuple (Some tag, fields) ->
+    | Tuple (tag, fields) ->
        pp "@[%s(%a)@]" (Symbol.to_string tag) (pp_fields (value env)) fields
     | Lambda (params, kret, body) ->
        let ret, env = fresh env "ret" in

@@ -77,13 +77,14 @@ let[@inline] noerror f = try f () with SubtypeError _ -> intfail "subtyping erro
    (I). Make the upper bound of α be UBvar β. (Ensure also that LB(β) contains LB(α))
    (II). Make the lower bound of β contain α. (Ensure also that UB(α) contains UB(β)) *)
 
+let make_err' env err (lhs,lloc) (rhs,rloc) =
+  { lhs; rhs; err;
+    located = ((lhs,lloc), (rhs,rloc));
+    env = (env, []) }
+
 let make_err env err (cp,cploc) (cn,cnloc) =
   let lhs = tcons_head (cp, cploc) and rhs = tcons_head (cn, cnloc) in
-  { lhs;
-    rhs;
-    err;
-    located = ((lhs, cploc), (rhs, cnloc));
-    env = (env, []) }
+  make_err' env err (lhs,cploc) (rhs,cnloc)
 
 let make_head_err env err (lhs, cploc) (cn, cnloc) =
   let err = Head err in
@@ -99,9 +100,7 @@ let make_head_err env err (lhs, cploc) (cn, cnloc) =
       | (_rv, _ :: _) -> None (* ignore if delayed constraint. (FIXME?) *))
   in
   let rhs = Tcvj (conses, rvs, Some cnloc) in
-  { lhs; rhs; err;
-    located = ((lhs, cploc), (rhs, cnloc));
-    env = (env, []) }
+  make_err' env err (lhs, cploc) (rhs, cnloc)
 
 let make_err_nocons env errs (cp,cploc) (cn,cnloc) =
   make_head_err env errs (tcons_head (cp, cploc), cploc) (cn, cnloc)
@@ -321,6 +320,11 @@ module Fields = struct
           | (Fabsent _ as a), (Foptional _ | Fabsent _) ->
              a)
 
+  type field_error =
+    | Field_missing of Tuple_fields.field_name * Location.t * Location.t
+    | Field_extra of Tuple_fields.field_name option * Location.t * Location.t
+
+  exception FieldError of field_error
   let sub ~f (a,a_def) (b,b_def) =
     let sub_field fn a b =
       let a =
@@ -333,10 +337,29 @@ module Fields = struct
         | Some x -> x
         | None -> b_def fn
       in
-      f (Some fn) a b;
+      begin match a, b with
+      | _, Funknown _ -> ()
+      | Fbroken _, _ -> ()
+      | Fabsent _, (Fabsent _ | Foptional _) -> ()
+      | (Foptional (a, _) | Fpresent (a, _)), Foptional (b, _)
+      | Fpresent (a, _), Fpresent (b, _) ->
+         f fn a b
+   
+      | (Funknown la | Fabsent la | Foptional (_, {abs_loc=la; _})),
+        (Fpresent (_, lb) | Fbroken {pres_loc=lb; _})
+      | (Funknown la, Foptional (_, {pres_loc=lb; _})) ->
+         (* failed to be present *)
+         raise (FieldError (Field_missing (fn, la, lb)))
+      | (Funknown la | Foptional (_,{pres_loc=la;_}) | Fpresent (_, la)),
+        (Fbroken {abs_loc=lb;_} | Fabsent lb) ->
+         (* failed to be absent *)
+         raise (FieldError (Field_extra (Some fn, la, lb)))
+      end;
       None
     in
-    ignore (Map.merge sub_field a.fields b.fields)
+    match Map.merge sub_field a.fields b.fields with
+    | _ -> Ok ()
+    | exception (FieldError e) -> Error e
 
 end
 
@@ -425,12 +448,6 @@ module Cons1 = struct
 
     | Record _, Func _ | Func _, Record _ -> assert false
 
-  type field_error =
-    | Field_missing of Tuple_fields.field_name * Location.t * Location.t
-    | Field_extra of Tuple_fields.field_name option * Location.t * Location.t
-
-  exception SubError of field_error
-
   let sub ~env ~neg ~pos (a, a_loc) (b, b_loc) =
     assert (sub_head a b = Le Id);
     match a, b with
@@ -450,31 +467,10 @@ module Cons1 = struct
        (match a.tag with Some (Named_tag _) -> () | _ -> assert (a.args = []));
        (match b.tag with Some (Named_tag _) -> () | _ -> assert (b.args = []));
        List.iteri sub_arg (List.combine a.args b.args);
-       let sub_field k a b =
-         match a, b with
-         | _, Funknown _ -> ()
-         | Fbroken _, _ -> ()
-         | Fabsent _, (Fabsent _ | Foptional _) -> ()
-         | (Foptional (a, _) | Fpresent (a, _)), Foptional (b, _)
-         | Fpresent (a, _), Fpresent (b, _) ->
-            pos (Record_field (Option.get k)) a b
-
-         | (Funknown la | Fabsent la | Foptional (_, {abs_loc=la; _})),
-           (Fpresent (_, lb) | Fbroken {pres_loc=lb; _})
-         | (Funknown la, Foptional (_, {pres_loc=lb; _})) ->
-            (* failed to be present *)
-            raise (SubError (Field_missing (Option.get k, la, lb)))
-         | (Funknown la | Foptional (_,{pres_loc=la;_}) | Fpresent (_, la)),
-           (Fbroken {abs_loc=lb;_} | Fabsent lb) ->
-            (* failed to be absent *)
-            raise (SubError (Field_extra (k, la, lb)))
-       in
+       let sub_field k a b = pos (Record_field k) a b in
        let a_def = record_def ~env ~loc:a_loc a in
        let b_def = record_def ~env ~loc:b_loc b in
-       begin match Fields.sub ~f:sub_field (a.body,a_def) (b.body,b_def) with
-       | () -> Ok ()
-       | exception (SubError e) -> Error e
-       end
+       Fields.sub ~f:sub_field (a.body,a_def) (b.body,b_def)
     | _ -> assert false
 
 end
@@ -626,6 +622,7 @@ let rec meet_cons ~changes env lvl ~must_freshen (cons_a, a_loc) (cons_b, b_loc)
      let decl_params = (Option.get (Env.lookup_decl env (fst sym))).params in
      let decl_fields = Env.get_decl_fields env (fst sym) in
      let tyarg i (n2, p2) =
+       (* FIXME: after arg-changing sub, can these be unconstrained? *)
        let var, _name = List.nth decl_params i in
        let (n1, p1) =
          (if var.occurs_neg = `Yes then [Lflexvar (fresh_flexvar lvl)] else []),
@@ -1175,6 +1172,24 @@ let rec clearly_subtype env (a : flexvar) (b : lower) : bool =
            | exception Exit -> false
            end
         | _ -> false))
+
+let rec clearly_subtype_typ env (a : ntyp) (b : ptyp) : bool =
+  match a, b with
+  | Tcvj (cons_a, vars_a, _), Tcvj (cons_b, vars_b, _) ->
+     vars_a |> List.for_all (fun a -> vars_b |> List.exists (equal_typ_var a))
+     &&
+     cons_a |> List.for_all (fun (a,aloc) ->
+       cons_b |> List.exists (fun (b,bloc) ->
+         let sub _ a b = if not (clearly_subtype_typ env a b) then raise Exit in
+         Cons1.sub_head a b = Le Id &&
+         match Cons1.sub ~env ~neg:sub ~pos:sub (a,aloc) (b,bloc) with
+         | Ok () -> true
+         | Error _ -> false
+         | exception Exit -> false))
+  | a, b ->
+     clearly_subtype env
+       (ntyp_to_fresh_flexvar ~simple:false env a)
+       (ptyp_to_lower ~simple:false env b)
 
 let rec map_typ_0 : 'neg1 'pos1 'neg2 'pos2 .
   neg:(index:int -> 'neg1 -> ('pos2, 'neg2) typ) ->

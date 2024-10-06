@@ -282,8 +282,6 @@ fn iii(x) { (x.b, gg(x), f(x)) }
 >   (x.b, gg(x), f(x))
 > }
 
-# FIXME: this is broken due to the bad modelling of absent fields as Funknown
-# FIXME: now this is broken due to closed supertypes
 {
 type Foo {a:Int, b: Int}
 fn f(x : Foo) { x.b }
@@ -308,6 +306,22 @@ fn t(x) { g(#T{foo: x}) }
 > fn s[a <: Int](x: a) -> a { g(#S{foo: x}) }
 > fn t[a <: Bool](x: a) -> a { g(#T{foo: x}) }
 
+{
+type S{foo:Int}
+type T{foo:Bool}
+fn f(x: S | T) { 5 }
+fn g(x) { let z = f(x); x.foo }
+fn s(x) { g(S{foo: x}) }
+fn t(x) { g(T{foo: x}) }
+}
+> type S{foo: Int}
+> type T{foo: Bool}
+> fn f(x: S | T) -> Int { 5 }
+> fn g[a <: Int, b <: Bool](x: S{foo: a} | T{foo: b}) -> (a | b) { let z : Int = f(x); x.foo }
+> fn s[a <: Int](x: a) -> a { g(S{foo: x}) }
+> fn t[a <: Bool](x: a) -> a { g(T{foo: x}) }
+
+
 
 {
 type Foo[a] { p: a, q: a}
@@ -327,4 +341,50 @@ fn g(x) { (x.p, f(x)) }
 > fn f[a <: Int](x: Foo{p: a}) -> a { x.p }
 > fn g[a <: Int](x: Foo{p: a}) -> (a, a) { (x.p, f(x)) }
 
-> STATS: fix: 17, flex: 228
+{
+type Box[a](a)
+type P {p: Box[#A|#B], i:Int, j:Int, b: Bool}
+fn f(i: Int, j: Int) { P{p: Box(#A), i, j, b:@true} }
+}
+> type Box[+a](a)
+> type P{p: Box[#A | #B], i: Int, j: Int, b: Bool}
+> fn f(i: Int, j: Int) -> (P{p: Box[#A | #B](#A)}) { P{p: Box(#A), i, j, b: @true} }
+
+# Inference of type parameters
+# FIXME: Any/Any is bad on fn args at least
+{
+type Box[a](a)
+fn p() {Box(#A)}
+fn q(a) {Box(a)}
+fn r(c,a,b) {Box(if c {a} else {b})}
+}
+> type Box[+a](a)
+> fn p() -> Box[Any](#A) { Box(#A) }
+> fn q[a](a: a) -> Box[Any](a) { Box(a) }
+> fn r[a, b](c: Bool, a: a, b: b) -> Box[Any](a | b) { Box(if c { a } else { b }) }
+
+# error messages
+{
+type Foo[a]{a:(Int,a)}
+fn f(){ Foo{b:42} }
+}
+> test:3: A surplus field 'b' is present.
+>   fn f(){ Foo{b:42} }
+>           ^^^^^^^^^
+>      found: {b: _}
+>   expected: Foo[_]
+> This {b: _} comes from test:3:
+>   fn f(){ Foo{b:42} }
+>               ^
+> but is used as Foo[_] at test:3:
+>   fn f(){ Foo{b:42} }
+>           ^^^
+
+Foo(42)
+> Foo(42)
+> test:1: Unknown type name Foo
+>   Foo(42)
+>   ^^^
+
+
+> STATS: fix: 19, flex: 238

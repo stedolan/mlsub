@@ -45,14 +45,76 @@ let fresh_flow env : ntyp * ptyp =
   let fv = fresh_flexvar (Env.level env) in
   Tsimple fv, Tsimple [Lflexvar fv]
 
-(* "Simultaneous Input and Output", e.g. sec 6.4 of Bidirectional Typing *)
-type ty_mode =
-  { ty_checked: ntyp;
-    ty_inferred: ptyp ref option }
+module Mode = struct
+  type t =
+    | Checking of ntyp
+    | Inference of ptyp ref
+    | Transparent of
+        (* "Simultaneous Input and Output", e.g. sec 6.4 of Bidirectional Typing *)
+        { checking: (zero, zero) typ;
+          mutable inference: ptyp option }
 
-let checking ty =
-  { ty_checked = ty;
-    ty_inferred = None }
+  let checking ty =
+    Checking ty
+
+  let inferring () =
+    Inference (ref (tbot (Some (Location.fixme "inference"))))
+
+  let transparent ty =
+    Transparent
+      { checking = ty;
+        inference = None }
+
+  let dup = function
+    | Checking _ | Inference _ as t -> t
+    | Transparent r -> Checking (gen_zero r.checking)
+
+  let wf env = function
+    | Checking t -> wf_ntyp env t
+    | Inference _ -> ()
+    | Transparent {checking=t;inference=_} -> wf_ntyp env (gen_zero t)
+
+  let inferred_type env ty =
+    let t = match ty with
+      | Checking _ -> intfail "Mode.result in Checking mode"
+      | Inference r -> !r
+      | Transparent {checking; inference=None} -> gen_zero checking
+      | Transparent {checking=_; inference=Some p} -> p
+    in
+    wf_ptyp env t;
+    t
+
+  let transparent_inferred_type env ty =
+    match ty with
+    | Checking _ | Inference _ -> intfail "Mode.transparent_inferred_type: wrong mode"
+    | Transparent {checking = _; inference = None} -> None
+    | Transparent {checking = ck; inference = Some inf} ->
+       (* We know inf <= ck. So if ck <= inf, they're equal *)
+       if clearly_subtype_typ env (gen_zero ck) inf
+       then None
+       else Some inf
+
+  let checking_type = function
+    | Checking t -> t
+    | Inference _ -> tcons (Top, Location.noloc)
+    | Transparent r -> gen_zero r.checking
+
+  let inferred env ~loc mode ty =
+    match mode with
+    | Inference r ->
+       r := join_ptyp env !r ty
+    | Checking ck ->
+       subtype env ty ck |> or_raise `Expr loc
+    | Transparent ({checking; inference} as r) ->
+       subtype env ty (gen_zero checking) |> or_raise `Expr loc;
+       match inference with
+       | None -> r.inference <- Some ty
+       | Some ty' -> r.inference <- Some (join_ptyp env ty' ty)
+end
+
+type ty_mode = Mode.t
+let checking = Mode.checking
+let inferring = Mode.inferring
 
 type inspect_result =
   | Imatches of (ptyp, ntyp) Cons1.t loc
@@ -72,11 +134,11 @@ let inspect_cons' cons ty =
      (match Cons1.sub_head cons c with Le _ -> Imatches (c,cloc) | Un _ -> Iother)
   | _ -> Iother
 
-let inspect_cons cons ty = inspect_cons' cons ty.ty_checked
+let inspect_cons cons ty = inspect_cons' cons (Mode.checking_type ty)
 
 let inspect_poly_func env params ty =
   let poly, ty =
-    match ty.ty_checked with
+    match Mode.checking_type ty with
     | Tpoly {vars; body} ->
        (* rigvars not in scope in body, so no rig_names *)
        let env', open_rvs = enter_rigid env vars SymMap.empty in
@@ -108,7 +170,7 @@ let mk_action (act : _ Check_pat.action) body : Elab.typed_action =
     act_comp_bindings }
 
 let rec check env ~(mode : generalisation_mode) e (ty : ty_mode) : typed_exp =
-  wf_ntyp env ty.ty_checked;
+  Mode.wf env ty;
   match e with
   | None, loc -> fail loc Syntax
   | Some e, loc ->
@@ -119,12 +181,7 @@ let rec check env ~(mode : generalisation_mode) e (ty : ty_mode) : typed_exp =
    even attempt this on intro forms at the wrong type. e.g. checking
    (1,2) against int *)
 and check' env ~mode eloc (e : exp') ty : typed_exp' =
-  let inferred inf =
-    subtype env inf ty.ty_checked |> or_raise `Expr eloc;
-    match ty.ty_inferred with
-    | None -> ()
-    | Some r -> r := join_ptyp env !r inf
-  in
+  let inferred inf = Mode.inferred env ~loc:eloc ty inf in
   match e with
   | Lit l ->
      let lty, e = infer_lit l in
@@ -148,102 +205,184 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
 
   | If ((_,loc) as e, ifso, ifnot) ->
      let e = check env ~mode e (checking (tcons (c_bool loc))) in
+     (* FIXME: probably broken for Transparent checking against non-simple types
+        (since the join might make the inferred type not a subtype of checked?)*)
      let ifso = check env ~mode ifso ty in
      let ifnot = check env ~mode ifnot ty in
      If (e, ifso, ifnot)
 
   | Tuple (tag, fields) ->
-     begin match tag with Some (Named_tag _)  -> unimp "named tag intro" | _ -> () end;
-     let fields = Exp.record_fields ~loc:eloc fields in
-     let res_fields = List.map (fun ((f,floc), m, e) ->
-       if m = Optional then fail floc (Bad_tuple_intro `Opt);
-       let e = match f, e with
-         | _, Some e -> e
-         | Field_positional _, None -> fail floc Syntax
-         | Field_named k, None -> (Some (Exp.Var ({label=k; shift=0}, floc)), floc) in
-       (f,floc), e, ref None) fields
+     let cons_fail err cploc (cn,cnloc) =
+       let fields =
+         Exp.record_fields ~loc:eloc fields
+         |> List.map (fun ((f,loc),_,_e) -> f, Fields.Fpresent ((),loc))
+         |> Fields.of_list
+       in
+       (* drop tag to avoid making invalid args *)
+       let tag = match tag with Some Anon_tag -> tag | _ -> None in
+       let cp = Cons1.Record {tag; args=[]; body=fields} in
+       let err = make_err env err (cp, cploc) (cn, cnloc) in
+       fail eloc (Conflict (`Expr, err))
      in
-     let exp_fields =
-       res_fields
-       |> List.map (fun ((f,floc), e, r) -> f, Fields.Fpresent ((e,r), floc))
-       |> Fields.of_list
+     let cons_fail_field (err : Fields.field_error) cn =
+       let err, cploc, cnloc =
+         match err with
+         | Field_missing (name, ploc, nloc) ->
+            Field_missing name, ploc, nloc
+         | Field_extra (name, ploc, nloc) ->
+            Field_extra name, ploc, nloc
+       in
+       cons_fail err cploc (cn, cnloc)
      in
-     let infer_typed env ((_,loc) as e) =
-       let ty, e = infer env ~mode e in
-       Some (Typed (e, elab_ptyp ty)), loc
-     in
+
+     (* expand punned fields *)
      let fields =
-       (* FIXME args *)
-       let econs = Cons1.Record {tag; args=[]; body=exp_fields} in
-       match inspect_cons econs ty with
-       | Imatches (Record _ as ty, tyloc) ->
-fixme;
-let subtype_cons env ~neg ~pos (cp,cploc) (cn,cnloc) =
-  let wrap_err k err = wrap_cons_err (cp, cploc) (cn, cnloc) k err in
-  let cp' =
-    match Cons1.sub_head cp cn with
-    | Un err -> raise (SubtypeError (make_err env (Head err) (cp,cploc) (cn,cnloc)))
-    | Le Id -> assert (tag <> None); cp
-    | Le To_top -> assert (tag <> None); Top
-    | Le (Drop_record_tag _) ->
-       (match cp with Record {tag=Some (Anon_tag | Struct_tag _);args;body} -> Record{tag=None;args;body} | _ -> assert false)
-  in
-  match
-    Cons1.sub ~env (cp',cploc) (cn,cnloc)
-      ~neg:(fun k a b ->
-        try neg a b
-        with SubtypeError err -> raise (SubtypeError (wrap_err k err)))
-      ~pos:(fun k a b ->
-        try pos a b
-        with SubtypeError err -> raise (SubtypeError (wrap_err k err)))
-  with
-  | Ok () -> ()
-  | Error err ->
-     let err =
-       match err with
-       | Field_missing (name, ploc, nloc) ->
-          make_err env (Field_missing name) (cp, ploc) (cn, nloc)
-       | Field_extra (name, ploc, nloc) ->
-          make_err env (Field_extra name) (cp, ploc) (cn, nloc)
+       Exp.record_fields ~loc:eloc fields
+       |> List.map (fun ((f,floc), m, e) ->
+         if m = Optional then fail floc (Bad_tuple_intro `Opt);
+         let e = match f, e with
+           | _, Some e -> e
+           | Field_positional _, None -> fail floc Syntax
+           | Field_named k, None -> (Some (Exp.Var ({label=k; shift=0}, floc)), floc) in
+         (f, floc), e, ref None)
      in
-     raise (SubtypeError err)
-in
-          (* FIXME this should updated inferred type too! *)
-          begin match
-            subtype_cons env (econs,eloc) (ty,tyloc)
-              ~neg:(fun _ _ -> assert false)
-              ~pos:(fun (_, r) ty -> r := Some (checking ty))
-          with
-          | () -> ()
-          | exception (SubtypeError e) -> fail eloc (Conflict (`Expr, e))
-          end;
-          res_fields |> List.map (fun (f,e,r) ->
-            f,
-            match !r with
-            | Some ty -> check env ~mode e ty
-            | None -> infer_typed env e)
+
+     (* inspect checked type *)
+     let tag, fields =
+       let orig_fields = fields in
+       let fields = Fields.of_list (List.map (fun ((f,loc), _, r) -> f, Fields.Fpresent (r, loc)) fields) in
+       let matching_conses ~tag conses =
+         conses |> List.filter_map (fun ((cons : _ Cons1.t),consloc) ->
+           match tag, cons with
+           | Some tag, Record ({tag=None; _} as r) ->
+              Some (tag, consloc, r)
+           | None, Record ({tag=Some tag; _} as r) ->
+              Some (tag, consloc, r)
+           | Some tag, Record ({tag=Some tag'; _} as r)
+                when Cons1.tuple_tag_equal tag tag' ->
+              Some (tag, consloc, r)
+           | _ -> None)
+       in
+       let get_matching_cons ((conses, rvs, tyloc) : _ tcvj) =
+         match matching_conses ~tag conses with
+         | [p] -> p
+         | _ ->
+            (* FIXME: factor this out into types.ml somewhere *)
+            let err =
+              match
+                List.map (fun (tag,_,_) -> tag) (matching_conses ~tag:None conses)
+              with
+              | [] -> Cons1.Incompatible
+              | tags -> (Cons1.Expected_tag (tag, tags))
+            in
+            let tunit _ = Tsimple () in
+            let body = Fields.map fields ~pos:tunit in
+            let cp = tcons (Cons1.Record {tag; args=[]; body}, eloc) in
+            let ty =
+              let conses = List.map (fun (c,l) -> Cons1.map ~neg:tunit ~pos:tunit c, l) conses in
+              (conses, rvs, tyloc)
+            in
+            let err = make_err' env (Head err) (cp,eloc) (Tcvj ty, Option.value tyloc ~default:eloc) in
+            fail eloc (Conflict (`Expr, err))
+       in
+       let expander ~loc ~args (tag : tuple_tag option) =
+         match tag with
+         | None ->
+            fun _ -> Fields.Funknown loc
+         | Some (Struct_tag _ | Anon_tag) ->
+            fun _ -> Fields.Fabsent loc
+         | Some (Named_tag tag) ->
+            let decl_fields = Env.get_decl_fields env (fst tag) in
+            fun fn ->
+            Fields.find fn (decl_fields,())
+            |> Option.value ~default:(Fields.Fabsent loc)
+            |> Fields.field_desc_map (fun ty ->
+              let neg ty vars =
+                let (t, _) = List.nth args (as_single_var ty vars) in t
+              in
+              let pos ty vars =
+                let (_, t) = List.nth args (as_single_var ty vars) in t
+              in
+              open_typ ~neg ~pos 0 (gen_zero ty))
+       in
+       let check_tag = function
+         | Anon_tag | Struct_tag _ as t -> t
+         | Named_tag (s,sloc) as t ->
+            match Env.lookup_decl env s with
+            | Some {name=_; params=_; body = Decl_record _} -> t
+            | _ -> fail sloc (Bad_name (`Unknown, `Type, s))
+       in
+
+       let check_fields ~loc ~mode_fn (record : _ Cons1.cons_record) =
+         begin match
+           Fields.sub
+             (fields, fun _ -> Fabsent eloc)
+             (record.body, expander ~loc ~args:record.args record.tag)
+             ~f:(fun _fn r ty -> r := Some (mode_fn ty))
+         with
+         | Ok () -> ()
+         | Error err ->
+            cons_fail_field err (Cons1.Record record)
+         end;
+         orig_fields |> List.map (fun (f, e, ty) ->
+           match !ty with
+           | Some ty ->
+              f, check env ~mode e ty
+           | None ->
+              let ty = inferring () in
+              let e = check env ~mode e ty in
+              f, (Some (Typed (e, elab_ptyp (Mode.inferred_type env ty))), snd e))
+       in
+       match ty with
+       | Checking (Tcvj conses as tcheck) when not (is_ttop tcheck) ->
+          let tag, consloc, record = get_matching_cons conses in
+          let typed_fields = check_fields ~loc:consloc ~mode_fn:Mode.checking record in
+          tag, typed_fields
+       | Transparent ({checking=(Tcvj conses); _} as r)
+            when not (is_ttop r.checking) ->
+          let tag, consloc, record = get_matching_cons conses in
+          let typed_fields = check_fields ~loc:consloc ~mode_fn:Mode.transparent record in
+          let () =
+            let body =
+              Fields.filter_map ~pos:(fun r -> Mode.transparent_inferred_type env (Option.get !r)) fields
+            in
+            (* FIXME: assumes record.args is wf for this tag
+               Maybe infer & subtype if RHS is None? *)
+            let args = List.map (fun (n,p) -> gen_zero n, gen_zero p) record.args in
+            let cons = Cons1.Record {tag = Some tag; args; body} in
+            Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
+          in
+          tag, typed_fields
        | _ ->
-          fixme; (* give a proper error *) assert (tag <> None);
-          let econs = Cons1.map econs
-            ~neg:never
-            ~pos:(fun (_e,r) ->
-              let p = ref (tbot None) in
-              r := Some { ty_inferred = Some p;
-                          ty_checked = tcons (Top, Location.noloc) };
-              p)
-          in
-          let fields =
-            res_fields |> List.map (fun (f,e,r) ->
-              f,
-              match !r with
-              | Some ty -> check env ~mode e ty
-              | None -> infer_typed env e)
-          in
-          let econs = Cons1.map econs
-                        ~neg:never
-                        ~pos:(fun r -> !r) in
-          inferred (tcons (econs, eloc));
-          fields
+          (* FIXME: do a subtyping check with the least record beforehand? *)
+          match tag with
+          | None -> fail eloc (Bad_tuple_intro (`Tag (tag, [])))
+          | Some (Anon_tag | Struct_tag _ as tag) ->
+             let field_tys = Fields.map ~pos:(fun r -> let ty = inferring () in r := Some ty; ty) fields in
+             let typed_fields = List.map (fun (f, e, ty) -> f, check env ~mode e (Option.get !ty)) orig_fields in
+             let () =
+               let body = Fields.map ~pos:(Mode.inferred_type env) field_tys in
+               let cons = Cons1.Record {tag = Some tag; args=[]; body} in
+               Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
+             in
+             tag, typed_fields
+          | Some (Named_tag t as tag) ->
+             let _tag = check_tag tag in
+             let decl_params = Env.get_decl_params env (fst t) in
+             let args =
+               (* FIXME: args? *)
+               decl_params |> List.map (fun _ -> (tbot None, ttop Location.noloc))
+             in
+             let record : _ Cons1.cons_record = { tag = Some tag; args; body = Fields.empty } in
+             let typed_fields = check_fields ~loc:(snd t) ~mode_fn:Mode.transparent record in
+             let () =
+               let body =
+                 Fields.filter_map ~pos:(fun r -> Mode.transparent_inferred_type env (Option.get !r)) fields
+               in
+               let cons = Cons1.Record {tag=Some tag; args; body} in
+               Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
+             in
+             tag, typed_fields
      in
      Tuple (tag, fields)
 
@@ -375,6 +514,7 @@ in
      App (f, args)
 
   | Match ((es, matchloc), cases) ->
+     (* FIXME: maybe check sometimes? *)
      let es = List.map (infer env ~mode) es in
      (* FIXME is this the right gen_level? How does this work again? *)
      let gen_level = mode.gen_level_acc in
@@ -399,11 +539,9 @@ in
 
 
 and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * typed_exp =
-  let ty = ref (tbot (Some (Location.fixme "inference"))) in
-  let ty_mode = { ty_inferred = Some ty; ty_checked = tcons (Top, Location.noloc) } in
+  let ty_mode = Mode.inferring () in
   let e = check env ~mode e ty_mode in
-  wf_ptyp env !ty;
-  !ty, e
+  Mode.inferred_type env ty_mode, e
 
 and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_func_def =
    let ty, typed_poly, _generalised, (act, split) =

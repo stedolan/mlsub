@@ -74,6 +74,25 @@ module Fields = struct
     let fields = Map.mapi (fun fn x -> pos fn x) t.fields in
     { t with fields }
 
+  let filter_map ~pos {fnames; fields} =
+    let fnames, fields =
+      List.fold_left
+        (fun (names, acc) fn ->
+          let x =
+            match field_desc_map pos (Map.find fn fields) with
+            | Fpresent (Some x, l) -> Some (Fpresent (x, l))
+            | Foptional (Some x, l) -> Some (Foptional (x, l))
+            | Fpresent (None, _) | Foptional (None, _) -> None
+            | (Fbroken _ | Fabsent _ | Funknown _) -> None
+          in
+          match x with
+          | None -> names, acc
+          | Some x -> fn :: names, Map.add fn x acc)
+        ([], Map.empty)
+        fnames
+    in
+    { fnames = List.rev fnames; fields }
+
   let wf ~pos {fields; fnames} =
     let remaining =
       List.fold_left (fun fields fn ->
@@ -421,6 +440,9 @@ let compare_typ_var a b =
      | n -> n
      end
 
+let equal_typ_var a b = compare_typ_var a b = 0
+
+
 type (+'neg, +'pos) typ =
   | Tsimple of 'pos
   | Tcvj of ('neg, 'pos) tcvj
@@ -602,6 +624,11 @@ module Env = struct
        Fields.empty
     | Some {name=_; params=_; body = Decl_variant _} -> unimp "variant fields"
     | Some {name=_; params=_; body = Decl_record fs} -> fs
+
+  let get_decl_params env (s : string) =
+    match lookup_decl env s with
+    | None -> intfail "unbound decl %s" s
+    | Some decl -> decl.params
 end
 
 type env = Env.t
