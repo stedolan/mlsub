@@ -187,21 +187,15 @@ and ntyp_to_upper ~simple env : ntyp -> upper = function
      assert (not simple);
      (* Negative var occurrences should be replaced with their upper
         bounds, positive ones should be deleted. *)
-     let bounds = Array.make (IArray.length vars) None in
-     let neg ty vars =
-       assert (is_tbot (Tcvj ty));
-       match vars with
-       | [v,_vloc] ->
-          (match bounds.(v) with
-           | None -> intfail "recursive rigid bound"
-           | Some t -> Tsimple t)
-       | _ -> assert false
-     in
+     (* FIXME: assumes left-to-right scoping of bounds,
+        which isn't enforced in user types *)
+     let bounds = Array.init (IArray.length vars) (fun i ->
+       let ((_,loc),_) = IArray.get vars i in ttop loc) in
+     let neg ty vars = bounds.(as_single_var ty vars) in
      let pos ty _vars = Tcvj ty in
-     vars |> IArray.iteri (fun i (_, b) ->
-       let b = Option.map (open_typ ~neg:pos ~pos:neg 0) b in
-       let b = Option.map (ptyp_to_lower ~simple:true env) b in
-       bounds.(i) <- b);
+     vars |> IArray.iteri (fun i -> function
+       | (_, None) -> ()
+       | (_, Some b) -> bounds.(i) <- open_typ ~neg:pos ~pos:neg 0 b);
      let body = open_typ ~neg ~pos 0 body in
      ntyp_to_upper ~simple env body
 

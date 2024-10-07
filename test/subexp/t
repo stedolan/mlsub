@@ -804,6 +804,13 @@ let f = fn (f: [b <: {foo:Int}, a <: {bar:b}](a) -> a|b, g) { g(f) }; fn() { (fn
 > let  = %yield(fun () ret { let x = fun (x) ret2 { ret2(x) }(f); ret(x) });
 > done
 
+# regression for ntyp_to_upper bug
+fn(f) -> ({foo:[a] a->a}) {f}
+> fn (f) -> ({foo: [a] a -> a}) { f }
+>   fn (f: {foo: Any -> Nothing}) -> ({foo: [a] a -> a}) { f }
+> ({foo: Any -> Nothing}) -> {foo: [a] a -> a}
+> let  = %yield(fun (f) ret { ret(f) }); done
+
 fn (f: [b <: {foo:Int}, a <: {bar:b}](a) -> a|b, g) { g(f) }
 > fn (f: [b <: {foo: Int}, a <: {bar: b}] a -> a | b, g) { g(f) }
 >   fn [a <: {foo: Int}, b <: {bar: a}, c](
@@ -1308,4 +1315,4 @@ fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 >   fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 >                                        ^^^^^^^^^^^^^^
 
-> STATS: fix: 91, flex: 1585
+> STATS: fix: 91, flex: 1593
