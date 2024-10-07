@@ -386,5 +386,52 @@ Foo(42)
 >   Foo(42)
 >   ^^^
 
+# polymorphic field projection
+{
+type Poly { wid: (([a] a -> a) -> (Int,Bool)) -> (Int,Bool) }
+fn f(p : Poly) { p.wid(fn(i) { (i(5),i(true)) }) }
+}
+> type Poly{wid: (([a] a -> a) -> (Int, Bool)) -> (Int, Bool)}
+> fn f(p: Poly) -> (Int, Bool) { p.wid(fn (i) { (i(5), i(true)) }) }
 
-> STATS: fix: 19, flex: 238
+# polymorphic field introduction
+{
+type Poly { wid : ([a] a -> a) -> Int }
+fn f () -> Poly { { wid: fn(i) { i(5) }}}
+}
+> type Poly{wid: ([a] a -> a) -> Int}
+> fn f() -> Poly { Poly{wid: fn (i) { i(5) }} }
+
+# poly param subst
+{
+type Box[a](a)
+type Other { boop: Int }
+fn f() -> (Box[([a] (a -> a)) -> (Int,Bool)] | Other) {
+  Box(fn(i) { (i(5), i(true)) })
+}
+}
+> type Box[+a](a)
+> type Other{boop: Int}
+> fn f() -> (Box[([a] a -> a) -> (Int, Bool)] | Other) { Box(fn (i) { (i(5), i(true)) }) }
+
+# poly param expansion
+{
+type Pair[a]{l:a, r:a}
+fn f(x : Pair[[a] a -> a]) -> ({l:Int -> Int, r:Bool -> Bool}) {
+  x
+}
+}
+> type Pair[+a]{l: a, r: a}
+> fn f(x: Pair[[a] a -> a]) -> ({l: Int -> Int, r: Bool -> Bool}) { x }
+
+# poly param subtyping
+{
+type Box[a](a)
+type Other()
+fn gbox(x : Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
+}
+> type Box[+a](a)
+> type Other()
+> fn gbox(x: Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
+
+> STATS: fix: 19, flex: 251

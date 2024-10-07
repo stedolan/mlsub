@@ -192,4 +192,4 @@ fn(x){ fn(y){ if true { x } else { y } } }
 >   })
 > });
 > done
-> STATS: fix: 11, flex: 127
+> STATS: fix: 11, flex: 111

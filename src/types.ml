@@ -125,6 +125,10 @@ let as_single_var ty vars =
   | [i, _loc] -> i
   | _ -> assert false
 
+let as_rigvar = function
+  | Vbound _ -> intfail "Vbound"
+  | Vrigid rv -> rv
+
 let rec instantiate_flex env vars (body : ptyp) : ptyp =
   let fvars = IArray.map (fun _ -> fresh_flexvar (Env.level env)) vars in
   let fvneg ty vars =
@@ -154,11 +158,7 @@ and ptyp_to_lower ~simple env : ptyp -> lower = function
                   ~pos:(ptyp_to_lower ~simple env),
                 loc))
      in
-     let vars =
-       vars |> List.map (function
-          | Vrigid rv -> Lrigvar rv
-          | Vbound _ -> intfail "Vbound")
-     in
+     let vars = List.map (fun v -> Lrigvar (as_rigvar v)) vars in
      conses @ vars
   | Tpoly {vars; body} ->
      assert (not simple);
@@ -176,11 +176,7 @@ and ntyp_to_upper ~simple env : ntyp -> upper = function
                   ~neg:(ptyp_to_lower ~simple env)
                   ~pos:(ntyp_to_fresh_flexvar ~simple env)))
      in
-     let vars =
-       vars |> List.map (function
-         | Vrigid rv -> Urigvar (rv, [])
-         | Vbound _ -> intfail "Vbound")
-     in
+     let vars = List.map (fun v -> Urigvar (as_rigvar v, [])) vars in
      let loc = Option.value loc ~default:Location.(fixme "neg loc") in
      Ugen {cons = (conses @ vars, loc); higher_fvs = []}
   | Tpoly {vars; body} ->
@@ -520,16 +516,12 @@ let upper_cons_map ~neg ~pos ((u,ul) : _ upper_cons Location.loc) : _ upper_cons
     | Ucons c -> Ucons (Cons1.map ~neg ~pos c)),
   ul
 
-let upper_find_cons cp (cn : _ upper_cons) =
+let find_cons_above cp (cns : _ Cons1.t loc list) =
   match
-    cn
-    |> List.filter_map (function
-       | Urigvar _ -> None
-       | Ucons cn ->
-          match Cons1.sub_head cp cn with
-          | Le hc -> Some (Either.Left (hc, cn))
-          | Un r -> Some (Either.Right r))
-    |> List.partition_map Fun.id
+    cns |> List.partition_map (fun (cn,cnloc) ->
+      match Cons1.sub_head cp cn with
+      | Le hc -> Left (hc, (cn, cnloc))
+      | Un r -> Right r)
   with
   | (_ :: _ :: _), _ ->
      intfail "multiple compat cons in upper_cons"
@@ -537,6 +529,10 @@ let upper_find_cons cp (cn : _ upper_cons) =
      Ok (hc, cn)
   | _, errs ->
      Error (Cons1.merge_head_conflicts errs)
+
+let upper_find_cons cp ((cn : _ upper_cons),cnloc) =
+  let cns = cn |> List.filter_map (function Urigvar _ -> None | Ucons cn -> Some (cn,cnloc)) in
+  find_cons_above cp cns
 
 let upper_find_rv rv (cn : _ upper_cons) =
   match
@@ -697,9 +693,9 @@ and match_sub ~changes env (p : lower_part) ((cn : (lower, lower -> unit) upper_
         resolve_delayed_constraints ~changes env ds
      | Error () ->
         Env.rigid_bound env rv |> List.iter (fun (l,lloc) ->
-          match upper_find_cons l cn with
+          match upper_find_cons l (cn,cnloc) with
           | Ok (_hc, cn) ->
-             subtype_cons env (l, lloc) (cn, cnloc)
+             subtype_cons env (l, lloc) cn
                ~shape:Shape_simple_pos
                ~neg:(fun p n -> subtype_lu ~changes env p (Uflexvar n))
                ~pos:(fun p pr -> pr p)
@@ -707,10 +703,10 @@ and match_sub ~changes env (p : lower_part) ((cn : (lower, lower -> unit) upper_
              raise (SubtypeError (make_head_err env err (tvar (Vrigid rv), rv.loc) (cn, cnloc))))
      end
   | Lcons (cp, cploc) ->
-     begin match upper_find_cons cp cn with
+     begin match upper_find_cons cp (cn,cnloc) with
      | Ok (_hc, cn) ->
         (* FIXME: use hc instead of recomputing? *)
-        subtype_cons env (cp,cploc) (cn,cnloc)
+        subtype_cons env (cp,cploc) cn
           ~shape:Shape_simple_pos
           ~neg:(fun p n -> subtype_lu ~changes env p (Uflexvar n))
           ~pos:(fun p pr -> pr p)
@@ -743,10 +739,10 @@ and match_sub ~changes env (p : lower_part) ((cn : (lower, lower -> unit) upper_
           match
             Env.rigid_bound env rv
             |> List.map (fun (cp, cploc) ->
-              match upper_find_cons cp (fst cons) with
+              match upper_find_cons cp cons with
               | Ok (_hc, cn) ->
                  { dy_lower = (cp, cploc);
-                   dy_upper = (cn, snd cons);
+                   dy_upper = cn;
                    dy_flexvar = pv;
                    dy_resolved = false }
               | Error _ -> raise_notrace Exit)
@@ -777,8 +773,8 @@ and match_sub ~changes env (p : lower_part) ((cn : (lower, lower -> unit) upper_
                | Error () -> []
             end
          | Ucons cons_a ->
-            begin match upper_find_cons cons_a cn with
-            | Ok (coe, cons_b) ->
+            begin match upper_find_cons cons_a (cn,cnloc) with
+            | Ok (coe, (cons_b,_loc)) ->
                [Meet_cons {cons_a; cons_b; coe=Left coe}]
             | Error _ -> []
             end)
@@ -799,9 +795,9 @@ and match_sub ~changes env (p : lower_part) ((cn : (lower, lower -> unit) upper_
                | Error () -> []
             end
          | Ucons cons_b ->
-            begin match upper_find_cons cons_b upper with
+            begin match upper_find_cons cons_b (upper,upper_loc) with
             | Ok (Id, _) -> [] (* already in meets_a *)
-            | Ok (coe, cons_a) ->
+            | Ok (coe, (cons_a,_loc)) ->
                cons_decreased := true;
                [Meet_cons {cons_a; cons_b; coe=Right coe}]
             | Error _ -> []
@@ -1052,10 +1048,21 @@ let rec subtype env (p : ptyp) (n : ntyp) =
   match p, n with
   | _, t when is_ttop t -> ()
   | t, _ when is_tbot t -> ()
-  (* FIXME should work with cons-cons joins.
-     Test this with poly under joined cons *)
-  | Tcvj ([cp],[],_), Tcvj ([cn],[],_) ->
-     subtype_cons env ~shape:Shape_gen_pos ~neg:(subtype env) ~pos:(subtype env) cp cn
+  | Tcvj (cp,vp,ploc), Tcvj (cns,vn,nloc) ->
+     cp |> List.iter (fun (cp,cploc) ->
+       match find_cons_above cp cns with
+       | Ok (_,cn) ->
+          subtype_cons env ~shape:Shape_gen_pos ~neg:(subtype env) ~pos:(subtype env) (cp,cploc) cn
+       | Error err ->
+          let tunit _ = Tsimple () in
+          let cp = Cons1.map ~neg:tunit ~pos:tunit cp in
+          let cns = List.map (fun (c,l) -> Cons1.map ~neg:tunit ~pos:tunit c, l) cns in
+          raise (SubtypeError (make_err' env (Head err)
+                                 (Tcvj ([cp,cploc],[],ploc), cploc)
+                                 (Tcvj (cns,vn,nloc),Option.value nloc ~default:Location.noloc))));
+     vp |> List.iter (fun vp ->
+       if not (List.exists (equal_typ_var vp) vn) then
+         subtype_lu ~changes:(ref []) env [Lrigvar (as_rigvar vp)] (ntyp_to_upper ~simple:false env n));
   | p, Tpoly {vars; body} ->
      let orig_env = env in
      let env, open_rvars = enter_rigid env vars SymMap.empty in
@@ -1066,7 +1073,7 @@ let rec subtype env (p : ptyp) (n : ntyp) =
   | Tpoly {vars; body}, n ->
      let body = instantiate_flex env vars body in
      subtype env body n; ()
-  | p, ((Tsimple _ | Tcvj _) as n) ->
+  | ((Tsimple _ | Tcvj _) as p), ((Tsimple _ | Tcvj _) as n) ->
      let u = ntyp_to_upper ~simple:false env n in
      subtype_lu ~changes:(ref []) env (ptyp_to_lower ~simple:false env p) u;
      wf_ptyp env p; wf_ntyp env n;
@@ -1105,9 +1112,9 @@ let rec match_ptyp ~loc env (p : ptyp) (heads : (ntyp ref, ptyp ref) upper_cons)
   (* FIXME: Can/should this work with vars too? *)
   | Tcvj (conses, [], _jloc) ->
      conses |> List.iter (fun (c, cloc) ->
-       match upper_find_cons c heads with
+       match upper_find_cons c (heads,loc) with
        | Ok (_hc, head) ->
-          subtype_cons env (c, cloc) (head, loc)
+          subtype_cons env (c, cloc) head
             ~shape:Shape_gen_pos
             ~neg:(fun v t -> v := meet_ntyp env !v t)
             ~pos:(fun t v -> v := join_ptyp env !v t)
