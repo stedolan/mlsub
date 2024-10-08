@@ -608,6 +608,9 @@ let rec meet_cons ~changes env lvl ~must_freshen (cons_a, a_loc) (cons_b, b_loc)
 
   | Record ({tag = None; _} as rec_a),
     Record ({tag = Some (Named_tag sym); _} as rec_b) ->
+(*     with_dump_fv ~env Format.std_formatter
+       (fun ~flexvar ->
+         Format.printf "   %a@." (pp_upper ~flexvar ~env) (Ugen {higher_fvs=[]; cons=([Ucons cons_a],Location.noloc)})); *)
      (* must expand fields on left *)
      let decl_params = (Option.get (Env.lookup_decl env (fst sym))).params in
      let decl_fields = Env.get_decl_fields env (fst sym) in
@@ -632,14 +635,17 @@ let rec meet_cons ~changes env lvl ~must_freshen (cons_a, a_loc) (cons_b, b_loc)
          ~pos:(function
             | LR (v,exp) -> subtype_flex_flex ~changes env exp v; exp
             | L _ -> assert false (* expand_field never Funknown *)
-            | R exp -> exp)
+            | R exp -> assert false; fixme; exp)
      in
      (* Safe to merge with default=Funknown here, because we now know both sides are Named_tag sym *)
      let a_def = Cons1.record_def ~env ~loc:a_loc rec_a in
      let b_def = Cons1.record_def ~env ~loc:b_loc rec_b in
-     Cons1.Record {tag = Some (Named_tag sym);
+     let r = Cons1.Record {tag = Some (Named_tag sym);
              args;
-             body = Fields.meet ~pos:meet_pos (a_body, a_def) (rec_b.body, b_def) }
+             body = Fields.meet ~pos:meet_pos (a_body, a_def) (rec_b.body, b_def) } in
+(*     with_dump_fv ~env Format.std_formatter
+       (fun ~flexvar -> Format.printf " = %a@." (pp_upper ~flexvar ~env) (Ugen {higher_fvs=[]; cons=([Ucons r],Location.noloc)}));*)
+     r
 
   | Record ({tag = Some (Named_tag sym); _} as rec_a),
     Record ({tag = None; _} as rec_b) ->

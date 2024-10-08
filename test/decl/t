@@ -333,6 +333,17 @@ fn g(x) { (x.p, f(x)) }
 > fn g[a, b](x: Foo[b]{p: a}) -> (a, Foo[a | b]) { (x.p, f(x)) }
 
 {
+type Box[a](a)
+type Foo[a] { p: Box[a], q: Box[a]}
+fn f[a](x: Foo[a]) { x }
+fn g(x) { (x.p, f(x)) }
+}
+> type Box[+a](a)
+> type Foo[+a]{p: Box[a], q: Box[a]}
+> fn f[a](x: Foo[a]) -> Foo[a] { x }
+> fn g[a, b <: Box[a]](x: Foo[a]{p: b}) -> (b, Foo[a]) { (x.p, f(x)) }
+
+{
 type Foo { p: Int }
 fn f[a <: Int](x : Foo{p : a}) { x.p }
 fn g(x) { (x.p, f(x)) }
@@ -386,6 +397,21 @@ Foo(42)
 >   Foo(42)
 >   ^^^
 
+{
+type Foo{a:Int, b:Int, c:Int}
+fn f() { ({a:1,b:1} : Foo{z:Int}) }
+}
+> test:3: A surplus field 'z' is present.
+>   fn f() { ({a:1,b:1} : Foo{z:Int}) }
+>                         ^^^^^^^^^^
+>      found: Foo{z: _}
+>   expected: Foo{a: _, b: _, c: _}
+> This Foo{z: _} comes from test:3:
+>   fn f() { ({a:1,b:1} : Foo{z:Int}) }
+>                             ^
+> but is used as Foo{a: _, b: _, c: _}
+
+
 # polymorphic field projection
 {
 type Poly { wid: (([a] a -> a) -> (Int,Bool)) -> (Int,Bool) }
@@ -434,4 +460,4 @@ fn gbox(x : Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
 > type Other()
 > fn gbox(x: Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
 
-> STATS: fix: 19, flex: 251
+> STATS: fix: 20, flex: 260

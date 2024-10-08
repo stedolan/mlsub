@@ -69,9 +69,9 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
               | `No -> ttop loc
               | `Yes | `Strict -> ty)
      in
-     let tag, args =
+     let tag, args, decl =
        match tag with
-       | None | Some (Anon_tag | Struct_tag _) -> tag, []
+       | None | Some (Anon_tag | Struct_tag _) -> tag, [], None
        | Some (Named_tag (name,nameloc)) ->
           match lookup ~env (name,nameloc) args with
           | None -> fail nameloc (Bad_name (`Unknown, `Type, name))
@@ -80,10 +80,57 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
              let nargs = List.length args in
              if nparams <> nargs then
                fail loc (Illformed_type (`Wrong_args (name, `Arity (nparams, nargs))));
-             Some (Named_tag decl.name),
-             List.map2 (check_arg name) decl.params (List.mapi (fun i x -> i,x) args)
+             let args = List.map2 (check_arg name) decl.params (List.mapi (fun i x -> i,x) args) in
+             Some (Named_tag decl.name), args, Some decl
      in
      let body = typs_of_fields ~lookup ~env (fields,loc) in
+     begin match decl with
+     | Some decl when not (Fields.is_empty body) ->
+        let fields =
+          match decl.body with
+          | Decl_primitive | Decl_variant _ ->
+             (*FIXME*) unimp "overrides in non-record types"
+          | Decl_record fs -> fs
+        in
+        let f _fn _ty _exp =
+          (*
+            FIXME
+          let neg ty vars =
+            let (t, _) = List.nth args (Types.as_single_var ty vars) in t
+          in
+          let pos ty vars =
+            let (_, t) = List.nth args (Types.as_single_var ty vars) in t
+          in
+          let exp : (zero,zero) typ = open_typ ~neg ~pos 0 exp in
+          let env = Env.extend_types_flex env ~level:(Env_level.extend (Env.level env)) in
+          match Types.subtype env ty (gen_zero exp) with
+          | Ok () -> ()
+          | Error err -> fail loc (Conflict (`Field_override (fst decl.name, Some fn), err))
+           *)
+          () (* on second thoughts, all types are wf as long as the fields exist *)
+        in
+        begin match
+          Types.Fields.sub ~f
+            (body, fun _ -> Fields.Fbroken {abs_loc=loc;pres_loc=loc} (*bottom*))
+            (fields, fun _ -> Fabsent loc)
+        with
+        | Ok () -> ()
+        | Error err ->
+           let err, fn, cploc, cnloc =
+             match err with
+             | Field_missing (name, ploc, nloc) ->
+                Types.Field_missing name, Some name, ploc, nloc
+             | Field_extra (name, ploc, nloc) ->
+                Types.Field_extra name, name, ploc, nloc
+           in
+           let err = Types.make_err env err
+                       (Record {tag; args; body = body}, cploc)
+                       (Record {tag; args; body = fields}, cnloc)
+           in
+           fail loc (Conflict (`Field_override (fst decl.name, fn), err))
+        end
+     | _ -> ()
+     end;
      tcons (Record {tag; args; body}, loc)
   | Tfunc (args, res) ->
      tcons (Func (List.map (typ_of_tyexp ~lookup ~env) args, typ_of_tyexp ~lookup ~env res), loc)
@@ -160,3 +207,5 @@ and enter_polybounds : 'a 'b . lookup:lookup_fn -> env:env -> typolybounds -> (s
     let names' = SymMap.add name' (SymMap.find name' name_ix) names in
     names', (name, mkbound names loc bound)) SymMap.empty (IArray.of_list vars) in
   vars, name_ix
+
+

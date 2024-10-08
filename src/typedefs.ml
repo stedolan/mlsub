@@ -601,6 +601,9 @@ module Env = struct
     let env_bindings = Env_types {level; rig_names; rig_defns; rest=env.env_bindings} in
     { env with env_level = level; env_bindings }
 
+  let extend_types_flex env ~level =
+    extend_types env ~level ~rig_names:SymMap.empty ~rig_defns:IArray.empty
+
   let extend_vals env ~vals =
     { env with env_bindings = Env_vals { vals; rest = env.env_bindings } }
 
@@ -1229,9 +1232,9 @@ let pp_flexlb ppf t =
   let doc = unparse_lower ~env:(Env.empty,[]) ~flexvar:ignore t in
   pp_tyexp ppf doc
 
-let pp_upper ppf t =
-  let env = Env.empty, [] in
-  let tys = unparse_upper ~env ~flexvar:ignore t in
+let pp_upper ~flexvar ~env ppf t =
+  let env = env, [] in
+  let tys = unparse_upper ~env ~flexvar t in
   let docs = List.map Print.tyexp tys in
   pp_doc ppf (PPrint.(separate (comma ^^ space) docs))
 
@@ -1256,6 +1259,41 @@ let fmt_unit_typ ~env t =
 
 let pp_unit_typ ~env ppf t =
   pp_doc ppf (fmt_unit_typ ~env t)
+
+let with_dump_fv ~env ppf f =
+  let env = env, [] in
+  let fvs = Hashtbl.create 20 in
+  let fv_list = ref [] in
+  let _name_ix = ref 0 in
+  let rec flexvar fv =
+    match Hashtbl.find fvs fv.id with
+    | _ -> ()
+    | exception Not_found ->
+       let fv_name = flexvar_name fv in
+       Hashtbl.add fvs fv.id (fv_name, None);
+       fv_list := fv.id :: !fv_list;
+       let l =
+         if equal_lower fv.lower bottom then None
+         else Some (unparse_lower ~env ~flexvar fv.lower) in
+       let u = unparse_upper ~env ~flexvar fv.upper in
+       Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
+       ()
+  in
+  f ~flexvar;
+  let fvs = !fv_list |> List.rev |> List.map (fun i -> let (n, t) = (Hashtbl.find fvs i) in n, Option.get t) in
+  fvs |> List.iter (function
+    | n, (l, us) ->
+       begin match l with
+       | Some l ->
+          Format.fprintf ppf " %a <= %s" pp_tyexp l n
+       | None ->
+          Format.fprintf ppf "      %s" n
+       end;
+       us |> List.iteri (fun i u ->
+         Format.fprintf ppf "%s %a" (if i = 0 then " <=" else ";") pp_tyexp u);
+       Format.fprintf ppf "\n");
+  Format.fprintf ppf "%!"
+
 
 let dump_ptyp ppf t =
   let env = Env.empty, [] in

@@ -14,7 +14,7 @@ type error_kind =
       | `Join_of_ty_param
       | `Must_be_closed
       ]
-  | Conflict of [`Expr|`Pat|`Subtype] * Types.subtyping_error
+  | Conflict of [`Expr|`Pat|`Subtype|`Field_override of string * Tuple_fields.field_name option] * Types.subtyping_error
   (* FIXME: Maybe delete Unknown_constructor, it's worse than a standard type error *)
   | Illformed_pat of [`Duplicate_name of string * Location.t | `Orpat_different_names of string | `Wrong_length of int * int | `Unknown_cases | `Unknown_constructor of string]
   | Incompatible_patterns of Location.t
