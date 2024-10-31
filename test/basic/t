@@ -322,7 +322,6 @@ if (false) { #{foo:1,bar:2} } else { #{foo:1,baz:()} }
 >   ((1,2,3) : (Int,Int))
 >              ^^^^^^^^^
 
-# FIXME
 ((1,2,3) : {0:Int,1: Int})
 > ((1, 2, 3) : {0: Int, 1: Int})
 >   ((1, 2, (3 : Int)) : {0: Int, 1: Int})
