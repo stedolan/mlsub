@@ -43,31 +43,37 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
   | Trecord (Some (Named_tag ("Nothing", _)), [], _) ->
      tbot (Some loc)
   | Trecord (tag, args, fields) ->
-     let check_arg name (v, (argname,_loc)) (i, arg) =
-       let check p loc = function
-         | `Strict | `Yes -> ()
-         | `No -> fail loc (Illformed_type (`Wrong_args (name, `Variance (i, argname, p))))
+     let check_arg name (v, (argname,_loc)) (i, arg) : _ Cons1.tyarg =
+       let bad_variance p loc =
+         fail loc (Illformed_type (`Wrong_args (name, `Variance (i, argname, p))))
        in
-       let ok_pos loc t = check `Pos loc v.occurs_pos; typ_of_tyexp ~lookup ~env t in
-       let ok_neg loc t = check `Neg loc v.occurs_neg; typ_of_tyexp ~lookup ~env t in
+       let has_pos = match v.occurs_pos with `Yes | `Strict -> true | `No -> false in
+       let has_neg = match v.occurs_neg with `Yes -> true | `No -> false in
+       let ok_pos loc t = if not has_pos then bad_variance `Pos loc; typ_of_tyexp ~lookup ~env t in
+       let ok_neg loc t = if not has_neg then bad_variance `Neg loc; typ_of_tyexp ~lookup ~env t in
        match arg with
        | None, loc -> fail loc Syntax
        | Some arg, loc ->
           match arg with
           | Arg_pos t ->
-             tbot (Some loc), (ok_pos loc t)
+             let t = ok_pos loc t in
+             if has_neg
+             then Arg_both (tbot (Some loc), t)
+             else Arg_pos t
           | Arg_neg t ->
-             (ok_neg loc t), ttop loc
-          | Arg_both {neg;pos} ->
-             (ok_neg loc neg), (ok_pos loc pos)
+             let t = ok_neg loc t in
+             if has_pos
+             then Arg_both (t, ttop loc)
+             else Arg_neg t
+          | Arg_both {neg; pos} ->
+             Arg_both (ok_neg loc neg, ok_pos loc pos)
           | Arg_gen t ->
-             let ty = typ_of_tyexp ~lookup ~env t in
-             (match v.occurs_neg with
-              | `No -> tbot (Some loc)
-              | `Yes -> ty),
-             (match v.occurs_pos with
-              | `No -> ttop loc
-              | `Yes | `Strict -> ty)
+             let t = typ_of_tyexp ~lookup ~env t in
+             match has_neg, has_pos with
+             | false, false -> Arg_none
+             | true, false -> Arg_neg t
+             | false, true -> Arg_pos t
+             | true, true -> Arg_both (t,t)
      in
      let tag, args, decl =
        match tag with

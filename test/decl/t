@@ -518,4 +518,4 @@ fn gbox(x : Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
 > type Other()
 > fn gbox(x: Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
 
-> STATS: fix: 23, flex: 325
+> STATS: fix: 23, flex: 312

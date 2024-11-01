@@ -304,10 +304,10 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
             |> Option.value ~default:(Fields.Fabsent loc)
             |> Fields.field_desc_map (fun ty ->
               let neg ty vars =
-                let (t, _) = List.nth args (as_single_var ty vars) in t
+                Cons1.Tyarg.proj_neg (List.nth args (as_single_var ty vars))
               in
               let pos ty vars =
-                let (_, t) = List.nth args (as_single_var ty vars) in t
+                Cons1.Tyarg.proj_pos (List.nth args (as_single_var ty vars))
               in
               open_typ ~neg ~pos 0 (gen_zero ty))
        in
@@ -352,7 +352,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
             let body =
               Fields.filter_map ~pos:(fun r -> Mode.transparent_inferred_type env (Option.get !r)) fields
             in
-            let args = List.map (fun (n,p) -> ntyp_of_vtyp n, ptyp_of_vtyp p) record.args in
+            let args = List.map (Cons1.Tyarg.map ~neg:ntyp_of_vtyp ~pos:ptyp_of_vtyp) record.args in
             let cons = Cons1.Record {tag = Some tag; args; body} in
             Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
           in
@@ -374,11 +374,13 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
              let _tag = check_tag tag in
              let decl_params = Env.get_decl_params env (fst t) in
              let args : (vtyp,vtyp) Cons1.tyarg list =
-               (* FIXME: args? *)
-               decl_params |> List.map (fun (var, _) ->
-                 let fv = fresh_flexvar (Env.level env) in
-                 (match var.occurs_neg with `No -> tbot None | `Yes -> Tsimple fv),
-                 (match var.occurs_pos with `No -> ttop Location.noloc | `Yes|`Strict -> Tsimple fv))
+               decl_params |> List.map (fun (var, _) : _ Cons1.tyarg ->
+                 let fv = Tsimple (fresh_flexvar (Env.level env)) in
+                 match var.occurs_neg, var.occurs_pos with
+                 | `No, `No -> Arg_none
+                 | `No, (`Yes|`Strict) -> Arg_pos fv
+                 | `Yes, `No -> Arg_neg fv
+                 | `Yes, (`Yes|`Strict) -> Arg_both (fv,fv))
              in
              let record : _ Cons1.cons_record = { tag = Some tag; args; body = Fields.empty } in
              let typed_fields = check_fields ~loc:(snd t) ~mode_fn:Mode.transparent record in
@@ -387,7 +389,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
                  Fields.filter_map ~pos:(fun r -> Mode.transparent_inferred_type env (Option.get !r)) fields
                in
                let args =
-                 args |> List.map (fun (n,p) -> ntyp_of_vtyp n, ptyp_of_vtyp p)
+                 args |> List.map (Cons1.Tyarg.map ~neg:ntyp_of_vtyp ~pos:ptyp_of_vtyp)
                in
                let cons = Cons1.Record {tag=Some tag; args; body} in
                Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))

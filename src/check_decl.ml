@@ -280,16 +280,17 @@ let check_type_decls types =
                      List.map fst decl'.params
                 in
                 List.iter2
-                  (fun (param : Exp.variance_spec) ((neg, pos) : _ Typedefs.Cons1.tyarg) ->
-                    begin match param.occurs_neg with
-                    | `No -> ()
-                    | `Yes -> (walk ~decl (vneg var) ~index) neg
-                    end;
-                    begin match param.occurs_pos with
-                    | `No -> ()
-                    | `Strict -> (walk ~decl var ~index) pos
-                    | `Yes -> (walk ~decl (vpos var) ~index) pos
-                    end)
+                  (fun (param : Exp.variance_spec) (arg : _ Typedefs.Cons1.tyarg) ->
+                    Typedefs.Cons1.Tyarg.iter arg
+                      ~neg:(fun neg ->
+                        match param.occurs_neg with
+                        | `No -> ()
+                        | `Yes -> walk ~decl (vneg var) ~index neg)
+                      ~pos:(fun pos ->
+                        match param.occurs_pos with
+                        | `No -> ()
+                        | `Strict -> walk ~decl var ~index pos
+                        | `Yes -> walk ~decl (vpos var) ~index pos))
                   params args
              | cons, _loc ->
                 ignore (Typedefs.Cons1.map ~neg:(walk ~decl (vneg var) ~index) ~pos:(walk ~decl var ~index) cons)
@@ -320,9 +321,18 @@ let check_type_decls types =
          let trim_cons = function
            | (Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc) when SymTbl.mem tbl t ->
               let decl = SymTbl.find tbl t in
-              let trim_arg (param : param_state) (n,p) =
-                (if param.var_found.occurs_neg = `No then Typedefs.tbot (Some loc) else trim_args n),
-                (if param.var_found.occurs_pos = `No then Typedefs.ttop loc else trim_args p)
+              let trim_arg (param : param_state) (arg : _ Typedefs.Cons1.tyarg) =
+                match param.var_spec, arg with
+                | Some _, arg ->
+                   (* specified variance, no trimming *)
+                   Typedefs.Cons1.Tyarg.map ~neg:trim_args ~pos:trim_args arg
+                | None, (Arg_none | Arg_pos _ | Arg_neg _) -> assert false
+                | None, Arg_both (n, p) ->
+                   match param.var_found.occurs_neg, param.var_found.occurs_pos with
+                   | `No, `No -> Arg_none
+                   | `Yes, `No -> Arg_neg (trim_args n)
+                   | `No, (`Yes|`Strict) -> Arg_pos (trim_args p)
+                   | `Yes, (`Yes|`Strict) -> Arg_both (trim_args n, trim_args p)
               in
               let args = List.map2 trim_arg decl.params args in
               let body = Typedefs.Fields.map ~pos:trim_args body in

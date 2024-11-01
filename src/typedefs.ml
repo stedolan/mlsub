@@ -154,24 +154,59 @@ module Cons1 = struct
     | Func of 'neg list * 'pos
 
   and (+'neg, +'pos) tyarg =
-    (* neg:None == Bot, pos:None == Top *)
-    'neg * 'pos
+    | Arg_none
+    | Arg_neg of 'neg
+    | Arg_pos of 'pos
+    | Arg_both of 'neg * 'pos
 
   let named t =
     Record { tag = Some (Named_tag t); args = []; body = Fields.empty }
 
   type (+'neg, +'pos) t = ('neg, 'pos) cons
 
+  module Tyarg = struct
+    let equal ~neg ~pos a b =
+      match a, b with
+      | Arg_none, Arg_none -> true
+      | Arg_neg a, Arg_neg b -> neg a b
+      | Arg_pos a, Arg_pos b -> pos a b
+      | Arg_both (na,pa), Arg_both (nb,pb) -> neg na nb && pos pa pb
+      | _, _ -> false
+
+    let map ~neg ~pos a =
+      match a with
+      | Arg_none -> Arg_none
+      | Arg_neg a -> Arg_neg (neg a)
+      | Arg_pos a -> Arg_pos (pos a)
+      | Arg_both (n,p) -> Arg_both (neg n, pos p)
+
+    let iter ~neg ~pos a =
+      ignore (map ~neg ~pos a)
+
+    let zip ~neg ~pos a b =
+      match a, b with
+      | Arg_none, Arg_none -> Arg_none
+      | Arg_neg a, Arg_neg b -> Arg_neg (neg a b)
+      | Arg_pos a, Arg_pos b -> Arg_pos (pos a b)
+      | Arg_both (na,pa), Arg_both (nb,pb) -> Arg_both (neg na nb, pos pa pb)
+      | _ -> intfail "Tyarg.zip: mismatched tyargs"
+
+    let proj_neg = function
+      | Arg_neg n | Arg_both (n,_) -> n
+      | _ -> intfail "Tyarg.proj_neg: variance mismatch"
+
+    let proj_pos = function
+      | Arg_pos p | Arg_both (_,p) -> p
+      | _ -> intfail "Tyarg.proj_pos: variance mismatch"
+  end
+
   let equal ~neg ~pos p q =
     match p, q with
     | Top, Top -> true
     | Record {tag=ptag; args=pargs; body=pbody},
       Record {tag=qtag; args=qargs; body=qbody} ->
-       let arg_equal (n1,p1) (n2,p2) =
-         neg n1 n2 && pos p1 p2
-       in
        Option.equal tuple_tag_equal ptag qtag &&
-       List.for_all2 arg_equal pargs qargs &&
+       List.for_all2 (Tyarg.equal ~neg ~pos) pargs qargs &&
        Fields.equal ~pos pbody qbody
     | Func (pa, pr), Func (qa, qr) ->
        List.equal neg pa qa &&
@@ -181,8 +216,7 @@ module Cons1 = struct
   let map ~neg ~pos = function
     | Top -> Top
     | Record {tag; args; body} ->
-       let tyarg_map (n, p) = neg n, pos p in
-       Record {tag; args = List.map tyarg_map args; body = Fields.map ~pos body}
+       Record {tag; args = List.map (Tyarg.map ~neg ~pos) args; body = Fields.map ~pos body}
     | Func (args, res) ->
        let args = List.map neg args in
        let res = pos res in
@@ -194,14 +228,20 @@ module Cons1 = struct
        begin match tag with
        | None | Some (Anon_tag | Struct_tag _) -> assert (args = [])
        | Some (Named_tag (name,_)) ->
-          let wf_arg _v (n,p) =
-            (*if v.Exp.occurs_pos = `No then assert (p = None);
-            if v.Exp.occurs_neg = `No then assert (n = None);*)
-            neg n;
-            pos p;
+          let wf_arg v arg =
+            match arg, v.Exp.occurs_neg, v.Exp.occurs_pos with
+            | Arg_none, `No, `No
+            | Arg_neg _, `Yes, `No
+            | Arg_pos _, `No, (`Yes|`Strict)
+            | Arg_both _, `Yes, (`Yes|`Strict) -> ()
+            | _ -> intfail "wf_arg: tyargs don't match param"
           in
           match params name with
-          | pvs -> List.iter2 wf_arg pvs args
+          | pvs ->
+             if List.length pvs <> List.length args then
+               intfail "Cons.wf: %d args to %s, should be %d" (List.length args) name (List.length pvs)
+             List.iter2 wf_arg pvs args;
+             List.iter (Tyarg.iter ~neg ~pos) args
           | exception Not_found -> intfail "Cons.wf: %s not in env" name
        end;
        Fields.wf ~pos body
@@ -234,13 +274,14 @@ module Cons1 = struct
   let mapi ~neg ~pos = function
     | Top -> Top
     | Record {tag; args; body} ->
-       let arg i (n, p) =
+       let arg i arg =
          let tag = match tag with
            | Some (Named_tag (t,_)) -> t
            | _ -> intfail "args on invalid type"
          in
-         (neg (Named_arg (`Neg, tag, i))) n,
-         (pos (Named_arg (`Pos, tag, i))) p
+         Tyarg.map arg
+           ~neg:(fun x -> neg (Named_arg (`Neg, tag, i)) x)
+           ~pos:(fun x -> pos (Named_arg (`Pos, tag, i)) x)
        in
        let args = List.mapi arg args in
        let field fn x = pos (Record_field fn) x in
@@ -1057,44 +1098,36 @@ let unparse_fields ~pos ~tag ({fields; fnames} : _ Fields.t) =
   | exception Exit ->
      Exp.Frecord (List.map (fun f -> unparse_field_desc f (Map.find f fields)) fnames)
 
-let unparse_cons ~env ~neg ~pos (ty,_tyloc) =
+let unparse_cons ~neg ~pos (ty,_tyloc) =
   let open Cons1 in
   let ty = match ty with
     | Top -> named_type "Any"
     | Record {tag; args; body} ->
        let fs = unparse_fields ~pos ~tag body in
        let args =
-         match tag with
-         | None | Some (Anon_tag | Struct_tag _) -> assert (args = []); []
-         | Some (Named_tag (tag,_)) ->
-            let decl = Option.get (Env.lookup_decl (fst env) tag) in
-            (* FIXME: Top/Bot in syntax? *)
-            fixme;
-            let is_top = function
-              | Some (Exp.Trecord (Some (Named_tag ("Any", _)), [], _)), _  -> true
-              | _ -> false
-            in
-            let is_bot = function
-              | Some (Exp.Trecord (Some (Named_tag ("Nothing", _)), [], _)), _  -> true
-              | _ -> false
-            in
-            List.map2
-              (fun ((pvariance : Exp.variance_spec), _) (n,p) : Exp.tyarg' ->
-               match neg n, pos p with
-               | n, p when is_bot n ->
-                  if pvariance.occurs_neg = `No
-                  then Arg_gen p
-                  else Arg_pos p
-               | n, p when is_top p ->
-                  if pvariance.occurs_pos = `No
-                  then Arg_gen n
-                  else Arg_neg n
-               | neg, pos ->
-                  if Exp.equal_tyexp neg pos
-                  then Arg_gen pos
-                  else Arg_both {neg;pos})
-              decl.params
-              args
+         (* FIXME: Top/Bot in syntax? *)
+         fixme;
+         let is_top = function
+           | Some (Exp.Trecord (Some (Named_tag ("Any", _)), [], _)), _  -> true
+           | _ -> false
+         in
+         let is_bot = function
+           | Some (Exp.Trecord (Some (Named_tag ("Nothing", _)), [], _)), _  -> true
+           | _ -> false
+         in
+         args
+         |> List.map (Tyarg.map ~neg ~pos)
+         |> List.map (function
+           | Arg_none -> Exp.Arg_gen (mayloc (named_type "Any"))
+           | Arg_neg t | Arg_pos t -> Exp.Arg_gen t
+           | Arg_both (neg, pos) ->
+              if Exp.equal_tyexp neg pos
+              then Exp.Arg_gen pos
+              else if is_bot neg
+              then Exp.Arg_pos pos
+              else if is_top pos
+              then Exp.Arg_neg neg
+              else Exp.Arg_both {neg;pos})
        in
        Trecord (tag, List.map mayloc args, fs)
     | Func (args, ret) ->
@@ -1156,7 +1189,7 @@ let rec unparse_gen_typ :
   | Tsimple t -> pos ~env t
   | Tcvj (conses, vars, _loc) ->
      let joinands =
-       List.map (unparse_cons ~env ~neg:(unparse_gen_typ ~env ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~env ~neg ~pos)) conses
+       List.map (unparse_cons ~neg:(unparse_gen_typ ~env ~neg:pos ~pos:neg) ~pos:(unparse_gen_typ ~env ~neg ~pos)) conses
        @ List.map (unparse_var ~env) vars
      in
      begin match joinands with
@@ -1190,7 +1223,7 @@ let unparse_join = function
 let rec unparse_lower_part ~env ~flexvar = function
   | Lflexvar fv -> unparse_flexvar ~env ~flexvar fv
   | Lrigvar rv -> unparse_rigid_var ~env rv
-  | Lcons c -> unparse_cons c ~env ~neg:(unparse_flexvar ~env ~flexvar) ~pos:(unparse_lower ~env ~flexvar)
+  | Lcons c -> unparse_cons c ~neg:(unparse_flexvar ~env ~flexvar) ~pos:(unparse_lower ~env ~flexvar)
 
 and unparse_lower ~env ~flexvar l =
   l
@@ -1206,7 +1239,7 @@ let unparse_upper ~env ~flexvar = function
          [unparse_join
            (cons |> List.map (fun c -> match c with
               | Urigvar (rv, _FIXME) -> unparse_rigid_var ~env rv
-              | Ucons c -> unparse_cons ~env ~neg:(unparse_lower ~env ~flexvar) ~pos:(unparse_flexvar ~env ~flexvar) (c,())))])
+              | Ucons c -> unparse_cons ~neg:(unparse_lower ~env ~flexvar) ~pos:(unparse_flexvar ~env ~flexvar) (c,())))])
      @ List.map (unparse_flexvar ~env ~flexvar) higher_fvs
 
 let unparse_ptyp ~flexvar ?(env=(Env.empty,[])) (t : ptyp) =

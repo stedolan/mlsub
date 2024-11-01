@@ -367,12 +367,14 @@ module Cons1 = struct
        |> Option.value ~default:(Fields.Fabsent loc)
        |> Fields.field_desc_map (fun ty ->
          let neg ty vars =
-           let (t, _) = List.nth args (as_single_var ty vars) in
-           Type_shape.to_typ ~shape:(Type_shape.negate shape) t
+           List.nth args (as_single_var ty vars)
+           |> Tyarg.proj_neg
+           |> Type_shape.to_typ ~shape:(Type_shape.negate shape)
          in
          let pos ty vars =
-           let (_, t) = List.nth args (as_single_var ty vars) in
-           Type_shape.to_typ ~shape:shape t
+           List.nth args (as_single_var ty vars)
+           |> Tyarg.proj_pos
+           |> Type_shape.to_typ ~shape:shape
          in
          gen_zero ty
          |> open_typ ~neg ~pos 0
@@ -407,11 +409,8 @@ module Cons1 = struct
        assert (Option.equal tuple_tag_equal a.tag b.tag);
        let a_def = record_def ~env ~shape:shape_a ~loc:a_loc a in
        let b_def = record_def ~env ~shape:shape_b ~loc:b_loc b in
-       let tyarg_join ((n1,p1) : _ tyarg) ((n2,p2) : _ tyarg) =
-         (neg n1 n2, pos p1 p2)
-       in
        Record {tag = a.tag;
-               args = List.map2 tyarg_join a.args b.args;
+               args = List.map2 (Tyarg.zip ~neg ~pos) a.args b.args;
                body = Fields.join ~pos (a.body, a_def) (b.body, b_def) },
        a_loc (* FIXME: which loc is best here? *)
 
@@ -438,19 +437,18 @@ module Cons1 = struct
 
     | Record a, Record b ->
        let tag, args =
+         let neg a b = neg (LR (a, b)) and pos a b = pos (LR (a, b)) in
          match a.tag, b.tag with
-         | None, Some (Named_tag (sym, _) as tag) ->
-            let decl_params = (Option.get (Env.lookup_decl env sym)).params in
-            let tyarg i (n2, p2) =
-              (* FIXME: after arg-changing sub, can these be unconstrained? *)
-              let var, _name = List.nth decl_params i in
-              let (n1, p1) =
-                (if var.occurs_neg = `Yes then [Lflexvar (fresh_flexvar lvl)] else []),
-                (fresh_flexvar lvl)
+         | None, Some (Named_tag _ as tag) ->
+            let tyarg arg : _ tyarg =
+              let fresh =
+                Cons1.Tyarg.map arg
+                  ~neg:(fun _ -> [Lflexvar (fresh_flexvar lvl)])
+                  ~pos:(fun _ -> fresh_flexvar lvl)
               in
-              neg (LR (n1, n2)), pos (LR (p1, p2))
+              Tyarg.zip ~neg ~pos fresh arg
             in
-            Some tag, List.mapi tyarg b.args
+            Some tag, List.map tyarg b.args
 
          | None, Some (Anon_tag | Struct_tag _ as tag) ->
             assert (b.args = []);
@@ -458,8 +456,7 @@ module Cons1 = struct
 
          | Some ta, Some tb ->
             assert (tuple_tag_equal ta tb);
-            let tyarg (n1, p1) (n2, p2) = neg (LR (n1, n2)), pos (LR (p1, p2)) in
-            Some ta, List.map2 tyarg a.args b.args
+            Some ta, List.map2 (Tyarg.zip ~neg ~pos) a.args b.args
 
          | tag, None ->
             assert (b.args = []);
@@ -484,10 +481,11 @@ module Cons1 = struct
        Ok ()
     | Record a, Record b ->
        assert (Option.equal tuple_tag_equal a.tag b.tag);
-       let sub_arg i ((an, ap), (bn, bp)) =
+       let sub_arg i (arg_a, arg_b) =
          let sym = match a.tag with Some (Named_tag (t,_)) -> t | _ -> assert false in
-         neg (Named_arg (`Neg, sym, i)) bn an;
-         pos (Named_arg (`Pos, sym, i)) ap bp
+         ignore (Tyarg.zip arg_a arg_b
+                   ~neg:(fun a b -> neg (Named_arg (`Neg, sym, i)) b a)
+                   ~pos:(fun a b -> pos (Named_arg (`Pos, sym, i)) a b))
        in
        (match a.tag with Some (Named_tag _) -> () | _ -> assert (a.args = []));
        (match b.tag with Some (Named_tag _) -> () | _ -> assert (b.args = []));
