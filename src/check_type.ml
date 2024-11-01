@@ -92,25 +92,9 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
              (*FIXME*) unimp "overrides in non-record types"
           | Decl_record fs -> fs
         in
-        let f _fn _ty _exp =
-          (*
-            FIXME
-          let neg ty vars =
-            let (t, _) = List.nth args (Types.as_single_var ty vars) in t
-          in
-          let pos ty vars =
-            let (_, t) = List.nth args (Types.as_single_var ty vars) in t
-          in
-          let exp : (zero,zero) typ = open_typ ~neg ~pos 0 exp in
-          let env = Env.extend_types_flex env ~level:(Env_level.extend (Env.level env)) in
-          match Types.subtype env ty (gen_zero exp) with
-          | Ok () -> ()
-          | Error err -> fail loc (Conflict (`Field_override (fst decl.name, Some fn), err))
-           *)
-          () (* on second thoughts, all types are wf as long as the fields exist *)
-        in
         begin match
-          Types.Fields.sub ~f
+          (* Check that the fields exist *)
+          Types.Fields.sub ~f:(fun _fn _ty _exp -> ())
             (body, fun _ -> Fields.Fbroken {abs_loc=loc;pres_loc=loc} (*bottom*))
             (fields, fun _ -> Fabsent loc)
         with

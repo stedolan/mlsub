@@ -272,13 +272,13 @@ fn iii(x) { (x.b, gg(x), f(x)) }
 > fn g(x: {a: {q: Int}}) -> ({a: {q: Int}}) { x }
 > fn gg[a <: {a: {q: Int}}](x: a) -> a { let z : {a: {q: Int}} = g(x); x }
 > fn h(x: Foo[{p: Int}]{a: {p: Int, q: Int}}) -> (({p: Int}) -> (), {a: {q: Int}}) { (f(x), g(x)) }
-> fn i(x: Foo[{p: Int}]{a: {p: Int, q: Int}}) -> ({a: {q: Int}}, ({p: Int}) -> ()) { (g(x), f(x)) }
+> fn i(x: Foo[{p: Int}]{a: {q: Int, p: Int}}) -> ({a: {q: Int}}, ({p: Int}) -> ()) { (g(x), f(x)) }
 > fn hh[a <: Foo[{p: Int}]{a: {p: Int, q: Int}}](x: a) -> (({p: Int}) -> (), a) { (f(x), gg(x)) }
-> fn ii[a <: Foo[{p: Int}]{a: {p: Int, q: Int}}](x: a) -> (a, ({p: Int}) -> ()) { (gg(x), f(x)) }
+> fn ii[a <: Foo[{p: Int}]{a: {q: Int, p: Int}}](x: a) -> (a, ({p: Int}) -> ()) { (gg(x), f(x)) }
 > fn hhh[a <: ({p: Int}) -> (), b <: Foo[{p: Int}]{a: {p: Int, q: Int}, b: a}](x: b) -> (({p: Int}) -> (), b, a) {
 >   (f(x), gg(x), x.b)
 > }
-> fn iii[a <: ({p: Int}) -> (), b <: Foo[{p: Int}]{b: a, a: {p: Int, q: Int}}](x: b) -> (a, b, ({p: Int}) -> ()) {
+> fn iii[a <: ({p: Int}) -> (), b <: Foo[{p: Int}]{b: a, a: {q: Int, p: Int}}](x: b) -> (a, b, ({p: Int}) -> ()) {
 >   (x.b, gg(x), f(x))
 > }
 
@@ -294,7 +294,6 @@ fn h(x) { (f(x), g(x)) }
 > fn h(x: Foo{a: Int}) -> (Int, {a: Int}) { (f(x), g(x)) }
 
 # France example
-# FIXME: do version of this with nominal types once intro form exists
 {
 fn f(x: #S{foo:Int} | #T{foo:Bool}) { 5 }
 fn g(x) { let z = f(x); x.foo }
@@ -305,6 +304,23 @@ fn t(x) { g(#T{foo: x}) }
 > fn g[a <: Int, b <: Bool](x: #S{foo: a} | #T{foo: b}) -> (a | b) { let z : Int = f(x); x.foo }
 > fn s[a <: Int](x: a) -> a { g(#S{foo: x}) }
 > fn t[a <: Bool](x: a) -> a { g(#T{foo: x}) }
+
+# France example, nominal
+{
+type S {foo: Int}
+type T {foo: Bool}
+fn f(x: S|T) { 5 }
+fn g(x) { let z = f(x); x.foo }
+fn s(x) { g(S{foo: x}) }
+fn t(x) { g(T{foo: x}) }
+}
+> type S{foo: Int}
+> type T{foo: Bool}
+> fn f(x: S | T) -> Int { 5 }
+> fn g[a <: Int, b <: Bool](x: S{foo: a} | T{foo: b}) -> (a | b) { let z : Int = f(x); x.foo }
+> fn s[a <: Int](x: a) -> a { g(S{foo: x}) }
+> fn t[a <: Bool](x: a) -> a { g(T{foo: x}) }
+
 
 {
 type S{foo:Int}
@@ -370,9 +386,9 @@ fn q(a) {Box(a)}
 fn r(c,a,b) {Box(if c {a} else {b})}
 }
 > type Box[+a](a)
-> fn p() -> Box[Any](#A) { Box(#A) }
-> fn q[a](a: a) -> Box[Any](a) { Box(a) }
-> fn r[a, b](c: Bool, a: a, b: b) -> Box[Any](a | b) { Box(if c { a } else { b }) }
+> fn p() -> Box[#A](#A) { Box(#A) }
+> fn q[a](a: a) -> Box[a](a) { Box(a) }
+> fn r[a, b](c: Bool, a: a, b: b) -> Box[a | b](a | b) { Box(if c { a } else { b }) }
 
 # error messages
 {
@@ -410,6 +426,48 @@ fn f() { ({a:1,b:1} : Foo{z:Int}) }
 >   fn f() { ({a:1,b:1} : Foo{z:Int}) }
 >                             ^
 > but is used as Foo{a: _, b: _, c: _}
+
+# overriding fields can give a better type
+{
+type Box[a]{foo:a}
+fn f(c,a:Box[Any]{foo:Int},b:Box[Int]) {
+  if c { a } else { b }
+}
+fn g(c,a,b) { f(c,a,b).foo }
+}
+> type Box[+a]{foo: a}
+> fn f(c: Bool, a: Box[Any]{foo: Int}, b: Box[Int]) -> (Box[Any]{foo: Int}) { if c { a } else { b } }
+> fn g(c: Bool, a: Box[Any]{foo: Int}, b: Box[Int]) -> Int { f(c, a, b).foo }
+
+# overriding fields can change type, oddly
+{
+type Foo{p: Int}
+fn f(p) -> (Foo{p: Any}) { Foo{p} }
+fn sub_same(x: Foo) -> (Foo{p:Int}) { x }
+fn mk[a](x:a) -> (Foo{p:a}) { Foo{p: x} }
+fn sub(x) -> Foo { mk(x) }
+fn join(x) { if true { Foo{p:5} } else { mk(x) } }
+fn meet(x) { ((x : Foo), (x : Foo{p:Any})) }
+}
+> type Foo{p: Int}
+> fn f(p: Any) -> (Foo{p: Any}) { Foo{p} }
+> fn sub_same(x: Foo) -> (Foo{p: Int}) { x }
+> fn mk[a](x: a) -> (Foo{p: a}) { Foo{p: x} }
+> fn sub(x: Int) -> Foo { mk(x) }
+> fn join[a](x: a) -> (Foo{p: Int | a}) { if true { Foo{p: 5} } else { mk(x) } }
+> fn meet(x: Foo{p: Int}) -> (Foo, Foo{p: Any}) { ((x : Foo), (x : Foo{p: Any})) }
+
+# The args still matter even if all fields using them are overridden
+{
+type Box[a](a)
+fn box(x) { Box(x) }
+fn use(x: Box[Int]) { x }
+fn app(x) { use(box(x)) }
+}
+> type Box[+a](a)
+> fn box[a](x: a) -> Box[a](a) { Box(x) }
+> fn use(x: Box[Int]) -> Box[Int] { x }
+> fn app(x: Int) -> Box[Int] { use(box(x)) }
 
 
 # polymorphic field projection
@@ -460,4 +518,4 @@ fn gbox(x : Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
 > type Other()
 > fn gbox(x: Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
 
-> STATS: fix: 20, flex: 260
+> STATS: fix: 23, flex: 325

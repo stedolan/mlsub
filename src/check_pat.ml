@@ -265,7 +265,7 @@ let rec split_cases :
          | Fpresent (ty, _) | Foptional (ty, _) -> ty, lvl
          | Funknown loc -> tcons (Top, loc), lvl
          | Fabsent abs_loc -> tbot (Some abs_loc), lvl
-         | Fbroken {abs_loc; pres_loc} ->
+         | Fbroken {abs_loc; pres_loc=_} ->
             (*
               FIXME
             Error.fail pres_loc (Incompatible_patterns abs_loc)

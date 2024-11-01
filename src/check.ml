@@ -45,13 +45,19 @@ let fresh_flow env : ntyp * ptyp =
   let fv = fresh_flexvar (Env.level env) in
   Tsimple fv, Tsimple [Lflexvar fv]
 
+type vtyp = (flexvar, flexvar) typ
+let ptyp_of_vtyp (t : vtyp) : ptyp =
+  Types.map_typ_1 ~neg:(fun x -> x) ~pos:(fun x -> [Lflexvar x]) ~index:0 t
+let ntyp_of_vtyp (t : vtyp) : ntyp =
+  Types.map_typ_1 ~pos:(fun x -> x) ~neg:(fun x -> [Lflexvar x]) ~index:0 t
+
 module Mode = struct
   type t =
     | Checking of ntyp
     | Inference of ptyp ref
     | Transparent of
         (* "Simultaneous Input and Output", e.g. sec 6.4 of Bidirectional Typing *)
-        { checking: (zero, zero) typ;
+        { checking: vtyp;
           mutable inference: ptyp option }
 
   let checking ty =
@@ -67,18 +73,18 @@ module Mode = struct
 
   let dup = function
     | Checking _ | Inference _ as t -> t
-    | Transparent r -> Checking (gen_zero r.checking)
+    | Transparent r -> Checking (ntyp_of_vtyp r.checking)
 
   let wf env = function
     | Checking t -> wf_ntyp env t
     | Inference _ -> ()
-    | Transparent {checking=t;inference=_} -> wf_ntyp env (gen_zero t)
+    | Transparent {checking=t;inference=_} -> wf_ntyp env (ntyp_of_vtyp t)
 
   let inferred_type env ty =
     let t = match ty with
       | Checking _ -> intfail "Mode.result in Checking mode"
       | Inference r -> !r
-      | Transparent {checking; inference=None} -> gen_zero checking
+      | Transparent {checking; inference=None} -> ptyp_of_vtyp checking
       | Transparent {checking=_; inference=Some p} -> p
     in
     wf_ptyp env t;
@@ -90,14 +96,14 @@ module Mode = struct
     | Transparent {checking = _; inference = None} -> None
     | Transparent {checking = ck; inference = Some inf} ->
        (* We know inf <= ck. So if ck <= inf, they're equal *)
-       if clearly_subtype_typ env (gen_zero ck) inf
+       if clearly_subtype_typ env (ntyp_of_vtyp ck) inf
        then None
        else Some inf
 
   let checking_type = function
     | Checking t -> t
     | Inference _ -> tcons (Top, Location.noloc)
-    | Transparent r -> gen_zero r.checking
+    | Transparent r -> ntyp_of_vtyp r.checking
 
   let inferred env ~loc mode ty =
     match mode with
@@ -106,7 +112,7 @@ module Mode = struct
     | Checking ck ->
        subtype env ty ck |> or_raise `Expr loc
     | Transparent ({checking; inference} as r) ->
-       subtype env ty (gen_zero checking) |> or_raise `Expr loc;
+       subtype env ty (ntyp_of_vtyp checking) |> or_raise `Expr loc;
        match inference with
        | None -> r.inference <- Some ty
        | Some ty' -> r.inference <- Some (join_ptyp env ty' ty)
@@ -346,9 +352,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
             let body =
               Fields.filter_map ~pos:(fun r -> Mode.transparent_inferred_type env (Option.get !r)) fields
             in
-            (* FIXME: assumes record.args is wf for this tag
-               Maybe infer & subtype if RHS is None? *)
-            let args = List.map (fun (n,p) -> gen_zero n, gen_zero p) record.args in
+            let args = List.map (fun (n,p) -> ntyp_of_vtyp n, ptyp_of_vtyp p) record.args in
             let cons = Cons1.Record {tag = Some tag; args; body} in
             Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
           in
@@ -369,15 +373,21 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
           | Some (Named_tag t as tag) ->
              let _tag = check_tag tag in
              let decl_params = Env.get_decl_params env (fst t) in
-             let args =
+             let args : (vtyp,vtyp) Cons1.tyarg list =
                (* FIXME: args? *)
-               decl_params |> List.map (fun _ -> (tbot None, ttop Location.noloc))
+               decl_params |> List.map (fun (var, _) ->
+                 let fv = fresh_flexvar (Env.level env) in
+                 (match var.occurs_neg with `No -> tbot None | `Yes -> Tsimple fv),
+                 (match var.occurs_pos with `No -> ttop Location.noloc | `Yes|`Strict -> Tsimple fv))
              in
              let record : _ Cons1.cons_record = { tag = Some tag; args; body = Fields.empty } in
              let typed_fields = check_fields ~loc:(snd t) ~mode_fn:Mode.transparent record in
              let () =
                let body =
                  Fields.filter_map ~pos:(fun r -> Mode.transparent_inferred_type env (Option.get !r)) fields
+               in
+               let args =
+                 args |> List.map (fun (n,p) -> ntyp_of_vtyp n, ptyp_of_vtyp p)
                in
                let cons = Cons1.Record {tag=Some tag; args; body} in
                Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
