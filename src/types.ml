@@ -420,7 +420,7 @@ module Cons1 = struct
 
     | Record _, Func _ | Func _, Record _ -> assert false
 
-  let meet env lvl ~shape_b ~neg ~pos (cons_a, a_loc) (cons_b, b_loc) =
+  let meet env ~shape_b ~neg ~pos (cons_a, a_loc) (cons_b, b_loc) =
     let open One_or_two in
     (* tree heads means meet exists only for comparable heads *)
     assert (not (incomparable_head cons_a cons_b));
@@ -437,18 +437,11 @@ module Cons1 = struct
 
     | Record a, Record b ->
        let tag, args =
-         let neg a b = neg (LR (a, b)) and pos a b = pos (LR (a, b)) in
+
          match a.tag, b.tag with
          | None, Some (Named_tag _ as tag) ->
-            let tyarg arg : _ tyarg =
-              let fresh =
-                Cons1.Tyarg.map arg
-                  ~neg:(fun _ -> [Lflexvar (fresh_flexvar lvl)])
-                  ~pos:(fun _ -> fresh_flexvar lvl)
-              in
-              Tyarg.zip ~neg ~pos fresh arg
-            in
-            Some tag, List.map tyarg b.args
+            let neg a = neg (R a) and pos a = pos (R a) in
+            Some tag, List.map (Tyarg.map ~neg ~pos) b.args
 
          | None, Some (Anon_tag | Struct_tag _ as tag) ->
             assert (b.args = []);
@@ -456,6 +449,7 @@ module Cons1 = struct
 
          | Some ta, Some tb ->
             assert (tuple_tag_equal ta tb);
+            let neg a b = neg (LR (a, b)) and pos a b = pos (LR (a, b)) in
             Some ta, List.map2 (Tyarg.zip ~neg ~pos) a.args b.args
 
          | tag, None ->
@@ -730,8 +724,7 @@ and match_sub ~changes env (p : lower_part) ((cn : (lower, lower -> unit) upper_
               else cons_a
             in
             let cons =
-              Cons1.meet
-                env pv.level ~shape_b:match_shape
+              Cons1.meet env ~shape_b:match_shape
                 (cons_a, upper_loc)
                 (cons_b, cnloc)
                 ~neg:(function

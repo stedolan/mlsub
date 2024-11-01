@@ -282,6 +282,14 @@ fn iii(x) { (x.b, gg(x), f(x)) }
 >   (x.b, gg(x), f(x))
 > }
 
+# meet can use indep fresh flexvars in arg coerce_up
+{
+type Foo[a] {a:a, b:a -> ()}
+fn f(x) { (x.a, (x:Foo[+Int])) }
+}
+> type Foo[+-a]{a: a, b: a -> ()}
+> fn f[a <: Int](x: Foo[+Int]{a: a}) -> (a, Foo[+Int]) { (x.a, (x : Foo[+Int])) }
+
 {
 type Foo {a:Int, b: Int}
 fn f(x : Foo) { x.b }
@@ -518,4 +526,4 @@ fn gbox(x : Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
 > type Other()
 > fn gbox(x: Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
 
-> STATS: fix: 23, flex: 312
+> STATS: fix: 23, flex: 314
