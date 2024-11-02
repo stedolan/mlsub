@@ -201,6 +201,13 @@ module Cons1 = struct
     let proj_pos = function
       | Arg_pos p | Arg_both (_,p) -> p
       | _ -> intfail "Tyarg.proj_pos: variance mismatch"
+
+    let of_variance_spec (v : Exp.variance_spec) =
+      match v.occurs_neg, v.occurs_pos with
+      | `No, `No -> Arg_none
+      | `No, (`Yes|`Strict) -> Arg_pos ()
+      | `Yes, `No -> Arg_neg ()
+      | `Yes, (`Yes|`Strict) -> Arg_both ((),())
   end
 
   let equal ~neg ~pos p q =

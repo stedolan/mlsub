@@ -376,11 +376,8 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
              let args : (vtyp,vtyp) Cons1.tyarg list =
                decl_params |> List.map (fun (var, _) : _ Cons1.tyarg ->
                  let fv = Tsimple (fresh_flexvar (Env.level env)) in
-                 match var.occurs_neg, var.occurs_pos with
-                 | `No, `No -> Arg_none
-                 | `No, (`Yes|`Strict) -> Arg_pos fv
-                 | `Yes, `No -> Arg_neg fv
-                 | `Yes, (`Yes|`Strict) -> Arg_both (fv,fv))
+                 Cons1.Tyarg.of_variance_spec var
+                 |> Cons1.Tyarg.map ~neg:(fun () -> fv) ~pos:(fun () -> fv))
              in
              let record : _ Cons1.cons_record = { tag = Some tag; args; body = Fields.empty } in
              let typed_fields = check_fields ~loc:(snd t) ~mode_fn:Mode.transparent record in
