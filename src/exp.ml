@@ -99,6 +99,8 @@ and tyexp = tyexp' mayloc and tyexp' =
   | Trecord of tuple_tag option * tyarg list * tyexp fields
   | Tfunc of tyexp list * tyexp
   | Tjoin of tyexp * tyexp
+  | Ttop
+  | Tbot
 
 and tyarg = tyarg' mayloc and tyarg' =
   | Arg_pos of tyexp
@@ -217,6 +219,8 @@ let mapper =
        Tfunc (List.map (r.tyexp r) args, r.tyexp r ret)
     | Tjoin (s, t) ->
        Tjoin (r.tyexp r s, r.tyexp r t)
+    | Ttop -> Ttop
+    | Tbot -> Tbot
   in
 
   let ty_decl_body r = function

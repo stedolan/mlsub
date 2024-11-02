@@ -55,7 +55,7 @@ let precedence : exp' -> precedence = function
   | If _ | Match _ -> Term
 
 let ty_precedence : tyexp' -> precedence = function
-  | Ttyvar _ -> Term
+  | Ttyvar _ | Ttop | Tbot -> Term
   | Trecord (Some (Named_tag ("_", _)), [], _) -> Infix
   | Trecord (_,_,Ftuple _) -> Term
   | Trecord (_,_,Frecord _) -> Infix
@@ -262,6 +262,8 @@ and tyexp_ t =
   | Ttyvar v ->
      symbol v
   | Tjoin (s, t) -> tyexp ~prec s ^^ op "|" ^^ tyexp ~prec t
+  | Ttop -> string "Any"
+  | Tbot -> string "Nothing"
 
 and argtype ~pos fn ty =
   if pos then tyexp ~prec:Exp ty

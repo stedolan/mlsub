@@ -40,6 +40,7 @@ and free_type_names' =
      List.fold_left SymSet.union (free_type_names ret) (List.map free_type_names args)
   | Tjoin (a, b) ->
      SymSet.union (free_type_names a) (free_type_names b)
+  | Ttop | Tbot -> SymSet.empty
 and free_type_names_fields fs =
   fs
   |> Exp.record_fields ~loc:Location.noloc

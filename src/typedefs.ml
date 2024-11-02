@@ -1116,33 +1116,19 @@ let unparse_fields ~pos ~tag ({fields; fnames} : _ Fields.t) =
 let unparse_cons ~neg ~pos (ty,_tyloc) =
   let open Cons1 in
   let ty = match ty with
-    | Top -> named_type "Any"
+    | Top -> Exp.Ttop
     | Record {tag; args; body} ->
        let fs = unparse_fields ~pos ~tag body in
        let args =
-         (* FIXME: Top/Bot in syntax? *)
-         fixme;
-         let is_top = function
-           | Some (Exp.Trecord (Some (Named_tag ("Any", _)), [], _)), _  -> true
-           | _ -> false
-         in
-         let is_bot = function
-           | Some (Exp.Trecord (Some (Named_tag ("Nothing", _)), [], _)), _  -> true
-           | _ -> false
-         in
          args
          |> List.map (Tyarg.map ~neg ~pos)
          |> List.map (function
-           | Arg_none -> Exp.Arg_gen (mayloc (named_type "Any"))
+           | Arg_none -> Exp.Arg_gen (mayloc Exp.Ttop)
            | Arg_neg t | Arg_pos t -> Exp.Arg_gen t
-           | Arg_both (neg, pos) ->
-              if Exp.equal_tyexp neg pos
-              then Exp.Arg_gen pos
-              else if is_bot neg
-              then Exp.Arg_pos pos
-              else if is_top pos
-              then Exp.Arg_neg neg
-              else Exp.Arg_both {neg;pos})
+           | Arg_both (neg, pos) when Exp.equal_tyexp neg pos -> Exp.Arg_gen pos
+           | Arg_both ((Some Exp.Tbot, _), pos) -> Exp.Arg_pos pos
+           | Arg_both (neg, (Some Exp.Ttop, _)) -> Exp.Arg_neg neg
+           | Arg_both (neg, pos) -> Exp.Arg_both {neg;pos})
        in
        Trecord (tag, List.map mayloc args, fs)
     | Func (args, ret) ->
@@ -1182,7 +1168,7 @@ let unparse_var ~env = function
   | Vrigid rv -> unparse_rigid_var ~env rv
 
 let unparse_joins = function
-  | [] -> mktyexp (named_type "Nothing")
+  | [] -> mktyexp Exp.Tbot
   | [x] -> x
   | x :: xs -> List.fold_left (fun a b -> mktyexp (Exp.Tjoin (a, b))) x xs
 
@@ -1208,7 +1194,7 @@ let rec unparse_gen_typ :
        @ List.map (unparse_var ~env) vars
      in
      begin match joinands with
-     | [] -> mktyexp (named_type "Nothing")
+     | [] -> mktyexp Exp.Tbot
      | j :: js ->
         let tjoin a b = mktyexp (Exp.Tjoin (a, b)) in
         List.fold_left tjoin j js
@@ -1231,7 +1217,7 @@ and unparse_bounds :
           s, Some (bound ~env:(env,ext) t)) vars |> IArray.to_list
 
 let unparse_join = function
-  | [] -> mktyexp (named_type "Nothing")
+  | [] -> mktyexp Exp.Tbot
   | t :: ts ->
      List.fold_left (fun a b -> mktyexp (Exp.Tjoin (a, b))) t ts
 

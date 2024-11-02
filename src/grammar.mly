@@ -11,6 +11,7 @@
 %token FN LET TRUE FALSE IF ELSE TILDE HASH PLUS MINUS
 %token SUBTYPE SUPTYPE AT TYPE
 %token MATCH
+%token T_ANY T_NOTHING
 
 %nonassoc low_priority
 %nonassoc ARROW
@@ -243,6 +244,10 @@ tytagargs:
 
 tyatomic: t = mayloc(tyatomic_) { t }
 %inline tyatomic_:
+| T_ANY
+  { Ttop }
+| T_NOTHING
+  { Tbot }
 | t = symbol
   { Ttyvar t }
 | t = tytagargs

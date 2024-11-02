@@ -38,9 +38,9 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
      | Some v -> tvar (Vrigid v)
      | None -> fail loc (Bad_name (`Unknown, `Type, name))
      end
-  | Trecord (Some (Named_tag ("Any", _)), [], _) ->
+  | Ttop ->
      tcons (Top, loc)
-  | Trecord (Some (Named_tag ("Nothing", _)), [], _) ->
+  | Tbot ->
      tbot (Some loc)
   | Trecord (tag, args, fields) ->
      let check_arg name (v, (argname,_loc)) (i, arg) : _ Cons1.tyarg =

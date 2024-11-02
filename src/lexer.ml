@@ -43,6 +43,9 @@ let rec lex buf =
   | "match" -> MATCH
   | "type" -> TYPE
 
+  | "Any" -> T_ANY
+  | "Nothing" -> T_NOTHING
+
   | '0' -> ZERO
   | Plus('0'..'9') -> NZINT (int_of_string (lexeme buf))
   | ('a'..'z'|'_'), Star('a'..'z'|'_'|'A'..'Z'|'0'..'9') ->
