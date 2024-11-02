@@ -42,6 +42,7 @@ module IArray : sig
   val iter2 : ('a -> 'b -> unit) -> 'a t -> 'b t -> unit
   val exists : ('a -> bool) -> 'a t -> bool
   val map_fold_left : ('s -> 'a -> 's * 'b) -> 's -> 'a t -> 's * 'b t
+  val equal : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
 end = struct
   type +'a t = Mk : 'b array * ('b -> 'a) -> 'a t
   let acopy a = Array.map id a
@@ -75,6 +76,11 @@ end = struct
       st := s
     done;
     !st, of_array !out
+  let equal eq a b =
+    length a = length b &&
+    (match iter2 (fun a b -> if not (eq a b) then raise Exit) a b with
+     | () -> true
+     | exception Exit -> false)
 end
 type 'a iarray = 'a IArray.t
 

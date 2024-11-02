@@ -299,7 +299,7 @@ fn h(x) { (f(x), g(x)) }
 > type Foo{a: Int, b: Int}
 > fn f(x: Foo) -> Int { x.b }
 > fn g(x: {a: Int}) -> ({a: Int}) { x }
-> fn h(x: Foo{a: Int}) -> (Int, {a: Int}) { (f(x), g(x)) }
+> fn h(x: Foo) -> (Int, {a: Int}) { (f(x), g(x)) }
 
 # France example
 {
@@ -463,7 +463,7 @@ fn meet(x) { ((x : Foo), (x : Foo{p:Any})) }
 > fn mk[a](x: a) -> (Foo{p: a}) { Foo{p: x} }
 > fn sub(x: Int) -> Foo { mk(x) }
 > fn join[a](x: a) -> (Foo{p: Int | a}) { if true { Foo{p: 5} } else { mk(x) } }
-> fn meet(x: Foo{p: Int}) -> (Foo, Foo{p: Any}) { ((x : Foo), (x : Foo{p: Any})) }
+> fn meet(x: Foo) -> (Foo, Foo{p: Any}) { ((x : Foo), (x : Foo{p: Any})) }
 
 # The args still matter even if all fields using them are overridden
 {

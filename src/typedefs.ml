@@ -74,24 +74,27 @@ module Fields = struct
     let fields = Map.mapi (fun fn x -> pos fn x) t.fields in
     { t with fields }
 
-  let filter_map ~pos {fnames; fields} =
+  let filter_mapi ~f {fnames; fields} =
     let fnames, fields =
       List.fold_left
         (fun (names, acc) fn ->
-          let x =
-            match field_desc_map pos (Map.find fn fields) with
-            | Fpresent (Some x, l) -> Some (Fpresent (x, l))
-            | Foptional (Some x, l) -> Some (Foptional (x, l))
-            | Fpresent (None, _) | Foptional (None, _) -> None
-            | (Fbroken _ | Fabsent _ | Funknown _) -> None
-          in
-          match x with
+          match f fn (Map.find fn fields) with
           | None -> names, acc
           | Some x -> fn :: names, Map.add fn x acc)
         ([], Map.empty)
         fnames
     in
     { fnames = List.rev fnames; fields }
+
+  let filter_map ~pos t =
+    filter_mapi t ~f:(fun _fn x ->
+      match field_desc_map pos x with
+      | Fpresent (Some x, l) -> Some (Fpresent (x, l))
+      | Foptional (Some x, l) -> Some (Foptional (x, l))
+      | Fpresent (None, _) | Foptional (None, _) -> None
+      | (Fbroken _ | Fabsent _ | Funknown _) -> None)
+
+  let filteri ~f t = filter_mapi ~f:(fun fn x -> if f fn x then Some x else None) t
 
   let wf ~pos {fields; fnames} =
     let remaining =
@@ -521,6 +524,18 @@ let is_varjoin : _ tcvj -> bool = function
 
 let gen_zero : (zero, zero) typ -> ('a, 'b) typ = Obj.magic
 
+let rec equal_typ :
+   'neg 'pos . neg:('neg -> 'neg -> bool) -> pos:('pos -> 'pos -> bool) -> ('neg, 'pos) typ -> ('neg, 'pos) typ -> bool =
+  fun ~neg ~pos a b ->
+  match a, b with
+  | Tsimple a, Tsimple b -> pos a b
+  | Tcvj (a_cons, a_vs, _), Tcvj (b_cons, b_vs, _) ->
+     List.equal (fun (a,_) (b,_) -> Cons1.equal ~neg:(equal_typ ~neg:pos ~pos:neg) ~pos:(equal_typ ~neg ~pos) a b) a_cons b_cons &&
+     List.equal equal_typ_var a_vs b_vs
+  | Tpoly {vars=a_vs; body=a}, Tpoly {vars=b_vs; body=b} ->
+     IArray.equal (fun (_,a) (_,b) -> Option.equal (equal_typ ~neg:pos ~pos:neg) a b) a_vs b_vs &&
+     equal_typ ~neg ~pos a b
+  | (Tsimple _ | Tcvj _ | Tpoly _), _ -> false
 
 type ptyp = (flexvar, lower) typ
 type ntyp = (lower, flexvar) typ

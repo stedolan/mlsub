@@ -223,13 +223,14 @@ module Type_shape = struct
 
   let simple_neg = negate simple_pos
 
-  let gen_pos : (ntyp, ptyp, flexvar, lower) t =
+  let gen : _ t =
     { of_typ_pos = (fun ~env:_ t -> t);
       of_typ_neg = (fun ~env:_ t -> t);
       to_typ_pos = Fun.id;
       to_typ_neg = Fun.id }
 
-  let gen_neg = negate gen_pos
+  let gen_pos = gen
+  let gen_neg = gen
 end
 
 module Fields = struct
@@ -1301,6 +1302,15 @@ type promvar =
   | Prom_hoist of flexvar
   | Prom_drop
 
+let trim_overrides s = function
+  | Cons1.Record r, loc ->
+     let def = Cons1.record_def ~env:s.env ~shape:Type_shape.gen ~loc r in
+     let no _ _ = false in
+     let eq = Fields.equal_field_desc (Typedefs.equal_typ ~neg:no ~pos:no) in
+     let body = Fields.filteri r.body ~f:(fun fn x -> not (eq x (def fn))) in
+     Cons1.Record {r with body}, loc
+  | cons -> cons
+
 let rec promote_lower :
   type n p . (n, p) promote_info -> lower -> (n, p) typ =
   fun s lower ->
@@ -1331,6 +1341,7 @@ let rec promote_lower :
       | Prom_hoist fv -> Some (Either.Right fv))
     |> List.partition_map id
   in
+  let conses = List.map (trim_overrides s) conses in
   let ty = Tcvj(conses, List.sort_uniq compare_typ_var vars, None) in
   match vflex with
   | [] -> ty
@@ -1405,7 +1416,7 @@ and promote_upper :
            end
         | Ucons c ->
            let c = Cons1.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s) c in
-           Either.Left (c,loc)) in
+           Either.Left (trim_overrides s (c,loc))) in
      vars, Tcvj (conses, List.filter_map id rigvars, Some loc)
 
 
