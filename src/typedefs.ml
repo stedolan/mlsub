@@ -242,7 +242,7 @@ module Cons1 = struct
           match params name with
           | pvs ->
              if List.length pvs <> List.length args then
-               intfail "Cons.wf: %d args to %s, should be %d" (List.length args) name (List.length pvs)
+               intfail "Cons.wf: %d args to %s, should be %d" (List.length args) name (List.length pvs);
              List.iter2 wf_arg pvs args;
              List.iter (Tyarg.iter ~neg ~pos) args
           | exception Not_found -> intfail "Cons.wf: %s not in env" name
