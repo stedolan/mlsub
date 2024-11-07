@@ -546,18 +546,20 @@ let x : Bool = 5; x
 >   let x : Bool = 5; x
 >           ^^^^
 
-let {x: foo, y: bar} = #{x: 10, y: true}; (foo, bar)
-> let {x: foo, y: bar} = #{x: 10, y: true}; (foo, bar)
->   let {x: foo, y: bar} : #{x: Int, y: Bool} = #{x: 10, y: true}; (foo, bar)
+let #{x: foo, y: bar} = #{x: 10, y: true}; (foo, bar)
+> let #{x: foo, y: bar} = #{x: 10, y: true}; (foo, bar)
+>   let #{x: foo, y: bar} : #{x: Int, y: Bool} = #{x: 10, y: true}; (foo, bar)
 > (Int, Bool)
 > let x, y = (x: 10, y: <true>).(x, y); let  = %yield((0: x, 1: y)); done
 
-let {x: foo, y: bar} = #{x: 10, y: true, z: 42}; (foo, bar)
-> let {x: foo, y: bar} = #{x: 10, y: true, z: 42}; (foo, bar)
->   let {x: foo, y: bar} : #{x: Int, y: Bool, z: Int} = #{x: 10, y: true, z: 42};
+let #{x: foo, y: bar} = #{x: 10, y: true, z: 42}; (foo, bar)
+> let #{x: foo, y: bar} = #{x: 10, y: true, z: 42}; (foo, bar)
+>   let #{x: foo, y: bar} : #{x: Int, y: Bool, z: Int} = #{x: 10, y: true, z: 42};
 >   (foo, bar)
 > (Int, Bool)
-> let x, y = (x: 10, y: <true>, z: 42).(x, y); let  = %yield((0: x, 1: y)); done
+> let x, y, z = (x: 10, y: <true>, z: 42).(x, y, z);
+> let  = %yield((0: x, 1: y));
+> done
 
 
 # Tuple bindings
@@ -577,25 +579,25 @@ let (x, y) = (false, (), 3); #{x,y}
 > let  = %yield((x: v0, y: v1));
 > done
 
-let {x: foo, y: bar} : {x:Int, y:Bool} = #{x:1, y:true}; foo
-> let {x: foo, y: bar} : {x: Int, y: Bool} = #{x: 1, y: true}; foo
->   let {x: foo, y: bar} : {x: Int, y: Bool} = #{x: 1, y: true}; foo
+let #{x: foo, y: bar} : #{x:Int, y:Bool} = #{x:1, y:true}; foo
+> let #{x: foo, y: bar} : #{x: Int, y: Bool} = #{x: 1, y: true}; foo
+>   let #{x: foo, y: bar} : #{x: Int, y: Bool} = #{x: 1, y: true}; foo
 > Int
 > let x, y = (x: 1, y: <true>).(x, y); let  = %yield(x); done
 
-let {x: foo, y: bar} : {x:Int} = #{x:1, y:true}; foo
-> let {x: foo, y: bar} : {x: Int} = #{x: 1, y: true}; foo
-> test:1: The field 'y' is missing.
->   let {x: foo, y: bar} : {x:Int} = #{x:1, y:true}; foo
->       ^^^^^^^^^^^^^^^^
->      found: {x: _}
->   expected: {x: _, y: _}
-> This {x: _} comes from test:1:
->   let {x: foo, y: bar} : {x:Int} = #{x:1, y:true}; foo
->                          ^^^^^^^
-> but is used as {x: _, y: _} at test:1:
->   let {x: foo, y: bar} : {x:Int} = #{x:1, y:true}; foo
->                ^
+let #{x: foo, y: bar} : #{x:Int} = #{x:1, y:true}; foo
+> let #{x: foo, y: bar} : #{x: Int} = #{x: 1, y: true}; foo
+> test:1: A surplus field 'y' is present.
+>   let #{x: foo, y: bar} : #{x:Int} = #{x:1, y:true}; foo
+>                                      ^^^^^^^^^^^^^^
+>      found: #{x: _, y: _}
+>   expected: #{x: _}
+> This #{x: _, y: _} comes from test:1:
+>   let #{x: foo, y: bar} : #{x:Int} = #{x:1, y:true}; foo
+>                                             ^
+> but is used as #{x: _} at test:1:
+>   let #{x: foo, y: bar} : #{x:Int} = #{x:1, y:true}; foo
+>                           ^^^^^^^^
 
 let {x: foo, y: bar} : {x:Int,y:Int} = #{x:1, y:true}; foo
 > let {x: foo, y: bar} : {x: Int, y: Int} = #{x: 1, y: true}; foo
@@ -621,9 +623,9 @@ let {x: foo, y: bar} : {x:Int,y:Bool,z:Bool} = #{x:1, y:true}; foo
 
 # punning
 
-let {x, y} : {x:Int, y:Bool} = #{x:1, y:true}; (y,x)
-> let {x, y} : {x: Int, y: Bool} = #{x: 1, y: true}; (y, x)
->   let {x, y} : {x: Int, y: Bool} = #{x: 1, y: true}; (y, x)
+let #{x, y} : #{x:Int, y:Bool} = #{x:1, y:true}; (y,x)
+> let #{x, y} : #{x: Int, y: Bool} = #{x: 1, y: true}; (y, x)
+>   let #{x, y} : #{x: Int, y: Bool} = #{x: 1, y: true}; (y, x)
 > (Bool, Int)
 > let x, y = (x: 1, y: <true>).(x, y); let  = %yield((0: y, 1: x)); done
 
@@ -876,10 +878,10 @@ fn (x) { if x.cond { #{q:2,p:1} } else { #{p:2,q:1} } }
 > });
 > done
 
-fn (x) { let {p,q}=x; x }
-> fn (x) { let {p, q} = x; x }
->   fn [a <: {p: Any, q: Any}](x: a) -> a { let {p, q} : a = x; x }
-> [a <: {p: Any, q: Any}] a -> a
+fn (x) { let #{p,q}=x; x }
+> fn (x) { let #{p, q} = x; x }
+>   fn [a <: #{p: Any, q: Any}](x: a) -> a { let #{p, q} : a = x; x }
+> [a <: #{p: Any, q: Any}] a -> a
 > let  = %yield(fun (x) ret { let p, q = x.(p, q); ret(x) }); done
 
 fn (x) { let #{p,q} = x; let #{p,q,r} = x; #{p,q} }
@@ -897,14 +899,14 @@ fn (x) { let #{p,q} = x; let #{p,q,r} = x; #{p,q} }
 > });
 > done
 
-fn (x) { let {p,q} = x; let #{p,q,r} = x; #{p,q} }
-> fn (x) { let {p, q} = x; let #{p, q, r} = x; #{p, q} }
->   fn [a, b](x: #{p: a, q: b, r: Any}) -> (#{p: a, q: b}) {
->     let {p, q} : #{p: a, q: b, r: Any} = x;
->     let #{p, q, r} : #{p: a, q: b, r: Any} = x;
+fn (x) { let #{p,q} = x; let #{p,q,r} = x; #{p,q} }
+> fn (x) { let #{p, q} = x; let #{p, q, r} = x; #{p, q} }
+>   fn [a, b](x: #{p: a, q: b, r: absent}) -> (#{p: a, q: b}) {
+>     let #{p, q} : #{p: a, q: b, r: absent} = x;
+>     let #{p, q, r} : #{p: a, q: b, r: absent} = x;
 >     #{p, q}
 >   }
-> [a, b] (#{p: a, q: b, r: Any}) -> #{p: a, q: b}
+> [a, b] (#{p: a, q: b, r: absent}) -> #{p: a, q: b}
 > let  = %yield(fun (x) ret {
 >   let p, q = x.(p, q);
 >   let p2, q2, r = x.(p, q, r);
@@ -2243,4 +2245,4 @@ fn h() { f(#Foo{foo:#{p:1}}) }
 > fn h() -> (#{p: Int}) { f(#Foo{foo: #{p: 1}}) }
 
 
-> STATS: fix: 129, flex: 1286
+> STATS: fix: 129, flex: 1283

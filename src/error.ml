@@ -16,7 +16,7 @@ type error_kind =
       ]
   | Conflict of [`Expr|`Pat|`Subtype|`Field_override of string * Tuple_fields.field_name option] * Types.subtyping_error
   (* FIXME: Maybe delete Unknown_constructor, it's worse than a standard type error *)
-  | Illformed_pat of [`Duplicate_name of string * Location.t | `Orpat_different_names of string | `Wrong_length of int * int | `Unknown_cases | `Unknown_constructor of string]
+  | Illformed_pat of [`Tag_required | `Duplicate_name of string * Location.t | `Orpat_different_names of string | `Wrong_length of int * int | `Unknown_cases | `Unknown_constructor of string]
   | Incompatible_patterns of Location.t
   | Nonexhaustive of Exp.pat list list
   | Bad_tuple_intro of [`Tag of Exp.tuple_tag option * Exp.tuple_tag list | `Opt]
@@ -172,6 +172,8 @@ let pp_err input loc err : PPrint.document =
      pp "This pattern:" ^^ context ^^
        hardline ^^ pp "is incompatible with the pattern at " ^^ pp_loc other_loc ^^ pp ":" ^^
        nest 2 (hardline ^^ pp_context other_loc)
+  | Illformed_pat `Tag_required ->
+     pp "This pattern is missing a tag" ^^ context
   | Illformed_pat (`Duplicate_name (k, other)) ->
      pp "The variable name %s is already in use:" k ^^ context ^^
        hardline ^^ pp "as it is previously bound here:" ^^

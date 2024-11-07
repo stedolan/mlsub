@@ -38,7 +38,6 @@ and _ dectree' =
   | Cases :
       (Typedefs.Cons1.tuple_tag * 'n fields_split) list
       * ((Typedefs.Cons1.tuple_tag * unit Fields.t) list * 'n dectree) option -> 'n s dectree'
-  | Fields : 'n fields_split -> 'n s dectree'
 
 and 'n fields_split =
   | Proj : ('m, 'n, Tuple_fields.field_name) Clist.prefix * Exp.extensible_flag * 'm dectree -> 'n fields_split
@@ -54,7 +53,6 @@ module Hashcons = struct
        List.for_all (fun (_, Proj (_, _, fs)) -> fs.empty) cases
        &&
        (match def with Some (_, t) -> t.empty | None -> true)
-    | Fields (Proj (_, _, fs)) -> fs.empty
 
   let is_total : type a . a dectree' -> bool = function
     | Done _ -> true
@@ -65,7 +63,6 @@ module Hashcons = struct
        List.for_all (fun (_, Proj (_, _, fs)) -> fs.total) cases
        &&
        (match def with Some (_, t) -> t.total | None -> true)
-    | Fields (Proj (_, _, fs)) -> fs.total
 
   let mk (type n) (t : n dectree') : n dectree =
     { tree = t;
@@ -93,7 +90,6 @@ end)
 (* The result of splitting a (w+1)-size matrix along the first column *)
 type 'w split_head =
   | Sp_any of 'w pat_matrix
-  | Sp_fields of 'w split_fields
   | Sp_cases of tuple_tag list * 'w split_fields TagMap.t * 'w pat_matrix
 
 (* Sp_fields: always open, Sp_cases: always closed *)
@@ -134,40 +130,19 @@ let rec split_head_row :
           match split with
           | Sp_any m ->
              Sp_any ((ps, act) :: m)
-          | Sp_fields fields ->
-             Sp_fields (no_fields fields)
           | Sp_cases (tags, cases, def) ->
              Sp_cases (tags,
                        TagMap.map no_fields cases,
                        (ps,act) :: def)
         in
         var, split
-     | Ptuple (None, fields) ->
-        let acc_fields =
-          match split with
-          | Sp_fields fields -> fields
-          | Sp_any m -> List.map (fun r -> (Fields.empty, []), r) m
-          | Sp_cases (_tags, cases, _def) ->
-             let other_locs =
-               TagMap.bindings cases
-               |> List.concat_map snd
-               |> List.concat_map (fun ((_,l),_) -> l)
-             in
-             Error.fail head_loc (Incompatible_patterns other_locs)
-        in
-        let split = Sp_fields ((head_fields ~loc:head_loc fields, (ps, act)) :: acc_fields) in
-        var, split
+     | Ptuple (None, _) ->
+        Error.fail head_loc (Illformed_pat `Tag_required)
      | Ptuple (Some tagloc, fields) ->
         let acc_tags, acc_cases, acc_def =
           match split with
           | Sp_cases (tags, cases, def) -> tags, cases, def
           | Sp_any m -> [], TagMap.empty, m
-          | Sp_fields fs ->
-             let other_locs =
-               fs
-               |> List.concat_map (fun ((_,l),_) -> l)
-             in
-             Error.fail head_loc (Incompatible_patterns other_locs)
         in
         let tail =
           try TagMap.find tagloc acc_cases
@@ -294,17 +269,6 @@ let rec split_cases :
        | Sp_any mat ->
           let rest = split_cases ~matchloc ~env typs mat in
           Any rest
-       | Sp_fields fields ->
-          let fnames, loc = collect_fields ~fopen:Ext_open fields in
-          (* FIXME loc? *)
-          let fnames = Fields.map ~pos:(fun () -> ref (tbot None)) fnames in
-          let cons = Cons1.Record {tag=None; args=[]; body=fnames} in
-          begin match Types.match_ptyp ~loc:matchloc env typ [cons] with
-          | Ok () ->
-             let ftypes = Fields.map ~pos:(fun t -> !t) fnames in
-             Fields (split_fields ~fopen:Ext_open ftypes fields)
-          | Error e -> Error.fail loc (Conflict (`Pat, e))
-          end
        | Sp_cases (tags, cases, def) ->
           let extract_cases = function
             (* FIXME handle rigvars with tagged bounds too *)
@@ -411,8 +375,6 @@ let rec counterexamples :
   | _ :: len, Any dt ->
      counterexamples len dt
      |> List.map (fun ps -> Clist.(any :: ps))
-  | _ :: len, Fields fields ->
-     counterexamples_fields ~tag:None len fields
   | _ :: len, Cases (cases, defaults) ->
      List.concat_map (fun (tag, fields) ->
        counterexamples_fields ~tag:(Some tag) len fields) cases
@@ -580,8 +542,6 @@ let compile ~actions vals orig_dt =
            compile ~vals dt)
        in
        Match (v, cases, default)
-    | Fields fs, v :: vals ->
-       Project (v, compile_fields ~vals fs)
 
   and compile_fields :
     type w . vals:(w, IR.value) Clist.t -> w fields_split -> IR.unpacking_cont =
