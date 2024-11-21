@@ -1097,11 +1097,11 @@ let mayloc t = (Some t, Location.noloc)
 let unparse_fields ~pos ~tag ({fields; fnames} : _ Fields.t) =
   let open Fields in
   let unparse_field_desc k = function
-    | Funknown l -> (k,l), Exp.Optional, None
-    | Foptional (a, l) -> (k,l.pres_loc), Exp.Optional, Some (pos a)
-    | Fpresent (a, l) -> (k,l), Exp.Mandatory, Some (pos a)
-    | Fabsent l -> (k,l), Exp.Optional, Some (mktyexp (Ttyvar ("absent", Location.noloc)))
-    | Fbroken l -> (k,l.abs_loc), Exp.Mandatory, Some (mktyexp (Ttyvar ("absent", Location.noloc)))
+    | Funknown l -> (k,l), Exp.Optional None
+    | Foptional (a, l) -> (k,l.pres_loc), Exp.Optional (Some (pos a))
+    | Fpresent (a, l) -> (k,l), Exp.Mandatory (Some (pos a))
+    | Fabsent l -> (k,l), Exp.Absent
+    | Fbroken l -> (k,l.abs_loc), Exp.Abs_broken
   in
   match
     if tag = None then raise Exit;

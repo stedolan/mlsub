@@ -44,8 +44,12 @@ and free_type_names' =
 and free_type_names_fields fs =
   fs
   |> Exp.record_fields ~loc:Location.noloc
-  |> List.concat_map (fun (_,_,t) -> Option.to_list (Option.map free_type_names t))
+  |> List.map (fun (_,t) -> free_type_names_field t)
   |> List.fold_left SymSet.union SymSet.empty
+and free_type_names_field (t : _ Exp.exp_field) =
+  match t with
+  | Mandatory (Some t) | Optional (Some t) -> free_type_names t
+  | _ -> SymSet.empty
 
 type scc_state =
   { index: int;

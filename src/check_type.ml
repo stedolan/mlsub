@@ -140,21 +140,21 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
 and typs_of_fields : 'a 'b . lookup:lookup_fn -> env:env -> tyexp fields loc -> ('a,'b) typ Fields.t =
   fun ~lookup ~env (fields,loc) ->
   let fields = Exp.record_fields ~loc fields in
-  let fnames = List.map (fun ((f,_), _, _) -> f) fields in
-  let fields = List.fold_left (fun acc ((f,floc), m, ty) ->
+  let fnames = List.map (fun ((f,_), _) -> f) fields in
+  let fields = List.fold_left (fun acc ((f,floc), ty) ->
     let ty : _ Fields.field_desc =
-      match m, ty with
-      | Optional, Some (Some (Ttyvar ("absent", _)), _) ->
+      match ty with
+      | Absent ->
          Fabsent floc
-      | Mandatory, Some (Some (Ttyvar ("absent", _)), _) ->
+      | Abs_broken ->
          Fbroken {abs_loc=floc; pres_loc=floc}
-      | Optional, None ->
+      | Optional None ->
          Funknown floc
-      | Optional, Some ty ->
+      | Optional (Some ty) ->
          Foptional (typ_of_tyexp ~lookup ~env ty, {abs_loc=floc; pres_loc=floc})
-      | Mandatory, Some ty ->
+      | Mandatory (Some ty) ->
          Fpresent (typ_of_tyexp ~lookup ~env ty, floc)
-      | Mandatory, None ->
+      | Mandatory None ->
          fail loc Syntax
     in FieldMap.add f ty acc)
     FieldMap.empty

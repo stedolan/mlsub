@@ -85,13 +85,14 @@ let fields ~tcomma f = function
      let fs = List.map f fs in
      parens (sep comma fs)
   | Frecord fs ->
-     let mand_flag = function
-       | Mandatory -> empty
-       | Optional -> string "?"
-     in
      let fs = List.map (function
-       | ((s,_loc), m, Some x) -> field_name s ^^ mand_flag m ^^ string ":" ^^ break 1 ^^ f x
-       | ((s,_loc), m, None) -> field_name s ^^ mand_flag m) fs in
+       | ((s,_loc), Mandatory (Some x)) -> field_name s ^^ string ":" ^^ break 1 ^^ f x
+       | ((s,_loc), Mandatory None) -> field_name s
+       | ((s,_loc), Optional (Some x)) -> field_name s ^^ string "?:" ^^ break 1 ^^ f x
+       | ((s,_loc), Optional None) -> field_name s ^^ string "?"
+       | ((s,_loc), Absent) -> field_name s ^^ string "?: absent"
+       | ((s,_loc), Abs_broken) -> field_name s ^^ string ": absent") fs
+     in
      braces (sep (ifflat comma empty) fs)
 
 (* FIXME syntax *)

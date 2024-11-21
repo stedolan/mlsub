@@ -221,7 +221,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      let cons_fail err cploc (cn,cnloc) =
        let fields =
          Exp.record_fields ~loc:eloc fields
-         |> List.map (fun ((f,loc),_,_e) -> f, Fields.Fpresent ((),loc))
+         |> List.map (fun ((f,loc),_) -> f, Fields.Fpresent ((),loc))
          |> Fields.of_list
        in
        (* drop tag to avoid making invalid args *)
@@ -244,12 +244,14 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      (* expand punned fields *)
      let fields =
        Exp.record_fields ~loc:eloc fields
-       |> List.map (fun ((f,floc), m, e) ->
-         if m = Optional then fail floc (Bad_tuple_intro `Opt);
+       |> List.map (fun ((f,floc), e) ->
          let e = match f, e with
-           | _, Some e -> e
-           | Field_positional _, None -> fail floc Syntax
-           | Field_named k, None -> (Some (Exp.Var ({label=k; shift=0}, floc)), floc) in
+           | _, (Optional _ | Absent | Abs_broken) ->
+              fail floc (Bad_tuple_intro `Opt)
+           | _, Mandatory (Some e) -> e
+           | Field_positional _, Mandatory None -> fail floc Syntax
+           | Field_named k, Mandatory None ->
+              (Some (Exp.Var ({label=k; shift=0}, floc)), floc) in
          (f, floc), e, ref None)
      in
 

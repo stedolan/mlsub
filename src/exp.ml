@@ -23,27 +23,38 @@ type extensible_flag =
   | Ext_open
   | Ext_closed
 
+type 'a exp_field =
+  | Mandatory of 'a
+  | Optional of 'a
+  | Absent
+  | Abs_broken (* Both mandatory and absent *)
+
 type 'a fields =
   | Ftuple of 'a list
-  | Frecord of (Tuple_fields.field_name loc * mand_flag * 'a option) list
+  | Frecord of (Tuple_fields.field_name loc * 'a option exp_field) list
 
 let empty_fields = Ftuple []
 
-let map_fields ?(loc=Fun.id) f = function
-  | Ftuple x -> Ftuple (List.mapi (fun i x -> f (Tuple_fields.Field_positional i, Mandatory) x) x)
-  | Frecord fs -> Frecord (List.map (fun ((s,sloc),m,x) -> (s,loc sloc), m, Option.map (f (s,m)) x) fs)
+let map_exp_field f = function
+  | Mandatory x -> Mandatory (f x)
+  | Optional x -> Optional (f x)
+  | Absent | Abs_broken as x -> x
+
+let map_fields ~loc f = function
+  | Ftuple x -> Ftuple (List.map f x)
+  | Frecord fs -> Frecord (List.map (fun ((s,sloc),m) -> (s,loc sloc), map_exp_field (Option.map f) m) fs)
 
 (* FIXME: is this a better repr? *)
 let record_fields ~loc = function
   | Ftuple xs ->
-     List.mapi (fun i x -> (Tuple_fields.Field_positional i, loc), Mandatory, Some x) xs
+     List.mapi (fun i x -> (Tuple_fields.Field_positional i, loc), Mandatory (Some x)) xs
   | Frecord fields -> fields
 
 let of_record_fields fs =
   match
     List.mapi (fun i x ->
       match x with
-      | (Tuple_fields.Field_positional j, _), Mandatory, Some x when i = j -> x
+      | (Tuple_fields.Field_positional j, _), Mandatory (Some x) when i = j -> x
       | _ -> raise_notrace Exit) fs
   with
   | ts -> Ftuple ts
@@ -153,7 +164,7 @@ let mapper =
 
   let case r ((pats, ploc), exp) = ((List.map (List.map (r.pat r)) pats, r.loc r ploc), r.exp r exp) in
 
-  let fields f r fs = map_fields ~loc:(r.loc r) (fun _fn e -> f r e) fs in
+  let fields f r fs = map_fields ~loc:(r.loc r) (fun e -> f r e) fs in
 
   let tuple_tag r t = match t with
     | Anon_tag -> Anon_tag

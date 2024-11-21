@@ -42,6 +42,7 @@ let rec lex buf =
   | "$outer" -> SHIFT
   | "match" -> MATCH
   | "type" -> TYPE
+  | "absent" -> ABSENT
 
   | "Any" -> T_ANY
   | "Nothing" -> T_NOTHING

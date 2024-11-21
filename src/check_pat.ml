@@ -100,12 +100,12 @@ and 'w split_fields =
 let head_fields ~loc (fields : pat fields) : pat Typedefs.Fields.t Location.loc =
   let fields = Exp.record_fields ~loc fields in
   (fields
-  |> List.map (fun ((f, floc), m, pat) ->
+  |> List.map (fun ((f, floc), pat) ->
      let desc : pat Fields.field_desc =
-       match m, pat with
-       | Mandatory, Some p -> Fpresent (p, floc)
-       | Mandatory, None -> Fpresent ((Some (pvar (Tuple_fields.string_of_field_name f, floc)), floc), floc)
-       | Optional, _ -> unimp "Optional field pattern matching"
+       match pat with
+       | Mandatory (Some p) -> Fpresent (p, floc)
+       | Mandatory None -> Fpresent ((Some (pvar (Tuple_fields.string_of_field_name f, floc)), floc), floc)
+       | _ -> unimp "Optional field pattern matching"
      in f, desc)
   |> Fields.of_list),
   loc
@@ -387,7 +387,7 @@ let rec counterexamples :
               Fields.to_list fields
               |> List.map (function
                 | f, Fields.Fpresent ((), _) ->
-                   (f, Location.noloc), Mandatory, Some any
+                   (f, Location.noloc), Mandatory (Some any)
                 | _ -> unimp "unimplemented counterex type")
             in
             ptuple ~tag:(Some tag) flist)
@@ -407,7 +407,7 @@ and counterexamples_fields :
     let fields =
       Clist.zip names fs
       |> Clist.to_list
-      |> List.map (fun (f,p) -> (f, Location.noloc), Exp.Mandatory, Some p)
+      |> List.map (fun (f,p) -> (f, Location.noloc), Exp.Mandatory (Some p))
     in
     Clist.(ptuple ~tag fields :: rest))
 

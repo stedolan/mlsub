@@ -149,9 +149,9 @@ module Elaborate = struct
     |> List.map (function
         | (Field_named k, _) as f,
           (Some (Var (({label=s';shift=0},_), _)), _) when k = s' ->
-           f, Mandatory, None
+           f, Mandatory None
         | f, e ->
-           f, Mandatory, Some (exp env e))
+           f, Mandatory (Some (exp env e)))
     |> Exp.of_record_fields
 
   and case env (ps, e) = (ps, exp env e.act_body)

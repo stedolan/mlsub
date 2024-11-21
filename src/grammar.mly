@@ -12,6 +12,7 @@
 %token SUBTYPE SUPTYPE AT TYPE
 %token MATCH
 %token T_ANY T_NOTHING
+%token ABSENT
 
 %nonassoc low_priority
 %nonassoc ARROW
@@ -73,12 +74,6 @@ literal_:
 | FALSE
   { Bool false }
 
-%inline mand_flag:
-|
-  { Mandatory }
-| QUESTION
-  { Optional }
-
 field_name:
 | f = SYMBOL
   { Field_named f }
@@ -100,10 +95,18 @@ fields_paren_items(X):
   { (f::fs), false }
 
 fields_brace_item(X):
-| f = loc(field_name); m = mand_flag; COLON; e = X
-  { f, m, Some e }
-| f = loc(field_name); m = mand_flag
-  { f, m, None }
+| f = loc(field_name); COLON; e = X
+  { f, Mandatory (Some e) }
+| f = loc(field_name); QUESTION; COLON; e = X
+  { f, Optional (Some e) }
+| f = loc(field_name)
+  { f, Mandatory None }
+| f = loc(field_name); QUESTION
+  { f, Optional None }
+| f = loc(field_name); QUESTION; COLON; ABSENT
+  { f, Absent }
+| f = loc(field_name); COLON; ABSENT
+  { f, Abs_broken }
 
 fields_brace_items1(X):
 | f = fields_brace_item(X); ioption(COMMA)
