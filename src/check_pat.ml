@@ -2,6 +2,8 @@ open Exp
 open Typedefs
 open Util
 
+module FieldMap = Tuple_fields.FieldOrdMap
+
 module List = struct
   include List
 
@@ -21,7 +23,7 @@ end
 
 module Fields = Typedefs.Fields
 
-module TagMap = Map.Make (struct
+module TagMap = OrdMap (struct
   type t = tuple_tag
   let compare (a : t) (b : t) =
     match a, b with
@@ -48,7 +50,7 @@ type pat_head =
 type split_kind =
   | Split_none
   | Split_any
-  | Split_cases of (mand_flag loc Fields.Map.t * Exp.extensible_flag * Location.t) TagMap.t * Exp.extensible_flag loc
+  | Split_cases of (mand_flag loc FieldMap.t * Exp.extensible_flag * Location.t) TagMap.t * Exp.extensible_flag loc
 
 let split_kind (pats : pat_head loc list) : split_kind =
   let find_cases : pat_head loc -> _ = function
@@ -56,13 +58,14 @@ let split_kind (pats : pat_head loc list) : split_kind =
        Either.Left loc
     | Ph_tuple (tag, fields), loc ->
        let fields =
-         List.fold_left
-           (fun acc ((fn,loc), pat) ->
-             match Fields.Map.find fn acc with
-             | (_, loc') ->
+         Exp.record_fields ~loc fields
+         |> List.map (fun ((fn,loc),pat) -> fn,(loc,pat))
+         |> FieldMap.of_multi_list
+              ~merge:(fun fn (loc',_pat') (loc,_pat) ->
                 let name = Tuple_fields.string_of_field_name fn in
-                Error.fail loc (Illformed_pat (`Duplicate_name (`Field, name, loc')))
-             | exception Not_found ->
+                Error.fail loc (Illformed_pat (`Duplicate_name (`Field, name, loc'))))
+         |> FieldMap.map
+              ~f:(fun (loc,pat) ->
                 let mand =
                   match pat with
                   | Exp.Optional _ | Exp.Absent -> Optional
@@ -71,17 +74,15 @@ let split_kind (pats : pat_head loc list) : split_kind =
                      (* FIXME better error? *)
                      Error.fail loc Syntax
                 in
-                Fields.Map.add fn (mand, loc) acc)
-           Fields.Map.empty
-           (Exp.record_fields ~loc fields)
+                (mand, loc))
        in
-       Either.Right (tag, fields, Ext_closed, loc)
+       Either.Right (tag, (fields, Ext_closed, loc))
   in
   match List.partition_map find_cases pats with
   | [], [] -> Split_none
   | (_::_), [] -> Split_any
   | wildcard, cases ->
-    let merge (fields1, ex1, loc1) (fields2, ex2, loc2) =
+    let merge _tag (fields1, ex1, loc1) (fields2, ex2, loc2) =
       let ex, loc =
         match ex1, ex2 with
         | Ext_open, Ext_open -> Ext_open, loc1
@@ -89,8 +90,8 @@ let split_kind (pats : pat_head loc list) : split_kind =
         | Ext_closed, Ext_open -> Ext_closed, loc1
         | Ext_closed, Ext_closed -> Ext_closed, loc1
       in
-      Fields.Map.merge
-        (fun _fn f1 f2 ->
+      FieldMap.merge fields1 fields2
+        ~f:(fun _fn f1 f2 ->
           match f1, f2 with
           | None, None
           | Some (Mandatory, _), Some (Mandatory, _)
@@ -100,23 +101,11 @@ let split_kind (pats : pat_head loc list) : split_kind =
           | f1, f2 ->
              let loc1 = match f1 with Some (_,l) -> l | None -> loc1 in
              let loc2 = match f2 with Some (_,l) -> l | None -> loc2 in
-             Error.fail loc1 (Incompatible_patterns loc2))
-        fields1
-        fields2,
+             Error.fail loc1 (Incompatible_patterns loc2)),
       ex,
       loc
     in
-    let case_map =
-      List.fold_left
-        (fun acc (tag, fields, ex, loc) ->
-          match TagMap.find tag acc with
-          | exception Not_found ->
-             TagMap.add tag (fields, ex, loc) acc
-          | fs ->
-             TagMap.add tag (merge fs (fields,ex,loc)) acc)
-        TagMap.empty
-        cases
-    in
+    let case_map = TagMap.of_multi_list ~merge cases in
     let ext = match wildcard with loc::_ -> Ext_open, loc | [] -> Ext_closed, (Location.fixme "unneeded?") in
     Split_cases (case_map, ext)
 
@@ -151,21 +140,21 @@ let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
   | Split_none | Split_any -> Split_type_any
   | Split_cases (cases, (ext, extloc)) ->
      let split_fields fields =
-       let fields = Fields.Map.map (fun (mand,loc) -> mand, loc, ref (tbot (Some loc))) fields in
+       let fields = FieldMap.map ~f:(fun (mand,loc) -> mand, loc, ref (tbot (Some loc))) fields in
        let tybody =
          fields
-         |> Fields.Map.map (function
+         |> FieldMap.map ~f:(function
            | Mandatory, loc, ty ->
               Fields.Fpresent (ty, loc)
            | Optional, loc, ty ->
               let loc = Fields.{pres_loc=loc; abs_loc=loc} in
               Fields.Foptional (ty, loc) )
-         |> Fields.Map.bindings
+         |> FieldMap.to_list
          |> Fields.of_list
        in
        let split =
          fields
-         |> Fields.Map.bindings
+         |> FieldMap.to_list
          |> List.map (fun (name, (mand, _loc, ty)) -> name, mand, ty)
        in
        tybody, split
@@ -177,8 +166,8 @@ let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
      let splits =
        match ptyp_conses ~env t with
        | Some checking_conses ->
-          TagMap.merge
-            (fun tag case ck ->
+          TagMap.merge cases checking_conses
+            ~f:(fun tag case ck ->
               match case, ck with
               | None, None -> None
               | Some _, None ->
@@ -214,14 +203,12 @@ let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
                  (* No error here: the unhandled cases will be reported as
                     nonexhaustive matches by counterexample generation later. *)
                  Some [] (*FIXME should be Ext_open?*))
-            cases
-            checking_conses
-          |> TagMap.bindings
+          |> TagMap.to_list
        | None ->
           (* Infer type of patterns *)
           if ext = Ext_open then Error.fail extloc (Illformed_pat `Unknown_cases);
           let conses, splits =
-            TagMap.bindings cases
+            TagMap.to_list cases
             |> List.map (fun (tag, (fields, ext, loc)) ->
                if ext = Ext_open then
                  (* FIXME test *)

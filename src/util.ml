@@ -97,7 +97,7 @@ module AssocList__UNUSED : sig
     val add : 'a t -> el -> 'a -> merge:('a -> 'a -> 'a) -> 'a t
     val append : 'a t -> 'a t -> merge:('a -> 'a -> 'a) -> 'a t
     val append' : 'a t -> (el * 'a) list -> merge:('a -> 'a -> 'a) -> 'a t
-  
+
     val filter : 'a t -> f:(el -> bool) -> 'a t
     val partition : 'a t -> f:(el -> bool) -> 'a t * 'a t
     val mem : el -> 'a t -> bool
@@ -117,10 +117,10 @@ end = struct
   module Make (El : sig type t val equal : t -> t -> bool end) = struct
     type el = El.t
     type 'a t = (el * 'a) list
-  
+
     let empty = []
     let single k v = [k, v]
-  
+
     let rec add xs k' v' ~merge =
       match xs with
       | [] -> [k', v']
@@ -137,11 +137,11 @@ end = struct
       | (k, v) :: ys -> append (add xs k v ~merge) ys ~merge
 
     let append' = append
-  
+
     let filter xs ~f = List.filter (fun (k,_) -> f k) xs
 
     let partition xs ~f = List.partition (fun (k, _) -> f k) xs
-  
+
     let mem x xs = List.exists (fun (k, _) -> El.equal k x) xs
 
     let is_empty = function [] -> true | _ :: _ -> false
@@ -218,32 +218,32 @@ end
 
 module Vector : sig
   type 'a t
-  
+
   val create : unit -> 'a t
-  
+
   val length : 'a t -> int
   val push : 'a t -> 'a -> int
   (* raises Invalid_argument if >= length *)
   val get : 'a t -> int -> 'a
-  
+
   val to_array : 'a t -> 'a array
   val of_array : 'a array -> 'a t
-  
+
   val clear : 'a t -> unit
-  
+
   val iter : 'a t -> ('a -> unit) -> unit
   val iteri : 'a t -> (int -> 'a -> unit) -> unit
-  
+
   val fold_lefti : ('a -> int -> 'b -> 'a) -> 'a -> 'b t -> 'a
 end = struct
   type 'a t = {
     mutable contents : 'a array;
     mutable length : int;
   }
-  
+
   let create () =
     { contents = [| |]; length = 0 }
-  
+
   let push v x =
     let pos = v.length in
     assert (pos <= Array.length v.contents);
@@ -259,30 +259,30 @@ end = struct
       v.length <- pos + 1;
     end;
     pos
-  
+
   let length { length; _ } = length
   let get v i = v.contents.(i)
-  
+
   let iter v f =
     for i = 0 to v.length - 1 do
       f (v.contents.(i))
     done
-  
+
   let iteri v f =
     for i = 0 to v.length - 1 do
       f i (v.contents.(i))
     done
-  
+
   let fold_lefti f acc vec =
     let r = ref acc in
     for i = 0 to vec.length - 1 do
       r := f !r i vec.contents.(i)
     done;
     !r
-  
+
   let to_array vec = Array.sub vec.contents 0 vec.length
   let of_array arr = { contents = arr; length = Array.length arr }
-  
+
   let clear vec = vec.length <- 0
 end
 
@@ -617,4 +617,65 @@ end = struct
 
   let fold f t acc =
     Hashtbl.fold (fun _ kv acc -> f kv acc) t acc
+end
+
+module OrdMap (X : Map.OrderedType) : sig
+  type key = X.t
+  type !+'a t
+
+  val empty : 'a t
+  val singleton : key -> 'a -> 'a t
+
+  val find_exn : key -> 'a t -> 'a
+  val find_opt : key -> 'a t -> 'a option
+
+  val map : 'a t -> f:('a -> 'b) -> 'b t
+  val merge :
+    'a t -> 'b t ->
+    f:(key -> 'a option -> 'b option -> 'c option) ->
+    'c t
+
+  val to_list : 'a t -> (key * 'a) list
+  val of_multi_list : merge:(key -> 'a -> 'a -> 'a) -> (key * 'a) list -> 'a t
+  val of_list : (key * 'a) list -> 'a t
+end = struct
+  module Map = Map.Make (X)
+  type key = X.t
+  type 'a t = key list * 'a Map.t
+
+  let empty = [], Map.empty
+
+  let singleton k v = [k], Map.singleton k v
+
+  let find_exn k (_,xs) = Map.find k xs
+  let find_opt k (_,xs) = Map.find_opt k xs
+
+  let map (k,x) ~f = k, Map.map f x
+
+  let merge (ka, xa) (kb, xb) ~f =
+    let xs = Map.merge f xa xb in
+    let ks =
+      List.filter (fun k -> Map.mem k xs) ka @
+        List.filter (fun k -> Map.mem k xs && not (Map.mem k xa)) kb
+    in
+    ks, xs
+
+  let to_list (ks, xs) =
+    ks |> List.map (fun k -> k, Map.find k xs)
+
+  let of_multi_list ~merge bindings =
+    let keys_rev, xs =
+      List.fold_left
+        (fun (ks,xs) (k,v) ->
+          match Map.find k xs with
+          | exception Not_found -> (k :: ks, Map.add k v xs)
+          | v' -> (ks, Map.add k (merge k v' v) xs))
+        empty
+        bindings
+    in
+    List.rev keys_rev, xs
+
+  let of_list bindings =
+    of_multi_list bindings ~merge:(fun _ _ -> invalid_arg "OrdMap.of_list: duplicate key")
+
 end

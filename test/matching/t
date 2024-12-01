@@ -210,7 +210,6 @@ fn(c) {
 > });
 > done
 
-# FIXME field order
 fn(x) {
   match x {
   | #A(_, b) => b
@@ -218,21 +217,21 @@ fn(x) {
   }
 }
 > fn (x) { match x { #A(_, b) => b | #B{foo: (#C | #D), bar: x} => x } }
->   fn [a, b](x: #A(Any, a) | #B{bar: b, foo: #C | #D}) -> (a | b) {
+>   fn [a, b](x: #A(Any, a) | #B{foo: #C | #D, bar: b}) -> (a | b) {
 >     match x {
 >       | #A(_, b) => b
 >       | #B{foo: (#C | #D), bar: x} => x
 >     }
 >   }
-> [a, b] (#A(Any, a) | #B{bar: b, foo: #C | #D}) -> a | b
+> [a, b] (#A(Any, a) | #B{foo: #C | #D, bar: b}) -> a | b
 > let  = %yield(fun (x) ret {
 >   match x {
 >     A(0: v0,
 >     1: v1) -> {
 >       ret(v1)
 >     };
->     B(bar: bar,
->     foo: foo) -> {
+>     B(foo: foo,
+>     bar: bar) -> {
 >       match foo {
 >         C() -> {
 >           ret(bar)
@@ -513,7 +512,6 @@ fn (x) {
 >     (y.foo, y.bar)
 >               ^^^
 
-# FIXME case order
 let make = fn (x) {
   if x.good {
     #Good{foo: x.foo, bar: x.bar}
@@ -546,8 +544,8 @@ fn (x) { use(make(x)) }
 >       #Bad{foo: x.foo}
 >     }
 >   };
->   let use : [a, b] (#Bad{foo: a} | #Good{bar: Any, foo: b}) -> a | b =
->   fn [a, b](y: #Bad{foo: a} | #Good{bar: Any, foo: b}) -> (a | b) {
+>   let use : [a, b] (#Good{foo: a, bar: Any} | #Bad{foo: b}) -> a | b =
+>   fn [a, b](y: #Good{foo: a, bar: Any} | #Bad{foo: b}) -> (a | b) {
 >     match y {
 >       | #Good{foo: bar, bar: z} => bar
 >       | #Bad{foo: bar} => bar
@@ -575,8 +573,8 @@ fn (x) { use(make(x)) }
 > let use =
 >   fun (y) ret {
 >     match y {
->       Good(bar: bar,
->       foo: foo) -> {
+>       Good(foo: foo,
+>       bar: bar) -> {
 >         ret(foo)
 >       };
 >       Bad(foo: foo) -> {
@@ -758,7 +756,6 @@ fn(x : #A(Int, #P|#Q|#R) | #B(Int, #P|#Q|#R)) {
 > | #A(_, #R), _
 > | #B(_, #R), _
 
-# FIXME case order
 let calls_any = fn(f) {
   (f(#Foo), f(#Bar), f(#Baz))
 };
@@ -772,15 +769,15 @@ calls_any(use)
 > let calls_any = fn (f) { (f(#Foo), f(#Bar), f(#Baz)) };
 > let use = fn (x) { match x { #Foo => 1 | #Bar => 2 } };
 > calls_any(use)
-> test:10: The tag should be Bar|Foo, but tag Baz is present.
+> test:10: The tag should be Foo|Bar, but tag Baz is present.
 >   calls_any(use)
 >             ^^^
->      found: (#Bar | #Foo) -> _
+>      found: (#Foo | #Bar) -> _
 >   expected: #Baz -> _
 > This #Baz comes from test:2:
 >     (f(#Foo), f(#Bar), f(#Baz))
 >                          ^^^^
-> but is used as #Bar | #Foo at test:5:
+> but is used as #Foo | #Bar at test:5:
 >     match x {
 >           ^
 
