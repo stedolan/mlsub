@@ -98,25 +98,37 @@ fn(x) { let (a, b, c) = x; (c, b, a) }
 
 fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
 > fn (x) { match x { (_, _) => 1 | (_, _, _) => 2 } }
-> test:1: This pattern is unused
+> test:1: This pattern:
+>   fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
+>                     ^^^^^
+> is incompatible with the pattern at test:1:
 >   fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
 >                                  ^^^^^^^
 
 fn(x) { match x { (_,_,_) => 1 | (_,_) => 2 } }
 > fn (x) { match x { (_, _, _) => 1 | (_, _) => 2 } }
-> test:1: This pattern is unused
+> test:1: This pattern:
+>   fn(x) { match x { (_,_,_) => 1 | (_,_) => 2 } }
+>                     ^^^^^^^
+> is incompatible with the pattern at test:1:
 >   fn(x) { match x { (_,_,_) => 1 | (_,_) => 2 } }
 >                                    ^^^^^
 
 fn(x) { match x { #{p,q: qq} => 1 | #{p,r} => 2 } }
 > fn (x) { match x { #{p, q: qq} => 1 | #{p, r} => 2 } }
-> test:1: This pattern is unused
+> test:1: This pattern:
 >   fn(x) { match x { #{p,q: qq} => 1 | #{p,r} => 2 } }
->                                       ^^^^^^
+>                     ^^^^^^^^^^
+> is incompatible with the pattern at test:1:
+>   fn(x) { match x { #{p,q: qq} => 1 | #{p,r} => 2 } }
+>                                           ^
 
 fn(x) { match x { #{p,r} => 1 | #{p,q: qq} => 2 } }
 > fn (x) { match x { #{p, r} => 1 | #{p, q: qq} => 2 } }
-> test:1: This pattern is unused
+> test:1: This pattern:
+>   fn(x) { match x { #{p,r} => 1 | #{p,q: qq} => 2 } }
+>                         ^
+> is incompatible with the pattern at test:1:
 >   fn(x) { match x { #{p,r} => 1 | #{p,q: qq} => 2 } }
 >                                   ^^^^^^^^^^
 
@@ -150,9 +162,9 @@ fn(x) { match x { (a | #Foo) => 1 } }
 
 fn(x) { match (#A(1, 2)) { #A(x,#C) => 1 } }
 > fn (x) { match #A(1, 2) { #A(x, #C) => 1 } }
-> test:1: This type does not have a constructor #C
+> test:1: This pattern is unused
 >   fn(x) { match (#A(1, 2)) { #A(x,#C) => 1 } }
->                 ^^^^^^^^^^
+>                              ^^^^^^^^
 
 fn(x : #A(Int, Int) | #B(Int, Int)) {
   match x {
@@ -166,9 +178,9 @@ fn(x : #A(Int, Int) | #B(Int, Int)) {
 >     | (a, b) => (a, b)
 >   }
 > }
-> test:2: This type does not have a constructor #
->     match x {
->           ^
+> test:4: This pattern is unused
+>     | (a, b) => (a, b)
+>       ^^^^^^
 
 
 fn(c) {
@@ -198,6 +210,7 @@ fn(c) {
 > });
 > done
 
+# FIXME field order
 fn(x) {
   match x {
   | #A(_, b) => b
@@ -205,21 +218,21 @@ fn(x) {
   }
 }
 > fn (x) { match x { #A(_, b) => b | #B{foo: (#C | #D), bar: x} => x } }
->   fn [a, b](x: #A(Any, a) | #B{foo: #C | #D, bar: b}) -> (a | b) {
+>   fn [a, b](x: #A(Any, a) | #B{bar: b, foo: #C | #D}) -> (a | b) {
 >     match x {
 >       | #A(_, b) => b
 >       | #B{foo: (#C | #D), bar: x} => x
 >     }
 >   }
-> [a, b] (#A(Any, a) | #B{foo: #C | #D, bar: b}) -> a | b
+> [a, b] (#A(Any, a) | #B{bar: b, foo: #C | #D}) -> a | b
 > let  = %yield(fun (x) ret {
 >   match x {
 >     A(0: v0,
 >     1: v1) -> {
 >       ret(v1)
 >     };
->     B(foo: foo,
->     bar: bar) -> {
+>     B(bar: bar,
+>     foo: foo) -> {
 >       match foo {
 >         C() -> {
 >           ret(bar)
@@ -248,7 +261,10 @@ fn(x) {
 >     | #B{foo: (#C | #D), bar: x} => x
 >   }
 > }
-> test:4: This pattern is unused
+> test:3: This pattern:
+>     | #A(_, b) => b
+>       ^^^^^^^^
+> is incompatible with the pattern at test:4:
 >     | #A(_, _, _) => 42
 >       ^^^^^^^^^^^
 
@@ -278,16 +294,23 @@ fn(a, b) {
 > done
 
 
-# FIXME: badly broken
 fn() {
   match #D{x:5} {
     #D{x, y} => (x, y)
   }
 }
 > fn () { match #D{x: 5} { #D{x, y} => (x, y) } }
-> test:3: Unknown variable name y
+> test:3: The field 'y' is missing.
 >       #D{x, y} => (x, y)
->                       ^
+>       ^^^^^^^^
+>      found: #D{x: _}
+>   expected: {x: _, y: _}
+> This #D{x: _} comes from test:2:
+>     match #D{x:5} {
+>           ^^^^^^^
+> but is used as {x: _, y: _} at test:3:
+>       #D{x, y} => (x, y)
+>             ^
 
 
 #
@@ -373,20 +396,44 @@ fn(p, q) {
 # Grammar ambiguity requires parens on return type
 # (otherwise function body is misread as fields)
 fn(x : #A | #B | #C(Int) | #D{x:Int}) -> Int {
-  match x { #A => 1 | #B() => 2 | #C(x) => 3 | #D{x:foo, y:bar} | #E(foo,bar) => 5 }
+  match x { #A => 1 | #B() => 2 | #C(x) => 3 | #D{x:foo} | #E(foo,_) => 5 }
 }
 > fn (x: #A | #B | #C(Int) | #D{x: Int}) -> Int {
 >   match x {
 >     | #A => 1
 >     | #B => 2
 >     | #C(x) => 3
->     | #D{x: foo, y: bar}
->     | #E(foo, bar) => 5
+>     | #D{x: foo}
+>     | #E(foo, _) => 5
 >   }
 > }
-> test:2: This type does not have a constructor #E
->     match x { #A => 1 | #B() => 2 | #C(x) => 3 | #D{x:foo, y:bar} | #E(foo,bar) => 5 }
->           ^
+>   fn (x: #A | #B | #C(Int) | #D{x: Int}) -> Int {
+>     match x {
+>       | #A => 1
+>       | #B => 2
+>       | #C(x) => 3
+>       | #D{x: foo}
+>       | #E(foo, _) => 5
+>     }
+>   }
+> (#A | #B | #C(Int) | #D{x: Int}) -> Int
+> let  = %yield(fun (x) ret {
+>   match x {
+>     A() -> {
+>       ret(1)
+>     };
+>     B() -> {
+>       ret(2)
+>     };
+>     C(0: v0) -> {
+>       ret(3)
+>     };
+>     D(x: x2) -> {
+>       ret(5)
+>     }
+>   }
+> });
+> done
 
 # FIXME the exhaustivity checking is kinda broken here as types change
 # Should either report an unused pat on case 2 or unhandled (B,B)
@@ -408,9 +455,9 @@ fn (x) {
 > (#A | #B, #A) -> Int
 > RECHECK: Lang.Error.Fail(_)
 > 
-> test:2: This type does not have a constructor #B
->     match x {
->           ^
+> test:4: This pattern is unused
+>     | (#A, #B) => 2
+>       ^^^^^^^^
 > ELAB: Lang.Error.Fail(_)
 > 
 > ELABINF: Lang.Error.Fail(_)
@@ -466,6 +513,7 @@ fn (x) {
 >     (y.foo, y.bar)
 >               ^^^
 
+# FIXME case order
 let make = fn (x) {
   if x.good {
     #Good{foo: x.foo, bar: x.bar}
@@ -498,8 +546,8 @@ fn (x) { use(make(x)) }
 >       #Bad{foo: x.foo}
 >     }
 >   };
->   let use : [a, b] (#Good{foo: a, bar: Any} | #Bad{foo: b}) -> a | b =
->   fn [a, b](y: #Good{foo: a, bar: Any} | #Bad{foo: b}) -> (a | b) {
+>   let use : [a, b] (#Bad{foo: a} | #Good{bar: Any, foo: b}) -> a | b =
+>   fn [a, b](y: #Bad{foo: a} | #Good{bar: Any, foo: b}) -> (a | b) {
 >     match y {
 >       | #Good{foo: bar, bar: z} => bar
 >       | #Bad{foo: bar} => bar
@@ -527,8 +575,8 @@ fn (x) { use(make(x)) }
 > let use =
 >   fun (y) ret {
 >     match y {
->       Good(foo: foo,
->       bar: bar) -> {
+>       Good(bar: bar,
+>       foo: foo) -> {
 >         ret(foo)
 >       };
 >       Bad(foo: foo) -> {
@@ -678,15 +726,15 @@ fn (x : ((#A(Int,Int)|#B{x:String,y:String}|#C|#D|#E), #B|#C|#D)) {
 >     | (#D, #C) => 1
 >   }
 > }
-> test:2: Some cases of this pattern-match are missing:
->     match x {
->           ^
-> The following cases are unhandled:
-> | (#A(_, _), #B)
-> | (#B{x: _, y: _}, #B)
-> | (#C, (#B | #D))
-> | (#D, (#B | #D))
-> | (#E, _)
+> test:3: A surplus field 'y' is present.
+>     | (#A(_,_)|#B{}, #C|#D)
+>                ^^^^
+>      found: #B{x: _, y: _}
+>   expected: {}
+> This #B{x: _, y: _} comes from test:1:
+>   fn (x : ((#A(Int,Int)|#B{x:String,y:String}|#C|#D|#E), #B|#C|#D)) {
+>                                     ^
+> but is used as {}
 
 fn(x : #A(Int, #P|#Q|#R) | #B(Int, #P|#Q|#R)) {
   match #{averylongnameinanexpression: #{averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression, #{x:0,y:5}.y {
@@ -710,6 +758,7 @@ fn(x : #A(Int, #P|#Q|#R) | #B(Int, #P|#Q|#R)) {
 > | #A(_, #R), _
 > | #B(_, #R), _
 
+# FIXME case order
 let calls_any = fn(f) {
   (f(#Foo), f(#Bar), f(#Baz))
 };
@@ -723,19 +772,17 @@ calls_any(use)
 > let calls_any = fn (f) { (f(#Foo), f(#Bar), f(#Baz)) };
 > let use = fn (x) { match x { #Foo => 1 | #Bar => 2 } };
 > calls_any(use)
-> test:10: The tag should be Foo|Bar, but tag Baz is present.
+> test:10: The tag should be Bar|Foo, but tag Baz is present.
 >   calls_any(use)
 >             ^^^
->      found: (#Foo | #Bar) -> _
+>      found: (#Bar | #Foo) -> _
 >   expected: #Baz -> _
 > This #Baz comes from test:2:
 >     (f(#Foo), f(#Bar), f(#Baz))
 >                          ^^^^
-> but is used as #Foo | #Bar at test:6,test:7:
->     | #Foo => 1
->       ^^^^
->     | #Bar => 2
->       ^^^^
+> but is used as #Bar | #Foo at test:5:
+>     match x {
+>           ^
 
 # codegen test for single-case matches
 fn(x) {
@@ -776,9 +823,9 @@ fn(x, y) {
 > (#A | #B, #A) -> Int
 > RECHECK: Lang.Error.Fail(_)
 > 
-> test:2: This type does not have a constructor #B
->     match x, y {
->           ^^^^
+> test:4: This pattern is unused
+>     | #A, #B => 2
+>       ^^^^^^
 > ELAB: Lang.Error.Fail(_)
 > 
 > ELABINF: Lang.Error.Fail(_)
@@ -869,4 +916,4 @@ fn (x : #A | #B | #C | #D | #E, y: #A | #B) -> Int {
 
 
 # end
-> STATS: fix: 13, flex: 184
+> STATS: fix: 13, flex: 174

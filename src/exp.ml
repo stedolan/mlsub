@@ -14,11 +14,6 @@ type tuple_tag =
 
 (* Expressions *)
 
-(* FIXME: move somewhere new? *)
-type mand_flag =
-  | Mandatory
-  | Optional
-
 type extensible_flag =
   | Ext_open
   | Ext_closed
@@ -44,13 +39,16 @@ let map_fields ~loc f = function
   | Ftuple x -> Ftuple (List.map f x)
   | Frecord fs -> Frecord (List.map (fun ((s,sloc),m) -> (s,loc sloc), map_exp_field (Option.map f) m) fs)
 
+type 'a field_list =
+  (Tuple_fields.field_name loc * 'a option exp_field) list
+
 (* FIXME: is this a better repr? *)
-let record_fields ~loc = function
+let record_fields ~loc : 'a fields -> 'a field_list = function
   | Ftuple xs ->
      List.mapi (fun i x -> (Tuple_fields.Field_positional i, loc), Mandatory (Some x)) xs
   | Frecord fields -> fields
 
-let of_record_fields fs =
+let of_record_fields (fs : 'a field_list) : 'a fields =
   match
     List.mapi (fun i x ->
       match x with

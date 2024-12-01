@@ -552,9 +552,10 @@ let #{x: foo, y: bar} = #{x: 10, y: true}; (foo, bar)
 > (Int, Bool)
 > let x, y = (x: 10, y: <true>).(x, y); let  = %yield((0: x, 1: y)); done
 
-let #{x: foo, y: bar} = #{x: 10, y: true, z: 42}; (foo, bar)
-> let #{x: foo, y: bar} = #{x: 10, y: true, z: 42}; (foo, bar)
->   let #{x: foo, y: bar} : #{x: Int, y: Bool, z: Int} = #{x: 10, y: true, z: 42};
+let #{x: foo, y: bar, z:_} = #{x: 10, y: true, z: 42}; (foo, bar)
+> let #{x: foo, y: bar, z: _} = #{x: 10, y: true, z: 42}; (foo, bar)
+>   let #{x: foo, y: bar, z: _} : #{x: Int, y: Bool, z: Int} =
+>   #{x: 10, y: true, z: 42};
 >   (foo, bar)
 > (Int, Bool)
 > let x, y, z = (x: 10, y: <true>, z: 42).(x, y, z);
@@ -570,14 +571,17 @@ let (x, y) = (1, true); (y, x)
 > (Bool, Int)
 > let v0, v1 = (0: 1, 1: <true>).(0, 1); let  = %yield((0: v1, 1: v0)); done
 
-# FIXME: should error
 let (x, y) = (false, (), 3); #{x,y}
 > let (x, y) = (false, (), 3); #{x, y}
->   let (x, y) : (Bool, (), Int) = (false, (), 3); #{x, y}
-> #{x: Bool, y: ()}
-> let v0, v1, v2 = (0: <false>, 1: (), 2: 3).(0, 1, 2);
-> let  = %yield((x: v0, y: v1));
-> done
+> test:1: A surplus field '.2' is present.
+>   let (x, y) = (false, (), 3); #{x,y}
+>       ^^^^^^
+>      found: (_, _, _)
+>   expected: (_, _)
+> This (_, _, _) comes from test:1:
+>   let (x, y) = (false, (), 3); #{x,y}
+>                ^^^^^^^^^^^^^^
+> but is used as (_, _)
 
 let #{x: foo, y: bar} : #{x:Int, y:Bool} = #{x:1, y:true}; foo
 > let #{x: foo, y: bar} : #{x: Int, y: Bool} = #{x: 1, y: true}; foo

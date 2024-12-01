@@ -473,82 +473,49 @@ module Peano_nat_types = struct
   type _ s = S
 end
 
-
 module Clist : sig
   open Peano_nat_types
-  type ('n, 'm, +'a) prefix =
-    | [] : ('n, 'n, 'a) prefix
-    | (::) : 'a * ('n, 'm, 'a) prefix -> ('n s, 'm, 'a) prefix
+  type ('n, +'a) t =
+    | [] : (z, 'a) t
+    | (::) : 'a * ('n, 'a) t -> ('n s, 'a) t
 
-  type ('w, +'a) t = ('w, z, 'a) prefix
+  type 'a unknown_len =
+    | Ex : ('n, 'a) t -> 'a unknown_len [@@unboxed]
 
-  type ('m, 'a) unknown_len =
-    | Ex : ('n, 'm, 'a) prefix -> ('m, 'a) unknown_len [@@unboxed]
+  val of_list : 'a list -> 'a unknown_len
+  val of_list_length : len:('n, _) t -> 'a list -> ('n, 'a) t option
+  val to_list : ('n, 'a) t -> 'a list
+  val length : ('n, 'a) t -> int
 
-  val of_list : 'a list -> ('m, 'a) unknown_len
-  val of_list_length : len:('n, 'm, _) prefix -> 'a list -> ('n, 'm, 'a) prefix option
-  val to_list : ('n, 'm, 'a) prefix -> 'a list
-  val get_single : ('n s, 'n, 'a) prefix -> 'a
-  val length : ('n, 'm, 'a) prefix -> int
+  val map : ('a -> 'b) -> ('n, 'a) t -> ('n, 'b) t
+  val zip : ('n, 'a) t -> ('n, 'b) t -> ('n, 'a * 'b) t
 
-  val append : ('n, 'm, 'a) prefix -> ('m, 'o, 'a) prefix -> ('n, 'o, 'a) prefix
-  val split :
-    ('n, 'm, _) prefix ->
-    ('m, 'w, _) prefix ->
-    ('n, 'w, 'a) prefix -> ('n, 'm, 'a) prefix * ('m, 'w, 'a) prefix
-  val map : ('a -> 'b) -> ('n, 'm, 'a) prefix -> ('n, 'm, 'b) prefix
-  val zip : ('n, 'm, 'a) prefix -> ('n, 'm, 'b) prefix -> ('n, 'm, 'a * 'b) prefix
-
-  val equal :
-    ('a -> 'a -> bool) ->
-    ('w, 'n, 'a) prefix -> ('w, 'm, 'a) prefix -> ('n, 'm) Type_id.eq_result
-  val equal' :
-    ('a -> 'a -> bool) ->
-    ('n, 'w, 'a) prefix -> ('m, 'w, 'a) prefix -> ('n, 'm) Type_id.eq_result
-  val compare_lengths :
-    ('n, 'k, 'a) prefix -> ('m, 'k, 'b) prefix -> ('n, 'm) Type_id.eq_result
-  val compare_lengths' :
-    ('k, 'n, 'a) prefix -> ('k, 'm, 'b) prefix -> ('n, 'm) Type_id.eq_result
+  val hd : ('n s, 'a) t -> 'a
+  val tl : ('n s, 'a) t -> ('n, 'a) t
 end = struct
   open Peano_nat_types
-  type ('n, 'm, +'a) prefix =
-    | [] : ('n, 'n, 'a) prefix
-    | (::) : 'a * ('n, 'm, 'a) prefix -> ('n s, 'm, 'a) prefix
+  type ('n, +'a) t =
+    | [] : (z, 'a) t
+    | (::) : 'a * ('n, 'a) t -> ('n s, 'a) t
 
-  type ('w, +'a) t = ('w, z, 'a) prefix
+  type 'a unknown_len =
+    | Ex : ('n, 'a) t -> 'a unknown_len [@@unboxed]
 
-  type ('m, 'a) unknown_len =
-    | Ex : ('n, 'm, 'a) prefix -> ('m, 'a) unknown_len [@@unboxed]
-
-  let refute_pfx (type a) (_ : (a, a s, _) prefix) =
-    (* You can actually hit this by using -rectypes or other trickery to make
-       a type t = t s, so this has to be a runtime failure *)
-    assert false
-
-  let rec of_list : _ list -> (_,_) unknown_len = function
+  let rec of_list : _ list -> _ unknown_len = function
     | [] -> Ex []
     | x :: xs ->
        let Ex xs = of_list xs in
        Ex (x :: xs)
 
-  let rec to_list : type n m . (n, m, _) prefix -> _ list = function
+  let rec to_list : type n . (n, _) t -> _ list = function
     | [] -> []
     | x :: xs -> x :: to_list xs
 
-  let rec length : type n m . (n, m, _) prefix -> int = function
+  let rec length : type n . (n, _) t -> int = function
     | [] -> 0
     | _ :: xs -> 1 + length xs
 
-  let rec append : type n m w .
-    (n, m, _) prefix ->
-    (m, w, _) prefix ->
-    (n, w, _) prefix =
-    fun xs ys ->
-    match xs with
-    | [] -> ys
-    | x :: xs -> x :: (append xs ys)
-
-  let rec map : type n m . ('a -> 'b) -> (n, m, 'a) prefix -> (n, m, 'b) prefix =
+  let rec map : type n . ('a -> 'b) -> (n, 'a) t -> (n, 'b) t =
     fun f xs ->
     match xs with
     | [] -> []
@@ -557,74 +524,21 @@ end = struct
        let ys = map f xs in
        y :: ys
 
-  let rec split : type n m w .
-    (n, m, _) prefix ->
-    (m, w, _) prefix ->
-    (n, w, 'a) prefix ->
-    (n, m, 'a) prefix * (m, w, 'a) prefix =
-    fun pfx1 pfx2 xs ->
-    match pfx1 with
-    | [] ->
-       [], xs
-    | _ :: pfx1 ->
-       begin match xs with
-       | [] ->
-          refute_pfx (append (map ignore pfx1) (map ignore pfx2))
-       | x :: xs ->
-          let xs1, xs2 = split pfx1 pfx2 xs in
-          x :: xs1, xs2
-       end
+  let hd (type n) (xs : (n s, _) t) =
+    match xs with
+    | x :: _ -> x
 
-  let get_single (type n) : (n s, n, 'a) prefix -> 'a =
-    function
-    | [x] -> x
-    | _ -> assert false
+  let tl (type n) (xs : (n s, _) t) =
+    match xs with
+    | _ :: xs -> xs
 
-  let rec zip : type n m .
-    (n, m, _) prefix ->
-    (n, m, _) prefix ->
-    (n, m, _) prefix =
+  let rec zip : type n m . (n, _) t -> (n, _) t -> (n, _) t =
     fun xs ys ->
     match xs, ys with
     | [], [] -> []
     | x :: xs, y :: ys -> (x, y) :: zip xs ys
-    | [], _ :: xs -> refute_pfx xs
-    | _ :: xs, [] -> refute_pfx xs
 
-  let rec equal : type n m w.
-    ('a -> 'a -> bool) ->
-    (w, n, 'a) prefix ->
-    (w, m, 'a) prefix ->
-    (n, m) Type_id.eq_result =
-    fun eq x y ->
-    match x, y with
-    | [], [] -> Equal
-    | x :: xs, y :: ys ->
-       begin match equal eq xs ys with
-       | Equal -> if eq x y then Equal else Not_equal
-       | Not_equal -> Not_equal
-       end
-    | [], _ :: _
-    | _ :: _, [] -> Not_equal
-
-  let rec equal' : type n m w.
-    ('a -> 'a -> bool) ->
-    (n, w, 'a) prefix ->
-    (m, w, 'a) prefix ->
-    (n, m) Type_id.eq_result =
-    fun eq x y ->
-    match x, y with
-    | [], [] -> Equal
-    | x :: xs, y :: ys ->
-       begin match equal' eq xs ys with
-       | Equal -> if eq x y then Equal else Not_equal
-       | Not_equal -> Not_equal
-       end
-    | [], _ :: _
-    | _ :: _, [] -> Not_equal
-
-
-  let rec compare_lengths : type n m k . (n, k, _) prefix -> (m, k, _) prefix -> (n,m) Type_id.eq_result =
+  let rec compare_lengths : type n m . (n, _) t -> (m, _) t -> (n,m) Type_id.eq_result =
     fun xs ys ->
     match xs, ys with
     | [], [] -> Equal
@@ -636,19 +550,7 @@ end = struct
     | [], _ :: _
     | _ :: _, [] -> Not_equal
 
-  let rec compare_lengths' : type n m k . (k, n, _) prefix -> (k, m, _) prefix -> (n,m) Type_id.eq_result =
-    fun xs ys ->
-    match xs, ys with
-    | [], [] -> Equal
-    | _ :: xs, _ :: ys ->
-       begin match compare_lengths' xs ys with
-       | Equal -> Equal
-       | Not_equal -> Not_equal
-       end
-    | [], _ :: _
-    | _ :: _, [] -> Not_equal
-
-  let of_list_length (type n) ~(len : (n,_,_) prefix) xs : (n,_,_) prefix option =
+  let of_list_length (type n) ~(len : (n,_) t) xs : (n,_) t option =
     let Ex xs = of_list xs in
     match compare_lengths len xs with
     | Equal -> Some xs

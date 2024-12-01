@@ -530,6 +530,10 @@ let lower_of_rigid_bound env rv : lower =
   Env.rigid_bound env rv
   |> List.map (fun (c,cloc) -> Lcons (c, if cloc == Location.noloc then rv.loc else cloc))
 
+let ptyp_of_rigid_bound env rv : ptyp =
+  (* FIXME: could do better here as Tcvj? *)
+  Tsimple (lower_of_rigid_bound env rv)
+
 (* Check whether a flex-flex constraint α ≤ β is already present via an upper bound of α *)
 let rec has_flex_upper (pv : flexvar) nv =
   pv == nv ||
