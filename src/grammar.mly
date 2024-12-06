@@ -7,7 +7,7 @@
 %token SHIFT
 %token EOF WS COMMENT NL ERROR
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
-%token COLON EQUALS DOTS COMMA SEMI UNDER QUESTION ARROW FATARROW AMPER VBAR
+%token COLON EQUALS COMMA SEMI UNDER QUESTION ARROW FATARROW AMPER VBAR
 %token FN LET TRUE FALSE IF ELSE TILDE HASH PLUS MINUS
 %token SUBTYPE SUPTYPE AT TYPE
 %token MATCH
@@ -113,13 +113,17 @@ fields_brace_item(X):
 
 fields_brace_items1(X):
 | f = fields_brace_item(X); ioption(COMMA)
-  { [f] }
+  { [f], Ext_closed }
+| f = fields_brace_item(X); COMMA; UNDER
+  { [f], Ext_open }
 | f = fields_brace_item(X); ioption(COMMA); fs = fields_brace_items1(X)
-  { (f::fs) }
+  { (f::fst fs), snd fs }
 
 fields_brace_items(X):
 | 
-  { [] }
+  { [], Ext_closed }
+| UNDER
+  { [], Ext_open }
 | fs = fields_brace_items1(X)
   { fs }
 
@@ -131,7 +135,7 @@ fields_brace_items(X):
 
 %inline fields_braces(X):
 | LBRACE; xs = fields_brace_items(X); RBRACE
-  { Frecord xs }
+  { Frecord (fst xs, snd xs) }
 
 fields(X):
 | fs = fields_parens(X) { fs }

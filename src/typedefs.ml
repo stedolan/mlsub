@@ -1225,7 +1225,8 @@ let unparse_fields ~pos ~tag ({fields; fnames} : _ Fields.t) =
   | tuple ->
      Exp.Ftuple tuple
   | exception Exit ->
-     Exp.Frecord (List.map (fun f -> unparse_field_desc f (Map.find f fields)) fnames)
+     Exp.Frecord (List.map (fun f -> unparse_field_desc f (Map.find f fields)) fnames,
+                  Ext_closed)
 
 let unparse_cons ~neg ~pos (ty,_tyloc) =
   let open Cons1 in

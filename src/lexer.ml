@@ -18,7 +18,6 @@ let rec lex buf =
   | '}' -> RBRACE
   | ':' -> COLON
   | '=' -> EQUALS
-  | "..." -> DOTS
   | ',' -> COMMA
   | ';' -> SEMI
   | '_' -> UNDER

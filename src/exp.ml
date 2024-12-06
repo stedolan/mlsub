@@ -27,7 +27,7 @@ type 'a exp_field =
 
 type 'a fields =
   | Ftuple of 'a list
-  | Frecord of (Tuple_fields.field_name loc * 'a option exp_field) list
+  | Frecord of (Tuple_fields.field_name loc * 'a option exp_field) list * extensible_flag
 
 let empty_fields = Ftuple []
 
@@ -38,16 +38,19 @@ let map_exp_field f = function
 
 let map_fields ~loc f = function
   | Ftuple x -> Ftuple (List.map f x)
-  | Frecord fs -> Frecord (List.map (fun ((s,sloc),m) -> (s,loc sloc), map_exp_field (Option.map f) m) fs)
+  | Frecord (fs,ext) ->
+     let fs = List.map (fun ((s,sloc),m) -> (s,loc sloc), map_exp_field (Option.map f) m) fs in
+     Frecord (fs, ext)
 
 type 'a field_list =
   (Tuple_fields.field_name loc * 'a option exp_field) list
 
 (* FIXME: is this a better repr? *)
-let record_fields ~loc : 'a fields -> 'a field_list = function
+let record_fields ~loc : 'a fields -> 'a field_list * extensible_flag = function
   | Ftuple xs ->
-     List.mapi (fun i x -> (Tuple_fields.Field_positional i, loc), Mandatory (Some x)) xs
-  | Frecord fields -> fields
+     List.mapi (fun i x -> (Tuple_fields.Field_positional i, loc), Mandatory (Some x)) xs,
+     Ext_closed
+  | Frecord (fields,ext) -> (fields,ext)
 
 let of_record_fields (fs : 'a field_list) : 'a fields =
   match
@@ -57,7 +60,7 @@ let of_record_fields (fs : 'a field_list) : 'a fields =
       | _ -> raise_notrace Exit) fs
   with
   | ts -> Ftuple ts
-  | exception Exit -> Frecord fs
+  | exception Exit -> Frecord (fs, Ext_closed)
 
 type exp = exp' mayloc and exp' =
   (* 42 or "hello" *)

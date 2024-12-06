@@ -84,7 +84,7 @@ let fields ~tcomma f = function
   | Ftuple fs ->
      let fs = List.map f fs in
      parens (sep comma fs)
-  | Frecord fs ->
+  | Frecord (fs, ext) ->
      let fs = List.map (function
        | ((s,_loc), Mandatory (Some x)) -> field_name s ^^ string ":" ^^ break 1 ^^ f x
        | ((s,_loc), Mandatory None) -> field_name s
@@ -92,6 +92,11 @@ let fields ~tcomma f = function
        | ((s,_loc), Optional None) -> field_name s ^^ string "?"
        | ((s,_loc), Absent) -> field_name s ^^ string "?: absent"
        | ((s,_loc), Abs_broken) -> field_name s ^^ string ": absent") fs
+     in
+     let fs =
+       match ext with
+       | Ext_closed -> fs
+       | Ext_open -> fs @ [string "_"]
      in
      braces (sep (ifflat comma empty) fs)
 

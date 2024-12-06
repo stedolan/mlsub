@@ -31,7 +31,7 @@ type mand_flag =
   | Optional
 
 type pat_head =
-  | Ph_tuple of Typedefs.Cons1.Tag.t * pat fields
+  | Ph_tuple of Typedefs.Cons1.Tag.t * pat Exp.field_list * Exp.extensible_flag
   | Ph_any
 
 type split_kind =
@@ -60,9 +60,9 @@ let split_kind (pats : pat_head loc list) : split_kind =
   let find_cases : pat_head loc -> _ = function
     | Ph_any, loc ->
        Either.Left loc
-    | Ph_tuple (tag, fields), loc ->
+    | Ph_tuple (tag, fields, ext), loc ->
        let fields =
-         Exp.record_fields ~loc fields
+         fields
          |> List.map (fun ((fn,loc),pat) -> fn,(loc,pat))
          |> FieldMap.of_multi_list
               ~merge:(fun fn (loc',_pat') (loc,_pat) ->
@@ -80,7 +80,7 @@ let split_kind (pats : pat_head loc list) : split_kind =
                 in
                 (mand, loc))
        in
-       Either.Right (tag, (fields, Ext_closed, loc))
+       Either.Right (tag, (fields, ext, loc))
   in
   match List.partition_map find_cases pats with
   | [], [] -> Split_none
@@ -205,11 +205,11 @@ let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
           let conses, delayed_splits =
             TagMap.to_list cases
             |> List.map (fun ((tag:Cons1.Tag.t), (fields, ext, loc)) ->
-               if ext = Ext_open then
-                 (* FIXME test *)
-                 Error.fail loc (Illformed_pat `Unknown_fields);
                match tag with
                | Anon_tag | Struct_tag _ ->
+                  if ext = Ext_open then
+                    (* FIXME test *)
+                    Error.fail loc (Illformed_pat `Unknown_fields);
                   let tybody, split = split_fields fields in
                   Cons1.Record {tag = Some tag; args = []; body = tybody},
                   (tag, split)
@@ -327,9 +327,10 @@ let head_first_column ~env (typ,gen_level) mat =
           let bindings = SymMap.add name {typ; gen_level; comp_var = IR.Binder.ref var } bindings in
           go ~var:(Some var) (((p::row),(bindings,action))::rest)
        | Ptuple (Some tag, fs) ->
+          let fs, ext = Exp.record_fields ~loc fs in
           let tag = check_tag ~loc ~env typ tag in
           let rest, var = go ~var rest in
-          (((Ph_tuple(tag,fs),loc), (row,act))::rest),var
+          (((Ph_tuple(tag,fs,ext),loc), (row,act))::rest),var
        | Pany ->
           let rest, var = go ~var rest in
           (((Ph_any,loc), (row,act))::rest), var
@@ -340,10 +341,9 @@ let pvar s = Pbind (s, (Some Pany, snd s))
 
 let split_on_case (type k w) tag (fields : (k, split_type_field) Clist.t) (mat : w head_pat_matrix) : ((k,pat Exp.exp_field option) Clist.t * w pat_row) list * w head_pat_matrix =
   mat |> List.split_filter_map (fun orig_row ->
-    let (p, ploc), row = orig_row in
+    let (p, _ploc), row = orig_row in
     match p with
-    | Ph_tuple (tag', fs) when Cons1.tuple_tag_equal tag tag' ->
-       let fs = Exp.record_fields ~loc:ploc fs in
+    | Ph_tuple (tag', fs, _ext) when Cons1.tuple_tag_equal tag tag' ->
        let fs =
          fields |> Clist.map (fun (fn,_mand,_ty) ->
            match
@@ -523,7 +523,7 @@ let rec split_cases :
 
           let rec split cases mat =
             let tag = mat |> List.find_map (function
-               | (Ph_tuple (tag,_),_loc),_ -> Some tag
+               | (Ph_tuple (tag,_,_),_loc),_ -> Some tag
                | (Ph_any,_loc), _ -> None)
             in
             match tag with
@@ -659,8 +659,8 @@ and check_fvs' ploc = function
      let p = check_fvs p in
      SymMap.add v ploc p
   | Ptuple (_, fs) ->
-     Exp.record_fields ~loc:ploc fs
-     |> List.filter_map (fun ((f, floc), pat) ->
+     let fs, _ext = Exp.record_fields ~loc:ploc fs in
+     fs |> List.filter_map (fun ((f, floc), pat) ->
         match pat with
         | Exp.Mandatory (Some p)
         | Exp.Optional (Some p) -> Some p

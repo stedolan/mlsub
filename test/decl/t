@@ -597,10 +597,11 @@ fn f(Z{foo,bar}) { (foo,bar) }
 
 {
 type Z {foo:Int, bar:Int}
-fn f(Z{foo}) { foo }
+fn f(Z{foo,_}) { foo }
+fn g(Z{foo}) { foo }
 }
-> test:3: A surplus field 'bar' is present.
->   fn f(Z{foo}) { foo }
+> test:4: A surplus field 'bar' is present.
+>   fn g(Z{foo}) { foo }
 >        ^^^^^^
 >      found: Z
 >   expected: {foo: _}
@@ -609,7 +610,4 @@ fn f(Z{foo}) { foo }
 >                    ^^^
 > but is used as {foo: _}
 
-
-
-
-> STATS: fix: 25, flex: 326
+> STATS: fix: 25, flex: 327

@@ -43,8 +43,8 @@ and free_type_names' =
      TagSet.union (free_type_names a) (free_type_names b)
   | Ttop | Tbot -> TagSet.empty
 and free_type_names_fields fs =
+  let fs, _ = Exp.record_fields ~loc:Location.noloc fs in
   fs
-  |> Exp.record_fields ~loc:Location.noloc
   |> List.map (fun (_,t) -> free_type_names_field t)
   |> List.fold_left TagSet.union TagSet.empty
 and free_type_names_field (t : _ Exp.exp_field) =

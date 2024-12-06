@@ -912,5 +912,46 @@ fn (x : #A | #B | #C | #D | #E, y: #A | #B) -> Int {
 > | (#B | #C | #D | #E), #B
 
 
+fn (x) {
+  match x {
+  | #{foo:#A, _} => 1
+  | #{foo:#B, bar:n} => n
+  }
+}
+> fn (x) { match x { #{foo: #A, _} => 1 | #{foo: #B, bar: n} => n } }
+>   fn [a](x: #{foo: #A | #B, bar: a}) -> (Int | a) {
+>     match x {
+>       | #{foo: #A, _} => 1
+>       | #{foo: #B, bar: n} => n
+>     }
+>   }
+> [a] (#{foo: #A | #B, bar: a}) -> Int | a
+> let  = %yield(fun (x) ret {
+>   let foo, bar = x.(foo, bar);
+>   match foo {
+>     A() -> {
+>       ret(1)
+>     };
+>     B() -> {
+>       ret(bar)
+>     }
+>   }
+> });
+> done
+
+fn (x) {
+  match x {
+  | #{foo:#A, _} => 1
+  | #{foo:#B, _} => n
+  }
+}
+> fn (x) { match x { #{foo: #A, _} => 1 | #{foo: #B, _} => n } }
+> test:3: Cannot determine which fields this pattern matches
+>     | #{foo:#A, _} => 1
+>       ^^^^^^^^^^^^
+
+
+
+
 # end
-> STATS: fix: 13, flex: 174
+> STATS: fix: 14, flex: 181

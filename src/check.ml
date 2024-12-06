@@ -219,8 +219,9 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
 
   | Tuple (tag, fields) ->
      let cons_fail err cploc (cn,cnloc) =
+       let fields, _ext = Exp.record_fields ~loc:eloc fields in
        let fields =
-         Exp.record_fields ~loc:eloc fields
+         fields
          |> List.map (fun ((f,loc),_) -> f, Fields.Fpresent ((),loc))
          |> Fields.of_list
        in
@@ -243,8 +244,10 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      in
 
      (* expand punned fields *)
+     let fields, ext = Exp.record_fields ~loc:eloc fields in
+     if ext <> Ext_closed then fail eloc Syntax;
      let fields =
-       Exp.record_fields ~loc:eloc fields
+       fields
        |> List.map (fun ((f,floc), e) ->
          let e = match f, e with
            | _, (Optional _ | Absent | Abs_broken) ->

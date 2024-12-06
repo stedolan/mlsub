@@ -166,7 +166,8 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
 
 and typs_of_fields : 'a 'b . lookup:lookup_fn -> env:env -> tyexp fields loc -> ('a,'b) typ Fields.t =
   fun ~lookup ~env (fields,loc) ->
-  let fields = Exp.record_fields ~loc fields in
+  let fields, fields_ext = Exp.record_fields ~loc fields in
+  if fields_ext <> Ext_closed then fail loc Syntax;
   let fnames = List.map (fun ((f,_), _) -> f) fields in
   let fields = List.fold_left (fun acc ((f,floc), ty) ->
     let ty : _ Fields.field_desc =
