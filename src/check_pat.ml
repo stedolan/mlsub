@@ -283,6 +283,8 @@ open Peano_nat_types
 type 'w head_pat_row = pat_head loc * 'w pat_row
 type 'w head_pat_matrix = 'w head_pat_row list
 
+let any : pat = (Some Pany, Location.noloc)
+
 let check_tag ~loc ~env typ (etag : Exp.tuple_tag) : Cons1.Tag.t =
   match etag with
   | Anon_tag ->
@@ -315,6 +317,73 @@ let check_tag ~loc ~env typ (etag : Exp.tuple_tag) : Cons1.Tag.t =
         match List.filter (Cons1.Tag.matches etag) tags with
         | [t] -> t
         | _ -> Error.fail loc (Bad_tag (Some etag, List.map Cons1.Tag.unparse tags))
+
+module Shrinking = struct
+  (* Attempt to remove some redundant entries.
+     (Unsure if this is worth it!)*)
+
+  let rec clearly_le_pat p q =
+    let check = clearly_le_pat in
+    match p, q with
+    | (None, _), _ | _, (None, _) -> false
+    | (Some p',_), (Some q',_) ->
+       match p', q' with
+       | Pbind (_, p), _ -> check p q
+       | _, Pbind (_, q) -> check p q
+       | Por (p1, p2), _ -> check p1 q && check p2 q
+       | _, Por (q1, q2) -> check p q1 || check p q2 (* Incomplete *)
+       | _, Pany -> true
+       | Pany, _ -> false       (* Incomplete *)
+       | Ptuple(tag, ps), Ptuple(tag', qs) ->
+          tag = tag' && check_fields ps qs
+
+  and check_fields ps qs =
+    let qs, _ = Exp.record_fields ~loc:Location.noloc qs in
+    let ps, _ = Exp.record_fields ~loc:Location.noloc ps in
+    qs |> List.for_all (fun ((fn,_), q) ->
+      match
+        ps |> List.find_map (fun ((fn',_),p) ->
+          if Tuple_fields.equal_field_name fn fn'
+          then Some p else None)
+      with
+      | None -> false
+      | Some p -> clearly_le_pat_field p q)
+
+  and clearly_le_pat_field p q =
+    let opt x = Option.value x ~default:any in
+    match p, q with
+    | Exp.Optional p, Exp.Optional q -> clearly_le_pat (opt p) (opt q)
+    | Exp.Mandatory p, Exp.Mandatory q -> clearly_le_pat (opt p) (opt q)
+    | Exp.Absent, Exp.Absent -> true
+    | _ -> false
+
+  let rec keep_irredundant le = function
+    | [] -> []
+    | x :: xs ->
+       let xs = keep_irredundant le xs in
+       let xs = List.filter (fun r -> not (le r x)) xs in
+       x :: xs
+
+  (* Optimisation: delete some clearly-unused rows from pat matrix before splitting.
+     FIXME: apply also during *)
+  let shrink_matrix (type w) (mat : w pat_matrix) : w pat_matrix =
+    keep_irredundant (fun (x,_) (y,_) -> Clist.for_all2 clearly_le_pat x y) mat
+
+  let shrink_proj_matrix (type k w) (mat : ((k,pat Exp.exp_field option) Clist.t * w pat_row) list) =
+    keep_irredundant (fun (pf,(pr,_act)) (qf,(qr,_act)) ->
+      let check_field p q =
+        match p, q with
+        | _, None -> true
+        | None, _ -> false
+        | Some (Exp.Optional p), Some (Exp.Optional q) -> clearly_le_pat p q
+        | Some (Exp.Mandatory p), Some (Exp.Mandatory q) -> clearly_le_pat p q
+        | Some Exp.Absent, Some Exp.Absent -> true
+        | _ -> false
+      in
+      Clist.for_all2 check_field pf qf &&
+      Clist.for_all2 clearly_le_pat pr qr)
+      mat
+end
 
 let head_first_column ~env (typ,gen_level) mat =
   let rec go ~var (mat : 'w s pat_matrix) :
@@ -434,12 +503,13 @@ module Hashcons = struct
 end
 
 
-let any : pat = (Some Pany, Location.noloc)
+
 let pat_or p q : pat = (Some (Por (p, q)), Location.noloc)
 
 let rec split_cases :
   type w . matchloc:_ -> env:_ -> (w, ptyp * Typedefs.gen_level) Clist.t -> w pat_matrix -> w dectree =
   fun ~matchloc ~env typs mat ->
+  let mat = Shrinking.shrink_matrix mat in
   match typs with
   | [] ->
      begin match mat with
@@ -496,6 +566,7 @@ let rec split_cases :
             ((k,pat exp_field option) Clist.t * w pat_row) list ->
             w field_projections =
             fun ftyps typs pats ->
+            let pats = Shrinking.shrink_proj_matrix pats in
             match ftyps with
             | [] ->
                Proj_end (split_cases ~matchloc ~env typs (List.map snd pats))

@@ -490,6 +490,7 @@ module Clist : sig
 
   val map : ('a -> 'b) -> ('n, 'a) t -> ('n, 'b) t
   val zip : ('n, 'a) t -> ('n, 'b) t -> ('n, 'a * 'b) t
+  val for_all2 : ('a -> 'b -> bool) -> ('n, 'a) t -> ('n, 'b) t -> bool
 
   val hd : ('n s, 'a) t -> 'a
   val tl : ('n s, 'a) t -> ('n, 'a) t
@@ -538,6 +539,12 @@ end = struct
     match xs, ys with
     | [], [] -> []
     | x :: xs, y :: ys -> (x, y) :: zip xs ys
+
+  let rec for_all2 : type n m . _ -> (n,_) t -> (n,_) t -> bool =
+    fun f xs ys ->
+    match xs, ys with
+    | [], [] -> true
+    | x :: xs, y :: ys -> f x y && for_all2 f xs ys
 
   let rec compare_lengths : type n m . (n, _) t -> (m, _) t -> (n,m) Type_id.eq_result =
     fun xs ys ->

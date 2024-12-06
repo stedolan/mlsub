@@ -100,10 +100,7 @@ fn(x) { let (a, b, c) = x; (c, b, a) }
 
 fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
 > fn (x) { match x { (_, _) => 1 | (_, _, _) => 2 } }
-> test:1: This pattern:
->   fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
->                     ^^^^^
-> is incompatible with the pattern at test:1:
+> test:1: This pattern is unused
 >   fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
 >                                  ^^^^^^^
 
@@ -616,14 +613,7 @@ fn(a : (#T|#F),b : #T|#F,c : #T|#F) {
 >     T -> {
 >       match (0: a, 1: b, 2: c).1 {
 >         T -> {
->           match (0: a, 1: b, 2: c).2 {
->             T -> {
->               ret(<true>)
->             };
->             F -> {
->               ret(<true>)
->             }
->           }
+>           ret(<true>)
 >         };
 >         F -> {
 >           match (0: a, 1: b, 2: c).2 {
@@ -650,14 +640,7 @@ fn(a : (#T|#F),b : #T|#F,c : #T|#F) {
 >           }
 >         };
 >         F -> {
->           match (0: a, 1: b, 2: c).2 {
->             F -> {
->               ret(<false>)
->             };
->             T -> {
->               ret(<false>)
->             }
->           }
+>           ret(<false>)
 >         }
 >       }
 >     }
@@ -1032,7 +1015,8 @@ fn (x:#A|#B,y:#P(Int) | #Q(Int)) {
 fn(x) {
   match x {
   | #{foo?: x, bar?: y} => (x,y)
-  | #{foo?: absent, _} | #{bar?: absent, _} => (0,0)
+  | #{foo?: absent, _}
+  | #{bar?: absent, _} => (0,0)
   }
 }
 > fn (x) {
@@ -1072,4 +1056,4 @@ fn(x) {
 > });
 > done
 
-> STATS: fix: 15, flex: 190
+> STATS: fix: 15, flex: 192
