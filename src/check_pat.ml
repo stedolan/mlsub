@@ -742,12 +742,12 @@ let compile ~actions vals orig_dt =
        LetVal (var, v, compile ~vals dt)
     (* Compile singleton pattern matches as projections *)
     | Cases ([(_tag, fs)], None), v :: vals ->
-       Project (v, compile_fields ~vals fs)
+       compile_fields ~obj:v ~vals fs
     | Cases (cases, default), v :: vals ->
        let ir_sym_tag t = IR.Symbol.of_string (Cons1.Tag.to_ir_string t) in
        let cases =
          cases |> List.map (fun (tag, fs) ->
-           let cont = compile_fields ~vals fs in
+           let cont = compile_fields ~obj:v ~vals fs in
            ir_sym_tag tag, cont)
        in
        let default =
@@ -758,21 +758,16 @@ let compile ~actions vals orig_dt =
        Match (v, cases, default)
 
   and compile_fields :
-    type w . vals:(w, IR.value) Clist.t -> w field_projections -> IR.unpacking_cont =
-    fun ~vals fs ->
-    let vname : Tuple_fields.field_name -> string = function
-      | Field_named s -> s
-      | Field_positional n -> Printf.sprintf "v%d" n
-    in
+    type w . obj:IR.value -> vals:(w, IR.value) Clist.t -> w field_projections -> IR.comp =
+    fun ~obj ~vals fs ->
     match fs with
     | Proj_end dt ->
-       [], compile ~vals dt
+       compile ~vals dt
     | Proj_mand (fn, fs) ->
-       let v = IR.Binder.fresh ~name:(vname fn) () in
-       let binders, rest = compile_fields ~vals:(IR.var v :: vals) fs in
-       (binders @ [fn,v]), rest
+       compile_fields ~obj ~vals:(Proj(obj,fn) :: vals) fs
     | Proj_opt _ -> unimp "Proj_opt compilation"
   in
+
   let Ex (len, dt) = orig_dt in
   let vals = Option.get (Clist.of_list_length ~len vals) in
   let code = compile ~vals dt in

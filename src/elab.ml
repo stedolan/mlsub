@@ -238,9 +238,7 @@ let tuple tag (fields : (field_name * exp) list) =
 let project e field =
   fun k ->
   eval_cont e @@ fun v ->
-  let vfield = IR.Binder.fresh ~name:field () in
-  Project (v, ([Field_named field, vfield],
-               apply_cont k (IR.var vfield)))
+    apply_cont k (Proj (v, field))
 
 let apply fn args =
   fun k ->
@@ -279,8 +277,8 @@ module Compile = struct
        IRB.name_cont k @@ fun k ->
        IRB.eval_cont (exp cond) @@ fun cond ->
        Match (cond, [
-         (IR.Symbol.of_string "true", ([], exp ifso (Named_cont k)));
-         (IR.Symbol.of_string "false", ([], exp ifnot (Named_cont k)))], None)
+         (IR.Symbol.of_string "true", (exp ifso (Named_cont k)));
+         (IR.Symbol.of_string "false", (exp ifnot (Named_cont k)))], None)
 
     | App (f, args) ->
        IRB.apply (exp f) (List.map exp args)
@@ -290,7 +288,7 @@ module Compile = struct
         IRB.tuple tag (List.map (fun ((fn,_loc), e) -> (fn, exp e)) fields))
 
     | Proj (e, (field, _loc)) ->
-       IRB.project (exp e) field
+       IRB.project (exp e) (Field_named field)
 
     | Seq (e1, e2) ->
        fun k ->

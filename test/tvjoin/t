@@ -16,10 +16,10 @@ fn[a](x:a){ fn[b](y:b){ if true { #{foo:x} } else { y } } }
 > let  = %yield(fun (x) ret {
 >   ret(fun (y) ret2 {
 >     match <true> {
->       true() -> {
+>       true -> {
 >         ret2((foo: x))
 >       };
->       false() -> {
+>       false -> {
 >         ret2(y)
 >       }
 >     }
@@ -54,10 +54,10 @@ fn[a](x:a){ fn(y){ if true { #{foo:x} } else { y } } }
 > let  = %yield(fun (x) ret {
 >   ret(fun (y) ret2 {
 >     match <true> {
->       true() -> {
+>       true -> {
 >         ret2((foo: x))
 >       };
->       false() -> {
+>       false -> {
 >         ret2(y)
 >       }
 >     }
@@ -92,10 +92,10 @@ fn(x){ fn[b](y:b){ if true { #{foo:x} } else { y } } }
 > let  = %yield(fun (x) ret {
 >   ret(fun (y) ret2 {
 >     match <true> {
->       true() -> {
+>       true -> {
 >         ret2((foo: x))
 >       };
->       false() -> {
+>       false -> {
 >         ret2(y)
 >       }
 >     }
@@ -130,10 +130,10 @@ fn(x){ fn(y){ if true { #{foo:x} } else { y } } }
 > let  = %yield(fun (x) ret {
 >   ret(fun (y) ret2 {
 >     match <true> {
->       true() -> {
+>       true -> {
 >         ret2((foo: x))
 >       };
->       false() -> {
+>       false -> {
 >         ret2(y)
 >       }
 >     }
@@ -156,10 +156,10 @@ fn(x){ fn(y){ if true { #{foo:y} } else { x } } }
 > let  = %yield(fun (x) ret {
 >   ret(fun (y) ret2 {
 >     match <true> {
->       true() -> {
+>       true -> {
 >         ret2((foo: y))
 >       };
->       false() -> {
+>       false -> {
 >         ret2(x)
 >       }
 >     }
@@ -182,10 +182,10 @@ fn(x){ fn(y){ if true { x } else { y } } }
 > let  = %yield(fun (x) ret {
 >   ret(fun (y) ret2 {
 >     match <true> {
->       true() -> {
+>       true -> {
 >         ret2(x)
 >       };
->       false() -> {
+>       false -> {
 >         ret2(y)
 >       }
 >     }

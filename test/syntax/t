@@ -32,10 +32,10 @@ fn(a) { #{ foo: if true { fn(x) { x } } else { a } } }
 >     ret((foo: x))
 >   };
 >   match <true> {
->     true() -> {
+>     true -> {
 >       k(fun (x) ret2 { ret2(x) })
 >     };
->     false() -> {
+>     false -> {
 >       k(a)
 >     }
 >   }

@@ -10,10 +10,11 @@ fn[a,b](id : [a](a) -> a, (x,y):(a, b)) { (id(y),id(x)) }
 >   fn [a, b](id: [a_2] a_2 -> a_2, (x, y): (a, b)) -> (b, a) { (id(y), id(x)) }
 > [a, b] ([a_2] a_2 -> a_2, (a, b)) -> (b, a)
 > let  = %yield(fun (id, param) ret {
->   let v0, v1 = param.(0, 1);
->   let x = id(v0);
->   let x2 = id(v1);
->   ret((0: x2, 1: x))
+>   let x = param.0;
+>   let y = param.1;
+>   let x2 = id(x);
+>   let x3 = id(y);
+>   ret((0: x3, 1: x2))
 > });
 > done
 
@@ -22,10 +23,11 @@ fn(id : [a](a) -> a, (x,y)) { (id(y),id(x)) }
 >   fn [a, b](id: [a_2] a_2 -> a_2, (x, y): (a, b)) -> (b, a) { (id(y), id(x)) }
 > [a, b] ([a_2] a_2 -> a_2, (a, b)) -> (b, a)
 > let  = %yield(fun (id, param) ret {
->   let v0, v1 = param.(0, 1);
->   let x = id(v0);
->   let x2 = id(v1);
->   ret((0: x2, 1: x))
+>   let x = param.0;
+>   let y = param.1;
+>   let x2 = id(x);
+>   let x3 = id(y);
+>   ret((0: x3, 1: x2))
 > });
 > done
 
@@ -46,12 +48,11 @@ fn[a <: {cond:Bool}](x : a) { if x.cond {x} else {x} }
 >   fn [a <: {cond: Bool}](x: a) -> a { if x.cond { x } else { x } }
 > [a <: {cond: Bool}] a -> a
 > let  = %yield(fun (x) ret {
->   let cond = x.(cond);
->   match cond {
->     true() -> {
+>   match x.cond {
+>     true -> {
 >       ret(x)
 >     };
->     false() -> {
+>     false -> {
 >       ret(x)
 >     }
 >   }
@@ -276,10 +277,10 @@ fn[a,b](x:a, y:b) { if true { x } else { y } }
 > [a, b] (a, b) -> a | b
 > let  = %yield(fun (x, y) ret {
 >   match <true> {
->     true() -> {
+>     true -> {
 >       ret(x)
 >     };
->     false() -> {
+>     false -> {
 >       ret(y)
 >     }
 >   }
@@ -292,10 +293,10 @@ fn[a,b](x : a, y : b) -> (a|b) { if true { x } else { y } }
 > [a, b] (a, b) -> a | b
 > let  = %yield(fun (x, y) ret {
 >   match <true> {
->     true() -> {
+>     true -> {
 >       ret(x)
 >     };
->     false() -> {
+>     false -> {
 >       ret(y)
 >     }
 >   }
@@ -311,10 +312,10 @@ let ch = fn[a,b](x : a, y : b) -> (a|b) { if true { x } else { y } }; ch
 > let ch =
 >   fun (x, y) ret {
 >     match <true> {
->       true() -> {
+>       true -> {
 >         ret(x)
 >       };
->       false() -> {
+>       false -> {
 >         ret(y)
 >       }
 >     }
@@ -336,10 +337,10 @@ let ch = fn[a,b](x : a, y : b) -> (a|b) { if true { x } else { y } }; fn (a,b) {
 > let ch =
 >   fun (x, y) ret {
 >     match <true> {
->       true() -> {
+>       true -> {
 >         ret(x)
 >       };
->       false() -> {
+>       false -> {
 >         ret(y)
 >       }
 >     }
@@ -355,10 +356,10 @@ let ch = fn[a,b](x : a, y : b) -> (a|b) { if true { x } else { y } }; fn (a,b) {
 > [a] (a, a) -> a
 > let  = %yield(fun (x, y) ret {
 >   match <true> {
->     true() -> {
+>     true -> {
 >       ret(x)
 >     };
->     false() -> {
+>     false -> {
 >       ret(y)
 >     }
 >   }
@@ -373,10 +374,10 @@ let ch = fn[a,b](x : a, y : b) -> (a|b) { if true { x } else { y } }; fn (a,b) {
 > [a] (a, a) -> a
 > let  = %yield(fun (x, y) ret {
 >   match <true> {
->     true() -> {
+>     true -> {
 >       ret(x)
 >     };
->     false() -> {
+>     false -> {
 >       ret(y)
 >     }
 >   }
@@ -419,7 +420,7 @@ let wid = fn (id: [b]({foo:b}) -> b) { id(#{foo:5}) }; fn(f) { wid(fn(x){f(5); x
 > (Int -> ()) -> Int
 > let wid = fun (id) ret { let x = id((foo: 5)); ret(x) };
 > let  = %yield(fun (f) ret {
->   let x = wid(fun (x) ret2 { let x2 = f(5); let foo = x.(foo); ret2(foo) });
+>   let x = wid(fun (x) ret2 { let x2 = f(5); ret2(x.foo) });
 >   ret(x)
 > });
 > done
@@ -460,7 +461,7 @@ let wid = fn (id: [b]({foo:b}) -> b) { id(#{foo:5}) }; fn(f) { wid(fn(x){f(x); x
 > (({foo: Any}) -> ()) -> Int
 > let wid = fun (id) ret { let x = id((foo: 5)); ret(x) };
 > let  = %yield(fun (f) ret {
->   let x = wid(fun (x) ret2 { let x2 = f(x); let foo = x.(foo); ret2(foo) });
+>   let x = wid(fun (x) ret2 { let x2 = f(x); ret2(x.foo) });
 >   ret(x)
 > });
 > done
@@ -478,7 +479,7 @@ let wid = fn (id: [b]({foo:b}) -> b) { id(#{foo:5}) }; fn(f : (Any) -> ()) { wid
 > (Any -> ()) -> Int
 > let wid = fun (id) ret { let x = id((foo: 5)); ret(x) };
 > let  = %yield(fun (f) ret {
->   let x = wid(fun (x) ret2 { let x2 = f(x); let foo = x.(foo); ret2(foo) });
+>   let x = wid(fun (x) ret2 { let x2 = f(x); ret2(x.foo) });
 >   ret(x)
 > });
 > done
@@ -515,11 +516,7 @@ let wid = fn (id: [b,a <: {foo:b}](a) -> b) { id(#{foo:5}) }; fn(f) { wid(fn(x){
 > ((#{bar: {foo: Any}}) -> Any) -> Int
 > let wid = fun (id) ret { let x = id((foo: 5)); ret(x) };
 > let  = %yield(fun (f) ret {
->   let x = wid(fun (x) ret2 {
->     let x2 = f((bar: x));
->     let foo = x.(foo);
->     ret2(foo)
->   });
+>   let x = wid(fun (x) ret2 { let x2 = f((bar: x)); ret2(x.foo) });
 >   ret(x)
 > });
 > done
@@ -539,11 +536,7 @@ let wid = fn (id: [b,a <: {foo:b}](a) -> b) { id(#{foo:5}) }; fn(f : (Any) -> St
 > (Any -> String) -> Int
 > let wid = fun (id) ret { let x = id((foo: 5)); ret(x) };
 > let  = %yield(fun (f) ret {
->   let x = wid(fun (x) ret2 {
->     let x2 = f((bar: x));
->     let foo = x.(foo);
->     ret2(foo)
->   });
+>   let x = wid(fun (x) ret2 { let x2 = f((bar: x)); ret2(x.foo) });
 >   ret(x)
 > });
 > done
@@ -707,15 +700,12 @@ let f = fn[a](id: [b](a, b) -> (a, b), x:a){id(x,1)}; fn(z){ f(fn(a,b){(a,b)}, i
 >     let x2 = f(fun (a, b) ret2 { ret2((0: a, 1: b)) }, x);
 >     ret(x2)
 >   };
->   let cond = z.(cond);
->   match cond {
->     true() -> {
->       let a = z.(a);
->       k(a)
+>   match z.cond {
+>     true -> {
+>       k(z.a)
 >     };
->     false() -> {
->       let b = z.(b);
->       k(b)
+>     false -> {
+>       k(z.b)
 >     }
 >   }
 > });
@@ -833,8 +823,7 @@ fn[a <: {foo:Int}](a: a) { let id = fn(x) { x }; id(a).foo }
 > let  = %yield(fun (a) ret {
 >   let id = fun (x) ret2 { ret2(x) };
 >   let x = id(a);
->   let foo = x.(foo);
->   ret(foo)
+>   ret(x.foo)
 > });
 > done
 
@@ -886,10 +875,10 @@ fn[a](x: Any, y:a) { if true {x} else {y} }
 > [a] (Any, a) -> Any
 > let  = %yield(fun (x, y) ret {
 >   match <true> {
->     true() -> {
+>     true -> {
 >       ret(x)
 >     };
->     false() -> {
+>     false -> {
 >       ret(y)
 >     }
 >   }
@@ -924,10 +913,10 @@ fn(x, y, k1, k2, k3) {
 >   let ch =
 >     fun (a, b) ret2 {
 >       match <true> {
->         true() -> {
+>         true -> {
 >           ret2(a)
 >         };
->         false() -> {
+>         false -> {
 >           ret2(b)
 >         }
 >       }
@@ -963,19 +952,17 @@ fn(x, y) {
 >   let ch =
 >     fun (a, b) ret2 {
 >       match <true> {
->         true() -> {
+>         true -> {
 >           ret2(a)
 >         };
->         false() -> {
+>         false -> {
 >           ret2(b)
 >         }
 >       }
 >     };
 >   let x2 = ch(x, y);
->   let bar = x2.(bar);
->   let bar2 = y.(bar);
->   let bar3 = x.(bar);
->   ret((0: bar3, 1: bar2))
+>   let z = x2.bar;
+>   ret((0: x.bar, 1: y.bar))
 > });
 > done
 
@@ -1001,18 +988,17 @@ fn(y) {
 >   let ch =
 >     fun (a, b) ret2 {
 >       match <true> {
->         true() -> {
+>         true -> {
 >           ret2(a)
 >         };
->         false() -> {
+>         false -> {
 >           ret2(b)
 >         }
 >       }
 >     };
 >   let x = ch((bar: <true>), y);
->   let bar = x.(bar);
->   let bar2 = y.(bar);
->   ret(bar2)
+>   let z = x.bar;
+>   ret(y.bar)
 > });
 > done
 
@@ -1050,10 +1036,10 @@ fn (x, y, k1, k2, k3) {
 >   let ch =
 >     fun (a, b) ret2 {
 >       match <true> {
->         true() -> {
+>         true -> {
 >           ret2(a)
 >         };
->         false() -> {
+>         false -> {
 >           ret2(b)
 >         }
 >       }
@@ -1090,10 +1076,10 @@ fn (x, y, k) {
 >   let ch =
 >     fun (a, b) ret2 {
 >       match <true> {
->         true() -> {
+>         true -> {
 >           ret2(a)
 >         };
->         false() -> {
+>         false -> {
 >           ret2(b)
 >         }
 >       }
@@ -1133,10 +1119,10 @@ fn[a <: {foo:Int}](x:a, y:{foo:Int}) { if true {x} else {y} }
 > [a <: {foo: Int}] (a, {foo: Int}) -> {foo: Int} | a
 > let  = %yield(fun (x, y) ret {
 >   match <true> {
->     true() -> {
+>     true -> {
 >       ret(x)
 >     };
->     false() -> {
+>     false -> {
 >       ret(y)
 >     }
 >   }

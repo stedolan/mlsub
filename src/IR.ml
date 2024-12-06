@@ -108,6 +108,7 @@ type value =
   | Literal of Exp.literal
   | Var of value Binder.ref
   | Tuple of tag * (field * value) list
+  | Proj of value * field (* Immutable field access in value language *)
   | Lambda of value Binder.t list * cont Binder.t * comp
 
 and comp =
@@ -115,13 +116,9 @@ and comp =
   | LetCont of cont Binder.t * value Binder.t list * comp * comp
 
   | Jump of cont Binder.ref * value list
-  | Match of value * (tag * unpacking_cont) list * (tag list * comp) option
-  | Project of value * unpacking_cont
+  | Match of value * (tag * comp) list * (tag list * comp) option
   | Apply of callee * value list * value Binder.t list * comp
   | Trap of string
-
-and unpacking_cont =
-  (field * value Binder.t) list * comp
 
 and callee = Func of value | Prim of string
 
@@ -137,13 +134,11 @@ let wf orig_c =
     | Literal _ -> ()
     | Var v -> Binder.deref pval v
     | Tuple (_, vs) -> List.iter (fun (_fn, v) -> value v) vs
+    | Proj (v, _f) -> value v
     | Lambda (params, ret, body) ->
        Binder.with_binders pval (List.map (fun p -> p, ()) params) @@ fun () ->
          Binder.with_binder pcont ret 1 @@ fun () ->
            comp (lambda_level ()) body
-  and unpacking_cont lam (fields, c) =
-    Binder.with_binders pval (List.map (fun (_,v) -> v, ()) fields) @@ fun () ->
-      comp lam c
   and comp lam = function
     | LetVal (x, v, body) ->
        value v;
@@ -162,11 +157,8 @@ let wf orig_c =
          List.map fst cases @
          Option.value ~default:[] (Option.map fst def) in
        assert (Util.all_distinct ~compare tags);
-       cases |> List.iter (fun (_tag, c) -> unpacking_cont lam c);
+       cases |> List.iter (fun (_tag, c) -> comp lam c);
        def |> Option.iter (fun (_tags, c) -> comp lam c)
-    | Project (v, c) ->
-       value v;
-       unpacking_cont lam c
     | Apply (v, args, ret, c) ->
        begin match v with Func v -> value v | Prim _ -> () end;
        List.iter value args;
@@ -233,6 +225,8 @@ let pp origc =
        pp "<false>"
     | Var v ->
        pp "%s" (deref vname v)
+    | Proj (v,f) ->
+       pp "%a.%s" (value env) v (field_name f)
     | Tuple (tag, fields) ->
        pp "@[%s(%a)@]" (Symbol.to_string tag) (pp_fields (value env)) fields
     | Lambda (params, kret, body) ->
@@ -270,32 +264,23 @@ let pp origc =
          (fun () d -> d) (PPrint.separate_map (pp ",@ ") (value env ()) vs)
     | Match (v, cases, def) ->
        let cases =
-         List.map (fun (t, c) -> [t], c) cases @
-         Option.to_list (Option.map (fun (t, c) -> t, ([],c)) def)
+         List.map (fun (t, c) -> [t], c) cases @ Option.to_list def
        in
        let ptags = function
          | [x] -> pp "%s" (Symbol.to_string x)
          | xs -> pp "@[(%a)@]" (fun () d -> d) (PPrint.separate_map (pp "|") (fun x -> pp "%s" (Symbol.to_string x)) xs)
        in
        let pcase = function
-         | (tags, (fields, body)) ->
-            let vars, body = fresh_binder_list ~defname:"x" vname env (List.map snd fields) (fun vns env -> vns, comp env () body) in
-            pp "%a(%a) -> {%a@ }"
+         | (tags, body) ->
+            let body = comp env () body in
+(*            let vars, body = fresh_binder_list ~defname:"x" vname env (List.map snd fields) (fun vns env -> vns, comp env () body) in*)
+            pp "%a -> {%a@ }"
               (fun () d -> d)
               (ptags tags)
-              (fun () d -> d)
-              (PPrint.separate_map (pp ",@ ") (fun (f, v) -> pp "%s: %s" (field_name f) v) (List.map2 (fun (a,_) b -> a,b) fields vars)) 
               (fun () d -> d)
               (PPrint.(nest 2 (break 1 ^^ body)))
        in
        pp "match @[%a@] {%a@ }" (value env) v (fun () d -> d) PPrint.(nest 2 (break 1 ^^ separate_map (pp ";@ ") pcase cases))
-    | Project (v, (fields, body)) ->
-       let vns, body = fresh_binder_list ~defname:"x" vname env (List.map snd fields) (fun vns env -> vns, comp env () body) in
-       pp "let @[%a@] = @[%a.(%a)@];@ %a"
-         (fun () d -> d) (PPrint.separate_map (pp ",@ ") (fun v -> pp "%s" v) vns)
-         (value env) v
-         (fun () d -> d) (PPrint.separate_map (pp ",@ ") (fun (v,_) -> pp "%s" (field_name v)) fields)
-         (fun () d -> d) body
     | Apply (f, args, ret, body) ->
        let f = match f with Func v -> value env () v | Prim s -> pp "%%%s" s in
        let vns, body = fresh_binder_list ~defname:"x" vname env ret (fun vns env -> vns, comp env () body) in
@@ -317,7 +302,7 @@ let subst_aliases origc =
   let is_trivial = function
     | Literal _ -> true
     | Var _ -> true
-    | Tuple _ | Lambda _ -> false
+    | Tuple _ | Lambda _ | Proj _ -> false
   in
   let is_trivial_comp = function
     | Jump (k, vs) when List.for_all is_trivial vs -> Some(k, vs)
@@ -328,6 +313,7 @@ let subst_aliases origc =
     | Literal _ as v -> v
     | Var v -> Binder.deref substv v
     | Tuple (tag, vs) -> Tuple (tag, List.map (fun (fn, v) -> fn, value v) vs)
+    | Proj (v, f) -> Proj (value v, f)
     | Lambda (params, ret, body) ->
        Lambda (params, ret,
          Binder.with_binders substv (List.map (fun p -> p, Var (Binder.ref p)) params) @@ fun () ->
@@ -361,20 +347,14 @@ let subst_aliases origc =
     | Match (v, cases, def) ->
        Match
          (value v,
-          List.map (fun (t, c) -> t, unpacking_cont c) cases,
+          List.map (fun (t, c) -> t, comp c) cases,
           Option.map (fun (t, c) -> t, comp c) def)
-    | Project (v, fields) ->
-       Project (value v, unpacking_cont fields)
     | Apply (f, args, ret, k) ->
        let f = match f with Func f -> Func (value f) | Prim _ as s -> s in
        Apply (f, List.map value args,
               ret,
               Binder.with_binders substv (List.map (fun v -> v, var v) ret) (fun () -> comp k))
     | Trap s -> Trap s
-
-  and unpacking_cont (fields, k) : unpacking_cont =
-    (fields,
-     Binder.with_binders substv (List.map (fun (_,v) -> v, var v) fields) (fun () -> comp k))
 
   in
   wf origc;

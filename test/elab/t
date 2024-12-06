@@ -88,12 +88,7 @@ fn (f) { fn(g,x) { (g(x.foo), f(x)) } }
 >   }
 > [a, b <: {foo: a}, c, d] (b -> c) -> (a -> d, b) -> (d, c)
 > let  = %yield(fun (f) ret {
->   ret(fun (g, x) ret2 {
->     let x2 = f(x);
->     let foo = x.(foo);
->     let x3 = g(foo);
->     ret2((0: x3, 1: x2))
->   })
+>   ret(fun (g, x) ret2 { let x2 = f(x); let x3 = g(x.foo); ret2((0: x3, 1: x2)) })
 > });
 > done
 
