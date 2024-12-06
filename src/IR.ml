@@ -117,6 +117,7 @@ and comp =
 
   | Jump of cont Binder.ref * value list
   | Match of value * (tag * comp) list * (tag list * comp) option
+  | OptField of value * field * comp * comp
   | Apply of callee * value list * value Binder.t list * comp
   | Trap of string
 
@@ -159,6 +160,8 @@ let wf orig_c =
        assert (Util.all_distinct ~compare tags);
        cases |> List.iter (fun (_tag, c) -> comp lam c);
        def |> Option.iter (fun (_tags, c) -> comp lam c)
+    | OptField (v, _, pres, abs) ->
+       value v; comp lam pres; comp lam abs
     | Apply (v, args, ret, c) ->
        begin match v with Func v -> value v | Prim _ -> () end;
        List.iter value args;
@@ -281,6 +284,12 @@ let pp origc =
               (PPrint.(nest 2 (break 1 ^^ body)))
        in
        pp "match @[%a@] {%a@ }" (value env) v (fun () d -> d) PPrint.(nest 2 (break 1 ^^ separate_map (pp ";@ ") pcase cases))
+    | OptField (v, f, pres, abs) ->
+       pp "ifpresent @[%a@].%s {%a@ } else {%a@ }"
+         (value env) v
+         (field_name f)
+         (fun () d -> d) (PPrint.(nest 2 (break 1 ^^ comp env () pres)))
+         (fun () d -> d) (PPrint.(nest 2 (break 1 ^^ comp env () abs)))
     | Apply (f, args, ret, body) ->
        let f = match f with Func v -> value env () v | Prim s -> pp "%%%s" s in
        let vns, body = fresh_binder_list ~defname:"x" vname env ret (fun vns env -> vns, comp env () body) in
@@ -349,6 +358,8 @@ let subst_aliases origc =
          (value v,
           List.map (fun (t, c) -> t, comp c) cases,
           Option.map (fun (t, c) -> t, comp c) def)
+    | OptField (v, f, pres, abs) ->
+       OptField (value v, f, comp pres, comp abs)
     | Apply (f, args, ret, k) ->
        let f = match f with Func f -> Func (value f) | Prim _ as s -> s in
        Apply (f, List.map value args,

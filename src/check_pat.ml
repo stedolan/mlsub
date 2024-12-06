@@ -779,7 +779,10 @@ let compile ~actions vals orig_dt =
        compile ~vals dt
     | Proj_mand (fn, fs) ->
        compile_fields ~obj ~vals:(Proj(obj,fn) :: vals) fs
-    | Proj_opt _ -> unimp "Proj_opt compilation"
+    | Proj_opt (fn, pres, abs) ->
+       let pres = compile_fields ~obj ~vals:(Proj(obj,fn) :: vals) pres in
+       let abs = compile_fields ~obj ~vals abs in
+       OptField (obj, fn, pres, abs)
   in
 
   let Ex (len, dt) = orig_dt in

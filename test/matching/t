@@ -665,6 +665,72 @@ fn(a : (#T|#F),b : #T|#F,c : #T|#F) {
 > });
 > done
 
+fn(x : #{a?: (), b?: (), c?: ()}) {
+  match x {
+  | #{a?:(), b?:(), _}
+  | #{b?:(), c?:(), _}
+  | #{c?:(), a?:(), _} => true
+
+  | #{a?:absent, b?:absent, _}
+  | #{b?:absent, c?:absent, _}
+  | #{c?:absent, a?:absent, _} => false
+  }
+}
+> fn (x: #{a?: (), b?: (), c?: ()}) {
+>   match x {
+>     | #{a?: (), b?: (), _}
+>     | #{b?: (), c?: (), _}
+>     | #{c?: (), a?: (), _} => true
+>     | #{a?: absent, b?: absent, _}
+>     | #{b?: absent, c?: absent, _}
+>     | #{c?: absent, a?: absent, _} => false
+>   }
+> }
+>   fn (x: #{a?: (), b?: (), c?: ()}) -> Bool {
+>     match x {
+>       | #{a?: (), b?: (), _}
+>       | #{b?: (), c?: (), _}
+>       | #{c?: (), a?: (), _} => true
+>       | #{a?: absent, b?: absent, _}
+>       | #{b?: absent, c?: absent, _}
+>       | #{c?: absent, a?: absent, _} => false
+>     }
+>   }
+> (#{a?: (), b?: (), c?: ()}) -> Bool
+> let  = %yield(fun (x) ret {
+>   ifpresent x.c {
+>     ifpresent x.b {
+>       ifpresent x.a {
+>         ret(<true>)
+>       } else {
+>         ret(<true>)
+>       }
+>     } else {
+>       ifpresent x.a {
+>         ret(<true>)
+>       } else {
+>         ret(<false>)
+>       }
+>     }
+>   } else {
+>     ifpresent x.b {
+>       ifpresent x.a {
+>         ret(<true>)
+>       } else {
+>         ret(<false>)
+>       }
+>     } else {
+>       ifpresent x.a {
+>         ret(<false>)
+>       } else {
+>         ret(<false>)
+>       }
+>     }
+>   }
+> });
+> done
+
+
 fn(a : (#T|#F),b : #T|#F,c : #T|#F) {
   match (a, b, c) {
   | (#T, #T, _)
@@ -963,5 +1029,47 @@ fn (x:#A|#B,y:#P(Int) | #Q(Int)) {
 > The following cases are unhandled:
 > | #B, #Q(_)
 
+fn(x) {
+  match x {
+  | #{foo?: x, bar?: y} => (x,y)
+  | #{foo?: absent, _} | #{bar?: absent, _} => (0,0)
+  }
+}
+> fn (x) {
+>   match x {
+>     | #{foo?: x, bar?: y} => (x, y)
+>     | #{foo?: absent, _}
+>     | #{bar?: absent, _} => (0, 0)
+>   }
+> }
+>   fn [a, b](x: #{foo?: b, bar?: a}) -> (Int | b, Int | a) {
+>     match x {
+>       | #{foo?: x, bar?: y} => (x, y)
+>       | #{foo?: absent, _}
+>       | #{bar?: absent, _} => (0, 0)
+>     }
+>   }
+> [a, b] (#{foo?: b, bar?: a}) -> (Int | b, Int | a)
+> let  = %yield(fun (x) ret {
+>   let case() = {
+>     ret((0: 0, 1: 0))
+>   };
+>   ifpresent x.bar {
+>     ifpresent x.foo {
+>       let x2 = x.foo;
+>       let y = x.bar;
+>       ret((0: x2, 1: y))
+>     } else {
+>       case()
+>     }
+>   } else {
+>     ifpresent x.foo {
+>       case()
+>     } else {
+>       case()
+>     }
+>   }
+> });
+> done
 
-> STATS: fix: 14, flex: 181
+> STATS: fix: 15, flex: 190
