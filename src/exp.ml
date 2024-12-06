@@ -11,6 +11,7 @@ type tuple_tag =
   | Anon_tag
   | Struct_tag of string loc
   | Named_tag of symbol
+  | Qualified_tag of symbol * symbol
 
 (* Expressions *)
 
@@ -168,6 +169,7 @@ let mapper =
     | Anon_tag -> Anon_tag
     | Struct_tag t -> Struct_tag (sym r t)
     | Named_tag t -> Named_tag (sym r t)
+    | Qualified_tag (s,t) -> Qualified_tag (sym r s, sym r t)
   in
 
   let exp = mayloc @@ fun r e -> match e with

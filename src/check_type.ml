@@ -75,29 +75,56 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
              | false, true -> Arg_pos t
              | true, true -> Arg_both (t,t)
      in
-     let tag, args, decl =
+     let (tag : Typedefs.Cons1.Tag.t option), args, override_decl =
+       let check_args ~name ~params =
+         let nparams = List.length params in
+         let nargs = List.length args in
+         if nparams <> nargs then
+           fail loc (Illformed_type (`Wrong_args (fst name, `Arity (nparams, nargs))));
+         List.map2 (check_arg (fst name)) params (List.mapi (fun i x -> i,x) args)
+       in
        match tag with
-       | None | Some (Anon_tag | Struct_tag _) -> tag, [], None
+       | None -> None, [], None
+       | Some Anon_tag -> Some Anon_tag, [], None
+       | Some (Struct_tag s) -> Some (Struct_tag s), [], None
+       | Some (Qualified_tag (name, case)) ->
+          begin match lookup ~env name args with
+          | None -> fail (snd name) (Bad_name (`Unknown, `Type, fst name))
+          | Some { body = Decl_primitive | Decl_record _; _ } ->
+             fail (snd case) (Bad_name (`Unknown, `Type, fst case))
+          | Some { name; params; body = Decl_variant cases } ->
+             match SymLocMap.find_opt case cases with
+             | None -> fail (snd case) (Bad_name (`Unknown, `Type, fst case))
+             | Some fs ->
+                let tag = Typedefs.Nom_tag.Variant_tag (name, case) in
+                Some (Named_tag tag),
+                check_args ~name ~params,
+                Some (tag, fs)
+          end
        | Some (Named_tag (name,nameloc)) ->
-          match lookup ~env (name,nameloc) args with
+          begin match lookup ~env (name,nameloc) args with
           | None -> fail nameloc (Bad_name (`Unknown, `Type, name))
-          | Some decl ->
-             let nparams = List.length decl.params in
-             let nargs = List.length args in
-             if nparams <> nargs then
-               fail loc (Illformed_type (`Wrong_args (name, `Arity (nparams, nargs))));
-             let args = List.map2 (check_arg name) decl.params (List.mapi (fun i x -> i,x) args) in
-             Some (Named_tag decl.name), args, Some decl
+          | Some { name; params; body = Decl_variant _ } ->
+             fixme; (* bad tag here, should be alias *)
+             let tag = Typedefs.Nom_tag.Record_tag name in
+             Some (Named_tag tag),
+             check_args ~name ~params,
+             None
+          | Some { name; params; body = Decl_primitive } ->
+             let tag = Typedefs.Nom_tag.Record_tag name in
+             Some (Named_tag tag),
+             check_args ~name ~params,
+             None
+          | Some { name; params; body = Decl_record fs } ->
+             let tag = Typedefs.Nom_tag.Record_tag name in
+             Some (Named_tag tag),
+             check_args ~name ~params,
+             Some (tag, fs)
+          end
      in
      let body = typs_of_fields ~lookup ~env (fields,loc) in
-     begin match decl with
-     | Some decl when not (Fields.is_empty body) ->
-        let fields =
-          match decl.body with
-          | Decl_primitive | Decl_variant _ ->
-             (*FIXME*) unimp "overrides in non-record types"
-          | Decl_record fs -> fs
-        in
+     begin match override_decl with
+     | Some (ntag, fields) when not (Fields.is_empty body) ->
         begin match
           (* Check that the fields exist *)
           Types.Fields.sub ~f:(fun _fn _ty _exp -> ())
@@ -117,7 +144,7 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
                        (Record {tag; args; body = body}, cploc)
                        (Record {tag; args; body = fields}, cnloc)
            in
-           fail loc (Conflict (`Field_override (fst decl.name, fn), err))
+           fail loc (Conflict (`Field_override (ntag, fn), err))
         end
      | _ -> ()
      end;
@@ -197,5 +224,3 @@ and enter_polybounds : 'a 'b . lookup:lookup_fn -> env:env -> typolybounds -> (s
     let names' = SymMap.add name' (SymMap.find name' name_ix) names in
     names', (name, mkbound names loc bound)) SymMap.empty (IArray.of_list vars) in
   vars, name_ix
-
-

@@ -526,4 +526,90 @@ fn gbox(x : Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
 > type Other()
 > fn gbox(x: Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
 
-> STATS: fix: 23, flex: 314
+# variants
+# FIXME: variant aliases
+{
+type Option[a]{
+| None
+| Some(a)
+}
+type Z[x] {
+  foo: Option.Some[x]
+  bar: Option.None[Int] | Option.Some[Int]
+}
+fn f(x) {
+  match x {
+  | Z{foo: Some(a), bar:Some(b)} => (a(3),b)
+  | Z{foo: Some(a), bar:Option.None} => (a(7),1)
+  }
+}
+fn g() { (f({foo: Some(fn(x){x}), bar:None}), Option.Some(true)) }
+}
+> type Option[+a]{ None | Some(a) }
+> type Z[+x]{foo: Option.Some[x], bar: Option.None[Int] | Option.Some[Int]}
+> fn f[a](x: Z[Int -> a]) -> (a, Int) {
+>   match x {
+>     | Z{foo: Some(a), bar: Some(b)} => (a(3), b)
+>     | Z{foo: Some(a), bar: Option.None} => (a(7), 1)
+>   }
+> }
+> fn g() -> ((Int, Int), Option.Some[Bool](Bool)) {
+>   (f(Z{foo: Option.Some(fn (x) { x }), bar: Option.None}), Option.Some(true))
+> }
+
+{
+type A {}
+fn f(A.B){}
+}
+> test:3: Invalid type name A (expected a variant type)
+>   fn f(A.B){}
+>        ^
+
+{
+type A { Foo | Bar }
+type B { Foo | Bar }
+fn f1(x : A.Foo | B.Bar) {
+  match x { Foo => 1 | Bar => 2 }
+}
+fn f2(x : A.Foo | B.Foo) {
+  match x { Foo => 1 | Foo => 2 }
+}
+}
+> test:8: Unexpected tag Foo, expected A.Foo | B.Foo
+>     match x { Foo => 1 | Foo => 2 }
+>               ^^^
+
+{
+type Z{ foo: Int }
+fn f(Z{foo,bar}) { (foo,bar) }
+}
+> test:3: The field 'bar' is missing.
+>   fn f(Z{foo,bar}) { (foo,bar) }
+>        ^^^^^^^^^^
+>      found: Z
+>   expected: {foo: _, bar: _}
+> This Z comes from test:3:
+>   fn f(Z{foo,bar}) { (foo,bar) }
+>        ^
+> but is used as {foo: _, bar: _} at test:3:
+>   fn f(Z{foo,bar}) { (foo,bar) }
+>              ^^^
+
+{
+type Z {foo:Int, bar:Int}
+fn f(Z{foo}) { foo }
+}
+> test:3: A surplus field 'bar' is present.
+>   fn f(Z{foo}) { foo }
+>        ^^^^^^
+>      found: Z
+>   expected: {foo: _}
+> This Z comes from test:2:
+>   type Z {foo:Int, bar:Int}
+>                    ^^^
+> but is used as {foo: _}
+
+
+
+
+> STATS: fix: 25, flex: 326

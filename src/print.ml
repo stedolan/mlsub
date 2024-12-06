@@ -100,6 +100,7 @@ let tuple_tag = function
   | Anon_tag -> string "#"
   | Struct_tag t -> string "#" ^^ symbol t
   | Named_tag t -> symbol t
+  | Qualified_tag (s, t) -> symbol s ^^ string "." ^^ symbol t
 
 let rec exp ~prec e =
   match e with
@@ -304,7 +305,11 @@ let decl_ty_body = function
   | Dty_record (fs,_) ->
      fields ~tcomma:false tyexp fs
   | Dty_variant vs ->
-     let variant (s, (fs,_)) = symbol s ^^ fields ~tcomma:false tyexp fs in
+     let variant (s, (fs,_)) =
+       match fs with
+       | Ftuple [] -> symbol s
+       | fs -> symbol s ^^ fields ~tcomma:false tyexp fs
+     in
      (* FIXME share code with Match? *)
      braces' (indent (break 1 ^^ ifflat empty (string "| ") ^^ separate_map (break 1 ^^ string "| ") variant vs) ^^ break 1)
 

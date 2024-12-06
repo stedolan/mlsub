@@ -132,18 +132,114 @@ module Fields = struct
   let mem f t = Map.mem f t.fields
 end
 
+module Nom_tag = struct
+  type t =
+    | Record_tag of Exp.symbol
+    | Variant_tag of Exp.symbol * Exp.symbol
+
+  let to_string = function
+    | Record_tag (s,_) -> s
+    | Variant_tag ((s,_),(t,_)) -> s ^ "." ^ t
+
+  let equal a b =
+    match a, b with
+    | Record_tag (a,_), Record_tag (b,_) -> String.equal a b
+    | Variant_tag ((a1,_),(a2,_)), Variant_tag ((b1,_),(b2,_)) ->
+       String.equal a1 b1 && String.equal a2 b2
+    | (Record_tag _ | Variant_tag _), _ -> false
+
+  let compare a b =
+    match a, b with
+    | Record_tag (a, _), Record_tag (b, _) -> String.compare a b
+    | Variant_tag ((a1,_), (a2,_)), Variant_tag ((b1,_),(b2,_)) ->
+       (match String.compare a1 b1 with 0 -> String.compare a2 b2 | n -> n)
+    | Record_tag _, Variant_tag _ -> -1
+    | Variant_tag _, Record_tag _ -> +1
+
+  let type_name = function
+    | Record_tag s -> s
+    | Variant_tag (s, _t) -> s
+
+  let exp_tag = function
+    | Record_tag s -> Exp.Named_tag s
+    | Variant_tag (s, t) -> Exp.Qualified_tag (s,t)
+
+  let loc = function
+    | Record_tag (_,l) -> l
+    | Variant_tag ((_,_),(_,l)) -> l
+
+  let hash = function
+    | Record_tag (s,_) -> String.hash s
+    | Variant_tag ((s,_),(t,_)) -> String.hash s * 678321 + String.hash t
+
+end
+
 module Cons1 = struct
   (* FIXME: add the None case here? *)
-  type tuple_tag = Exp.tuple_tag =
+  type tuple_tag =
     | Anon_tag
     | Struct_tag of string loc
-    | Named_tag of Exp.symbol
+    | Named_tag of Nom_tag.t
+
+  module Tag = struct
+    type t = tuple_tag
+    let to_string = function
+      | Anon_tag -> "#"
+      | Struct_tag (s,_) -> "#" ^ s
+      | Named_tag t -> Nom_tag.to_string t
+
+    let compare a b =
+      match a, b with
+      | Anon_tag, Anon_tag -> 0
+      | Struct_tag (a, _), Struct_tag (b, _) -> String.compare a b
+      | Named_tag a, Named_tag b -> Nom_tag.compare a b
+    
+      | Anon_tag, (Struct_tag _ | Named_tag _)
+      | Struct_tag _, Named_tag _ -> -1
+    
+      | Named_tag _, (Anon_tag | Struct_tag _)
+      | Struct_tag _, Anon_tag -> +1
+
+    module Map = Util.OrdMap (struct type nonrec t = t let compare = compare end)
+
+    (* FIXME: delete? *)
+    let to_ir_string : t -> string = function
+      | Anon_tag ->
+         ""
+      | Struct_tag (s, _) ->
+         s
+      | Named_tag t ->
+         Nom_tag.to_string t
+
+    let matches (etag : Exp.tuple_tag) (tag : t) =
+      match etag, tag with
+      | Anon_tag, Anon_tag -> true
+      | Struct_tag (s,_), Struct_tag (t,_) -> String.equal s t
+      | Named_tag (s,_), Named_tag (Record_tag (t,_)) -> String.equal s t
+      | Named_tag (s,_), Named_tag (Variant_tag (_,(t,_))) -> String.equal s t
+      | Qualified_tag ((s,_),(t,_)), Named_tag (Variant_tag ((s',_),(t',_))) ->
+         String.equal s s' && String.equal t t'
+      | _ -> false
+
+    let unparse : t -> Exp.tuple_tag =
+      function
+      | Anon_tag -> Anon_tag
+      | Struct_tag t -> Struct_tag t
+      | Named_tag t -> Nom_tag.exp_tag t
+
+    (* Makes invalid tags, used only in error messages *)
+    let unchecked_tag : Exp.tuple_tag -> t =
+      function
+      | Anon_tag -> Anon_tag
+      | Struct_tag t -> Struct_tag t
+      | Named_tag t | Qualified_tag (_,t) -> Named_tag (Record_tag t)
+  end
 
   let tuple_tag_equal a b =
     match a, b with
     | Anon_tag, Anon_tag -> true
     | Struct_tag (a,_), Struct_tag (b,_) -> String.equal a b
-    | Named_tag (a,_), Named_tag (b,_) -> String.equal a b
+    | Named_tag a, Named_tag b -> Nom_tag.equal a b
     | (Struct_tag _ | Named_tag _ | Anon_tag), _ -> false
 
   type (+'neg, +'pos) cons_record =
@@ -223,10 +319,13 @@ module Cons1 = struct
        pos pr qr
     | (Record _|Func _|Top), _ -> false
 
+  let cons_record_map ~neg ~pos {tag; args; body} =
+    {tag; args = List.map (Tyarg.map ~neg ~pos) args; body = Fields.map ~pos body}
+
   let map ~neg ~pos = function
     | Top -> Top
-    | Record {tag; args; body} ->
-       Record {tag; args = List.map (Tyarg.map ~neg ~pos) args; body = Fields.map ~pos body}
+    | Record r ->
+       Record (cons_record_map ~neg ~pos r)
     | Func (args, res) ->
        let args = List.map neg args in
        let res = pos res in
@@ -237,7 +336,7 @@ module Cons1 = struct
     | Record {tag; args; body} ->
        begin match tag with
        | None | Some (Anon_tag | Struct_tag _) -> assert (args = [])
-       | Some (Named_tag (name,_)) ->
+       | Some (Named_tag name) ->
           let wf_arg v arg =
             match arg, v.Exp.occurs_neg, v.Exp.occurs_pos with
             | Arg_none, `No, `No
@@ -249,10 +348,10 @@ module Cons1 = struct
           match params name with
           | pvs ->
              if List.length pvs <> List.length args then
-               intfail "Cons.wf: %d args to %s, should be %d" (List.length args) name (List.length pvs);
+               intfail "Cons.wf: %d args to %s, should be %d" (List.length args) (Nom_tag.to_string name) (List.length pvs);
              List.iter2 wf_arg pvs args;
              List.iter (Tyarg.iter ~neg ~pos) args
-          | exception Not_found -> intfail "Cons.wf: %s not in env" name
+          | exception Not_found -> intfail "Cons.wf: %s not in env" (Nom_tag.to_string name)
        end;
        Fields.wf ~pos body
     | Func (args, res) ->
@@ -262,7 +361,7 @@ module Cons1 = struct
   type field =
     | Func_arg of int
     | Func_res
-    | Named_arg of [`Neg|`Pos] * string * int
+    | Named_arg of [`Neg|`Pos] * Nom_tag.t * int
     | Record_field of Tuple_fields.field_name
 
   let field_is_positive = function
@@ -286,7 +385,7 @@ module Cons1 = struct
     | Record {tag; args; body} ->
        let arg i arg =
          let tag = match tag with
-           | Some (Named_tag (t,_)) -> t
+           | Some (Named_tag t) -> t
            | _ -> intfail "args on invalid type"
          in
          Tyarg.map arg
@@ -310,7 +409,7 @@ module Cons1 = struct
   type head_conflict =
     | Incompatible
     | Args of [`Too_few | `Too_many | `Wrong_number]
-    | Expected_tag of (tuple_tag option * tuple_tag list)
+    | Expected_tag of (Exp.tuple_tag option * tuple_tag list)
 
   let merge_head_conflicts xs =
     let merge c d =
@@ -347,7 +446,7 @@ module Cons1 = struct
        | None, None -> Le Id
        | Some t, None -> Le (Drop_record_tag t)
        | Some pt, Some qt when tuple_tag_equal pt qt -> Le Id
-       | _, Some qt -> Un (Expected_tag (ptag, [qt]))
+       | _, Some qt -> Un (Expected_tag (Option.map Tag.unparse ptag, [qt]))
        end
 
   let incomparable_head a b =
@@ -549,12 +648,16 @@ type ntyp = (lower, flexvar) typ
 
 type gen_level = env_level option
 
+module SymLocMap = Map.Make (struct
+  type t = Exp.symbol
+  let compare (s,_) (t,_) = String.compare s t
+end)
 
 type decl_fields = (zero,zero) typ Fields.t
 type decl_body =
   | Decl_primitive
   | Decl_record of decl_fields
-  | Decl_variant of (Exp.symbol * decl_fields) list
+  | Decl_variant of decl_fields SymLocMap.t
 
 let map_decl_body ~pos = function
   | Decl_primitive ->
@@ -562,7 +665,7 @@ let map_decl_body ~pos = function
   | Decl_record fs ->
      Decl_record (Fields.map ~pos fs)
   | Decl_variant vs ->
-     Decl_variant (List.map (fun (s,fs) -> s, Fields.map ~pos fs) vs)
+     Decl_variant (SymLocMap.map (Fields.map ~pos) vs)
 
 type type_decl =
   { name: Exp.symbol;
@@ -602,7 +705,7 @@ module Env = struct
     | Env_nil
 
   type t =
-    { env_type_decls: type_decl SymMap.t;
+    { env_type_decls: type_decl SymLocMap.t;
       env_level: env_level;
       env_bindings: bindings }
 
@@ -640,7 +743,7 @@ module Env = struct
     search v env.env_bindings
 
   let lookup_decl env (s : string) =
-    SymMap.find_opt s env.env_type_decls
+    SymLocMap.find_opt (s,Location.noloc) env.env_type_decls
 
   let level env =
     env.env_level
@@ -650,8 +753,9 @@ module Env = struct
       "Int", {name = n_int Location.noloc; params=[]; body=Decl_primitive};
       "String", {name = n_string Location.noloc; params=[]; body=Decl_primitive}]
      : (string * type_decl) list)
+    |> List.map (fun (s,x) -> ((s,Location.noloc),x))
     |> List.to_seq
-    |> SymMap.of_seq
+    |> SymLocMap.of_seq
 
   let empty =
     { env_type_decls = builtins;
@@ -673,28 +777,31 @@ module Env = struct
   let extend_decls env decls =
     let env_type_decls =
       List.fold_left (fun acc (d : type_decl) ->
-        assert (not (SymMap.mem (fst d.name) acc));
-        SymMap.add (fst d.name) d acc)
+        assert (not (SymLocMap.mem d.name acc));
+        SymLocMap.add d.name d acc)
         env.env_type_decls
         decls
     in
     { env with env_type_decls }
 
   let param_variances env name =
-    (SymMap.find name env.env_type_decls).params |> List.map fst
+    (SymLocMap.find (Nom_tag.type_name name) env.env_type_decls).params |> List.map fst
 
-  let get_decl_fields env (s : string) =
-    match lookup_decl env s with
-    | None -> intfail "unbound decl %s" s
-    | Some {name=_; params=_; body = Decl_primitive } ->
+  let get_decl_fields env (s : Nom_tag.t) =
+    match s, SymLocMap.find (Nom_tag.type_name s) env.env_type_decls with
+    | Record_tag _, {name=_; params=_; body = Decl_primitive } ->
        Fields.empty
-    | Some {name=_; params=_; body = Decl_variant _} -> unimp "variant fields"
-    | Some {name=_; params=_; body = Decl_record fs} -> fs
+    | Record_tag _, {name=_; params=_; body = Decl_record fs} -> fs
+    | Variant_tag (_,t), {body = Decl_variant vs; _} ->
+       SymLocMap.find t vs
+    | Record_tag _, {body = Decl_variant _; _} ->
+       intfail "Not a record type"
+    | Variant_tag _, {body = (Decl_record _ | Decl_primitive); _} ->
+       intfail "Not a variant type"
 
-  let get_decl_params env (s : string) =
-    match lookup_decl env s with
-    | None -> intfail "unbound decl %s" s
-    | Some decl -> decl.params
+  let get_decl_params env (s : Nom_tag.t) =
+    (SymLocMap.find (Nom_tag.type_name s) env.env_type_decls).params
+
 end
 
 type env = Env.t
@@ -931,9 +1038,9 @@ let rec env_lookup_type_var (env : Env.bindings) loc name : rigvar option =
 
 let env_lookup_type_var env loc name = env_lookup_type_var env.Env.env_bindings loc name
 
-let c_bool loc = (Cons1.named (n_bool loc), loc)
-let c_int loc = (Cons1.named (n_int loc), loc)
-let c_string loc = (Cons1.named (n_string loc), loc)
+let c_bool loc = (Cons1.named (Record_tag (n_bool loc)), loc)
+let c_int loc = (Cons1.named (Record_tag (n_int loc)), loc)
+let c_string loc = (Cons1.named (Record_tag (n_string loc)), loc)
 
 let flexvar_name fv =
   let names = [| "α"; "β"; "γ"; "δ"; "ε"; "ζ"; "η"; "θ"; "κ"; "ν"; "ξ"; "π"; "ρ" |] in
@@ -1076,10 +1183,10 @@ let wf_decl env (decl : type_decl) =
   | Decl_primitive -> ()
   | Decl_record fs -> Fields.wf ~pos:wf_typ fs
   | Decl_variant vs ->
-     vs |> List.iter (fun (_,fs) -> Fields.wf ~pos:wf_typ fs)
+     vs |> SymLocMap.iter (fun _ fs -> Fields.wf ~pos:wf_typ fs)
 
 let wf_env env =
-  SymMap.iter (fun _ d -> wf_decl env d) env.Env.env_type_decls
+  SymLocMap.iter (fun _ d -> wf_decl env d) env.Env.env_type_decls
 
 (*
  * Unparsing: converting a typ back to a Exp.tyexp
@@ -1137,7 +1244,7 @@ let unparse_cons ~neg ~pos (ty,_tyloc) =
            | Arg_both (neg, (Some Exp.Ttop, _)) -> Exp.Arg_neg neg
            | Arg_both (neg, pos) -> Exp.Arg_both {neg;pos})
        in
-       Trecord (tag, List.map mayloc args, fs)
+       Trecord (Option.map Cons1.Tag.unparse tag, List.map mayloc args, fs)
     | Func (args, ret) ->
        Tfunc (List.map neg args, pos ret)
   in

@@ -1,10 +1,10 @@
 open Error
 open Util
 
-module SymSet = Set.Make (struct
-  type t = Exp.symbol
-  let compare (s,_) (t,_) = String.compare s t
-end)
+
+module SymMap = Typedefs.SymLocMap
+module Nom_tag = Typedefs.Nom_tag
+module TagSet = Set.Make (Nom_tag)
 
 module SymTbl = Hashtbl.Make (struct
   type t = Exp.symbol
@@ -13,43 +13,44 @@ module SymTbl = Hashtbl.Make (struct
 end)
 
 let rec free_type_names = function
-  | None, _ -> SymSet.empty
+  | None, _ -> TagSet.empty
   | Some t, _ -> free_type_names' t
 and free_type_names' =
   let open Exp in function
   | Tforall (vars, body) ->
      (* No possibility of capture: we're not binding named types, just Ttyvars *)
-     List.fold_left SymSet.union (free_type_names body)
+     List.fold_left TagSet.union (free_type_names body)
        (List.concat_map (fun (_, b) -> Option.to_list (Option.map free_type_names b)) vars)
   | Ttyvar _ ->
-     SymSet.empty (* free *named type* names, not vars *)
+     TagSet.empty (* free *named type* names, not vars *)
   | Trecord (tag, args, fs) ->
      let free_arg = function
-       | None, _ -> SymSet.empty
+       | None, _ -> TagSet.empty
        | Some (Arg_pos t | Arg_neg t | Arg_gen t), _ -> free_type_names t
-       | Some (Arg_both {neg;pos}), _ -> SymSet.union (free_type_names neg) (free_type_names pos)
+       | Some (Arg_both {neg;pos}), _ -> TagSet.union (free_type_names neg) (free_type_names pos)
      in
      let names =
        match tag with
-       | Some (Named_tag id) -> SymSet.singleton id
-       | Some (Struct_tag _ | Anon_tag) | None -> SymSet.empty
+       | Some (Named_tag id) -> TagSet.singleton (Record_tag id)
+       | Some (Qualified_tag (s, t)) -> TagSet.singleton (Variant_tag (s,t))
+       | Some (Struct_tag _ | Anon_tag) | None -> TagSet.empty
      in
-     let names = List.fold_left (fun acc arg -> SymSet.union acc (free_arg arg)) names args in
-     SymSet.union names (free_type_names_fields fs)
+     let names = List.fold_left (fun acc arg -> TagSet.union acc (free_arg arg)) names args in
+     TagSet.union names (free_type_names_fields fs)
   | Tfunc (args, ret) ->
-     List.fold_left SymSet.union (free_type_names ret) (List.map free_type_names args)
+     List.fold_left TagSet.union (free_type_names ret) (List.map free_type_names args)
   | Tjoin (a, b) ->
-     SymSet.union (free_type_names a) (free_type_names b)
-  | Ttop | Tbot -> SymSet.empty
+     TagSet.union (free_type_names a) (free_type_names b)
+  | Ttop | Tbot -> TagSet.empty
 and free_type_names_fields fs =
   fs
   |> Exp.record_fields ~loc:Location.noloc
   |> List.map (fun (_,t) -> free_type_names_field t)
-  |> List.fold_left SymSet.union SymSet.empty
+  |> List.fold_left TagSet.union TagSet.empty
 and free_type_names_field (t : _ Exp.exp_field) =
   match t with
   | Mandatory (Some t) | Optional (Some t) -> free_type_names t
-  | _ -> SymSet.empty
+  | _ -> TagSet.empty
 
 type scc_state =
   { index: int;
@@ -81,7 +82,7 @@ let decl_names (d : type_decl_state) =
   | Dty_variant vs ->
      vs
      |> List.map (fun (_,(fs,_)) -> free_type_names_fields fs)
-     |> List.fold_left SymSet.union SymSet.empty
+     |> List.fold_left TagSet.union TagSet.empty
 
 
 module Variance_spec = struct
@@ -150,8 +151,8 @@ let check_type_decls types =
     decl.scc_state <- Some state;
     stack := decl :: !stack;
     decl_names decl
-    |> SymSet.elements
-    |> List.filter_map (fun s -> SymTbl.find_opt table s)
+    |> TagSet.elements
+    |> List.filter_map (fun s -> SymTbl.find_opt table (Nom_tag.type_name s))
     |> List.sort (fun d1 d2 -> compare d1.decl_index d2.decl_index)
     |> List.iter (fun decl' ->
       match decl'.scc_state with
@@ -214,15 +215,15 @@ let check_type_decls types =
     in
     let decl_types =
       cs |> List.map (fun (d : type_decl_state) ->
-      let open Typedefs in
       let env = env_with_params ~env (d.params |> List.map (fun (x:param_state) -> x.name)) in
       let ck_fields fs = Check_type.typs_of_fields ~lookup ~env fs in
-      let body =
+      let body : Typedefs.decl_body  =
         match d.body with
         | Dty_record fs -> Decl_record (ck_fields fs)
-        | Dty_variant vs -> Decl_variant (List.map (fun (s, fs) -> s, ck_fields fs) vs)
+        | Dty_variant vs -> Decl_variant (List.map (fun (s, fs) -> s, ck_fields fs) vs |> SymMap.of_list)
       in
       let body =
+        let open Typedefs in
         let nojoin ((_,_,tyloc) as ty) =
           if is_varjoin ty then
             let loc = Option.value tyloc ~default:(snd d.name) in
@@ -276,13 +277,12 @@ let check_type_decls types =
              | Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc ->
                 assert (Typedefs.Fields.is_empty body);
                 let params =
-                  match SymTbl.find tbl t with
+                  match SymTbl.find tbl (Nom_tag.type_name t) with
                   | decl' ->
                      found_recursion ~loc var decl';
                      List.map (fun (p : param_state) -> p.var_found) decl'.params
                   | exception Not_found ->
-                     let decl' = Option.get (Typedefs.Env.lookup_decl env (fst t)) in
-                     List.map fst decl'.params
+                     List.map fst (Typedefs.Env.get_decl_params env t)
                 in
                 List.iter2
                   (fun (param : Exp.variance_spec) (arg : _ Typedefs.Cons1.tyarg) ->
@@ -324,8 +324,8 @@ let check_type_decls types =
          Tpoly {vars; body}
       | Tcvj (conses, vars, loc) ->
          let trim_cons = function
-           | (Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc) when SymTbl.mem tbl t ->
-              let decl = SymTbl.find tbl t in
+           | (Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc) when SymTbl.mem tbl (Nom_tag.type_name t) ->
+              let decl = SymTbl.find tbl (Nom_tag.type_name t) in
               let trim_arg (param : param_state) (arg : _ Typedefs.Cons1.tyarg) =
                 match param.var_spec, arg with
                 | Some _, arg ->
@@ -430,7 +430,7 @@ let unparse_type_decl ~env (d : Typedefs.type_decl) : Exp.decl =
     | Decl_record fs ->
        Dty_record (unparse_fields fs, Location.noloc)
     | Decl_variant vs ->
-       Dty_variant (vs |> List.map (fun (s,fs) -> s, (unparse_fields fs, Location.noloc)))
+       Dty_variant (vs |> SymMap.map (fun fs -> (unparse_fields fs, Location.noloc)) |> SymMap.bindings)
   in
   Some (Dtype (name, params, body)), Location.noloc
 

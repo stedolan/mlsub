@@ -23,20 +23,7 @@ end
 
 module Fields = Typedefs.Fields
 
-module TagMap = OrdMap (struct
-  type t = tuple_tag
-  let compare (a : t) (b : t) =
-    match a, b with
-    | Anon_tag, Anon_tag -> 0
-    | Struct_tag (a, _), Struct_tag (b, _) -> String.compare a b
-    | Named_tag (a, _), Named_tag (b, _) -> String.compare a b
-
-    | Anon_tag, (Struct_tag _ | Named_tag _)
-    | Struct_tag _, Named_tag _ -> -1
-
-    | Named_tag _, (Anon_tag | Struct_tag _)
-    | Struct_tag _, Anon_tag -> +1
-end)
+module TagMap = Typedefs.Cons1.Tag.Map
 
 (* FIXME: move somewhere new? *)
 type mand_flag =
@@ -44,13 +31,30 @@ type mand_flag =
   | Optional
 
 type pat_head =
-  | Ph_tuple of tuple_tag * pat fields
+  | Ph_tuple of Typedefs.Cons1.Tag.t * pat fields
   | Ph_any
 
 type split_kind =
   | Split_none
   | Split_any
   | Split_cases of (mand_flag loc FieldMap.t * Exp.extensible_flag * Location.t) TagMap.t * Exp.extensible_flag loc
+
+(* FIXME: move to Types? *)
+let ptyp_conses ~env (t : ptyp) =
+  let rec go = function
+    | Tcvj (conses, [], _) ->
+       List.map (function
+         | (Cons1.Record ({tag=Some tag; _} as r)),loc -> tag,(r,loc)
+         | _ -> raise Exit) conses
+    | Tcvj (conses, (rv :: rvs), loc) ->
+       go (Types.join_ptyp env
+             (Tcvj (conses, rvs, loc))
+             (Types.ptyp_of_rigid_bound env (Types.as_rigvar rv)))
+    | _ -> raise Exit
+  in
+  match go t with
+  | exception Exit -> None
+  | t -> Some t
 
 let split_kind (pats : pat_head loc list) : split_kind =
   let find_cases : pat_head loc -> _ = function
@@ -113,27 +117,11 @@ type split_type =
   | Split_type_any
   | Split_type_cases of split_type_cases
 
-and split_type_cases = (tuple_tag * split_type_field list) list
+and split_type_cases = (Cons1.Tag.t * split_type_field list) list
 
 and split_type_field =
   (Tuple_fields.field_name * mand_flag * ptyp)
 
-(* FIXME: move to Types? *)
-let ptyp_conses ~env (t : ptyp) =
-  let rec go = function
-    | Tcvj (conses, [], _) ->
-       List.map (function
-         | (Cons1.Record ({tag=Some tag; _} as r)),loc -> tag,(r,loc)
-         | _ -> raise Exit) conses
-    | Tcvj (conses, (rv :: rvs), loc) ->
-       go (Types.join_ptyp env
-             (Tcvj (conses, rvs, loc))
-             (Types.ptyp_of_rigid_bound env (Types.as_rigvar rv)))
-    | _ -> raise Exit
-  in
-  match go t with
-  | exception Exit -> None
-  | t -> Some (TagMap.of_list t)
 
 let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
   match kind with
@@ -152,12 +140,41 @@ let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
          |> FieldMap.to_list
          |> Fields.of_list
        in
-       let split =
+       let split () =
          fields
          |> FieldMap.to_list
-         |> List.map (fun (name, (mand, _loc, ty)) -> name, mand, ty)
+         |> List.map (fun (name, (mand, _loc, ty)) -> name, mand, !ty)
        in
        tybody, split
+     in
+     let check_fields ~env ~loc ((cons : _ Cons1.cons_record),cons_loc) (fields_b,ext) =
+       let decl_fields =
+         match cons.tag with
+         | Some (Named_tag t) -> Env.get_decl_fields env t
+         | None | Some (Anon_tag | Struct_tag _) -> Fields.empty
+       in
+       let fields_a = cons.body in
+       let ext_a = Types.Cons1.record_def ~env ~shape:(Types.Type_shape.gen_pos) ~loc:cons_loc cons in
+       let ext_b _ = Fields.desc_of_ext loc ext in
+       match
+         Types.Fields.sub ~extra:decl_fields (fields_a,ext_a) (fields_b, ext_b)
+           ~f:(fun _k a b -> b := a)
+       with
+       | Ok () -> ()
+       | Error (err : Types.Fields.field_error) ->
+          let err, cploc, cnloc =
+            match err with
+            | Field_missing (name, ploc, nloc) ->
+               Types.Field_missing name, ploc, nloc
+            | Field_extra (name, ploc, nloc) ->
+               Types.Field_extra name, ploc, nloc
+          in
+          let cp = Cons1.Record cons in
+          (* drop tag to avoid making invalid args *)
+          let tag = match cons.tag with Some (Anon_tag | Struct_tag _) as t -> t | _ -> None in
+          let cn = Cons1.Record{tag; args=[]; body=fields_b} in
+          let err = Types.make_err env err (cp, cploc) (cn, cnloc) in
+          Error.fail loc (Conflict (`Pat, err))
      in
      (* Checked conses should be used for:
           - filling in wildcards
@@ -166,87 +183,64 @@ let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
      let splits =
        match ptyp_conses ~env t with
        | Some checking_conses ->
-          TagMap.merge cases checking_conses
-            ~f:(fun tag case ck ->
+          TagMap.merge cases (TagMap.of_list checking_conses)
+            ~f:(fun _tag case ck ->
               match case, ck with
               | None, None -> None
               | Some _, None ->
                  (* Drop this case, it's impossible *)
                  None
-              | Some (fields, ext, loc), Some (ty, tyloc) ->
+              | Some (fields, ext, loc), Some ty ->
                  let fields, split = split_fields fields in
-                 let fields_def _ = Fields.desc_of_ext loc ext in
-                 let ty_def = Types.Cons1.record_def ~env ~shape:(Types.Type_shape.gen_pos) ~loc:tyloc ty in
-                 begin match
-                   Types.Fields.sub (ty.body,ty_def) (fields,fields_def)
-                     ~f:(fun _k a b -> b := a)
-                 with
-                 | Ok () -> ()
-                 | Error err ->
-                    (* FIXME merge with Check Tuple *)
-                    let err, cploc, cnloc =
-                      match err with
-                      | Field_missing (name, ploc, nloc) ->
-                         Types.Field_missing name, ploc, nloc
-                      | Field_extra (name, ploc, nloc) ->
-                         Types.Field_extra name, ploc, nloc
-                    in
-                    (* drop tag to avoid making invalid args *)
-                    let tag = match tag with Anon_tag -> Some tag | _ -> None in
-                    let cn = Cons1.Record{tag; args=[]; body=fields} in
-                    let cp = Cons1.Record ty in
-                    let err = Types.make_err env err (cp, cploc) (cn, cnloc) in
-                    Error.fail loc (Conflict (`Pat, err))
-                 end;
+                 check_fields ~env ~loc ty (fields,ext);
                  Some split
               | None, Some (_ty, _tyloc) ->
                  (* No error here: the unhandled cases will be reported as
                     nonexhaustive matches by counterexample generation later. *)
-                 Some [] (*FIXME should be Ext_open?*))
+                 Some (fun () -> []) (*FIXME should be Ext_open?*))
           |> TagMap.to_list
        | None ->
           (* Infer type of patterns *)
           if ext = Ext_open then Error.fail extloc (Illformed_pat `Unknown_cases);
-          let conses, splits =
+          let conses, delayed_splits =
             TagMap.to_list cases
-            |> List.map (fun (tag, (fields, ext, loc)) ->
+            |> List.map (fun ((tag:Cons1.Tag.t), (fields, ext, loc)) ->
                if ext = Ext_open then
                  (* FIXME test *)
                  Error.fail loc (Illformed_pat `Unknown_fields);
-               let args =
-                 match tag with
-                 | Anon_tag | Struct_tag _ -> []
-                 | Named_tag (tag,_) ->
-                    let params =
-                      match Env.lookup_decl env tag with
-                      | Some {name=_; params; body=Decl_record _} -> params
-                      | _ -> Error.fail loc (Bad_name (`Unknown, `Type, tag))
-                    in
-                    params
+               match tag with
+               | Anon_tag | Struct_tag _ ->
+                  let tybody, split = split_fields fields in
+                  Cons1.Record {tag = Some tag; args = []; body = tybody},
+                  (tag, split)
+               | Named_tag name ->
+                  (* FIXME: check whether invariant params need to be
+                     related. I think not, that's only for intro forms? *)
+                  let args =
+                    Env.get_decl_params env name
                     |> List.map (fun (var, _) : _ Cons1.tyarg ->
                       Cons1.Tyarg.of_variance_spec var
                       |> Cons1.Tyarg.map
                            ~neg:(fun () -> ref (ttop loc))
                            ~pos:(fun () -> ref (tbot (Some loc))))
-               in
-               let tybody, split = split_fields fields in
-               Cons1.Record {tag = Some tag; args; body = tybody},
-               (tag, split))
+                  in
+                  let fields, split = split_fields fields in
+                  let cons : _ Cons1.cons_record =
+                    { tag = Some tag; args; body = Fields.empty } in
+                  Cons1.Record cons,
+                  (tag, (fun () ->
+                    let cons = Cons1.cons_record_map ~neg:(!) ~pos:(!) cons in
+                    check_fields ~env ~loc (cons,Nom_tag.loc name) (fields, ext);
+                    split ())))
             |> List.split
           in
           begin match Types.match_ptyp ~loc:matchloc env t conses with
           | Ok () -> ()
           | Error  e -> Error.fail matchloc (Conflict (`Pat, e))
           end;
-          splits
+          delayed_splits
      in
-     let splits =
-       splits
-       |> List.map (fun (tag, split) ->
-          let split = List.map (fun (name,mand,ty) -> (name,mand,!ty)) split in
-          tag, split)
-     in
-     Split_type_cases splits
+     Split_type_cases (List.map (fun (t, s) -> t, s ()) splits)
 
 let split_case tag (splits : split_type_cases) : split_type_field list * split_type_cases =
   match List.partition (fun (t,_) -> Cons1.tuple_tag_equal t tag) splits with
@@ -278,7 +272,40 @@ open Peano_nat_types
 type 'w head_pat_row = pat_head loc * 'w pat_row
 type 'w head_pat_matrix = 'w head_pat_row list
 
-let head_first_column typ mat =
+let check_tag ~loc ~env typ (etag : Exp.tuple_tag) : Cons1.Tag.t =
+  match etag with
+  | Anon_tag ->
+     Anon_tag
+  | Struct_tag s ->
+     Struct_tag s
+  | Qualified_tag (s,t) ->
+     begin match Env.lookup_decl env (fst s) with
+     | None -> Error.fail (snd s) (Bad_name (`Unknown, `Type, fst s))
+     | Some {body = Decl_record _ | Decl_primitive; _} ->
+        Error.fail (snd s) (Bad_name (`Expected `Variant, `Type, fst s))
+     | Some {body = Decl_variant vs; _} ->
+        match SymLocMap.find_opt t vs with
+        | None -> Error.fail (snd t) (Bad_name (`Unknown, `Type, fst s ^ "." ^ fst t))
+        | Some _ ->
+           Named_tag (Variant_tag (s,t))
+     end
+  | Named_tag t ->
+     match ptyp_conses ~env typ with
+     | None ->
+        begin match Env.lookup_decl env (fst t) with
+        | None -> Error.fail (snd t) (Bad_name (`Unknown, `Type, fst t))
+        | Some {body = Decl_primitive | Decl_variant _; _} ->
+           Error.fail (snd t) (Bad_name (`Expected `Record, `Type, fst t))
+        | Some {body = Decl_record _; _} -> Named_tag (Record_tag t)
+        end
+     | Some conses ->
+        (* FIXME: should an unexpected tag be ignored with a warning instead? *)
+        let tags = List.map fst conses in
+        match List.filter (Cons1.Tag.matches etag) tags with
+        | [t] -> t
+        | _ -> Error.fail loc (Bad_tag (Some etag, List.map Cons1.Tag.unparse tags))
+
+let head_first_column ~env (typ,gen_level) mat =
   let rec go ~var (mat : 'w s pat_matrix) :
       'w head_pat_matrix * IR.value IR.Binder.t option =
     match mat with
@@ -297,10 +324,10 @@ let head_first_column typ mat =
             | Some v -> v
           in
           let bindings, action = act in
-          let typ, gen_level = typ in
           let bindings = SymMap.add name {typ; gen_level; comp_var = IR.Binder.ref var } bindings in
           go ~var:(Some var) (((p::row),(bindings,action))::rest)
        | Ptuple (Some tag, fs) ->
+          let tag = check_tag ~loc ~env typ tag in
           let rest, var = go ~var rest in
           (((Ph_tuple(tag,fs),loc), (row,act))::rest),var
        | Pany ->
@@ -442,7 +469,7 @@ let rec split_cases :
      end
 
   | (typ, lvl) :: typs ->
-     let mat, var = head_first_column (typ,lvl) mat in
+     let mat, var = head_first_column ~env (typ,lvl) mat in
      let sk = split_kind (List.map fst mat) in
      let split_ty = split_type ~env ~matchloc typ sk in
      let dt =
@@ -535,7 +562,7 @@ let rec split_cases :
      Hashcons.mk dt
 
 let ptuple ~tag fields =
-  Some (Ptuple (Some tag, Exp.of_record_fields fields)),
+  Some (Ptuple (Some (Typedefs.Cons1.Tag.unparse tag), Exp.of_record_fields fields)),
   Location.noloc
 
 let rec counterexamples :
@@ -717,14 +744,15 @@ let compile ~actions vals orig_dt =
     | Cases ([(_tag, fs)], None), v :: vals ->
        Project (v, compile_fields ~vals fs)
     | Cases (cases, default), v :: vals ->
+       let ir_sym_tag t = IR.Symbol.of_string (Cons1.Tag.to_ir_string t) in
        let cases =
          cases |> List.map (fun (tag, fs) ->
            let cont = compile_fields ~vals fs in
-           IR.Symbol.of_tuple_tag tag, cont)
+           ir_sym_tag tag, cont)
        in
        let default =
          default |> Option.map (fun (tags, dt) ->
-           List.map (fun tag -> IR.Symbol.of_tuple_tag tag) tags,
+           List.map ir_sym_tag tags,
            compile ~vals dt)
        in
        Match (v, cases, default)

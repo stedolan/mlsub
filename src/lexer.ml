@@ -1,6 +1,9 @@
 open Grammar
 open Sedlexing
 open Sedlexing.Utf8
+
+let chop s = String.sub s 1 (String.length s - 1)
+
 let rec lex buf =
   match%sedlex buf with
   | Plus(' ' | '\t') -> WS
@@ -16,7 +19,6 @@ let rec lex buf =
   | ':' -> COLON
   | '=' -> EQUALS
   | "..." -> DOTS
-  | '.' -> DOT
   | ',' -> COMMA
   | ';' -> SEMI
   | '_' -> UNDER
@@ -53,6 +55,11 @@ let rec lex buf =
      SYMBOL (lexeme buf)
   | ('A'..'Z'), Star('a'..'z'|'_'|'A'..'Z'|'0'..'9') ->
      USYMBOL (lexeme buf)
+
+  | '.', ('a'..'z'|'_'), Star('a'..'z'|'_'|'A'..'Z'|'0'..'9') ->
+     DOT_SYMBOL (chop (lexeme buf))
+  | '.', ('A'..'Z'), Star('a'..'z'|'_'|'A'..'Z'|'0'..'9') ->
+     DOT_USYMBOL (chop (lexeme buf))
 
   | '@', Star('a'..'z') ->
      PRAGMA (sub_lexeme buf 1 (lexeme_length buf - 1))

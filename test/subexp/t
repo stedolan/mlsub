@@ -1289,7 +1289,7 @@ fn [a <: {foo:Int}](x : a) -> ({bar:Bool}) { x }
 
 fn [a <: {foo:Int}](x : a) -> (#Tag{bar:Bool}) { x }
 > fn [a <: {foo: Int}](x: a) -> (#Tag{bar: Bool}) { x }
-> test:1: The tag should be Tag, but no tag is present.
+> test:1: The tag should be #Tag, but no tag is present.
 >   fn [a <: {foo:Int}](x : a) -> (#Tag{bar:Bool}) { x }
 >                                                    ^
 >      found: a
@@ -1303,7 +1303,7 @@ fn [a <: {foo:Int}](x : a) -> (#Tag{bar:Bool}) { x }
 
 fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 > fn [a <: ({foo: Int}, Int)](x: a) -> (#Tag{bar: Bool}, Int) { x }
-> test:1: The tag should be Tag, but no tag is present.
+> test:1: The tag should be #Tag, but no tag is present.
 >   fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 >                                                              ^
 >      found: ({foo: _}, _)

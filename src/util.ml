@@ -9,6 +9,7 @@ let unimp fmt =
 let () = Printexc.register_printer (function Unimplemented s -> Some ("unimplemented: " ^ s) | _ -> None)
 
 let fixme [@alert fixme] = ()
+let todo [@alert todo] = fun s -> unimp "%s" s
 
 let id x = x
 

@@ -31,7 +31,7 @@ fn(x) { (#Foo(), #Bar, #Foo{x: 42}, #Baz(1)) }
 
 (#{x: 42} : #Foo{x: Int})
 > (#{x: 42} : #Foo{x: Int})
-> test:1: The tag should be Foo, but tag # is present.
+> test:1: The tag should be #Foo, but tag # is present.
 >   (#{x: 42} : #Foo{x: Int})
 >    ^^^^^^^^
 >      found: #{x: _}
@@ -42,7 +42,7 @@ fn(x) { (#Foo(), #Bar, #Foo{x: 42}, #Baz(1)) }
 
 (#Bar{x: 42} : #Foo{x: Int})
 > (#Bar{x: 42} : #Foo{x: Int})
-> test:1: The tag should be Foo, but tag Bar is present.
+> test:1: The tag should be #Foo, but tag #Bar is present.
 >   (#Bar{x: 42} : #Foo{x: Int})
 >    ^^^^^^^^^^^
 >      found: #Bar{x: _}
@@ -303,11 +303,11 @@ fn() {
 >       #D{x, y} => (x, y)
 >       ^^^^^^^^
 >      found: #D{x: _}
->   expected: {x: _, y: _}
+>   expected: #D{x: _, y: _}
 > This #D{x: _} comes from test:2:
 >     match #D{x:5} {
 >           ^^^^^^^
-> but is used as {x: _, y: _} at test:3:
+> but is used as #D{x: _, y: _} at test:3:
 >       #D{x, y} => (x, y)
 >             ^
 
@@ -510,7 +510,7 @@ fn (x) {
 >       ^^^^^^^^^^^^^^^^
 > but is used as {bar: _} at test:10:
 >     (y.foo, y.bar)
->               ^^^
+>              ^^^^
 
 let make = fn (x) {
   if x.good {
@@ -728,11 +728,11 @@ fn (x : ((#A(Int,Int)|#B{x:String,y:String}|#C|#D|#E), #B|#C|#D)) {
 >     | (#A(_,_)|#B{}, #C|#D)
 >                ^^^^
 >      found: #B{x: _, y: _}
->   expected: {}
+>   expected: #B
 > This #B{x: _, y: _} comes from test:1:
 >   fn (x : ((#A(Int,Int)|#B{x:String,y:String}|#C|#D|#E), #B|#C|#D)) {
 >                                     ^
-> but is used as {}
+> but is used as #B
 
 fn(x : #A(Int, #P|#Q|#R) | #B(Int, #P|#Q|#R)) {
   match #{averylongnameinanexpression: #{averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression, #{x:0,y:5}.y {
@@ -769,7 +769,7 @@ calls_any(use)
 > let calls_any = fn (f) { (f(#Foo), f(#Bar), f(#Baz)) };
 > let use = fn (x) { match x { #Foo => 1 | #Bar => 2 } };
 > calls_any(use)
-> test:10: The tag should be Foo|Bar, but tag Baz is present.
+> test:10: The tag should be #Foo|#Bar, but tag #Baz is present.
 >   calls_any(use)
 >             ^^^
 >      found: (#Foo | #Bar) -> _

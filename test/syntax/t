@@ -14,7 +14,7 @@ fn (id : [a]. a -> a) { id(42) }
 > fn (<err>) { id(42) }
 > test:1: syntax error
 >   fn (id : [a]. a -> a) { id(42) }
->               ^
+>                 ^
 
 fn (x)
 > parser failure: bad parse

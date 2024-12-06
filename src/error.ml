@@ -1,6 +1,7 @@
 type error_kind =
   | Syntax
-  | Bad_name of [`Unknown|`Duplicate of Location.t] * [`Type|`Var] * string
+  | Bad_name of [`Unknown|`Duplicate of Location.t|`Expected of [`Record|`Variant]] *
+                [`Type|`Var] * string
   | Illformed_type of
       [ `Join_multi_cons
       | `Join_not_cons_or_var
@@ -14,12 +15,13 @@ type error_kind =
       | `Join_of_ty_param
       | `Must_be_closed
       ]
-  | Conflict of [`Expr|`Pat|`Subtype|`Field_override of string * Tuple_fields.field_name option] * Types.subtyping_error
+  | Conflict of [`Expr|`Pat|`Subtype|`Field_override of Typedefs.Nom_tag.t * Tuple_fields.field_name option] * Types.subtyping_error
   (* FIXME: Maybe delete Unknown_constructor, it's worse than a standard type error *)
   | Illformed_pat of [`Tag_required | `Duplicate_name of [`Var|`Field] * string * Location.t | `Orpat_different_names of string | `Wrong_length of int * int | `Unknown_cases | `Unknown_fields | `Unknown_constructor of string]
   | Incompatible_patterns of Location.t
   | Nonexhaustive of Exp.pat list list
-  | Bad_tuple_intro of [`Tag of Exp.tuple_tag option * Exp.tuple_tag list | `Opt]
+  | Bad_tag of (Exp.tuple_tag option * Exp.tuple_tag list)
+  | Bad_tuple_intro of [`Opt]
   | Unused_pattern
 
 type t = Location.t * error_kind
@@ -63,11 +65,16 @@ let pp_err input loc err : PPrint.document =
   | Syntax -> pp "syntax error" ^^ context
   | Bad_name (err,kind,name) ->
      pp "%s %s name %s"
-       (match err with `Unknown -> "Unknown" | `Duplicate _ -> "Duplicate")
+       (match err with `Unknown -> "Unknown" | `Duplicate _ -> "Duplicate" | `Expected _ -> "Invalid")
        (match kind with `Type -> "type" | `Var -> "variable")
-       name ^^ context ^^
+       name ^^
+       (match err with
+        | `Expected `Variant -> pp " (expected a variant type)"
+        | `Expected `Record -> pp " (expected a record type)"
+        | `Unknown | `Duplicate _ -> empty) ^^
+       context ^^
      (match err with
-      | `Unknown -> empty
+      | `Unknown | `Expected _ -> empty
       | `Duplicate loc' ->
          hardline ^^ pp_loc loc' ^^ pp ": previously defined here" ^^
            nest 2 (hardline ^^ pp_context loc'))
@@ -101,14 +108,16 @@ let pp_err input loc err : PPrint.document =
      pp "Type definitions may not use joins of type parameters" ^^ context
   | Illformed_type `Must_be_closed ->
      pp "This type cannot use '...'" ^^ context
-  | Bad_tuple_intro (`Tag (tag, options)) ->
+  | Bad_tag (tag, options) ->
      (match tag, options with
-      | None, [] -> pp "Expected a record tag"
+      | None, [] -> pp "Expected a tag"
       | None, others ->
-         pp "Expected a record tag " ^^ separate_map (pp "|") Print.tuple_tag others
+         pp "Expected a tag " ^^ separate_map (pp " | ") Print.tuple_tag others
+      | Some tag, [] ->
+         pp "Unexpected tag " ^^ Print.tuple_tag tag
       | Some tag, others ->
-         pp "Unexpected record tag " ^^ Print.tuple_tag tag ^^
-           pp ", expected " ^^ separate_map (pp "|") Print.tuple_tag others)
+         pp "Unexpected tag " ^^ Print.tuple_tag tag ^^
+           pp ", expected " ^^ separate_map (pp " | ") Print.tuple_tag others)
        ^^ context
   | Bad_tuple_intro `Opt ->
      pp "Tuple construction cannot use optional fields" ^^ context
@@ -128,9 +137,9 @@ let pp_err input loc err : PPrint.document =
            pp "Surplus fields are present."
         | Head (Expected_tag (tag, tags')) ->
            (* FIXME reword (e.g. int vs. bool) *)
-           let tagname = function Exp.Anon_tag -> "#" | Exp.Struct_tag (s, _) | Exp.Named_tag (s, _) -> s in
-           let tag = match tag with None -> "no tag" | Some t -> "tag " ^ tagname t in
-           pp "The tag should be " ^^ separate_map (pp "|") (fun t -> pp "%s" (tagname t)) tags' ^^ pp ", but %s is present." tag
+           let tagname = Typedefs.Cons1.Tag.to_string in
+           let tag = match tag with None -> string "no tag" | Some t -> string "tag " ^^ Print.tuple_tag t in
+           pp "The tag should be " ^^ separate_map (pp "|") (fun t -> pp "%s" (tagname t)) tags' ^^ pp ", but " ^^ tag ^^ string " is present."
         | Head (Args `Too_few) ->
            pp "Too few arguments."
         | Head (Args `Too_many) ->

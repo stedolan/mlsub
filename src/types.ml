@@ -317,7 +317,7 @@ module Fields = struct
     | Field_extra of Tuple_fields.field_name option * Location.t * Location.t
 
   exception FieldError of field_error
-  let sub ~f (a,a_def) (b,b_def) =
+  let sub ?(extra=empty) ~f (a,a_def) (b,b_def) =
     let sub_field fn a b =
       let a =
         match a with
@@ -349,7 +349,12 @@ module Fields = struct
       end;
       None
     in
-    match Map.merge sub_field a.fields b.fields with
+    match
+      ignore (Map.merge sub_field a.fields b.fields);
+      extra.fnames |> List.iter (fun k ->
+        if not (Map.mem k a.fields || Map.mem k b.fields) then
+          ignore (sub_field k None None));
+    with
     | _ -> Ok ()
     | exception (FieldError e) -> Error e
 
@@ -361,8 +366,8 @@ module Cons1 = struct
 
   let record_def ~env ~shape ~loc {tag; args; body=_} =
     match tag with
-    | Some (Named_tag (sym, _)) ->
-       let decl_fields = Env.get_decl_fields env sym in
+    | Some (Named_tag name) ->
+       let decl_fields = Env.get_decl_fields env name in
        fun fn ->
        Fields.find fn (decl_fields, ())
        |> Option.value ~default:(Fields.Fabsent loc)
@@ -392,10 +397,11 @@ module Cons1 = struct
        let body =
          match t with
          | Anon_tag | Struct_tag _ -> r.body
-         | Named_tag (s,loc) ->
+         | Named_tag name ->
+            let loc = Nom_tag.loc name in
             Fields.merge ~f:(fun ty _decl -> ty)
               (r.body, record_def ~env ~shape ~loc r)
-              (Typedefs.Env.get_decl_fields env s, fun _ -> Fabsent loc)
+              (Typedefs.Env.get_decl_fields env name, fun _ -> Fabsent loc)
        in
        Record {tag=None; args=[]; body}
     | Drop_record_tag _, _ -> assert false
@@ -477,7 +483,7 @@ module Cons1 = struct
     | Record a, Record b ->
        assert (Option.equal tuple_tag_equal a.tag b.tag);
        let sub_arg i (arg_a, arg_b) =
-         let sym = match a.tag with Some (Named_tag (t,_)) -> t | _ -> assert false in
+         let sym = match a.tag with Some (Named_tag name) -> name | _ -> assert false in
          ignore (Tyarg.zip arg_a arg_b
                    ~neg:(fun a b -> neg (Named_arg (`Neg, sym, i)) b a)
                    ~pos:(fun a b -> pos (Named_arg (`Pos, sym, i)) a b))

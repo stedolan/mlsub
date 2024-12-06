@@ -7,12 +7,14 @@
 %token SHIFT
 %token EOF WS COMMENT NL ERROR
 %token LPAR RPAR LBRACE RBRACE LBRACK RBRACK
-%token COLON EQUALS DOT DOTS COMMA SEMI UNDER QUESTION ARROW FATARROW AMPER VBAR
+%token COLON EQUALS DOTS COMMA SEMI UNDER QUESTION ARROW FATARROW AMPER VBAR
 %token FN LET TRUE FALSE IF ELSE TILDE HASH PLUS MINUS
 %token SUBTYPE SUPTYPE AT TYPE
 %token MATCH
 %token T_ANY T_NOTHING
 %token ABSENT
+%token <string> DOT_SYMBOL
+%token <string> DOT_USYMBOL
 
 %nonassoc low_priority
 %nonassoc ARROW
@@ -55,6 +57,7 @@ struct_tag:
 | HASH { Anon_tag }
 | s = loc(HASH; s=USYMBOL {s}) { Struct_tag s }
 | s = loc(USYMBOL) { Named_tag s }
+| s = loc(USYMBOL); t = loc(DOT_USYMBOL) { Qualified_tag (s,t) }
 
 ident: v = loc(ident_) { v }
 ident_:
@@ -170,7 +173,7 @@ term_:
   { Some (Lit k) }
 | fn = term; LPAR; args = separated_list(COMMA, argument); RPAR
   { Some (App (fn, args)) }
-| e = term; DOT; f = symbol
+| e = term; f = loc(DOT_SYMBOL)
   { Some (Proj (e, f)) }
 | tag = struct_tag %prec low_priority
   { Some (Tuple (Some tag, empty_fields)) }
@@ -222,9 +225,13 @@ onepat_:
   { pvar v }
 | UNDER
   { Pany }
-| HASH; tag = usymbol (* FIXME named tags *)
+| HASH; tag = usymbol
   { Ptuple (Some (Struct_tag tag), empty_fields) }
-| tag = ioption(struct_tag); fs = fields(pat) (* FIXME named tags *)
+| s = loc(USYMBOL)
+  { Ptuple (Some (Named_tag s), empty_fields) }
+| s = loc(USYMBOL); t = loc(DOT_USYMBOL)
+  { Ptuple (Some (Qualified_tag (s,t)), empty_fields) }
+| tag = ioption(struct_tag); fs = fields(pat)
   { match tag, fs with
     | None, (Some (Some p, _), _) -> p
     | None, (_, (Ftuple _ as fs)) -> Ptuple (Some Anon_tag, fs)
@@ -242,6 +249,11 @@ tytagargs:
   { Anon_tag, [] }
 | tag = loc(USYMBOL)
   { Named_tag tag, [] }
+| tag = loc(USYMBOL); subtag = loc(DOT_USYMBOL)
+  { Qualified_tag (tag,subtag), [] }
+| tag = loc(USYMBOL); subtag = loc(DOT_USYMBOL);
+  LBRACK; args = separated_list(COMMA, tyarg); RBRACK
+  { Qualified_tag (tag,subtag), args }
 | tag = loc(USYMBOL); LBRACK; args = separated_list(COMMA, tyarg); RBRACK
   { Named_tag tag, args }
 
@@ -316,6 +328,8 @@ decl_ty_body:
   { Dty_variant(vs) }
 
 decl_ty_variant:
+| tag = loc(usymbol)
+  { fst tag, (empty_fields, snd tag) }
 | tag = usymbol; fs = loc(fields(tyexp))
   { let ((_,fs),loc) = fs in tag, (fs,loc) }
 

@@ -341,7 +341,7 @@ true.foo
 >   ^^^^
 > but is used as {foo: _} at test:1:
 >   true.foo
->        ^^^
+>       ^^^^
 
 @bot
 > @bot

@@ -14,7 +14,7 @@ type typed_exp = typed_exp' mayloc and typed_exp' =
   | Fn of typed_func_def
   | FnDef of symbol * IR.value IR.Binder.t * typed_func_def * typed_exp
   | App of typed_exp * typed_exp list (* FIXME: restore/preserve parameter names? *)
-  | Tuple of tuple_tag * (field_name loc * typed_exp) list
+  | Tuple of Cons1.Tag.t * (field_name loc * typed_exp) list
   | Let of typed_pat * Check_pat.ex_split * elab_typ * typed_exp * typed_action
   | Seq of typed_exp * typed_exp
   | Proj of typed_exp * symbol
@@ -128,7 +128,7 @@ module Elaborate = struct
     | App (f, args) ->
        App (exp env f, List.map (fun e -> None (*FIXME*), exp env e) args)
     | Tuple (tag, fs) ->
-       Tuple (Some tag, tuple env fs)
+       Tuple (Some (Typedefs.Cons1.Tag.unparse tag), tuple env fs)
     | Let (p, _split, ty, e, body) ->
        Let (p, Some (typ env ty), exp env e, exp env body.act_body)
     | Seq (e1, e2) ->
@@ -286,7 +286,7 @@ module Compile = struct
        IRB.apply (exp f) (List.map exp args)
 
     | Tuple (tag, fields) ->
-       (let tag = IR.Symbol.of_tuple_tag tag in
+       (let tag = IR.Symbol.of_string (Cons1.Tag.to_ir_string tag) in
         IRB.tuple tag (List.map (fun ((fn,_loc), e) -> (fn, exp e)) fields))
 
     | Proj (e, (field, _loc)) ->

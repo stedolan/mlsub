@@ -69,9 +69,6 @@ module Symbol : sig
   type t [@@immediate]
   val of_string : string -> t
   val to_string : t -> string
-
-  (* FIXME: how should these be translated? *)
-  val of_tuple_tag : Exp.tuple_tag -> t
 end = struct
   type t = int
   let table = Hashtbl.create 20
@@ -92,13 +89,6 @@ end = struct
   let to_string n =
     assert (0 <= n && n < !next_id);
     (!strings).(n)
-
-  let of_tuple_tag (t : Exp.tuple_tag) =
-    match t with
-    | Anon_tag ->
-       of_string ""
-    | Struct_tag (s, _) | Named_tag (s, _) ->
-       of_string s
 end
 
 (* Based-ish on CBPV, with additional restrictions on functions.
