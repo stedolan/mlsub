@@ -194,10 +194,21 @@ let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
                  let fields, split = split_fields fields in
                  check_fields ~env ~loc ty (fields,ext);
                  Some split
-              | None, Some (_ty, _tyloc) ->
+              | None, Some (ty, tyloc) ->
                  (* No error here: the unhandled cases will be reported as
                     nonexhaustive matches by counterexample generation later. *)
-                 Some (fun () -> []) (*FIXME should be Ext_open?*))
+                 let fields =
+                   match ty.tag with
+                   | Some (Named_tag _) -> []
+                   | None | Some (Anon_tag | Struct_tag _) ->
+                      (* Keep fields for counterexample generation *)
+                      ty.body
+                      |> Fields.to_list
+                      |> List.map (function
+                        | fn, Fields.Fpresent _ -> fn, Mandatory, ttop tyloc
+                        | fn, _ -> fn, Optional, ttop tyloc)
+                 in
+                 Some (fun () -> fields))
           |> TagMap.to_list
        | None ->
           (* Infer type of patterns *)
@@ -376,7 +387,7 @@ and _ dectree' =
   (* Cases: nonempty and sorted *)
   | Cases :
       (Typedefs.Cons1.tuple_tag * 'n field_projections) list
-      * (Typedefs.Cons1.tuple_tag list * 'n dectree) option -> 'n s dectree'
+      * ((Typedefs.Cons1.tuple_tag * (Tuple_fields.field_name * mand_flag) list) list * 'n dectree) option -> 'n s dectree'
 
 and 'n field_projections =
   (* Outermost Proj_foo: rightmost column (reverse order) *)
@@ -547,7 +558,7 @@ let rec split_cases :
                  | [] -> None
                  | cases ->
                     let dt = split_cases ~matchloc ~env typs (List.map snd mat) in
-                    Some (List.map fst cases, dt)
+                    Some (List.map (fun (c,fs) -> c, List.map (fun (fn,m,_) -> fn,m) fs) cases, dt)
                in
                [], def
           in
@@ -561,8 +572,8 @@ let rec split_cases :
      in
      Hashcons.mk dt
 
-let ptuple ~tag fields =
-  Some (Ptuple (Some (Typedefs.Cons1.Tag.unparse tag), Exp.of_record_fields fields)),
+let ptuple ~tag ~ext fields =
+  Some (Ptuple (Some (Typedefs.Cons1.Tag.unparse tag), Exp.of_record_fields ~ext fields)),
   Location.noloc
 
 let rec counterexamples :
@@ -580,16 +591,19 @@ let rec counterexamples :
      List.concat_map (fun (tag, fields) ->
        counterexamples_fields len fields
        |> List.map (fun (fs, ps) ->
-         let fs = ptuple ~tag (List.rev fs) in
+         let fs = ptuple ~ext:Ext_closed ~tag (List.rev fs) in
          Clist.(fs :: ps)))
        cases
      @
      match defaults with
      | Some (tags, dt) when not dt.total ->
         let case_pats : pat list =
-          List.map (fun tag ->
-            fixme; (* FIXME: make extensible, not closed *)
-            ptuple ~tag [])
+          List.map (fun (tag,fields) ->
+            let fields = fields |> List.map (function
+              | fn, Mandatory -> (fn, Location.noloc), Exp.Mandatory (Some any)
+              | fn, Optional -> (fn, Location.noloc), Exp.Optional (Some any))
+            in
+            ptuple ~ext:Ext_closed ~tag fields)
             tags
         in
         let head = List.fold_left pat_or (List.hd case_pats) (List.tl case_pats) in
@@ -752,7 +766,7 @@ let compile ~actions vals orig_dt =
        in
        let default =
          default |> Option.map (fun (tags, dt) ->
-           List.map ir_sym_tag tags,
+           List.map (fun (tag,_) -> ir_sym_tag tag) tags,
            compile ~vals dt)
        in
        Match (v, cases, default)

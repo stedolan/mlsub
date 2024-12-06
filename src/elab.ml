@@ -152,7 +152,7 @@ module Elaborate = struct
            f, Mandatory None
         | f, e ->
            f, Mandatory (Some (exp env e)))
-    |> Exp.of_record_fields
+    |> Exp.of_record_fields ~ext:Ext_closed
 
   and case env (ps, e) = (ps, exp env e.act_body)
 

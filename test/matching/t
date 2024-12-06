@@ -943,8 +943,25 @@ fn (x) {
 >     | #{foo:#A, _} => 1
 >       ^^^^^^^^^^^^
 
+fn (x:#A|#B,y:#P(Int) | #Q(Int)) {
+  match x,y {
+  | #A, #P(x) => x
+  | #A, #Q(x) => x
+  | #B, #P(x) => x
+  }
+}
+> fn (x: #A | #B, y: #P(Int) | #Q(Int)) {
+>   match x, y {
+>     | #A, #P(x) => x
+>     | #A, #Q(x) => x
+>     | #B, #P(x) => x
+>   }
+> }
+> test:2: Some cases of this pattern-match are missing:
+>     match x,y {
+>           ^^^
+> The following cases are unhandled:
+> | #B, #Q(_)
 
 
-
-# end
 > STATS: fix: 14, flex: 181

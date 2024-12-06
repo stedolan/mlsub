@@ -52,15 +52,16 @@ let record_fields ~loc : 'a fields -> 'a field_list * extensible_flag = function
      Ext_closed
   | Frecord (fields,ext) -> (fields,ext)
 
-let of_record_fields (fs : 'a field_list) : 'a fields =
+let of_record_fields ~ext (fs : 'a field_list) : 'a fields =
   match
+    if ext = Ext_open then raise_notrace Exit;
     List.mapi (fun i x ->
       match x with
       | (Tuple_fields.Field_positional j, _), Mandatory (Some x) when i = j -> x
       | _ -> raise_notrace Exit) fs
   with
   | ts -> Ftuple ts
-  | exception Exit -> Frecord (fs, Ext_closed)
+  | exception Exit -> Frecord (fs, ext)
 
 type exp = exp' mayloc and exp' =
   (* 42 or "hello" *)
