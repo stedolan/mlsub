@@ -67,17 +67,7 @@ fn((#A|#B), x) { x }
 > fn ((#A | #B), x) { x }
 >   fn [a]((#A | #B): #A | #B, x: a) -> a { x }
 > [a] (#A | #B, a) -> a
-> let  = %yield(fun (param, x) ret {
->   match param {
->     A -> {
->       ret(x)
->     };
->     B -> {
->       ret(x)
->     }
->   }
-> });
-> done
+> let  = %yield(fun (param, x) ret { ret(x) }); done
 
 fn(x) { let (a, b, c) = x; (c, b, a) }
 > fn (x) { let (a, b, c) = x; (c, b, a) }
@@ -100,7 +90,10 @@ fn(x) { let (a, b, c) = x; (c, b, a) }
 
 fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
 > fn (x) { match x { (_, _) => 1 | (_, _, _) => 2 } }
-> test:1: This pattern is unused
+> test:1: This pattern:
+>   fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
+>                     ^^^^^
+> is incompatible with the pattern at test:1:
 >   fn(x) { match x { (_,_) => 1 | (_,_,_) => 2 } }
 >                                  ^^^^^^^
 
@@ -229,16 +222,8 @@ fn(x) {
 >       ret(b)
 >     };
 >     B -> {
->       match x.foo {
->         C -> {
->           let x2 = x.bar;
->           ret(x2)
->         };
->         D -> {
->           let x2 = x.bar;
->           ret(x2)
->         }
->       }
+>       let x2 = x.bar;
+>       ret(x2)
 >     }
 >   }
 > });
@@ -326,8 +311,7 @@ fn(x) { match x { (z @ (#A | #B)) => z } }
 > fn (x) { match x { (z @ #A | #B) => z } }
 >   fn [a <: #A | #B](x: a) -> a { match x { (z @ #A | #B) => z } }
 > [a <: #A | #B] a -> a
-> let  = %yield(fun (x) ret { match x { A -> { ret(x) }; B -> { ret(x) } } });
-> done
+> let  = %yield(fun (x) ret { ret(x) }); done
 
 fn(p, q) {
   match p, q {
@@ -703,11 +687,7 @@ fn(x : #{a?: (), b?: (), c?: ()}) {
 >         ret(<false>)
 >       }
 >     } else {
->       ifpresent x.a {
->         ret(<false>)
->       } else {
->         ret(<false>)
->       }
+>       ret(<false>)
 >     }
 >   }
 > });
@@ -735,8 +715,7 @@ fn(a : (#T|#F),b : #T|#F,c : #T|#F) {
 >     match (a, b, c) {
 >           ^^^^^^^^^
 > The following cases are unhandled:
-> | (#F, #F, #T)
-> | (#F, #T, #T)
+> | (#F, _, #T)
 
 fn(x : (#A|#B|#C), y : (#A|#B|#C)) {
   match x, y {
@@ -912,24 +891,10 @@ fn (x : #A | #B | #C | #D | #E, y) -> Int {
 > let  = %yield(fun (x, y) ret {
 >   match x {
 >     A -> {
->       match y {
->         A -> {
->           ret(1)
->         };
->         B -> {
->           ret(1)
->         }
->       }
+>       ret(1)
 >     };
 >     (B|C|D|E) -> {
->       match y {
->         A -> {
->           ret(2)
->         };
->         B -> {
->           ret(2)
->         }
->       }
+>       ret(2)
 >     }
 >   }
 > });
@@ -1014,46 +979,45 @@ fn (x:#A|#B,y:#P(Int) | #Q(Int)) {
 
 fn(x) {
   match x {
-  | #{foo?: x, bar?: y} => (x,y)
-  | #{foo?: absent, _}
-  | #{bar?: absent, _} => (0,0)
+  | #{foo?: x, bar?: y, baz:z} => (x,y,z)
+  | #{foo?: absent, baz, _}
+  | #{bar?: absent, baz, _} => (0,0,baz)
   }
 }
 > fn (x) {
 >   match x {
->     | #{foo?: x, bar?: y} => (x, y)
->     | #{foo?: absent, _}
->     | #{bar?: absent, _} => (0, 0)
+>     | #{foo?: x, bar?: y, baz: z} => (x, y, z)
+>     | #{foo?: absent, baz, _}
+>     | #{bar?: absent, baz, _} => (0, 0, baz)
 >   }
 > }
->   fn [a, b](x: #{foo?: b, bar?: a}) -> (Int | b, Int | a) {
+>   fn [a, b, c](x: #{foo?: c, bar?: a, baz: b}) -> (Int | c, Int | a, b) {
 >     match x {
->       | #{foo?: x, bar?: y} => (x, y)
->       | #{foo?: absent, _}
->       | #{bar?: absent, _} => (0, 0)
+>       | #{foo?: x, bar?: y, baz: z} => (x, y, z)
+>       | #{foo?: absent, baz, _}
+>       | #{bar?: absent, baz, _} => (0, 0, baz)
 >     }
 >   }
-> [a, b] (#{foo?: b, bar?: a}) -> (Int | b, Int | a)
+> [a, b, c] (#{foo?: c, bar?: a, baz: b}) -> (Int | c, Int | a, b)
 > let  = %yield(fun (x) ret {
->   let case() = {
->     ret((0: 0, 1: 0))
+>   let case(baz) = {
+>     ret((0: 0, 1: 0, 2: baz))
 >   };
 >   ifpresent x.bar {
 >     ifpresent x.foo {
 >       let x2 = x.foo;
 >       let y = x.bar;
->       ret((0: x2, 1: y))
+>       let z = x.baz;
+>       ret((0: x2, 1: y, 2: z))
 >     } else {
->       case()
+>       let baz = x.baz;
+>       case(baz)
 >     }
 >   } else {
->     ifpresent x.foo {
->       case()
->     } else {
->       case()
->     }
+>     let baz = x.baz;
+>     case(baz)
 >   }
 > });
 > done
 
-> STATS: fix: 15, flex: 196
+> STATS: fix: 15, flex: 198

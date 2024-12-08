@@ -318,73 +318,6 @@ let check_tag ~loc ~env typ (etag : Exp.tuple_tag) : Cons1.Tag.t =
         | [t] -> t
         | _ -> Error.fail loc (Bad_tag (Some etag, List.map Cons1.Tag.unparse tags))
 
-module Shrinking = struct
-  (* Attempt to remove some redundant entries.
-     (Unsure if this is worth it!)*)
-
-  let rec clearly_le_pat p q =
-    let check = clearly_le_pat in
-    match p, q with
-    | (None, _), _ | _, (None, _) -> false
-    | (Some p',_), (Some q',_) ->
-       match p', q' with
-       | Pbind (_, p), _ -> check p q
-       | _, Pbind (_, q) -> check p q
-       | Por (p1, p2), _ -> check p1 q && check p2 q
-       | _, Por (q1, q2) -> check p q1 || check p q2 (* Incomplete *)
-       | _, Pany -> true
-       | Pany, _ -> false       (* Incomplete *)
-       | Ptuple(tag, ps), Ptuple(tag', qs) ->
-          tag = tag' && check_fields ps qs
-
-  and check_fields ps qs =
-    let qs, _ = Exp.record_fields ~loc:Location.noloc qs in
-    let ps, _ = Exp.record_fields ~loc:Location.noloc ps in
-    qs |> List.for_all (fun ((fn,_), q) ->
-      match
-        ps |> List.find_map (fun ((fn',_),p) ->
-          if Tuple_fields.equal_field_name fn fn'
-          then Some p else None)
-      with
-      | None -> false
-      | Some p -> clearly_le_pat_field p q)
-
-  and clearly_le_pat_field p q =
-    let opt x = Option.value x ~default:any in
-    match p, q with
-    | Exp.Optional p, Exp.Optional q -> clearly_le_pat (opt p) (opt q)
-    | Exp.Mandatory p, Exp.Mandatory q -> clearly_le_pat (opt p) (opt q)
-    | Exp.Absent, Exp.Absent -> true
-    | _ -> false
-
-  let rec keep_irredundant le = function
-    | [] -> []
-    | x :: xs ->
-       let xs = keep_irredundant le xs in
-       let xs = List.filter (fun r -> not (le r x)) xs in
-       x :: xs
-
-  (* Optimisation: delete some clearly-unused rows from pat matrix before splitting.
-     FIXME: apply also during *)
-  let shrink_matrix (type w) (mat : w pat_matrix) : w pat_matrix =
-    keep_irredundant (fun (x,_) (y,_) -> Clist.for_all2 clearly_le_pat x y) mat
-
-  let shrink_proj_matrix (type k w) (mat : ((k,pat Exp.exp_field option) Clist.t * w pat_row) list) =
-    keep_irredundant (fun (pf,(pr,_act)) (qf,(qr,_act)) ->
-      let check_field p q =
-        match p, q with
-        | _, None -> true
-        | None, _ -> false
-        | Some (Exp.Optional p), Some (Exp.Optional q) -> clearly_le_pat p q
-        | Some (Exp.Mandatory p), Some (Exp.Mandatory q) -> clearly_le_pat p q
-        | Some Exp.Absent, Some Exp.Absent -> true
-        | _ -> false
-      in
-      Clist.for_all2 check_field pf qf &&
-      Clist.for_all2 clearly_le_pat pr qr)
-      mat
-end
-
 let head_first_column ~env (typ,gen_level) mat =
   let rec go ~var (mat : 'w s pat_matrix) :
       'w head_pat_matrix * IR.value IR.Binder.t option =
@@ -453,7 +386,6 @@ and _ dectree' =
   | Failure : z dectree'
   | Any : 'n dectree -> 'n s dectree'
   | Bind : IR.value IR.Binder.t * 'n s dectree -> 'n s dectree'
-  (* Cases: nonempty and sorted *)
   | Cases :
       (Typedefs.Cons1.tuple_tag * 'n field_projections) list
       * ((Typedefs.Cons1.tuple_tag * (Tuple_fields.field_name * mand_flag) list) list * 'n dectree) option -> 'n s dectree'
@@ -463,6 +395,8 @@ and 'n field_projections =
   | Proj_end of 'n dectree
   | Proj_mand of Tuple_fields.field_name * 'n s field_projections
   | Proj_opt of Tuple_fields.field_name * 'n s field_projections * 'n field_projections
+  (* Same as Proj_opt, but doesn't care about the present field's value *)
+  | Proj_check of Tuple_fields.field_name * 'n field_projections * 'n field_projections
 
 module Hashcons = struct
 
@@ -470,6 +404,7 @@ module Hashcons = struct
     | Proj_end t -> t.empty
     | Proj_mand (_,fs) -> is_empty_fields fs
     | Proj_opt (_,fs,fs') -> is_empty_fields fs && is_empty_fields fs'
+    | Proj_check (_,fs,fs') -> is_empty_fields fs && is_empty_fields fs'
 
   let is_empty : type a . a dectree' -> bool = function
     | Done _ -> false
@@ -485,6 +420,7 @@ module Hashcons = struct
     | Proj_end t -> t.total
     | Proj_mand (_,fs) -> is_total_fields fs
     | Proj_opt (_,fs,fs') -> is_total_fields fs && is_total_fields fs'
+    | Proj_check (_,fs,fs') -> is_total_fields fs && is_total_fields fs'
 
   let is_total : type a . a dectree' -> bool = function
     | Done _ -> true
@@ -500,6 +436,41 @@ module Hashcons = struct
     { tree = t;
       empty = is_empty t;
       total = is_total t }
+
+  (* could/should speed this up by hashing *)
+  let rec equal : type n . vpair:_ -> n dectree -> n dectree -> bool =
+    fun ~vpair a b -> equal' ~vpair a.tree b.tree
+
+  and equal' : type n . vpair:_ -> n dectree' -> n dectree' -> bool =
+    fun ~vpair a b -> match a, b with
+    | Done (bindings, act), Done (bindings', act') ->
+       let veq a b =
+         (a == b) || (try List.assq a vpair == b with Not_found -> false) in
+       act.id = act'.id && SymMap.equal veq bindings bindings'
+    | Failure, Failure -> true
+    | Any a, Any b -> equal ~vpair a b
+    | Bind (va,a), Bind (vb,b) ->
+       equal ~vpair:((IR.Binder.ref va,IR.Binder.ref vb)::vpair) a b
+    | Cases (cs, def), Cases (cs', def') ->
+       List.equal
+         (fun (tag,fs) (tag',fs') -> Typedefs.Cons1.Tag.equal tag tag' && equal_fields ~vpair fs fs')
+         cs cs' &&
+       Option.equal (fun (_, def) (_, def') -> equal ~vpair def def') def def'
+    | (Done _|Failure|Any _|Bind _|Cases _), _ -> false
+
+  and equal_fields : type n . vpair:_ -> n field_projections -> n field_projections -> bool =
+    fun ~vpair a b -> match a, b with
+    | Proj_end a, Proj_end b -> equal ~vpair a b
+    | Proj_mand (f,a), Proj_mand (f',b) ->
+       Tuple_fields.equal_field_name f f' && equal_fields ~vpair a b
+    | Proj_opt (f,pres,abs), Proj_opt (f',pres',abs') ->
+       Tuple_fields.equal_field_name f f' && equal_fields ~vpair pres pres' && equal_fields ~vpair abs abs'
+    | Proj_check (f,pres,abs), Proj_check (f',pres',abs') ->
+       Tuple_fields.equal_field_name f f' && equal_fields ~vpair pres pres' && equal_fields ~vpair abs abs'
+    | (Proj_end _|Proj_mand _|Proj_opt _|Proj_check _), _ -> false
+
+  let equal a b = equal ~vpair:[] a b
+  let equal_fields a b = equal_fields ~vpair:[] a b
 end
 
 
@@ -509,7 +480,6 @@ let pat_or p q : pat = (Some (Por (p, q)), Location.noloc)
 let rec check_matrix :
   type w . matchloc:_ -> env:_ -> (w, ptyp * Typedefs.gen_level) Clist.t -> w pat_matrix -> w dectree =
   fun ~matchloc ~env typs mat ->
-  let mat = Shrinking.shrink_matrix mat in
   match typs with
   | [] ->
      begin match mat with
@@ -569,11 +539,23 @@ let rec check_matrix :
             | Some tag ->
                begin match List.partition (fun (t,_) -> Cons1.tuple_tag_equal t tag) cases with
                | (_::_::_), _ -> intfail "nonunique split cases"
-               | [_, fields], rest ->
-                  let Ex fields = Clist.of_list (List.rev fields) in
+               | [_, field_types], rest ->
+                  let Ex fields = Clist.of_list (List.rev field_types) in
                   let this, others = split_on_case tag fields mat in
                   let cases, def = split rest others in
-                  (tag, check_projection ~matchloc ~env ~lvl fields typs this)::cases, def
+                  let this = check_projection ~matchloc ~env ~lvl fields typs this in
+                  (* check for defaults in disguise.
+                     the check cases=[] isn't necessary but makes some exhaustivity
+                     errors show up in the right order *)
+                  begin match this, cases, def with
+                  | Proj_end dt, [], None ->
+                     let fieldnames = List.map (fun (f,m,_) -> f,m) field_types in
+                     cases, Some ([tag, fieldnames], dt)
+                  | Proj_end dt, [], Some (tags, def) when Hashcons.equal dt def ->
+                     let fieldnames = List.map (fun (f,m,_) -> f,m) field_types in
+                     cases, Some ((tag,fieldnames)::tags, def)
+                  | _ -> (tag, this)::cases, def
+                  end
                | [], rest ->
                   (* This can happen when a pattern matches a case that the
                      type shows cannot occur *)
@@ -590,8 +572,10 @@ let rec check_matrix :
                in
                [], def
           in
-          let cases, def = split cases mat in
-          Cases (cases, def)
+          match split cases mat with
+          | [], None -> Cases ([], None) (* FIXME: possible? or Failure? *)
+          | [], Some (_tags, dt) -> Any dt
+          | cases, def -> Cases (cases, def)
      in
      let dt =
        match var with
@@ -605,8 +589,7 @@ and check_projection :
     (k, split_type_field) Clist.t -> (w, ptyp * gen_level) Clist.t ->
     ((k,pat exp_field option) Clist.t * w pat_row) list ->
     w field_projections =
-  fun ~matchloc ~env ~lvl ftyps typs mat ->
-  let pats = Shrinking.shrink_proj_matrix mat in
+  fun ~matchloc ~env ~lvl ftyps typs pats ->
   match ftyps with
   | [] ->
      Proj_end (check_matrix ~matchloc ~env typs (List.map snd pats))
@@ -638,9 +621,19 @@ and check_projection :
             Some (fs, (Clist.(pany::row), act)),
             Some (fs, (row, act)))
      in
-     Proj_opt (fname,
-               check_projection ~matchloc ~env ~lvl ftyps ((ty,lvl)::typs) pats_pres,
-               check_projection ~matchloc ~env ~lvl ftyps typs pats_abs)
+     let abs = check_projection ~matchloc ~env ~lvl ftyps typs pats_abs in
+     match
+       pats_pres |> List.map (fun (fs, (Clist.(p::ps), act)) ->
+         match p with
+         | Some Pany, _ -> (fs, (ps,act))
+         | _  -> raise_notrace Exit)
+     with
+     | pats_pres ->
+        let pres = check_projection ~matchloc ~env ~lvl ftyps typs pats_pres in
+        if Hashcons.equal_fields pres abs then pres else Proj_check (fname, pres, abs)
+     | exception Exit ->
+        let pres = check_projection ~matchloc ~env ~lvl ftyps ((ty,lvl)::typs) pats_pres in
+        Proj_opt (fname, pres, abs)
 
 let ptuple ~tag ~ext fields =
   Some (Ptuple (Some (Typedefs.Cons1.Tag.unparse tag), Exp.of_record_fields ~ext fields)),
@@ -705,6 +698,19 @@ and counterexamples_fields :
          (mkfield fn Absent :: fs), ps)
      in
      pres @ abs
+  | Proj_check (fn, pres, abs) ->
+     let pres =
+       counterexamples_fields len pres
+       |> List.map (fun (fs, (ps : (_, pat) Clist.t)) ->
+         (mkfield fn (Optional any) :: fs), ps)
+     in
+     let abs =
+       counterexamples_fields len abs
+       |> List.map (fun (fs, ps) ->
+         (mkfield fn Absent :: fs), ps)
+     in
+     pres @ abs
+
 
 (*
  * Parse a list of cases into a pattern matrix
@@ -851,6 +857,10 @@ let compile ~actions vals orig_dt =
        compile_fields ~obj ~vals:(Proj(obj,fn) :: vals) fs
     | Proj_opt (fn, pres, abs) ->
        let pres = compile_fields ~obj ~vals:(Proj(obj,fn) :: vals) pres in
+       let abs = compile_fields ~obj ~vals abs in
+       OptField (obj, fn, pres, abs)
+    | Proj_check (fn, pres, abs) ->
+       let pres = compile_fields ~obj ~vals pres in
        let abs = compile_fields ~obj ~vals abs in
        OptField (obj, fn, pres, abs)
   in
