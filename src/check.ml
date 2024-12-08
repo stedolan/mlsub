@@ -269,171 +269,169 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      in
 
      (* inspect checked type *)
-     let tag, fields =
-       let orig_fields = fields in
-       let fields = Fields.of_list (List.map (fun ((f,loc), _, r) -> f, Fields.Fpresent (r, loc)) fields) in
-       let check_tag : tuple_tag -> Cons1.Tag.t = function
-         | Anon_tag -> Anon_tag
-         | Struct_tag t -> Struct_tag t
-         | Qualified_tag ((s,sloc),(t,tloc)) ->
-            begin match Env.lookup_decl env s with
-            | None ->
-               fail sloc (Bad_name (`Unknown, `Type, s))
-            | Some {body = Decl_record _ | Decl_primitive; _} ->
-               fail sloc (Bad_name (`Expected `Variant, `Type, s))
-            | Some {body = Decl_variant vs; _ } when not (SymLocMap.mem (t,tloc) vs) ->
-               fail tloc (Bad_name (`Unknown, `Type, t))
-            | Some {body = Decl_variant _; _} ->
-               Named_tag (Variant_tag ((s,sloc), (t,tloc)))
-            end
-         | Named_tag ((s,sloc) as t) ->
-            match Env.lookup_decl env s with
-            | None ->
-               fail sloc (Bad_name (`Unknown, `Type, s))
-            | Some {body = Decl_variant _ | Decl_primitive; _} ->
-               fail sloc (Bad_name (`Expected `Record, `Type, s))
-            | Some {name=_; params=_; body = Decl_record _} ->
-               Named_tag (Record_tag t)
-       in
-       let matching_conses ~tag conses =
-         conses |> List.filter_map (fun ((cons : _ Cons1.t),consloc) ->
-           match tag, cons with
-           | Some tag, Record ({tag=None; _} as r) ->
-              Some (check_tag tag, consloc, r)
-           | None, Record ({tag=Some tag; _} as r) ->
-              Some (tag, consloc, r)
-           | Some tag, Record ({tag=Some tag'; _} as r)
-                when Cons1.Tag.matches tag tag' ->
-              Some (tag', consloc, r)
-           | _ -> None)
-       in
-       let get_matching_cons ((conses, rvs, tyloc) : _ tcvj) =
-         match matching_conses ~tag conses with
-         | [p] -> p
-         | _ ->
-            (* FIXME: factor this out into types.ml somewhere *)
-            let err =
-              match
-                List.map (fun (tag,_,_) -> tag) (matching_conses ~tag:None conses)
-              with
-              | [] -> Cons1.Incompatible
-              | tags -> (Cons1.Expected_tag (tag, tags))
-            in
-            let tunit _ = Tsimple () in
-            let body = Fields.map fields ~pos:tunit in
-            let tag = Option.map Cons1.Tag.unchecked_tag tag in
-            let cp = tcons (Cons1.Record {tag; args=[]; body}, eloc) in
-            let ty =
-              let conses = List.map (fun (c,l) -> Cons1.map ~neg:tunit ~pos:tunit c, l) conses in
-              (conses, rvs, tyloc)
-            in
-            let err = make_err' env (Head err) (cp,eloc) (Tcvj ty, Option.value tyloc ~default:eloc) in
-            fail eloc (Conflict (`Expr, err))
-       in
-       let expander ~loc ~args (tag : Cons1.Tag.t option) =
-         match tag with
-         | None ->
-            fun _ -> Fields.Funknown loc
-         | Some (Struct_tag _ | Anon_tag) ->
-            fun _ -> Fields.Fabsent loc
-         | Some (Named_tag tag) ->
-            let decl_fields = Env.get_decl_fields env tag in
-            fun fn ->
-            Fields.find fn (decl_fields,())
-            |> Option.value ~default:(Fields.Fabsent loc)
-            |> Fields.field_desc_map (fun ty ->
-              let neg ty vars =
-                Cons1.Tyarg.proj_neg (List.nth args (as_single_var ty vars))
-              in
-              let pos ty vars =
-                Cons1.Tyarg.proj_pos (List.nth args (as_single_var ty vars))
-              in
-              open_typ ~neg ~pos 0 (gen_zero ty))
-       in
-       let check_fields ~loc ~mode_fn (record : _ Cons1.cons_record) =
-         begin match
-           Fields.sub
-             (fields, fun _ -> Fabsent eloc)
-             (record.body, expander ~loc ~args:record.args record.tag)
-             ~f:(fun _fn r ty -> r := Some (mode_fn ty))
-         with
-         | Ok () -> ()
-         | Error err ->
-            cons_fail_field err (Cons1.Record record)
-         end;
-         orig_fields |> List.map (fun (f, e, ty) ->
-           match !ty with
-           | Some ty ->
-              f, check env ~mode e ty
-           | None ->
-              let ty = inferring () in
-              let e = check env ~mode e ty in
-              f, (Some (Typed (e, elab_ptyp (Mode.inferred_type env ty))), snd e))
-       in
-       match ty with
-       | Checking (Tcvj conses as tcheck) when not (is_ttop tcheck) ->
-          let tag, consloc, record = get_matching_cons conses in
-          let typed_fields = check_fields ~loc:consloc ~mode_fn:Mode.checking record in
-          tag, typed_fields
-       | Transparent ({checking=(Tcvj conses); _} as r)
-            when not (is_ttop r.checking) ->
-          let tag, consloc, record = get_matching_cons conses in
-          let typed_fields = check_fields ~loc:consloc ~mode_fn:Mode.transparent record in
-          begin
-            let fields = Fields.map ~pos:(fun r -> Option.get !r) fields in
-            let body = Fields.map fields ~pos:Mode.transparent_inferred_type in
-            let args = List.map (Cons1.Tyarg.map ~neg:ntyp_of_vtyp ~pos:ptyp_of_vtyp) record.args in
-            let cons = Cons1.Record {tag = Some tag; args; body} in
-            Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
-          end;
-          tag, typed_fields
-       | _ ->
-          (* FIXME: do a subtyping check with the least record beforehand? *)
-          match tag with
-          | None -> fail eloc (Bad_tag (tag, []))
-          | Some (Anon_tag | Struct_tag _ as tag) ->
-             let tag : Cons1.Tag.t =
-               match tag with
-               | Struct_tag s -> Struct_tag s
-               | Anon_tag -> Anon_tag
-               | _ -> assert false
-             in
-             let field_tys = Fields.map ~pos:(fun r -> let ty = inferring () in r := Some ty; ty) fields in
-             let typed_fields = List.map (fun (f, e, ty) -> f, check env ~mode e (Option.get !ty)) orig_fields in
-             let () =
-               let body = Fields.map ~pos:(Mode.inferred_type env) field_tys in
-               let cons = Cons1.Record {tag = Some tag; args=[]; body} in
-               Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
-             in
-             tag, typed_fields
-          | Some (Named_tag _ | Qualified_tag _ as tag) ->
-             let tag = check_tag tag in
-             let ntag = match tag with Named_tag t -> t | _ -> assert false in
-             let decl_params = Env.get_decl_params env ntag in
-             let args : (vtyp,vtyp) Cons1.tyarg list =
-               decl_params |> List.map (fun (var, _) : _ Cons1.tyarg ->
-                 let fv = Tsimple (fresh_flexvar (Env.level env)) in
-                 Cons1.Tyarg.of_variance_spec var
-                 |> Cons1.Tyarg.map ~neg:(fun () -> fv) ~pos:(fun () -> fv))
-             in
-             let record : _ Cons1.cons_record = { tag = Some tag; args; body = Fields.empty } in
-             let typed_fields = check_fields ~loc:(Nom_tag.loc ntag) ~mode_fn:Mode.transparent record in
-             begin
-               let fields = Fields.map fields ~pos:(fun r -> Option.get !r) in
-               let body =
-                 (* Can drop fields where we inferred nothing interesting *)
-                 Fields.filter_map fields
-                   ~pos:(Mode.transparent_inferred_type_opt env)
-               in
-               let args =
-                 args |> List.map (Cons1.Tyarg.map ~neg:ntyp_of_vtyp ~pos:ptyp_of_vtyp)
-               in
-               let cons = Cons1.Record {tag=Some tag; args; body} in
-               Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
-             end;
-             tag, typed_fields
+     let orig_fields = fields in
+     let fields = Fields.of_list (List.map (fun ((f,loc), _, r) -> f, Fields.Fpresent (r, loc)) fields) in
+     let check_tag : tuple_tag -> Cons1.Tag.t = function
+       | Anon_tag -> Anon_tag
+       | Struct_tag t -> Struct_tag t
+       | Qualified_tag ((s,sloc),(t,tloc)) ->
+          begin match Env.lookup_decl env s with
+          | None ->
+             fail sloc (Bad_name (`Unknown, `Type, s))
+          | Some {body = Decl_record _ | Decl_primitive; _} ->
+             fail sloc (Bad_name (`Expected `Variant, `Type, s))
+          | Some {body = Decl_variant vs; _ } when not (SymLocMap.mem (t,tloc) vs) ->
+             fail tloc (Bad_name (`Unknown, `Type, t))
+          | Some {body = Decl_variant _; _} ->
+             Named_tag (Variant_tag ((s,sloc), (t,tloc)))
+          end
+       | Named_tag ((s,sloc) as t) ->
+          match Env.lookup_decl env s with
+          | None ->
+             fail sloc (Bad_name (`Unknown, `Type, s))
+          | Some {body = Decl_variant _ | Decl_primitive; _} ->
+             fail sloc (Bad_name (`Expected `Record, `Type, s))
+          | Some {name=_; params=_; body = Decl_record _} ->
+             Named_tag (Record_tag t)
      in
-     Tuple (tag, fields)
+     let matching_conses ~tag conses =
+       conses |> List.filter_map (fun ((cons : _ Cons1.t),consloc) ->
+         match tag, cons with
+         | Some tag, Record ({tag=None; _} as r) ->
+            Some (check_tag tag, consloc, r)
+         | None, Record ({tag=Some tag; _} as r) ->
+            Some (tag, consloc, r)
+         | Some tag, Record ({tag=Some tag'; _} as r)
+              when Cons1.Tag.matches tag tag' ->
+            Some (tag', consloc, r)
+         | _ -> None)
+     in
+     let get_matching_cons ((conses, rvs, tyloc) : _ tcvj) =
+       match matching_conses ~tag conses with
+       | [p] -> p
+       | _ ->
+          (* FIXME: factor this out into types.ml somewhere *)
+          let err =
+            match
+              List.map (fun (tag,_,_) -> tag) (matching_conses ~tag:None conses)
+            with
+            | [] -> Cons1.Incompatible
+            | tags -> (Cons1.Expected_tag (tag, tags))
+          in
+          let tunit _ = Tsimple () in
+          let body = Fields.map fields ~pos:tunit in
+          let tag = Option.map Cons1.Tag.unchecked_tag tag in
+          let cp = tcons (Cons1.Record {tag; args=[]; body}, eloc) in
+          let ty =
+            let conses = List.map (fun (c,l) -> Cons1.map ~neg:tunit ~pos:tunit c, l) conses in
+            (conses, rvs, tyloc)
+          in
+          let err = make_err' env (Head err) (cp,eloc) (Tcvj ty, Option.value tyloc ~default:eloc) in
+          fail eloc (Conflict (`Expr, err))
+     in
+     let expander ~loc ~args (tag : Cons1.Tag.t option) =
+       match tag with
+       | None ->
+          fun _ -> Fields.Funknown loc
+       | Some (Struct_tag _ | Anon_tag) ->
+          fun _ -> Fields.Fabsent loc
+       | Some (Named_tag tag) ->
+          let decl_fields = Env.get_decl_fields env tag in
+          fun fn ->
+          Fields.find fn (decl_fields,())
+          |> Option.value ~default:(Fields.Fabsent loc)
+          |> Fields.field_desc_map (fun ty ->
+            let neg ty vars =
+              Cons1.Tyarg.proj_neg (List.nth args (as_single_var ty vars))
+            in
+            let pos ty vars =
+              Cons1.Tyarg.proj_pos (List.nth args (as_single_var ty vars))
+            in
+            open_typ ~neg ~pos 0 (gen_zero ty))
+     in
+     let check_fields ~loc ~mode_fn (record : _ Cons1.cons_record) =
+       begin match
+         Fields.sub
+           (fields, fun _ -> Fabsent eloc)
+           (record.body, expander ~loc ~args:record.args record.tag)
+           ~f:(fun _fn r ty -> r := Some (mode_fn ty))
+       with
+       | Ok () -> ()
+       | Error err ->
+          cons_fail_field err (Cons1.Record record)
+       end;
+       orig_fields |> List.map (fun (f, e, ty) ->
+         match !ty with
+         | Some ty ->
+            f, check env ~mode e ty
+         | None ->
+            let ty = inferring () in
+            let e = check env ~mode e ty in
+            f, (Some (Typed (e, elab_ptyp (Mode.inferred_type env ty))), snd e))
+     in
+     begin match ty with
+     | Checking (Tcvj conses as tcheck) when not (is_ttop tcheck) ->
+        let tag, consloc, record = get_matching_cons conses in
+        let typed_fields = check_fields ~loc:consloc ~mode_fn:Mode.checking record in
+        Tuple (tag, typed_fields)
+     | Transparent ({checking=(Tcvj conses); _} as r)
+          when not (is_ttop r.checking) ->
+        let tag, consloc, record = get_matching_cons conses in
+        let typed_fields = check_fields ~loc:consloc ~mode_fn:Mode.transparent record in
+        begin
+          let fields = Fields.map ~pos:(fun r -> Option.get !r) fields in
+          let body = Fields.map fields ~pos:Mode.transparent_inferred_type in
+          let args = List.map (Cons1.Tyarg.map ~neg:ntyp_of_vtyp ~pos:ptyp_of_vtyp) record.args in
+          let cons = Cons1.Record {tag = Some tag; args; body} in
+          Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
+        end;
+        Tuple (tag, typed_fields)
+     | _ ->
+        (* FIXME: do a subtyping check with the least record beforehand? *)
+        match tag with
+        | None -> fail eloc (Bad_tag (tag, []))
+        | Some (Anon_tag | Struct_tag _ as tag) ->
+           let tag : Cons1.Tag.t =
+             match tag with
+             | Struct_tag s -> Struct_tag s
+             | Anon_tag -> Anon_tag
+             | _ -> assert false
+           in
+           let field_tys = Fields.map ~pos:(fun r -> let ty = inferring () in r := Some ty; ty) fields in
+           let typed_fields = List.map (fun (f, e, ty) -> f, check env ~mode e (Option.get !ty)) orig_fields in
+           let () =
+             let body = Fields.map ~pos:(Mode.inferred_type env) field_tys in
+             let cons = Cons1.Record {tag = Some tag; args=[]; body} in
+             Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
+           in
+           Tuple (tag, typed_fields)
+        | Some (Named_tag _ | Qualified_tag _ as tag) ->
+           let tag = check_tag tag in
+           let ntag = match tag with Named_tag t -> t | _ -> assert false in
+           let decl_params = Env.get_decl_params env ntag in
+           let args : (vtyp,vtyp) Cons1.tyarg list =
+             decl_params |> List.map (fun (var, _) : _ Cons1.tyarg ->
+               let fv = Tsimple (fresh_flexvar (Env.level env)) in
+               Cons1.Tyarg.of_variance_spec var
+               |> Cons1.Tyarg.map ~neg:(fun () -> fv) ~pos:(fun () -> fv))
+           in
+           let record : _ Cons1.cons_record = { tag = Some tag; args; body = Fields.empty } in
+           let typed_fields = check_fields ~loc:(Nom_tag.loc ntag) ~mode_fn:Mode.transparent record in
+           begin
+             let fields = Fields.map fields ~pos:(fun r -> Option.get !r) in
+             let body =
+               (* Can drop fields where we inferred nothing interesting *)
+               Fields.filter_map fields
+                 ~pos:(Mode.transparent_inferred_type_opt env)
+             in
+             let args =
+               args |> List.map (Cons1.Tyarg.map ~neg:ntyp_of_vtyp ~pos:ptyp_of_vtyp)
+             in
+             let cons = Cons1.Record {tag=Some tag; args; body} in
+             Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
+           end;
+           Tuple (tag, typed_fields)
+     end
 
   | Proj (e, (field, loc)) ->
      let ty, e = infer env ~mode e in

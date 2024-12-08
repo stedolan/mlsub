@@ -506,7 +506,7 @@ end
 
 let pat_or p q : pat = (Some (Por (p, q)), Location.noloc)
 
-let rec split_cases :
+let rec check_matrix :
   type w . matchloc:_ -> env:_ -> (w, ptyp * Typedefs.gen_level) Clist.t -> w pat_matrix -> w dectree =
   fun ~matchloc ~env typs mat ->
   let mat = Shrinking.shrink_matrix mat in
@@ -557,52 +557,9 @@ let rec split_cases :
        match split_ty with
        | Split_type_any ->
           let mat = List.map snd mat in
-          let rest = split_cases ~matchloc ~env typs mat in
+          let rest = check_matrix ~matchloc ~env typs mat in
           Any rest
        | Split_type_cases cases ->
-          let rec proj : type k w .
-            (k, split_type_field) Clist.t ->
-            (w, ptyp * gen_level) Clist.t ->
-            ((k,pat exp_field option) Clist.t * w pat_row) list ->
-            w field_projections =
-            fun ftyps typs pats ->
-            let pats = Shrinking.shrink_proj_matrix pats in
-            match ftyps with
-            | [] ->
-               Proj_end (split_cases ~matchloc ~env typs (List.map snd pats))
-            | (fname, Mandatory, ty) :: ftyps ->
-               let pats =
-                 pats |> List.map (fun (fs, ((row,act) : w pat_row)) ->
-                   let fpat = Clist.hd fs and fs = Clist.tl fs in
-                   let pat =
-                     match fpat with
-                     | Some (Exp.Mandatory p) -> p
-                     | Some _ -> intfail "bad fpat kind"
-                     | None -> Some Pany, matchloc
-                   in
-                   fs, (Clist.(pat :: row), act))
-               in
-               Proj_mand (fname, proj ftyps ((ty,lvl)::typs) pats)
-            | (fname, Optional, ty) :: ftyps ->
-               let pats_pres, pats_abs =
-                 pats |> List.split_filter_map (fun (fs, ((row,act) : w pat_row)) ->
-                   let fpat = Clist.hd fs and fs = Clist.tl fs in
-                   match fpat with
-                   | Some (Exp.Mandatory _) -> intfail "bad fpat kind"
-                   | Some (Exp.Optional p) ->
-                      Some (fs, (Clist.(p::row), act)), None
-                   | Some (Exp.Absent | Exp.Abs_broken) ->
-                      None, Some (fs, (row,act))
-                   | None ->
-                      let pany = Some Pany, Location.noloc in
-                      Some (fs, (Clist.(pany::row), act)),
-                      Some (fs, (row, act)))
-               in
-               Proj_opt (fname,
-                         proj ftyps ((ty,lvl)::typs) pats_pres,
-                         proj ftyps typs pats_abs)
-          in
-
           let rec split cases mat =
             let tag = mat |> List.find_map (function
                | (Ph_tuple (tag,_,_),_loc),_ -> Some tag
@@ -616,7 +573,7 @@ let rec split_cases :
                   let Ex fields = Clist.of_list (List.rev fields) in
                   let this, others = split_on_case tag fields mat in
                   let cases, def = split rest others in
-                  (tag, proj fields typs this)::cases, def
+                  (tag, check_projection ~matchloc ~env ~lvl fields typs this)::cases, def
                | [], rest ->
                   (* This can happen when a pattern matches a case that the
                      type shows cannot occur *)
@@ -628,7 +585,7 @@ let rec split_cases :
                  match cases with
                  | [] -> None
                  | cases ->
-                    let dt = split_cases ~matchloc ~env typs (List.map snd mat) in
+                    let dt = check_matrix ~matchloc ~env typs (List.map snd mat) in
                     Some (List.map (fun (c,fs) -> c, List.map (fun (fn,m,_) -> fn,m) fs) cases, dt)
                in
                [], def
@@ -642,6 +599,48 @@ let rec split_cases :
        | None -> dt
      in
      Hashcons.mk dt
+
+and check_projection :
+  type k w . matchloc:_ -> env:_ -> lvl:_ ->
+    (k, split_type_field) Clist.t -> (w, ptyp * gen_level) Clist.t ->
+    ((k,pat exp_field option) Clist.t * w pat_row) list ->
+    w field_projections =
+  fun ~matchloc ~env ~lvl ftyps typs mat ->
+  let pats = Shrinking.shrink_proj_matrix mat in
+  match ftyps with
+  | [] ->
+     Proj_end (check_matrix ~matchloc ~env typs (List.map snd pats))
+  | (fname, Mandatory, ty) :: ftyps ->
+     let pats =
+       pats |> List.map (fun (fs, ((row,act) : w pat_row)) ->
+         let fpat = Clist.hd fs and fs = Clist.tl fs in
+         let pat =
+           match fpat with
+           | Some (Exp.Mandatory p) -> p
+           | Some _ -> intfail "bad fpat kind"
+           | None -> Some Pany, matchloc
+         in
+         fs, (Clist.(pat :: row), act))
+     in
+     Proj_mand (fname, check_projection ~matchloc ~env ~lvl ftyps ((ty,lvl)::typs) pats)
+  | (fname, Optional, ty) :: ftyps ->
+     let pats_pres, pats_abs =
+       pats |> List.split_filter_map (fun (fs, ((row,act) : w pat_row)) ->
+         let fpat = Clist.hd fs and fs = Clist.tl fs in
+         match fpat with
+         | Some (Exp.Mandatory _) -> intfail "bad fpat kind"
+         | Some (Exp.Optional p) ->
+            Some (fs, (Clist.(p::row), act)), None
+         | Some (Exp.Absent | Exp.Abs_broken) ->
+            None, Some (fs, (row,act))
+         | None ->
+            let pany = Some Pany, Location.noloc in
+            Some (fs, (Clist.(pany::row), act)),
+            Some (fs, (row, act)))
+     in
+     Proj_opt (fname,
+               check_projection ~matchloc ~env ~lvl ftyps ((ty,lvl)::typs) pats_pres,
+               check_projection ~matchloc ~env ~lvl ftyps typs pats_abs)
 
 let ptuple ~tag ~ext fields =
   Some (Ptuple (Some (Typedefs.Cons1.Tag.unparse tag), Exp.of_record_fields ~ext fields)),
@@ -785,7 +784,7 @@ let split_cases ~matchloc env (typs : (ptyp * Typedefs.gen_level) list) (cases :
         | None -> Error.fail loc (Illformed_pat (`Wrong_length (List.length ps, Clist.length typs)))
         | Some ps -> ps, (SymMap.empty, act)))
   in
-  let dtree = split_cases ~matchloc ~env typs mat in
+  let dtree = check_matrix ~matchloc ~env typs mat in
   actions |> List.iter (fun act ->
     if act.bindings = None then
       Error.log ~loc:act.pat_loc Unused_pattern);
