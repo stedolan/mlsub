@@ -90,10 +90,19 @@ module Mode = struct
     wf_ptyp env t;
     t
 
-  let transparent_inferred_type env ty =
+  let transparent_inferred_type ty =
     match ty with
     | Checking _ | Inference _ -> intfail "Mode.transparent_inferred_type: wrong mode"
-    | Transparent {checking = _; inference = None} -> None
+    | Transparent {checking = ck; inference = None} ->
+       ptyp_of_vtyp ck
+    | Transparent {checking = _; inference = Some inf} ->
+       inf
+
+  (* Returns None if the inferred type is no more precise than the checked one *)
+  let transparent_inferred_type_opt env = function
+    | Checking _ | Inference _ -> intfail "Mode.transparent_inferred_type: wrong mode"
+    | Transparent {checking = _; inference = None} ->
+       None
     | Transparent {checking = ck; inference = Some inf} ->
        (* We know inf <= ck. So if ck <= inf, they're equal *)
        if clearly_subtype_typ env (ntyp_of_vtyp ck) inf
@@ -147,7 +156,7 @@ let inspect_poly_func env params ty =
     match Mode.checking_type ty with
     | Tpoly {vars; body} ->
        (* rigvars not in scope in body, so no rig_names *)
-       let env', open_rvs = enter_rigid env vars SymMap.empty in
+       let env', open_rvs, _rv2 = enter_rigid env vars SymMap.empty in
        (* FIXME: Can there be flexvars used somewhere? Do they get bound/hoisted properly? *)
        Some (vars, env'), open_rvs body
     | ty -> None, ty
@@ -370,14 +379,13 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
             when not (is_ttop r.checking) ->
           let tag, consloc, record = get_matching_cons conses in
           let typed_fields = check_fields ~loc:consloc ~mode_fn:Mode.transparent record in
-          let () =
-            let body =
-              Fields.filter_map ~pos:(fun r -> Mode.transparent_inferred_type env (Option.get !r)) fields
-            in
+          begin
+            let fields = Fields.map ~pos:(fun r -> Option.get !r) fields in
+            let body = Fields.map fields ~pos:Mode.transparent_inferred_type in
             let args = List.map (Cons1.Tyarg.map ~neg:ntyp_of_vtyp ~pos:ptyp_of_vtyp) record.args in
             let cons = Cons1.Record {tag = Some tag; args; body} in
             Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
-          in
+          end;
           tag, typed_fields
        | _ ->
           (* FIXME: do a subtyping check with the least record beforehand? *)
@@ -410,16 +418,19 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
              in
              let record : _ Cons1.cons_record = { tag = Some tag; args; body = Fields.empty } in
              let typed_fields = check_fields ~loc:(Nom_tag.loc ntag) ~mode_fn:Mode.transparent record in
-             let () =
+             begin
+               let fields = Fields.map fields ~pos:(fun r -> Option.get !r) in
                let body =
-                 Fields.filter_map ~pos:(fun r -> Mode.transparent_inferred_type env (Option.get !r)) fields
+                 (* Can drop fields where we inferred nothing interesting *)
+                 Fields.filter_map fields
+                   ~pos:(Mode.transparent_inferred_type_opt env)
                in
                let args =
                  args |> List.map (Cons1.Tyarg.map ~neg:ntyp_of_vtyp ~pos:ptyp_of_vtyp)
                in
                let cons = Cons1.Record {tag=Some tag; args; body} in
                Mode.inferred env ~loc:eloc ty (tcons (cons, eloc))
-             in
+             end;
              tag, typed_fields
      in
      Tuple (tag, fields)
@@ -443,10 +454,12 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      Proj (e, (field, loc))
 
   | Let (p, pty, rhs, body) ->
-     let pty, e, gen_level = check_rhs env ~mode pty rhs in
+     (* Transparent ascription: use inferred type to bind variable,
+        but keep specified type in elab. (Is this the right choice?) *)
+     let pty, infty, e, gen_level = check_rhs env ~mode pty rhs in
 
      let case : case = ([[p]], snd p), body in
-     let act, split = Check_pat.split_cases ~matchloc:(snd p) env [pty, gen_level] [case] in
+     let act, split = Check_pat.split_cases ~matchloc:(snd p) env [infty, gen_level] [case] in
      let act = Util.as_singleton act in
      let env = extend_env env act in
      let body = check env ~mode body ty in
@@ -589,7 +602,7 @@ and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_
     | None -> IArray.empty, SymMap.empty
     | Some poly -> Check_type.enter_polybounds ~lookup:Check_type.default_lookup_fn ~env poly in
 
-  let env', _rigvars = enter_rigid env rigvars' rig_names in
+  let env', _rigvars, _rv2 = enter_rigid env rigvars' rig_names in
   let check_ty ~ispos ty =
     let ty = typ_of_tyexp env' ty in
     (* check for contravariant joins *)
@@ -711,7 +724,10 @@ and check_rhs env ~mode pty e =
      let bmode = fresh_gen_mode () in
      let pty, e = infer env ~mode:bmode e in
      mark_var_use_at_level ~mode bmode.gen_level_acc;
-     pty, e, bmode.gen_level_acc
+     pty, pty, e, bmode.gen_level_acc
   | Some ty ->
      let t = typ_of_tyexp env ty in
-     t, check env ~mode e (checking t), None
+     let ty_mode = Mode.transparent t in
+     let exp = check env ~mode e ty_mode in
+     let ty = Mode.transparent_inferred_type ty_mode in
+     t, ty, exp, None

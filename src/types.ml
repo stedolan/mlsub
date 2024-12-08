@@ -978,7 +978,7 @@ let enter_rigid env vars rig_names =
         in
         { name; upper = conses }) vars in
   let env = Env.extend_types env ~level ~rig_names ~rig_defns in
-  env, openrig
+  env, openrig, openrig
 
 let rec subtype_exn env (p : ptyp) (n : ntyp) =
   (* Format.printf "%a <= %a\n" dump_ptyp p pp_ntyp n; *)
@@ -1006,7 +1006,7 @@ let rec subtype_exn env (p : ptyp) (n : ntyp) =
          subtype_lu ~changes:(ref []) env [Lrigvar (as_rigvar vp)] (ntyp_to_upper ~simple:false env n));
   | p, Tpoly {vars; body} ->
      let orig_env = env in
-     let env, open_rvars = enter_rigid env vars SymMap.empty in
+     let env, open_rvars, _ = enter_rigid env vars SymMap.empty in
      let body = open_rvars body in
      (try subtype_exn env p body
       with SubtypeError err ->
@@ -1137,10 +1137,26 @@ let rec clearly_subtype_typ env (a : ntyp) (b : ptyp) : bool =
          | Ok () -> true
          | Error _ -> false
          | exception Exit -> false))
-  | a, b ->
+  | (Tsimple _ | Tcvj _), (Tsimple _ | Tcvj _) ->
      clearly_subtype env
        (ntyp_to_fresh_flexvar ~simple:false env a)
        (ptyp_to_lower ~simple:false env b)
+  | Tpoly {vars=vars_a; body=a}, Tpoly {vars=vars_b; body=b}
+       when IArray.length vars_a = IArray.length vars_b ->
+     (* Try pairing up the variables directly *)
+     IArray.for_all2
+       (fun x y -> match x, y with
+        | (_,None), _  -> true
+        | _, (_, None) -> false
+        | (_,Some a), (_,Some b) -> clearly_subtype_typ env b a)
+       vars_a
+       vars_b
+     &&
+     (* entering vars_b would be more precise but it's the wrong type *)
+     (let env, open_rvars, open_rvars' = enter_rigid env vars_a SymMap.empty in
+      clearly_subtype_typ env (open_rvars a) (open_rvars' b))
+  | Tpoly _, _ | _, Tpoly _ ->
+     false
 
 let rec map_typ_0 : 'neg1 'pos1 'neg2 'pos2 .
   neg:(index:int -> 'neg1 -> ('pos2, 'neg2) typ) ->

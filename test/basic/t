@@ -700,7 +700,7 @@ let a = #{foo: 1, bar: 2}; let b : #{bar: Int} = a; b
 let a = #{foo: 1, bar: 2}; let b : {bar: Any} = a; b
 > let a = #{foo: 1, bar: 2}; let b : {bar: Any} = a; b
 >   let a : #{foo: Int, bar: Int} = #{foo: 1, bar: 2}; let b : {bar: Any} = a; b
-> {bar: Any}
+> #{foo: Int, bar: Int}
 > let a = (foo: 1, bar: 2); let  = %yield(a); done
 
 let a = #{foo: 1, bar: 2}; let b : {bar: Nothing} = a; b
@@ -2199,4 +2199,4 @@ fn h() { f(#Foo{foo:#{p:1}}) }
 > fn h() -> (#{p: Int}) { f(#Foo{foo: #{p: 1}}) }
 
 
-> STATS: fix: 129, flex: 1283
+> STATS: fix: 129, flex: 1291

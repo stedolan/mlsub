@@ -155,7 +155,7 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
      syn_tjoin loc (typ_of_tyexp ~lookup ~env a) (typ_of_tyexp ~lookup ~env b)
   | Tforall (vars, body) ->
      let vars, name_ix = enter_polybounds ~lookup ~env vars in
-     let env, _rigvars = Types.enter_rigid env vars name_ix in
+     let env, _rigvars, _rv2 = Types.enter_rigid env vars name_ix in
      let body =
        try Types.close_typ_poly_exn ~ispos:true (Env.level env) (typ_of_tyexp ~lookup ~env body)
        with Types.CloseError (err, errloc) ->

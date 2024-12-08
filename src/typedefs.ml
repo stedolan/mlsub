@@ -200,6 +200,8 @@ module Cons1 = struct
       | Named_tag _, (Anon_tag | Struct_tag _)
       | Struct_tag _, Anon_tag -> +1
 
+    let equal a b = compare a b = 0
+
     module Map = Util.OrdMap (struct type nonrec t = t let compare = compare end)
 
     (* FIXME: delete? *)

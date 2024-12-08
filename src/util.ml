@@ -42,6 +42,7 @@ module IArray : sig
   val iteri : (int -> 'a -> unit) -> 'a t -> unit
   val iter2 : ('a -> 'b -> unit) -> 'a t -> 'b t -> unit
   val exists : ('a -> bool) -> 'a t -> bool
+  val for_all2 : ('a -> 'b -> bool) -> 'a t -> 'b t -> bool
   val map_fold_left : ('s -> 'a -> 's * 'b) -> 's -> 'a t -> 's * 'b t
   val equal : ('a -> 'a -> bool) -> 'a t -> 'a t -> bool
 end = struct
@@ -63,6 +64,8 @@ end = struct
     Array.iter2 (fun a b -> f (ra a) (rb b)) a b
   let iter f (Mk (a, r)) = Array.iter (fun x -> f (r x)) a
   let exists f (Mk (a, r)) = Array.exists (fun x -> f (r x)) a
+  let for_all2 f (Mk (a, ar)) (Mk (b, br)) =
+    Array.for_all2 (fun x y -> f (ar x) (br y)) a b
   let map_fold_left f s (Mk (a, r)) =
     let st = ref s in
     let out = ref [| |] in

@@ -28,7 +28,8 @@ type t = Location.t * error_kind
 
 exception Fail of t
 
-let fail loc k = raise (Fail (loc, k))
+let fail loc k =
+  raise (Fail (loc, k))
 
 (* FIXME: for now, log always Fail's *)
 let log ~loc e = fail loc e

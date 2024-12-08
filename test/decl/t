@@ -610,4 +610,12 @@ fn g(Z{foo}) { foo }
 >                    ^^^
 > but is used as {foo: _}
 
+# transparent ascription test
+{
+type Box[a](a)
+fn f() {let x : Box[#A|#B] = Box(#A); x}
+}
+> type Box[+a](a)
+> fn f() -> Box[#A | #B](#A) { let x : Box[#A | #B] = Box(#A); x }
+
 > STATS: fix: 25, flex: 327
