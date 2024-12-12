@@ -537,15 +537,14 @@ and lower_part =
 and upper =
   | Utop  (* Unrotated equiv of Ugen {cons=Top; higher_fvs=[]} *)
   | Uflexvar of flexvar
-  | Ugen of
-      { cons: (lower, flexvar) upper_cons Location.loc;
-        higher_fvs: flexvar list }
+  | Ugen of upper_gen
 
-and (+'neg,+'pos) upper_cons = ('neg,'pos) upper_part list
+and upper_gen =
+  { conses: (lower, flexvar) Cons1.t list Location.loc;
+    rvs: upper_rigvar list;
+    higher_fvs: flexvar list }
 
-and (+'neg,+'pos) upper_part =
-  | Urigvar of rigvar * delayed_constraint list
-  | Ucons of ('neg, 'pos) Cons1.t
+and upper_rigvar = rigvar * delayed_constraint list
 
 and delayed_constraint =
   { dy_lower: (flexvar, lower) Cons1.t loc;
@@ -824,24 +823,14 @@ let rec equal_lower (p : lower) (q : lower) =
     | _, _ -> false
   in List.equal eq p q
 
-let equal_upper_cons_loc ((p,_) : _ upper_cons Location.loc) ((q,_) : _ upper_cons Location.loc) =
-  let eq p q =
-    match p, q with
-    | Urigvar (pv, pds), Urigvar (qv, qds) ->
-       equal_rigvar pv qv && List.equal (==) pds qds
-    | Ucons pc, Ucons qc ->
-       Cons1.equal pc qc ~neg:equal_lower ~pos:equal_flexvar
-    | _, _ -> false
-  in
-  List.equal eq p q
-
 let equal_upper (p : upper) (q : upper) =
   match p, q with
   | Utop, Utop -> true
   | Uflexvar pv, Uflexvar qv -> equal_flexvar pv qv
-  | Ugen {cons=pc; higher_fvs=pv},
-    Ugen {cons=qc; higher_fvs=qv} ->
-     equal_upper_cons_loc pc qc &&
+  | Ugen {conses=(pc,_); rvs=prvs; higher_fvs=pv},
+    Ugen {conses=(qc,_); rvs=qrvs; higher_fvs=qv} ->
+     List.equal (Cons1.equal ~neg:equal_lower ~pos:equal_flexvar) pc qc &&
+     List.equal (fun (pv,pd) (qv,qd) -> equal_rigvar pv qv && List.equal (==) pd qd) prvs qrvs &&
      List.equal equal_flexvar pv qv
   | _, _ -> false
 
@@ -1073,25 +1062,24 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
 and wf_upper ~seen env lvl = function
   | Utop -> ()
   | Uflexvar v -> wf_flexvar ~seen env lvl v
-  | Ugen {cons=(cons,_loc); higher_fvs} ->
+  | Ugen {conses=(conses,_loc); rvs; higher_fvs} ->
      higher_fvs |> List.iter (fun v ->
        assert (not (Env_level.equal lvl v.level));
        wf_flexvar ~seen env lvl v);
-       cons |> List.iter (function
-         | Urigvar (rv, ds) ->
-            wf_rigvar env lvl rv;
-            List.iter (wf_delayed_constraint ~seen env lvl) ds
-         | Ucons c ->
-            Cons1.map c
-              ~neg:(wf_lower ~seen env lvl)
-              ~pos:(wf_flexvar ~seen env lvl)
-            |> ignore);
-       cons |> List.iteri (fun i c ->
-         cons |> List.iteri (fun j d ->
-           if i < j then match c, d with
-           | Urigvar (a,_), Urigvar (b,_) -> assert (not (equal_rigvar a b))
-           | Ucons a, Ucons b -> assert (Cons1.incomparable_head a b)
-           | _, _ -> ()))
+     conses |> List.iter (fun c ->
+       Cons1.map c
+         ~neg:(wf_lower ~seen env lvl)
+         ~pos:(wf_flexvar ~seen env lvl)
+       |> ignore);
+     rvs |> List.iter (fun (rv, ds) ->
+       wf_rigvar env lvl rv;
+       List.iter (wf_delayed_constraint ~seen env lvl) ds);
+     conses |> List.iteri (fun i c ->
+       conses |> List.iteri (fun j d ->
+         if i < j then assert (Cons1.incomparable_head c d)));
+     rvs |> List.iteri (fun i (c,_) ->
+       rvs |> List.iteri (fun j (d,_) ->
+         if i < j then assert (not (equal_rigvar c d))))
 
 and wf_delayed_constraint ~seen env _lvl {dy_lower; dy_upper; dy_flexvar; dy_resolved=_} =
   let lvl = dy_flexvar.level in
@@ -1351,13 +1339,19 @@ and unparse_lower ~env ~flexvar l =
 let unparse_upper ~env ~flexvar = function
   | Utop -> []
   | Uflexvar v -> [unparse_flexvar ~env ~flexvar v]
-  | Ugen {cons=([Ucons Top], _loc); higher_fvs=[]} -> []
-  | Ugen {cons=(cons,_loc); higher_fvs} ->
-     (   (* FIXME: do something with delayed constraints? *)
-         [unparse_join
-           (cons |> List.map (fun c -> match c with
-              | Urigvar (rv, _FIXME) -> unparse_rigid_var ~env rv
-              | Ucons c -> unparse_cons ~neg:(unparse_lower ~env ~flexvar) ~pos:(unparse_flexvar ~env ~flexvar) (c,())))])
+  | Ugen {conses=([Top], _loc); rvs=[]; higher_fvs=[]} -> []
+  | Ugen {conses=(conses,_loc); rvs; higher_fvs} ->
+     let conses =
+       conses |> List.map (fun c ->
+         unparse_cons (c, ())
+           ~neg:(unparse_lower ~env ~flexvar)
+           ~pos:(unparse_flexvar ~env ~flexvar))
+     in
+     let rvs =
+       (* FIXME: do something with delayed constraints? *)
+       rvs |> List.map (fun (rv, _FIXME) -> unparse_rigid_var ~env rv)
+     in
+     [unparse_join (conses @ rvs)]
      @ List.map (unparse_flexvar ~env ~flexvar) higher_fvs
 
 let unparse_ptyp ~flexvar ?(env=(Env.empty,[])) (t : ptyp) =
