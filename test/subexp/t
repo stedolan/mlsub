@@ -880,7 +880,6 @@ fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> (#{a:{bar:Bool}|a, b:{foo:Int}|b, c:An
 > let  = %yield(fun (x) ret { ret((a: x, b: x, c: x)) }); done
 
 
-# FIXME: spec_sub_rigid_pos should remove one of the variables here
 fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> (#{a:{bar:Bool}|a, b:{foo:Int}|a|b, c:Any}) {
   #{a:x, b:x, c:x}
 }

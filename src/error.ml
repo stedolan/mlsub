@@ -16,8 +16,7 @@ type error_kind =
       | `Must_be_closed
       ]
   | Conflict of [`Expr|`Pat|`Subtype|`Field_override of Typedefs.Nom_tag.t * Tuple_fields.field_name option] * Types.subtyping_error
-  (* FIXME: Maybe delete Unknown_constructor, it's worse than a standard type error *)
-  | Illformed_pat of [`Tag_required | `Duplicate_name of [`Var|`Field] * string * Location.t | `Orpat_different_names of string | `Wrong_length of int * int | `Unknown_cases | `Unknown_fields | `Unknown_constructor of string]
+  | Illformed_pat of [`Tag_required | `Duplicate_name of [`Var|`Field] * string * Location.t | `Orpat_different_names of string | `Wrong_length of int * int | `Unknown_cases | `Unknown_fields]
   | Incompatible_patterns of Location.t
   | Nonexhaustive of Exp.pat list list
   | Bad_tag of (Exp.tuple_tag option * Exp.tuple_tag list)
@@ -197,9 +196,6 @@ let pp_err input loc err : PPrint.document =
      pp "Cannot determine which fields this pattern matches" ^^ context
   | Illformed_pat (`Orpat_different_names k) ->
      pp "The variable %s must be bound on both sides of this or-pattern" k ^^ context
-  | Illformed_pat (`Unknown_constructor s) ->
-     (* FIXME should show source of ty *)
-     pp "This type does not have a constructor %s" s ^^ context
   | Nonexhaustive missing ->
      pp "Some cases of this pattern-match are missing:" ^^ context  ^^
      hardline ^^ pp "The following cases are unhandled:" ^^ hardline ^^

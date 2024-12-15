@@ -1419,15 +1419,6 @@ fn(f) { (fn(x) { 5 })(f(10)) }
 > });
 > done
 
-
-# FIXME: fails recheck. Is this a correct value restriction?
-# # needs approx
-# (fn (x) { x })(fn (x) { x })
-# > (fn (x) { x })(fn (x) { x })
-# > *, 0: [(#1.2) -> #1.1, Any], 1: [#1.2, Any], 2: [Nothing, #1.1],  ⊢ #1.0
-# > [A] (A) -> A
-
-# generalised version
 fn() { (fn (x) { x })(fn (x) { x }) }
 > fn () { (fn (x) { x })(fn (x) { x }) }
 >   fn [a]() -> (a -> a) {

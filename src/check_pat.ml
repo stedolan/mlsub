@@ -37,7 +37,7 @@ type pat_head =
 type split_kind =
   | Split_none
   | Split_any
-  | Split_cases of (mand_flag loc FieldMap.t * Exp.extensible_flag * Location.t) TagMap.t * Exp.extensible_flag loc
+  | Split_cases of (mand_flag loc FieldMap.t * Exp.extensible_flag * Location.t) TagMap.t * [`Open of Location.t | `Closed]
 
 (* FIXME: move to Types? *)
 let ptyp_conses ~env (t : ptyp) =
@@ -112,7 +112,7 @@ let split_kind (pats : pat_head loc list) : split_kind =
       loc
     in
     let case_map = TagMap.of_multi_list ~merge cases in
-    let ext = match wildcard with loc::_ -> Ext_open, loc | [] -> Ext_closed, (Location.fixme "unneeded?") in
+    let ext = match wildcard with loc::_ -> `Open loc | [] -> `Closed in
     Split_cases (case_map, ext)
 
 type split_type =
@@ -128,7 +128,7 @@ and split_type_field =
 let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
   match kind with
   | Split_none | Split_any -> Split_type_any
-  | Split_cases (cases, (ext, extloc)) ->
+  | Split_cases (cases, ext) ->
      let split_fields fields =
        let fields = FieldMap.map ~f:(fun (mand,loc) -> mand, loc, ref (tbot (Some loc))) fields in
        let tybody =
@@ -214,14 +214,16 @@ let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
           |> TagMap.to_list
        | None ->
           (* Infer type of patterns *)
-          if ext = Ext_open then Error.fail extloc (Illformed_pat `Unknown_cases);
+          begin match ext with
+          | `Open extloc -> Error.fail extloc (Illformed_pat `Unknown_cases)
+          | `Closed -> ()
+          end;
           let conses, delayed_splits =
             TagMap.to_list cases
             |> List.map (fun ((tag:Cons1.Tag.t), (fields, ext, loc)) ->
                match tag with
                | Anon_tag | Struct_tag _ ->
                   if ext = Ext_open then
-                    (* FIXME test *)
                     Error.fail loc (Illformed_pat `Unknown_fields);
                   let tybody, split = split_fields fields in
                   Cons1.Record {tag = Some tag; args = []; body = tybody},

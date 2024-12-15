@@ -100,7 +100,6 @@ let fields ~tcomma f = function
      in
      braces (sep (ifflat comma empty) fs)
 
-(* FIXME syntax *)
 let tuple_tag = function
   | Anon_tag -> string "#"
   | Struct_tag t -> string "#" ^^ symbol t
@@ -315,7 +314,6 @@ let decl_ty_body = function
        | Ftuple [] -> symbol s
        | fs -> symbol s ^^ fields ~tcomma:false tyexp fs
      in
-     (* FIXME share code with Match? *)
      braces' (indent (break 1 ^^ ifflat empty (string "| ") ^^ separate_map (break 1 ^^ string "| ") variant vs) ^^ break 1)
 
 let decl = function
