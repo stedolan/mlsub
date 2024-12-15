@@ -104,7 +104,7 @@ let pp_err input loc err : PPrint.document =
   | Illformed_type (`Close_error Join_contravariant) ->
      pp "This type contains a contravariant join of a polymorphic variable" ^^ context
   | Illformed_type (`Close_error Join_bad_scoping) ->
-     pp "This type contains a scope-escaping join of a polymorphic variable" ^^ context
+     pp "This variable escapes its scope in a join" ^^ context
   | Illformed_type `Join_of_ty_param ->
      pp "Type definitions may not use joins of type parameters" ^^ context
   | Illformed_type `Must_be_closed ->

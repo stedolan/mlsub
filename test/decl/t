@@ -557,6 +557,19 @@ fn g() { (f({foo: Some(fn(x){x}), bar:None}), Option.Some(true)) }
 >   (f(Z{foo: Option.Some(fn (x) { x }), bar: Option.None}), Option.Some(true))
 > }
 
+# expansion of RVs in matches
+{
+type T { A | B }
+fn f[a <: T.B](c, x : T.A, y : a) {
+  match (if c {x} else {y}) {
+  | A => 1
+  | B => 2
+  }
+}
+}
+> type T{ A | B }
+> fn f[a <: T.B](c: Bool, x: T.A, y: a) -> Int { match if c { x } else { y } { A => 1 | B => 2 } }
+
 {
 type A {}
 fn f(A.B){}
@@ -618,4 +631,4 @@ fn f() {let x : Box[#A|#B] = Box(#A); x}
 > type Box[+a](a)
 > fn f() -> Box[#A | #B](#A) { let x : Box[#A | #B] = Box(#A); x }
 
-> STATS: fix: 25, flex: 331
+> STATS: fix: 25, flex: 352

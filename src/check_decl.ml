@@ -115,7 +115,7 @@ let env_with_params ~env (params : Exp.symbol list) : Typedefs.env =
   let rig_defns =
     params
     |> List.map (fun name : rigvar_defn ->
-      { name; upper = [Top,Location.noloc]; upper_promote_check=None} )
+      { name; upper = [Top,Location.noloc]} )
     |> IArray.of_list
   in
   let rig_names =

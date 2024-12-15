@@ -29,15 +29,15 @@ fn[a](x:a){ fn[b](y:b){ if true { #{foo:x} } else { y } } }
 
 fn[a](x:a){ fn[b](y:b){ if true { #{foo:y} } else { x } } }
 > fn [a](x: a) { fn [b](y: b) { if true { #{foo: y} } else { x } } }
-> test:1: This type contains a scope-escaping join of a polymorphic variable
+> test:1: This variable escapes its scope in a join
 >   fn[a](x:a){ fn[b](y:b){ if true { #{foo:y} } else { x } } }
->   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>                       ^
 
 fn[a](x:a){ fn[b](y:b){ if true { x } else { y } } }
 > fn [a](x: a) { fn [b](y: b) { if true { x } else { y } } }
-> test:1: This type contains a scope-escaping join of a polymorphic variable
+> test:1: This variable escapes its scope in a join
 >   fn[a](x:a){ fn[b](y:b){ if true { x } else { y } } }
->   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>                       ^
 
 fn[a](x:a){ fn(y){ if true { #{foo:x} } else { y } } }
 > fn [a](x: a) { fn (y) { if true { #{foo: x} } else { y } } }
@@ -67,15 +67,15 @@ fn[a](x:a){ fn(y){ if true { #{foo:x} } else { y } } }
 
 fn[a](x:a){ fn(y){ if true { #{foo:y} } else { x } } }
 > fn [a](x: a) { fn (y) { if true { #{foo: y} } else { x } } }
-> test:1: This type contains a scope-escaping join of a polymorphic variable
+> test:1: This variable escapes its scope in a join
 >   fn[a](x:a){ fn(y){ if true { #{foo:y} } else { x } } }
->   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 fn[a](x:a){ fn(y){ if true { x } else { y } } }
 > fn [a](x: a) { fn (y) { if true { x } else { y } } }
-> test:1: This type contains a scope-escaping join of a polymorphic variable
+> test:1: This variable escapes its scope in a join
 >   fn[a](x:a){ fn(y){ if true { x } else { y } } }
->   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 fn(x){ fn[b](y:b){ if true { #{foo:x} } else { y } } }
 > fn (x) { fn [b](y: b) { if true { #{foo: x} } else { y } } }
@@ -105,13 +105,13 @@ fn(x){ fn[b](y:b){ if true { #{foo:x} } else { y } } }
 
 fn(x){ fn[b](y:b){ if true { #{foo:y} } else { x } } }
 > fn (x) { fn [b](y: b) { if true { #{foo: y} } else { x } } }
-> test:1: This type contains a scope-escaping join of a polymorphic variable
+> test:1: This variable escapes its scope in a join
 >   fn(x){ fn[b](y:b){ if true { #{foo:y} } else { x } } }
 >          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 fn(x){ fn[b](y:b){ if true { x } else { y } } }
 > fn (x) { fn [b](y: b) { if true { x } else { y } } }
-> test:1: This type contains a scope-escaping join of a polymorphic variable
+> test:1: This variable escapes its scope in a join
 >   fn(x){ fn[b](y:b){ if true { x } else { y } } }
 >          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

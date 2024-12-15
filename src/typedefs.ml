@@ -459,7 +459,9 @@ end
 
 module Conses = struct
   type ('neg,'pos) t = ('neg,'pos) Cons1.t list
+  type ('neg,'pos) tloc = ('neg,'pos) Cons1.t loc list
   let map ~neg ~pos (t : _ t) : _ t = List.map (Cons1.map ~neg ~pos) t
+  let map_loc ~neg ~pos (t : _ tloc) : _ tloc = List.map (fun (c,l) -> Cons1.map c ~neg ~pos, l) t
 end
 
 
@@ -694,8 +696,7 @@ type rigvar_defn = {
   (* unique among a binding group, but can shadow.
      Only used for parsing/printing: internally, referred to by index. *)
   name : string Location.loc;
-  upper : (flexvar, lower) Cons1.t loc list;
-  upper_promote_check : (unit,unit) typ option;
+  upper : (ntyp, ptyp) Cons1.t loc list
 }
 
 let n_bool loc = ("Bool", loc)
@@ -946,11 +947,12 @@ let fv_gen_visit_neg env visit fv k =
  * Opening/closing of binders
  *)
 
+exception Not_locally_closed of Location.t
 let is_locally_closed ix t =
   let var ix = function
     | Vrigid _ -> ()
-    | Vbound {index; _} ->
-       if index >= ix then raise Exit
+    | Vbound {index; loc; _} ->
+       if index >= ix then raise (Not_locally_closed loc)
   in
   let rec check : 'a 'b . int -> ('a,'b) typ -> unit =
     fun ix ty -> match ty with
@@ -965,8 +967,8 @@ let is_locally_closed ix t =
        check ix body
   in
   match check ix t with
-  | () -> true
-  | exception Exit -> false
+  | () -> Ok ()
+  | exception (Not_locally_closed loc) -> Error loc
 
 let rec open_typ :
   'neg 'pos .

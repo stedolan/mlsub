@@ -204,7 +204,7 @@ and enter_polybounds : 'a 'b . lookup:lookup_fn -> env:env -> typolybounds -> (s
   let level = Env_level.extend (Env.level env) in
   let stubs =
     vars
-    |> List.map (fun (name,_) -> {name; upper=[Top,Location.noloc]; upper_promote_check=None})
+    |> List.map (fun (name,_) -> {name; upper=[Top,Location.noloc]})
     |> IArray.of_list in
   let mkbound rig_names loc bound =
     match bound with

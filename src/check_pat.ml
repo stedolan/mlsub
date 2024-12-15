@@ -46,6 +46,8 @@ let ptyp_conses ~env (t : ptyp) =
        List.map (function
          | (Cons1.Record ({tag=Some tag; _} as r)),loc -> tag,(r,loc)
          | _ -> raise Exit) conses
+    | Tcvj ([], [rv], _loc) ->
+       go (Types.ptyp_of_rigid_bound env (Types.as_rigvar rv))
     | Tcvj (conses, (rv :: rvs), loc) ->
        go (Types.join_ptyp env
              (Tcvj (conses, rvs, loc))

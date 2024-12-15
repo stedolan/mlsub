@@ -14,9 +14,10 @@ let close_poly_neg ((_,_,loc) as ty) =
   if is_varjoin ty then
     raise (CloseError (Join_contravariant, loc))
 
-let close_poly_pos ((_,_,loc) as ty) =
-  if not (is_locally_closed 0 (Tcvj ty)) then
-    raise (CloseError (Join_bad_scoping, loc))
+let close_poly_pos ty =
+  match is_locally_closed 0 (Tcvj ty) with
+  | Ok () -> ()
+  | Error loc -> raise (CloseError (Join_bad_scoping, Some loc))
 
 let close_typ_poly_exn ~ispos lvl ty =
   if ispos
@@ -563,13 +564,16 @@ let lower_contains_fv fv lower =
     | Lcons (Top, _) -> true
     | _ -> false) lower
 
-let lower_of_rigid_bound env rv : lower =
+let rigid_bound_simple env rv =
   Env.rigid_bound env rv
+  |> Conses.map_loc ~neg:(ntyp_to_fresh_flexvar ~simple:true env) ~pos:(ptyp_to_lower ~simple:true env)
+
+let lower_of_rigid_bound env rv : lower =
+  rigid_bound_simple env rv
   |> List.map (fun (c,cloc) -> Lcons (c, if cloc == Location.noloc then rv.loc else cloc))
 
 let ptyp_of_rigid_bound env rv : ptyp =
-  (* FIXME: could do better here as Tcvj? *)
-  Tsimple (lower_of_rigid_bound env rv)
+  Tcvj (Env.rigid_bound env rv, [], Some rv.loc)
 
 (* Check whether a flex-flex constraint α ≤ β is already present via an upper bound of α *)
 let rec has_flex_upper (pv : flexvar) nv =
@@ -685,7 +689,7 @@ and match_sub ~changes ~env ~loc:cnloc (p : lower_part) ((cn_conses, cn_rvs) : (
             (Ugen {conses=urv.urv_conses; rvs=[]; higher_fvs=[]})
         end
      | Error () ->
-        Env.rigid_bound env rv |> List.iter (fun (l,lloc) ->
+        rigid_bound_simple env rv |> List.iter (fun (l,lloc) ->
           match upper_find_cons l (cn_conses,cnloc) with
           | Ok (_hc, cn) ->
              subtype_cons env (l, lloc) cn
@@ -961,39 +965,28 @@ let upper_is_bot = function
 
 let enter_rigid env vars rig_names =
   let level = Env_level.extend (Env.level env) in
-  let temp_env =
-    Env.extend_types env
-      ~level
-      ~rig_names
-      ~rig_defns:(IArray.map (fun (name, _) ->
-                    {name; upper=[Top,Location.noloc]; upper_promote_check = None}) vars)
-  in
   let getrv (conses, vars, loc) vars' =
     let vars = vars @ (List.map (fun (var,loc) -> Vrigid {level;loc;var}) vars') in
     Tcvj (conses, vars, loc)
   in
   let openrig t = open_typ ~neg:getrv ~pos:getrv 0 t in
   let rig_defns = IArray.map (fun (name, b) ->
-     let upper =
-       match b with
-       | None -> [Lcons (Top, Location.noloc)]
-       | Some b -> ptyp_to_lower ~simple:true temp_env (openrig b) in
-     let upper_promote_check =
-       b |> Option.map (map_typ_1 ~neg:ignore ~pos:ignore ~index:0)
-     in
+     let upper = Option.map openrig b in
      match upper with
-     | [Lcons (Top, loc)] ->
-        { name; upper = [Top, loc]; upper_promote_check }
-     | lower ->
+     | None ->
+        { name; upper = [Top, Location.noloc] }
+     | Some t when is_ttop t ->
+        { name; upper = [Top, Location.noloc] }
+     | Some (Tcvj (conses, [], _loc)) ->
+        { name; upper = conses }
+     | Some _ ->
        (* FIXME: can you actually hit this?
           Try with a higher-rank type where the outer rank gets instantiated.
           Maybe change the type of the upper bound in parsed types.
           (to reflect its Tconsness)*)
-        let conses = lower |> List.map (function
-          | Lcons (c,cloc) -> c,cloc
-          | Lrigvar _ | Lflexvar _ -> assert false)
-        in
-        { name; upper = conses; upper_promote_check }) vars in
+        assert false)
+     vars
+  in
   let env = Env.extend_types env ~level ~rig_names ~rig_defns in
   env, openrig, openrig
 
@@ -1045,12 +1038,26 @@ let subtype env p n =
      Error e
   | () -> Ok ()
 
-(* FIXME: rank1 joins maybe?
-   FIXME: keep types as Tcons if possible? Better inference. Can this matter? *)
+(* FIXME: rank1 joins maybe? *)
 let join_ptyp env (p : ptyp) (q : ptyp) : ptyp =
-  if is_tbot p then q
-  else if is_tbot q then p
-  else
+  match p, q with
+  | p, q when is_tbot p -> q
+  | p, q when is_tbot q -> p
+  | p, _ when is_ttop p -> p
+  | _, q when is_ttop q -> q
+  | Tcvj (cons_p, vars_p, loc_p), Tcvj (cons_q, vars_q, loc_q)
+       when
+         cons_p |> List.for_all (fun (p,_) ->
+           cons_q |> List.for_all (fun (q,_) ->
+             Cons1.incomparable_head p q))
+    ->
+     let vars =
+       vars_p @ List.filter (fun v -> not (List.exists (equal_typ_var v) vars_p)) vars_q
+     in
+     Tcvj(cons_p @ cons_q,
+          vars,
+          (match loc_p with Some _ -> loc_p | _ -> loc_q))
+  | p, q ->
     let p = ptyp_to_lower ~simple:false env p in
     let q = ptyp_to_lower ~simple:false env q in
     Tsimple (join_simple env p q)
@@ -1464,20 +1471,13 @@ and promote_upper :
          | { urv_var = rv; urv_conses = (conses, loc); urv_ordered = _ } ->
             (* rv & conses = rv if rv <= conses
                Otherwise, set to bottom (sound but not principal!)*)
-            let bound = (Env.rigid_var s.env rv).upper_promote_check in
+            let ignore_simple t = map_typ_1 ~neg:ignore ~pos:ignore ~index:0 t in
+            let bound = ptyp_of_rigid_bound s.env rv in
             let conses = List.map (Cons1.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s)) conses in
-            let cons_ty =
-              Tcvj (List.map (fun c -> c,loc) conses, [], Some loc)
-              |> map_typ_1 ~neg:ignore ~pos:ignore ~index:0
-            in
-            begin match bound, conses with
-            | _, [Top] ->
-               Some (promote_rigvar s rv)
-            | Some bound, _ when clearly_subtype_bounds s.env bound cons_ty ->
-               Some (promote_rigvar s rv)
-            | _ ->
-               None
-            end)
+            let cons_ty = Tcvj (List.map (fun c -> c,loc) conses, [], Some loc) in
+            if clearly_subtype_bounds s.env (ignore_simple bound) (ignore_simple cons_ty)
+            then Some (promote_rigvar s rv)
+            else None)
      in
      vars, Tcvj (conses, rigvars, Some loc)
 
