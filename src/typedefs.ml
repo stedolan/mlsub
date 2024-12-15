@@ -457,6 +457,11 @@ module Cons1 = struct
     | _, _ -> false
 end
 
+module Conses = struct
+  type ('neg,'pos) t = ('neg,'pos) Cons1.t list
+  let map ~neg ~pos (t : _ t) : _ t = List.map (Cons1.map ~neg ~pos) t
+end
+
 
 module SymMap = Tuple_fields.SymMap
 
@@ -540,18 +545,19 @@ and upper =
   | Ugen of upper_gen
 
 and upper_gen =
+  (* Interpretation: (conses | (rv & rv_c)) & higher_fvs *)
   { conses: (lower, flexvar) Cons1.t list Location.loc;
     rvs: upper_rigvar list;
     higher_fvs: flexvar list }
 
-and upper_rigvar = rigvar * delayed_constraint list
+and upper_rigvar =
+  (* (a & C), for rv a and cons type C.
+     If we learn that a <= C, we can delete C as then a & C = a. *)
+  { urv_var : rigvar;
+    urv_conses : (lower, flexvar) Cons1.t list Location.loc;
+    urv_ordered : bool ref (* True when urv_var <= urv_conses is known *) }
 
-and delayed_constraint =
-  { dy_lower: (flexvar, lower) Cons1.t loc;
-    dy_upper: (lower, flexvar) Cons1.t loc;
-    dy_flexvar: flexvar;
-    mutable dy_resolved: bool }
-
+and rigvar_constraint = (lower, flexvar) Cons1.t list
 
 (* Temporary structure used during generalisation *)
 and flexvar_gen_visit_counts = { mutable pos : int; mutable neg : int }
@@ -689,6 +695,7 @@ type rigvar_defn = {
      Only used for parsing/printing: internally, referred to by index. *)
   name : string Location.loc;
   upper : (flexvar, lower) Cons1.t loc list;
+  upper_promote_check : (unit,unit) typ option;
 }
 
 let n_bool loc = ("Bool", loc)
@@ -823,6 +830,10 @@ let rec equal_lower (p : lower) (q : lower) =
     | _, _ -> false
   in List.equal eq p q
 
+let equal_upper_rigvar (p : upper_rigvar) (q : upper_rigvar) =
+  equal_rigvar p.urv_var q.urv_var &&
+  List.equal (Cons1.equal ~neg:equal_lower ~pos:equal_flexvar) (fst p.urv_conses) (fst q.urv_conses)
+
 let equal_upper (p : upper) (q : upper) =
   match p, q with
   | Utop, Utop -> true
@@ -830,7 +841,7 @@ let equal_upper (p : upper) (q : upper) =
   | Ugen {conses=(pc,_); rvs=prvs; higher_fvs=pv},
     Ugen {conses=(qc,_); rvs=qrvs; higher_fvs=qv} ->
      List.equal (Cons1.equal ~neg:equal_lower ~pos:equal_flexvar) pc qc &&
-     List.equal (fun (pv,pd) (qv,qd) -> equal_rigvar pv qv && List.equal (==) pd qd) prvs qrvs &&
+     List.equal equal_upper_rigvar prvs qrvs &&
      List.equal equal_flexvar pv qv
   | _, _ -> false
 
@@ -844,6 +855,7 @@ type flexvar_change =
   | Change_expanded_mark (* hack for logging expand changes *)
   | Change_upper of flexvar * upper
   | Change_lower of flexvar * lower
+  | Change_urv_ordered of bool ref * bool (* FIXME: does this need to be separate? *)
 
 let fv_set_upper ~changes fv upper =
   changes := Change_upper (fv, fv.upper) :: !changes;
@@ -864,11 +876,17 @@ let fv_maybe_set_upper ~changes (fv : flexvar) upper =
     (fv_set_upper ~changes fv upper; true)
   else false
 
+let fv_set_ordered ~changes urv =
+  let r = urv.urv_ordered in
+  changes := Change_urv_ordered (r, !r) :: !changes;
+  r := true
+
 let revert changes =
   changes |> List.iter (function
   | Change_expanded_mark -> ()
   | Change_upper (fv, upper) -> fv.upper <- upper
-  | Change_lower (fv, lower) -> fv.lower <- lower)
+  | Change_lower (fv, lower) -> fv.lower <- lower
+  | Change_urv_ordered (r,v) -> r := v)
 
 let commit ~changes rest =
   changes := rest @ !changes
@@ -1059,6 +1077,13 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   wf_upper ~seen env fv.level fv.upper
   end
 
+and wf_conses ~neg ~pos cs =
+  cs |> List.iter (fun c ->
+    Cons1.map c ~neg ~pos |> ignore);
+  cs |> List.iteri (fun i c ->
+    cs |> List.iteri (fun j d ->
+      if i < j then assert (Cons1.incomparable_head c d)))
+
 and wf_upper ~seen env lvl = function
   | Utop -> ()
   | Uflexvar v -> wf_flexvar ~seen env lvl v
@@ -1066,25 +1091,15 @@ and wf_upper ~seen env lvl = function
      higher_fvs |> List.iter (fun v ->
        assert (not (Env_level.equal lvl v.level));
        wf_flexvar ~seen env lvl v);
-     conses |> List.iter (fun c ->
-       Cons1.map c
-         ~neg:(wf_lower ~seen env lvl)
-         ~pos:(wf_flexvar ~seen env lvl)
-       |> ignore);
-     rvs |> List.iter (fun (rv, ds) ->
+     wf_conses conses
+       ~neg:(wf_lower ~seen env lvl)
+       ~pos:(wf_flexvar ~seen env lvl);
+     rvs |> List.iter (fun {urv_var=rv; urv_conses=(cs,_loc); urv_ordered=_} ->
        wf_rigvar env lvl rv;
-       List.iter (wf_delayed_constraint ~seen env lvl) ds);
-     conses |> List.iteri (fun i c ->
-       conses |> List.iteri (fun j d ->
-         if i < j then assert (Cons1.incomparable_head c d)));
-     rvs |> List.iteri (fun i (c,_) ->
-       rvs |> List.iteri (fun j (d,_) ->
-         if i < j then assert (not (equal_rigvar c d))))
-
-and wf_delayed_constraint ~seen env _lvl {dy_lower; dy_upper; dy_flexvar; dy_resolved=_} =
-  let lvl = dy_flexvar.level in
-  Cons1.wf ~params:(Env.param_variances env) ~neg:(wf_flexvar ~seen env lvl) ~pos:(wf_lower ~seen env lvl) (fst dy_lower);
-  Cons1.wf ~params:(Env.param_variances env) ~pos:(wf_flexvar ~seen env lvl) ~neg:(wf_lower ~seen env lvl) (fst dy_upper)
+       wf_conses cs ~neg:(wf_lower ~seen env lvl) ~pos:(wf_flexvar ~seen env lvl));
+     rvs |> List.iteri (fun i c ->
+       rvs |> List.iteri (fun j d ->
+         if i < j then assert (not (equal_rigvar c.urv_var d.urv_var))))
 
 and wf_rigvar env lvl (rv : rigvar) =
   assert (Env_level.extends rv.level lvl);
@@ -1349,7 +1364,7 @@ let unparse_upper ~env ~flexvar = function
      in
      let rvs =
        (* FIXME: do something with delayed constraints? *)
-       rvs |> List.map (fun (rv, _FIXME) -> unparse_rigid_var ~env rv)
+       rvs |> List.map (fun rv -> unparse_rigid_var ~env rv.urv_var)
      in
      [unparse_join (conses @ rvs)]
      @ List.map (unparse_flexvar ~env ~flexvar) higher_fvs
@@ -1485,7 +1500,8 @@ let pp_changes ppf changes =
     match ch with
     | Change_expanded_mark -> Format.fprintf ppf "%s!" sp
     | Change_upper(v,_) -> pv v "-"
-    | Change_lower(v,_) -> pv v "+");
+    | Change_lower(v,_) -> pv v "+"
+    | Change_urv_ordered _ -> Format.fprintf ppf "URV");
   Format.fprintf ppf "]"
 
 

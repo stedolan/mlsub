@@ -435,8 +435,10 @@ fn (x) {
 > test:4: This pattern is unused
 >     | (#A, #B) => 2
 >       ^^^^^^^^
-> ELAB: Lang.Error.Fail(_)
-> 
+> ELAB: 
+> test:4: This pattern is unused
+>     | (#A, #B) => 2
+>       ^^^^^^^^
 > ELABINF: Lang.Error.Fail(_)
 > 
 > let  = %yield(fun (x) ret {
@@ -845,8 +847,10 @@ fn(x, y) {
 > test:4: This pattern is unused
 >     | #A, #B => 2
 >       ^^^^^^
-> ELAB: Lang.Error.Fail(_)
-> 
+> ELAB: 
+> test:4: This pattern is unused
+>     | #A, #B => 2
+>       ^^^^^^
 > ELABINF: Lang.Error.Fail(_)
 > 
 > let  = %yield(fun (x, y) ret {
@@ -1020,4 +1024,4 @@ fn(x) {
 > });
 > done
 
-> STATS: fix: 15, flex: 198
+> STATS: fix: 15, flex: 204

@@ -112,4 +112,4 @@ fn() { twice(id, id)(id) }
 > let id = fun (a) ret { ret(a) };
 > let  = %yield(fun () ret { let x = twice(id, id); let x2 = x(id); ret(x2) });
 > done
-> STATS: fix: 20, flex: 236
+> STATS: fix: 20, flex: 243

@@ -835,10 +835,21 @@ fn[a <: {foo:Int}, b <: {bar:Int}](x) -> ({a:a, b:{foo:Int}|b}) {
 >   let splat = fn (x) { #{a: x, b: x} };
 >   splat(x)
 > }
-> typechecking error: unimplemented: unresolved delayed constraints
+>   fn [a <: {foo: Int}, b <: {bar: Int}](x: a) -> ({a: a, b: {foo: Int} | b}) {
+>     let splat : [c] c -> #{a: c, b: c} =
+>     fn [c](x: c) -> (#{a: c, b: c}) { #{a: x, b: x} };
+>     splat(x)
+>   }
+> [a <: {foo: Int}, b <: {bar: Int}] a -> {a: a, b: {foo: Int} | b}
+> let  = %yield(fun (x) ret {
+>   let splat = fun (x2) ret2 { ret2((a: x2, b: x2)) };
+>   let x2 = splat(x);
+>   ret(x2)
+> });
+> done
 
 
-# weirdness: non-monotonicity wrt annotations
+# FIXME: bad error messages. (Should this even error or should promotion drop the join?)
 
 fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> (#{a:{bar:Bool}|a, b:{foo:Int}|b, c:{foo:Int}}) {
   #{a:x, b:x, c:x}
@@ -847,7 +858,12 @@ fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> (#{a:{bar:Bool}|a, b:{foo:Int}|b, c:{f
 >   (#{a: {bar: Bool} | a, b: {foo: Int} | b, c: {foo: Int}}) {
 >   #{a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints
+>   fn [a <: {foo: Int}, b <: {bar: Bool}](x: {bar: Bool, foo: Int}) ->
+>     (#{a: {bar: Bool} | a, b: {foo: Int} | b, c: {foo: Int}}) {
+>     #{a: x, b: x, c: x}
+>   }
+> [a <: {foo: Int}, b <: {bar: Bool}] ({bar: Bool, foo: Int}) -> #{a: {bar: Bool} | a, b: {foo: Int} | b, c: {foo: Int}}
+> let  = %yield(fun (x) ret { ret((a: x, b: x, c: x)) }); done
 
 fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> (#{a:{bar:Bool}|a, b:{foo:Int}|b, c:Any}) {
   #{a:x, b:x, c:x}
@@ -856,7 +872,12 @@ fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> (#{a:{bar:Bool}|a, b:{foo:Int}|b, c:An
 >   (#{a: {bar: Bool} | a, b: {foo: Int} | b, c: Any}) {
 >   #{a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints
+>   fn [a <: {foo: Int}, b <: {bar: Bool}](x: {bar: Bool, foo: Int}) ->
+>     (#{a: {bar: Bool} | a, b: {foo: Int} | b, c: Any}) {
+>     #{a: x, b: x, c: x}
+>   }
+> [a <: {foo: Int}, b <: {bar: Bool}] ({bar: Bool, foo: Int}) -> #{a: {bar: Bool} | a, b: {foo: Int} | b, c: Any}
+> let  = %yield(fun (x) ret { ret((a: x, b: x, c: x)) }); done
 
 
 # FIXME: spec_sub_rigid_pos should remove one of the variables here
@@ -867,7 +888,12 @@ fn[a <: {foo:Int}, b <: {bar:Bool}](x) -> (#{a:{bar:Bool}|a, b:{foo:Int}|a|b, c:
 >   (#{a: {bar: Bool} | a, b: {foo: Int} | a | b, c: Any}) {
 >   #{a: x, b: x, c: x}
 > }
-> typechecking error: unimplemented: unresolved delayed constraints
+>   fn [a <: {foo: Int}, b <: {bar: Bool}](x: {bar: Bool, foo: Int}) ->
+>     (#{a: {bar: Bool} | a, b: {foo: Int} | a | b, c: Any}) {
+>     #{a: x, b: x, c: x}
+>   }
+> [a <: {foo: Int}, b <: {bar: Bool}] ({bar: Bool, foo: Int}) -> #{a: {bar: Bool} | a, b: {foo: Int} | a | b, c: Any}
+> let  = %yield(fun (x) ret { ret((a: x, b: x, c: x)) }); done
 
 fn[a](x: Any, y:a) { if true {x} else {y} }
 > fn [a](x: Any, y: a) { if true { x } else { y } }
@@ -1132,7 +1158,9 @@ fn[a <: {foo:Int}](x:a, y:{foo:Int}) { if true {x} else {y} }
 # multi RV upper bounds tests
 fn[a <: {foo:Int}](x) -> (a,{foo:Int}) { (x,x) }
 > fn [a <: {foo: Int}](x) -> (a, {foo: Int}) { (x, x) }
-> typechecking error: unimplemented: unresolved delayed constraints
+>   fn [a <: {foo: Int}](x: a) -> (a, {foo: Int}) { (x, x) }
+> [a <: {foo: Int}] a -> (a, {foo: Int})
+> let  = %yield(fun (x) ret { ret((0: x, 1: x)) }); done
 
 # ensure_rigvars_present gets this one
 fn mkdup[a]() -> (a -> (a, a)) { fn(x) { (x,x) } }
@@ -1202,7 +1230,9 @@ fn (x: {foo:{bar:{baz:Bool}}}) -> ({foo:{bar:{baz:Int}}}) {
 #
 fn [a <: {foo:{bar:Int}}] (x) -> ({foo:Int}, a) { (x,x) }
 > fn [a <: {foo: {bar: Int}}](x) -> ({foo: Int}, a) { (x, x) }
-> typechecking error: unimplemented: unresolved delayed constraints
+>   fn [a <: {foo: {bar: Int}}](x: Nothing) -> ({foo: Int}, a) { (x, x) }
+> [a <: {foo: {bar: Int}}] Nothing -> ({foo: Int}, a)
+> let  = %yield(fun (x) ret { ret((0: x, 1: x)) }); done
 
 fn ch[a](x:a,y:a) -> (a,a) { if true {(x,x)} else {(y,y)} }
 fn [a <: {foo:{bar:Int}}] (x, y:a) -> ({foo:Bool}, a) { ch(x,y) }
@@ -1301,4 +1331,4 @@ fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 >   fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 >                                        ^^^^^^^^^^^^^^
 
-> STATS: fix: 93, flex: 1577
+> STATS: fix: 94, flex: 1995

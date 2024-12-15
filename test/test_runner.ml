@@ -98,7 +98,7 @@ let run_cmd s =
           let env0 = env0 in
           Check.check env0 ~mode:(Check.fresh_gen_mode ()) elab (Check.checking t) |> ignore
         with e ->
-            println "ELAB: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
+            println "ELAB: "; pexn e (* "%s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())*)
         end;
         begin try
           let t', _ty = check elab in

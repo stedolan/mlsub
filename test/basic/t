@@ -2199,4 +2199,4 @@ fn h() { f(#Foo{foo:#{p:1}}) }
 > fn h() -> (#{p: Int}) { f(#Foo{foo: #{p: 1}}) }
 
 
-> STATS: fix: 129, flex: 1291
+> STATS: fix: 129, flex: 1358
