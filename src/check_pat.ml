@@ -275,6 +275,7 @@ type 'rhs action = {
   rhs: 'rhs;
   id: int;
   pat_loc: Location.t;
+  var_names: Location.t SymMap.t;
   mutable bindings: act_bindings option;
 }
 
@@ -779,10 +780,11 @@ type ex_split = Ex : (('n,_) Clist.t * 'n dectree) -> ex_split
 let split_cases ~matchloc env (typs : (ptyp * Typedefs.gen_level) list) (cases : case list) =
   let actions =
     cases |> List.mapi (fun id ((pps,pat_loc), exp) ->
-      let _fvs = check_fvs_mat matchloc pps in
+      let var_names = check_fvs_mat matchloc pps in
       { rhs = exp;
         pat_loc;
         id;
+        var_names;
         bindings = None })
   in
   let Ex typs = Clist.of_list typs in

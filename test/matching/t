@@ -186,9 +186,26 @@ fn(x : #A(Int, Int) | #B(Int, Int)) {
 >           ^
 > The following cases are unhandled:
 > | #B(_, _)
-> test:4: Unknown variable name a
->     | (a, b) => (a, b)
->                  ^
+>   fn (x: #A(Int, Int) | #B(Int, Int)) -> (Int, Int) {
+>     match x {
+>       | #A(x, y) => (x, y)
+>       | (a, b) => (a, b)
+>     }
+>   }
+> (#A(Int, Int) | #B(Int, Int)) -> (Int, Int)
+> let  = %yield(fun (x) ret {
+>   match x {
+>     A -> {
+>       let x2 = x.0;
+>       let y = x.1;
+>       ret((0: x2, 1: y))
+>     };
+>     B -> {
+>       match failure
+>     }
+>   }
+> });
+> done
 
 
 fn(c) {
@@ -1216,6 +1233,38 @@ fn(x) {
 >   } else {
 >     let baz = x.baz;
 >     case(baz)
+>   }
+> });
+> done
+
+# unreachable patterns
+fn (x : #A(Int) | #B(Int)) {
+  match x {
+  | #A(_) | #B(_) => 1
+  | #A(a) => a
+  }
+}
+> fn (x: #A(Int) | #B(Int)) { match x { #A(_) | #B(_) => 1 | #A(a) => a } }
+> test:4: This pattern is unused
+>     | #A(a) => a
+>       ^^^^^
+>   fn (x: #A(Int) | #B(Int)) -> Int {
+>     match x {
+>       | #A(_)
+>       | #B(_) => 1
+>       | #A(a) => a
+>     }
+>   }
+> (#A(Int) | #B(Int)) -> Int
+> let  = %yield(fun (x) ret {
+>   match x {
+>     A -> {
+>       let a = x.0;
+>       ret(1)
+>     };
+>     B -> {
+>       ret(1)
+>     }
 >   }
 > });
 > done

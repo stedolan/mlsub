@@ -704,11 +704,18 @@ and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_
     act)
 
 and extend_env env act =
-  match act.Check_pat.bindings with
-  | Some {bindings=vals;_} -> Env.extend_vals env ~vals
-  | None ->
-     (* Happens on unused cases. FIXME: What's the right thing here? *)
-     env
+  let vals =
+    match act.Check_pat.bindings with
+    | Some b -> b.bindings
+    | None ->
+       (* Slightly horrible: out-of-scope names.
+          They can never be compiled because we're in dead code *)
+       act.Check_pat.var_names |> SymMap.mapi (fun name loc ->
+         { typ = tbot (Some loc);
+           gen_level = None;
+           comp_var = IR.Binder.ref (IR.Binder.fresh ~name ()) })
+  in
+  Env.extend_vals env ~vals
 
 and infer_lit = function
   | l, loc ->
