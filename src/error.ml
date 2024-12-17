@@ -30,8 +30,16 @@ exception Fail of t
 let fail loc k =
   raise (Fail (loc, k))
 
-(* FIXME: for now, log always Fail's *)
-let log ~loc e = fail loc e
+let log_handler = ref None
+let log ~loc e : unit =
+  let handler = Option.value !log_handler ~default:fail in
+  handler loc e
+
+let with_warnings ~on_warn f =
+  let old = !log_handler in
+  log_handler := Some on_warn;
+  Fun.protect f
+    ~finally:(fun () -> log_handler := old)
 
 let or_raise kind loc = function
   | Ok () -> ()

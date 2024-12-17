@@ -704,8 +704,11 @@ and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_
     act)
 
 and extend_env env act =
-  let vals = (Option.get act.Check_pat.bindings).bindings in
-  Env.extend_vals env ~vals
+  match act.Check_pat.bindings with
+  | Some {bindings=vals;_} -> Env.extend_vals env ~vals
+  | None ->
+     (* Happens on unused cases. FIXME: What's the right thing here? *)
+     env
 
 and infer_lit = function
   | l, loc ->

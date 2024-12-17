@@ -157,6 +157,14 @@ fn(x) { match (#A(1, 2)) { #A(x,#C) => 1 } }
 > test:1: This pattern is unused
 >   fn(x) { match (#A(1, 2)) { #A(x,#C) => 1 } }
 >                              ^^^^^^^^
+> test:1: Some cases of this pattern-match are missing:
+>   fn(x) { match (#A(1, 2)) { #A(x,#C) => 1 } }
+>                 ^^^^^^^^^^
+> The following cases are unhandled:
+> | _
+>   fn (x: Any) -> Int { match #A(1, 2) { #A(x, #C) => 1 } }
+> Any -> Int
+> let  = %yield(fun (x) ret { let x2 = A(0: 1, 1: 2).0; match failure }); done
 
 fn(x : #A(Int, Int) | #B(Int, Int)) {
   match x {
@@ -173,6 +181,14 @@ fn(x : #A(Int, Int) | #B(Int, Int)) {
 > test:4: This pattern is unused
 >     | (a, b) => (a, b)
 >       ^^^^^^
+> test:2: Some cases of this pattern-match are missing:
+>     match x {
+>           ^
+> The following cases are unhandled:
+> | #B(_, _)
+> test:4: Unknown variable name a
+>     | (a, b) => (a, b)
+>                  ^
 
 
 fn(c) {
@@ -430,17 +446,6 @@ fn (x) {
 >     }
 >   }
 > (#A | #B, #A) -> Int
-> RECHECK: Lang.Error.Fail(_)
-> 
-> test:4: This pattern is unused
->     | (#A, #B) => 2
->       ^^^^^^^^
-> ELAB: 
-> test:4: This pattern is unused
->     | (#A, #B) => 2
->       ^^^^^^^^
-> ELABINF: Lang.Error.Fail(_)
-> 
 > let  = %yield(fun (x) ret {
 >   match x.0 {
 >     A -> {
@@ -718,6 +723,47 @@ fn(a : (#T|#F),b : #T|#F,c : #T|#F) {
 >           ^^^^^^^^^
 > The following cases are unhandled:
 > | (#F, _, #T)
+>   fn (a: #T | #F, b: #T | #F, c: #T | #F) -> Bool {
+>     match (a, b, c) {
+>       | (#T, #T, _)
+>       | (#T, _, #T) => true
+>       | (_, #F, #F)
+>       | (#F, _, #F) => false
+>     }
+>   }
+> (#T | #F, #T | #F, #T | #F) -> Bool
+> let  = %yield(fun (a, b, c) ret {
+>   match (0: a, 1: b, 2: c).0 {
+>     T -> {
+>       match (0: a, 1: b, 2: c).1 {
+>         T -> {
+>           ret(<true>)
+>         };
+>         F -> {
+>           match (0: a, 1: b, 2: c).2 {
+>             T -> {
+>               ret(<true>)
+>             };
+>             F -> {
+>               ret(<false>)
+>             }
+>           }
+>         }
+>       }
+>     };
+>     F -> {
+>       match (0: a, 1: b, 2: c).2 {
+>         F -> {
+>           ret(<false>)
+>         };
+>         T -> {
+>           match failure
+>         }
+>       }
+>     }
+>   }
+> });
+> done
 
 fn(x : (#A|#B|#C), y : (#A|#B|#C)) {
   match x, y {
@@ -731,6 +777,26 @@ fn(x : (#A|#B|#C), y : (#A|#B|#C)) {
 > The following cases are unhandled:
 > | #A, (#B | #C)
 > | (#B | #C), _
+>   fn (x: #A | #B | #C, y: #A | #B | #C) -> Int { match x, y { #A, #A => 1 } }
+> (#A | #B | #C, #A | #B | #C) -> Int
+> let  = %yield(fun (x, y) ret {
+>   match x {
+>     A -> {
+>       match y {
+>         A -> {
+>           ret(1)
+>         };
+>         (B|C) -> {
+>           match failure
+>         }
+>       }
+>     };
+>     (B|C) -> {
+>       match failure
+>     }
+>   }
+> });
+> done
 
 fn (x : ((#A(Int,Int)|#B{x:String,y:String}|#C|#D|#E), #B|#C|#D)) {
   match x {
@@ -777,6 +843,55 @@ fn(x : #A(Int, #P|#Q|#R) | #B(Int, #P|#Q|#R)) {
 > The following cases are unhandled:
 > | #A(_, #R), _
 > | #B(_, #R), _
+>   fn (x: #A(Int, #P | #Q | #R) | #B(Int, #P | #Q | #R)) -> Int {
+>     match
+>       #{averylongnameinanexpression: #{averylongnameinanexpression: x}}.averylongnameinanexpression.averylongnameinanexpression,
+>       #{x: 0, y: 5}.y
+>     {
+>       | #A(x, (#P | #Q)), y => 1
+>       | #B(x, (#P | #Q)), y => 1
+>     }
+>   }
+> (#A(Int, #P | #Q | #R) | #B(Int, #P | #Q | #R)) -> Int
+> let  = %yield(fun (x) ret {
+>   match (averylongnameinanexpression: (averylongnameinanexpression: x)).averylongnameinanexpression.averylongnameinanexpression {
+>     A -> {
+>       let x2 =
+>         (averylongnameinanexpression: (averylongnameinanexpression: x)).averylongnameinanexpression.averylongnameinanexpression.0;
+>       match (averylongnameinanexpression: (averylongnameinanexpression: x)).averylongnameinanexpression.averylongnameinanexpression.1 {
+>         P -> {
+>           let y = (x: 0, y: 5).y;
+>           ret(1)
+>         };
+>         Q -> {
+>           let y = (x: 0, y: 5).y;
+>           ret(1)
+>         };
+>         R -> {
+>           match failure
+>         }
+>       }
+>     };
+>     B -> {
+>       let x2 =
+>         (averylongnameinanexpression: (averylongnameinanexpression: x)).averylongnameinanexpression.averylongnameinanexpression.0;
+>       match (averylongnameinanexpression: (averylongnameinanexpression: x)).averylongnameinanexpression.averylongnameinanexpression.1 {
+>         P -> {
+>           let y = (x: 0, y: 5).y;
+>           ret(1)
+>         };
+>         Q -> {
+>           let y = (x: 0, y: 5).y;
+>           ret(1)
+>         };
+>         R -> {
+>           match failure
+>         }
+>       }
+>     }
+>   }
+> });
+> done
 
 let calls_any = fn(f) {
   (f(#Foo), f(#Bar), f(#Baz))
@@ -873,17 +988,6 @@ fn(x, y) {
 >     }
 >   }
 > (#A | #B, #A) -> Int
-> RECHECK: Lang.Error.Fail(_)
-> 
-> test:4: This pattern is unused
->     | #A, #B => 2
->       ^^^^^^
-> ELAB: 
-> test:4: This pattern is unused
->     | #A, #B => 2
->       ^^^^^^
-> ELABINF: Lang.Error.Fail(_)
-> 
 > let  = %yield(fun (x, y) ret {
 >   match x {
 >     A -> {
@@ -952,6 +1056,31 @@ fn (x : #A | #B | #C | #D | #E, y: #A | #B) -> Int {
 >           ^^^^
 > The following cases are unhandled:
 > | (#B | #C | #D | #E), #B
+>   fn (x: #A | #B | #C | #D | #E, y: #A | #B) -> Int {
+>     match x, y {
+>       | #A, (#A | #B) => 1
+>       | _, #A => 2
+>     }
+>   }
+> (#A | #B | #C | #D | #E, #A | #B) -> Int
+> let  = %yield(fun (x, y) ret {
+>   match x {
+>     A -> {
+>       ret(1)
+>     };
+>     (B|C|D|E) -> {
+>       match y {
+>         A -> {
+>           ret(2)
+>         };
+>         B -> {
+>           match failure
+>         }
+>       }
+>     }
+>   }
+> });
+> done
 
 
 fn (x) {
@@ -1011,6 +1140,42 @@ fn (x:#A|#B,y:#P(Int) | #Q(Int)) {
 >           ^^^
 > The following cases are unhandled:
 > | #B, #Q(_)
+>   fn (x: #A | #B, y: #P(Int) | #Q(Int)) -> Int {
+>     match x, y {
+>       | #A, #P(x) => x
+>       | #A, #Q(x) => x
+>       | #B, #P(x) => x
+>     }
+>   }
+> (#A | #B, #P(Int) | #Q(Int)) -> Int
+> let  = %yield(fun (x, y) ret {
+>   match x {
+>     A -> {
+>       match y {
+>         P -> {
+>           let x2 = y.0;
+>           ret(x2)
+>         };
+>         Q -> {
+>           let x2 = y.0;
+>           ret(x2)
+>         }
+>       }
+>     };
+>     B -> {
+>       match y {
+>         P -> {
+>           let x2 = y.0;
+>           ret(x2)
+>         };
+>         Q -> {
+>           match failure
+>         }
+>       }
+>     }
+>   }
+> });
+> done
 
 fn(x) {
   match x {

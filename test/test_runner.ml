@@ -58,15 +58,17 @@ let run_cmd s =
       | _ -> println "MISMATCH"
      end;
      let open Typedefs in
-     let check e =
+     let check ~warn e =
        let fndef = None, [], None, e in
        let wrapped : Exp.exp = Some (Fn fndef), Location.noloc in
-       match Check.infer Env.empty ~mode:(Check.fresh_gen_mode ()) wrapped with
-       | Tcvj([Func ([], r), _], [], _),
-         (Some (Fn (None, [], _, _, { act_body = rhs; _ })), _) ->  r, rhs
-       | _ -> failwith "unexpected inference result (weak poly?)"
+       let on_warn loc err = if warn then pexn (Error.Fail (loc,err)) in
+       Error.with_warnings ~on_warn (fun () ->
+         match Check.infer Env.empty ~mode:(Check.fresh_gen_mode ()) wrapped with
+         | Tcvj([Func ([], r), _], [], _),
+           (Some (Fn (None, [], _, _, { act_body = rhs; _ })), _) ->  r, rhs
+         | _ -> failwith "unexpected inference result (weak poly?)")
      in
-     begin match check e with
+     begin match check ~warn:true e with
      | t, etyped ->
         begin
         let elab = Elab.Elaborate.exp (Env.empty,[]) etyped in
@@ -85,23 +87,25 @@ let run_cmd s =
         pprintln (Print.tyexp te);
         begin try
           wf_ptyp env0 t;
-          let t = Check.typ_of_tyexp env0 te in
-          let env0 = env0 in
-          Check.check env0 ~mode:(Check.fresh_gen_mode ()) e (Check.checking t) |> ignore
+          Error.with_warnings ~on_warn:(fun _ _ -> ()) (fun () ->
+            let t = Check.typ_of_tyexp env0 te in
+            let env0 = env0 in
+            Check.check env0 ~mode:(Check.fresh_gen_mode ()) e (Check.checking t) |> ignore)
         with e ->
             println "RECHECK: %s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ());
             pexn e
         end;
         begin try
           wf_ptyp env0 t;
-          let t = Check.typ_of_tyexp env0 te in
-          let env0 = env0 in
-          Check.check env0 ~mode:(Check.fresh_gen_mode ()) elab (Check.checking t) |> ignore
+          Error.with_warnings ~on_warn:(fun _ _ -> ()) (fun () ->
+            let t = Check.typ_of_tyexp env0 te in
+            let env0 = env0 in
+            Check.check env0 ~mode:(Check.fresh_gen_mode ()) elab (Check.checking t) |> ignore)
         with e ->
             println "ELAB: "; pexn e (* "%s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())*)
         end;
         begin try
-          let t', _ty = check elab in
+          let t', _ty = check ~warn:false elab in
           let te' = Typedefs.unparse_ptyp ~flexvar:ignore t' in
           Types.subtype Env.empty t' (Check.typ_of_tyexp Env.empty te) |> Error.or_raise `Subtype Location.noloc;
           Types.subtype Env.empty t (Check.typ_of_tyexp Env.empty te') |> Error.or_raise `Subtype Location.noloc;
@@ -158,7 +162,7 @@ let run_cmd s =
   Buffer.to_bytes outbuf |> Bytes.to_string
 
 let () =
-  Printexc.record_backtrace false;
+  Printexc.record_backtrace true;
   let lines = rawlines [] in
   let cmds = parse_cmds [] [] lines in
   Lang.Types.fixpoint_iters := 0;
