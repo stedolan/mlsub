@@ -826,6 +826,37 @@ fn(x) {
 > });
 > done
 
+# tricky binding
+fn(x) {
+  match x {
+  | (a, b, #T) | (b, a, #F) => (a,b)
+  }
+}
+> fn (x) { match x { (a, b, #T) | (b, a, #F) => (a, b) } }
+>   fn [a, b](x: (a, b, #T | #F)) -> (a | b, a | b) {
+>     match x {
+>       | (a, b, #T)
+>       | (b, a, #F) => (a, b)
+>     }
+>   }
+> [a, b] (a, b, #T | #F) -> (a | b, a | b)
+> let  = %yield(fun (x) ret {
+>   let case(a, b) = {
+>     ret((0: a, 1: b))
+>   };
+>   let a = x.0;
+>   let b = x.1;
+>   match x.2 {
+>     T -> {
+>       case(a, b)
+>     };
+>     F -> {
+>       case(b, a)
+>     }
+>   }
+> });
+> done
+
 fn(x, y) {
   match x, y {
   | #A, #A => 1
@@ -1024,4 +1055,4 @@ fn(x) {
 > });
 > done
 
-> STATS: fix: 15, flex: 198
+> STATS: fix: 16, flex: 208
