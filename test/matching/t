@@ -1269,4 +1269,44 @@ fn (x : #A(Int) | #B(Int)) {
 > });
 > done
 
+# partially unused patterns
+fn (x: (#A|#B|#C, Int)) {
+  match x {
+  | (#A | #B, a) => a
+  | ((#B | #C), _) => 1
+  }
+}
+> fn (x: (#A | #B | #C, Int)) {
+>   match x {
+>     | ((#A | #B), a) => a
+>     | ((#B | #C), _) => 1
+>   }
+> }
+> test:4: This pattern is unused
+>     | ((#B | #C), _) => 1
+>         ^^
+>   fn (x: (#A | #B | #C, Int)) -> Int {
+>     match x {
+>       | ((#A | #B), a) => a
+>       | ((#B | #C), _) => 1
+>     }
+>   }
+> (#A | #B | #C, Int) -> Int
+> let  = %yield(fun (x) ret {
+>   match x.0 {
+>     A -> {
+>       let a = x.1;
+>       ret(a)
+>     };
+>     B -> {
+>       let a = x.1;
+>       ret(a)
+>     };
+>     C -> {
+>       ret(1)
+>     }
+>   }
+> });
+> done
+
 > STATS: fix: 16, flex: 208

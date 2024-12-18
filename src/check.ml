@@ -172,7 +172,7 @@ let typ_of_tyexp env ty =
 
 let mk_action (act : _ Check_pat.action) body : Elab.typed_action =
   let act_bindings, act_comp_bindings =
-    match act.bindings with
+    match !(act.bindings) with
     | None -> SymMap.empty, `Unused
     | Some {bindings; shared_cont = sc} ->
        SymMap.map (fun vb -> elab_ptyp vb.typ, vb.comp_var) bindings,
@@ -705,7 +705,7 @@ and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_
 
 and extend_env env act =
   let vals =
-    match act.Check_pat.bindings with
+    match !(act.Check_pat.bindings) with
     | Some b -> b.bindings
     | None ->
        (* Slightly horrible: out-of-scope names.

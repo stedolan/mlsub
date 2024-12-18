@@ -25,19 +25,71 @@ module Fields = Typedefs.Fields
 
 module TagMap = Typedefs.Cons1.Tag.Map
 
+module Use_flag = struct
+  type t =
+    { mutable used: bool;
+      loc: Location.t;
+      parent: t option }
+  let make ?parent loc = { used = false; loc; parent }
+  let rec used t = t.used <- true; Option.iter used t.parent
+  let maybe_warn_unused = function
+    | { used = false; parent = (None | Some { used = true; _ }); loc } ->
+       Error.log ~loc Unused_pattern
+    | _ -> ()
+end
+
 (* FIXME: move somewhere new? *)
 type mand_flag =
   | Mandatory
   | Optional
 
-type pat_head =
-  | Ph_tuple of Typedefs.Cons1.Tag.t * pat Exp.field_list * Exp.extensible_flag
-  | Ph_any
-
 type split_kind =
   | Split_none
   | Split_any
   | Split_cases of (mand_flag loc FieldMap.t * Exp.extensible_flag * Location.t) TagMap.t * [`Open of Location.t | `Closed]
+
+type bindings = Typedefs.value_binding SymMap.t
+
+type shared_cont = (IR.cont IR.Binder.t * (string * IR.value IR.Binder.t) list)
+
+type act_bindings =
+  { bindings: bindings;
+    shared_cont: shared_cont option }
+
+type 'rhs action = {
+  rhs: 'rhs;
+  id: int;
+  pat_loc: Location.t;
+  var_names: Location.t SymMap.t;
+  use: Use_flag.t;
+  bindings: act_bindings option ref;
+}
+
+type pattern =
+  | Pt_any of Location.t
+  | Pt_bind of symbol * pattern
+  | Pt_tuple :
+      { tag: Exp.tuple_tag option;
+        fields: pattern Exp.field_list;
+        ext: Exp.extensible_flag;
+        loc: Location.t } -> pattern
+  | Pt_or of (pattern * Use_flag.t) * (pattern * Use_flag.t)
+
+type pat_head =
+  | Ph_tuple of Typedefs.Cons1.Tag.t * pattern Exp.field_list * Exp.extensible_flag
+  | Ph_any
+
+type 'w pat_row = ('w, pattern) Clist.t * (bindings * exp action)
+
+type 'w pat_matrix = 'w pat_row list
+open Peano_nat_types
+
+
+type 'w head_pat_row = pat_head loc * 'w pat_row
+type 'w head_pat_matrix = 'w head_pat_row list
+
+let any : pat = (Some Pany, Location.noloc)
+
 
 (* FIXME: move to Types? *)
 let ptyp_conses ~env (t : ptyp) =
@@ -262,34 +314,6 @@ let split_case tag (splits : split_type_cases) : split_type_field list * split_t
   | [_, c], splits -> c, splits
   | _ -> intfail "split_case: no such case"
 
-
-type bindings = Typedefs.value_binding SymMap.t
-
-type shared_cont = (IR.cont IR.Binder.t * (string * IR.value IR.Binder.t) list)
-
-type act_bindings =
-  { bindings: bindings;
-    shared_cont: shared_cont option }
-
-type 'rhs action = {
-  rhs: 'rhs;
-  id: int;
-  pat_loc: Location.t;
-  var_names: Location.t SymMap.t;
-  mutable bindings: act_bindings option;
-}
-
-type 'w pat_row = ('w, pat) Clist.t * (bindings * exp action)
-
-type 'w pat_matrix = 'w pat_row list
-open Peano_nat_types
-
-
-type 'w head_pat_row = pat_head loc * 'w pat_row
-type 'w head_pat_matrix = 'w head_pat_row list
-
-let any : pat = (Some Pany, Location.noloc)
-
 let check_tag ~loc ~env typ (etag : Exp.tuple_tag) : Cons1.Tag.t =
   match etag with
   | Anon_tag ->
@@ -328,14 +352,16 @@ let head_first_column ~env (typ,gen_level) mat =
       'w head_pat_matrix * IR.value IR.Binder.t option =
     match mat with
     | [] -> [], var
-    | ((None, loc) :: _row, _act) :: _ -> Error.fail loc Syntax
-    | ((Some p, loc) :: row, act) :: rest ->
+    | (p :: row, act) :: rest ->
        match p with
-       | Por (p, q) ->
-          go ~var ((p::row,act)::(q::row,act)::rest)
-       | Ptuple (None, _) ->
+       | Pt_or ((p,p_use), (q,q_use)) ->
+          let bindings, act = act in
+          go ~var ((p::row,(bindings, {act with use=p_use}))::
+                   (q::row,(bindings, {act with use=q_use}))::
+                   rest)
+       | Pt_tuple {tag=None; loc; _} ->
           Error.fail loc (Illformed_pat `Tag_required)
-       | Pbind ((name,_), p) ->
+       | Pt_bind ((name,_), p) ->
           let var =
             match var with
             | None -> IR.Binder.fresh ~name ()
@@ -344,12 +370,11 @@ let head_first_column ~env (typ,gen_level) mat =
           let bindings, action = act in
           let bindings = SymMap.add name {typ; gen_level; comp_var = IR.Binder.ref var } bindings in
           go ~var:(Some var) (((p::row),(bindings,action))::rest)
-       | Ptuple (Some tag, fs) ->
-          let fs, ext = Exp.record_fields ~loc fs in
+       | Pt_tuple {tag = Some tag; fields; ext; loc; _} ->
           let tag = check_tag ~loc ~env typ tag in
           let rest, var = go ~var rest in
-          (((Ph_tuple(tag,fs,ext),loc), (row,act))::rest),var
-       | Pany ->
+          (((Ph_tuple(tag,fields,ext),loc), (row,act))::rest),var
+       | Pt_any loc ->
           let rest, var = go ~var rest in
           (((Ph_any,loc), (row,act))::rest), var
   in
@@ -357,7 +382,7 @@ let head_first_column ~env (typ,gen_level) mat =
 
 let pvar s = Pbind (s, (Some Pany, snd s))
 
-let split_on_case (type k w) tag (fields : (k, split_type_field) Clist.t) (mat : w head_pat_matrix) : ((k,pat Exp.exp_field option) Clist.t * w pat_row) list * w head_pat_matrix =
+let split_on_case (type k w) tag (fields : (k, split_type_field) Clist.t) (mat : w head_pat_matrix) : ((k,pattern Exp.exp_field option) Clist.t * w pat_row) list * w head_pat_matrix =
   mat |> List.split_filter_map (fun orig_row ->
     let (p, _ploc), row = orig_row in
     match p with
@@ -372,7 +397,9 @@ let split_on_case (type k w) tag (fields : (k, split_type_field) Clist.t) (mat :
            | Some ((_,floc), pat) ->
              Some (pat |> Exp.map_exp_field (function
                | Some p -> p
-               | None -> Some (pvar (Tuple_fields.string_of_field_name fn, floc)), floc)))
+               | None ->
+                  let name = Tuple_fields.string_of_field_name fn, floc in
+                  Pt_bind (name, Pt_any floc))))
        in
        Some (fs, row), None
     | Ph_tuple _ ->
@@ -491,10 +518,11 @@ let rec check_matrix :
      | [] ->
         Hashcons.mk Failure
      | ([], (bindings, act)) :: _ ->
+        Use_flag.used act.use;
         (* We have already checked that all paths to
            the same action bind the same vars *)
-        act.bindings <-
-          (match act.bindings with
+        act.bindings :=
+          (match !(act.bindings) with
           | None ->
              (* First use of action *)
              Some { bindings; shared_cont = None }
@@ -592,7 +620,7 @@ let rec check_matrix :
 and check_projection :
   type k w . matchloc:_ -> env:_ -> lvl:_ ->
     (k, split_type_field) Clist.t -> (w, ptyp * gen_level) Clist.t ->
-    ((k,pat exp_field option) Clist.t * w pat_row) list ->
+    ((k,pattern exp_field option) Clist.t * w pat_row) list ->
     w field_projections =
   fun ~matchloc ~env ~lvl ftyps typs pats ->
   match ftyps with
@@ -606,7 +634,7 @@ and check_projection :
            match fpat with
            | Some (Exp.Mandatory p) -> p
            | Some _ -> intfail "bad fpat kind"
-           | None -> Some Pany, matchloc
+           | None -> Pt_any matchloc
          in
          fs, (Clist.(pat :: row), act))
      in
@@ -622,15 +650,14 @@ and check_projection :
          | Some (Exp.Absent | Exp.Abs_broken) ->
             None, Some (fs, (row,act))
          | None ->
-            let pany = Some Pany, Location.noloc in
-            Some (fs, (Clist.(pany::row), act)),
+            Some (fs, (Clist.(Pt_any Location.noloc::row), act)),
             Some (fs, (row, act)))
      in
      let abs = check_projection ~matchloc ~env ~lvl ftyps typs pats_abs in
      match
        pats_pres |> List.map (fun (fs, (Clist.(p::ps), act)) ->
          match p with
-         | Some Pany, _ -> (fs, (ps,act))
+         | Pt_any _ -> (fs, (ps,act))
          | _  -> raise_notrace Exit)
      with
      | pats_pres ->
@@ -778,6 +805,12 @@ let check_fvs_mat loc = function
 
 type ex_split = Ex : (('n,_) Clist.t * 'n dectree) -> ex_split
 let split_cases ~matchloc env (typs : (ptyp * Typedefs.gen_level) list) (cases : case list) =
+  let use_flags = ref [] in
+  let flag ?parent loc =
+    let use = Use_flag.make ?parent loc in
+    use_flags := use :: !use_flags;
+    use
+  in
   let actions =
     cases |> List.mapi (fun id ((pps,pat_loc), exp) ->
       let var_names = check_fvs_mat matchloc pps in
@@ -785,21 +818,38 @@ let split_cases ~matchloc env (typs : (ptyp * Typedefs.gen_level) list) (cases :
         pat_loc;
         id;
         var_names;
-        bindings = None })
+        use = flag pat_loc;
+        bindings = ref None })
+  in
+  let rec of_exp_pat ~use = function
+    | None, loc -> Error.fail loc Syntax
+    | Some p, loc ->
+       match p with
+       | Pany -> Pt_any loc
+       | Pbind (s, p) -> Pt_bind (s, of_exp_pat ~use p)
+       | Ptuple (tag, ps) ->
+          let fields, ext = Exp.record_fields ~loc ps in
+          let fields = List.map (fun (n,p) -> n, Exp.map_exp_field (Option.map (of_exp_pat ~use)) p) fields in
+          Pt_tuple {tag; fields; ext; loc}
+       | Por (p,q) ->
+          Pt_or (of_exp_pat_use ~use p, of_exp_pat_use ~use q)
+  and of_exp_pat_use ~use p =
+    let use = flag ~parent:use (snd p) in
+    let p = of_exp_pat ~use p in
+    p, use
   in
   let Ex typs = Clist.of_list typs in
   let mat =
     List.map2 (fun (pps, _) b -> pps, b) cases actions
     |> List.concat_map (fun ((pps,loc), act) ->
       pps |> List.map (fun ps ->
+        let ps = List.map (of_exp_pat ~use:act.use) ps in
         match Clist.of_list_length ~len:typs ps with
         | None -> Error.fail loc (Illformed_pat (`Wrong_length (List.length ps, Clist.length typs)))
         | Some ps -> ps, (SymMap.empty, act)))
   in
   let dtree = check_matrix ~matchloc ~env typs mat in
-  actions |> List.iter (fun act ->
-    if act.bindings = None then
-      Error.log ~loc:act.pat_loc Unused_pattern);
+  List.iter Use_flag.maybe_warn_unused !use_flags;
   begin match counterexamples (Clist.map ignore typs) dtree with
   | [] -> ()
   | unmatched ->
