@@ -2190,4 +2190,58 @@ fn h() { f(#Foo{foo:#{p:1}}) }
 > fn h() -> (#{p: Int}) { f(#Foo{foo: #{p: 1}}) }
 
 
-> STATS: fix: 129, flex: 1358
+# Transparent checking and Mode.dup
+fn (c) {
+  let f : [a] a -> a = if c { fn(x) {x} } else { fn(x) { x } };
+  f
+}
+> fn (c) { let f : [a] a -> a = if c { fn (x) { x } } else { fn (x) { x } }; f }
+>   fn (c: Bool) -> ([a] a -> a) {
+>     let f : [a] a -> a =
+>     if c { fn [a](x: a) -> a { x } } else { fn [a](x: a) -> a { x } };
+>     f
+>   }
+> Bool -> [a] a -> a
+> let  = %yield(fun (c) ret {
+>   match c {
+>     true -> {
+>       ret(fun (x) ret2 { ret2(x) })
+>     };
+>     false -> {
+>       ret(fun (x) ret2 { ret2(x) })
+>     }
+>   }
+> });
+> done
+
+fn (c) {
+  let f : [a] a -> a = match c { #A => fn(x) {x} | #B => fn(x) { x } };
+  f
+}
+> fn (c) {
+>   let f : [a] a -> a = match c { #A => (fn (x) { x }) | #B => (fn (x) { x }) };
+>   f
+> }
+>   fn (c: #A | #B) -> ([a] a -> a) {
+>     let f : [a] a -> a =
+>     match c {
+>       | #A => (fn [a](x: a) -> a { x })
+>       | #B => (fn [a](x: a) -> a { x })
+>     };
+>     f
+>   }
+> (#A | #B) -> [a] a -> a
+> let  = %yield(fun (c) ret {
+>   match c {
+>     A -> {
+>       ret(fun (x) ret2 { ret2(x) })
+>     };
+>     B -> {
+>       ret(fun (x) ret2 { ret2(x) })
+>     }
+>   }
+> });
+> done
+
+
+> STATS: fix: 129, flex: 1380

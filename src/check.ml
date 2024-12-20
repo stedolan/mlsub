@@ -220,8 +220,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
 
   | If ((_,loc) as e, ifso, ifnot) ->
      let e = check env ~mode e (checking (tcons (c_bool loc))) in
-     (* FIXME: probably broken for Transparent checking against non-simple types
-        (since the join might make the inferred type not a subtype of checked?)*)
+     let ty = Mode.dup ty in
      let ifso = check env ~mode ifso ty in
      let ifnot = check env ~mode ifnot ty in
      If (e, ifso, ifnot)
@@ -563,8 +562,8 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      App (f, args)
 
   | Match ((es, matchloc), cases) ->
-     (* FIXME: maybe check sometimes? *)
      let es = List.map (infer env ~mode) es in
+     let ty = Mode.dup ty in
      (* FIXME is this the right gen_level? How does this work again? *)
      let gen_level = mode.gen_level_acc in
      let etyps, es = List.map (fun (t, _) -> t, gen_level) es, List.map snd es in

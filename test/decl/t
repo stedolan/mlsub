@@ -395,7 +395,7 @@ fn r(c,a,b) {Box(if c {a} else {b})}
 > type Box[+a](a)
 > fn p() -> Box[#A](#A) { Box(#A) }
 > fn q[a](a: a) -> Box[a](a) { Box(a) }
-> fn r[a, b](c: Bool, a: a, b: b) -> Box[a | b](a | b) { Box(if c { a } else { b }) }
+> fn r[a](c: Bool, a: a, b: a) -> Box[a] { Box(if c { a } else { b }) }
 
 # error messages
 {
@@ -630,4 +630,4 @@ fn f() {let x : Box[#A|#B] = Box(#A); x}
 > type Box[+a](a)
 > fn f() -> Box[#A | #B](#A) { let x : Box[#A | #B] = Box(#A); x }
 
-> STATS: fix: 25, flex: 352
+> STATS: fix: 25, flex: 351
