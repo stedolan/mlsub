@@ -386,7 +386,6 @@ fn f(i: Int, j: Int) { P{p: Box(#A), i, j, b:@true} }
 > fn f(i: Int, j: Int) -> (P{p: Box[#A | #B](#A)}) { P{p: Box(#A), i, j, b: @true} }
 
 # Inference of type parameters
-# FIXME: Any/Any is bad on fn args at least
 {
 type Box[a](a)
 fn p() {Box(#A)}

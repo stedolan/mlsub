@@ -202,7 +202,6 @@ and ntyp_to_upper ~simple env : ntyp -> upper = function
   | Tcvj (conses, vars, loc) ->
      let conses =
        conses |> List.map (fun (cons, _loc) ->
-         (* FIXME: is matchability assumed for the ptyp_to_lower bits? *)
          (Cons1.map cons
             ~neg:(ptyp_to_lower ~simple env)
             ~pos:(ntyp_to_fresh_flexvar ~simple env)))
@@ -934,14 +933,6 @@ and join_lower_part ~changes env level lower ty =
 and join_lower ~changes env level lower (ty : lower) =
   List.fold_left (join_lower_part ~changes env level) lower ty
 
-let join_simple env a b =
-  (* FIXME: start with a not bottom. (Improve matchability) *)
-  let changes = ref [] in
-  let r = bottom in
-  let r = join_lower ~changes env (Env.level env) r a in
-  let r = join_lower ~changes env (Env.level env) r b in
-  r
-
 let check_simple t =
   let rec aux = function
     | Tsimple _ -> ()
@@ -1060,7 +1051,12 @@ let join_ptyp env (p : ptyp) (q : ptyp) : ptyp =
   | p, q ->
     let p = ptyp_to_lower ~simple:false env p in
     let q = ptyp_to_lower ~simple:false env q in
-    Tsimple (join_simple env p q)
+    let changes = ref [] in
+    (* Must start with bottom to ensure correct freshening *)
+    let r = bottom in
+    let r = join_lower ~changes env (Env.level env) r p in
+    let r = join_lower ~changes env (Env.level env) r q in
+    Tsimple r
 
 (* FIXME: is this ever needed in nontrivial ways? *)
 let meet_ntyp env (p : ntyp) (q : ntyp) : ntyp =
