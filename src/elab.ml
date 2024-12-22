@@ -17,7 +17,7 @@ type typed_exp = typed_exp' mayloc and typed_exp' =
   | Tuple of Cons1.Tag.t * (field_name loc * typed_exp) list
   | Let of typed_pat * Check_pat.ex_split * elab_typ * typed_exp * typed_action
   | Seq of typed_exp * typed_exp
-  | Proj of typed_exp * symbol
+  | Proj of typed_exp * field_name loc
   | If of typed_exp * typed_exp * typed_exp
   | Match of typed_exp list loc * Check_pat.ex_split * typed_case list
   | Typed of typed_exp * elab_typ
@@ -288,7 +288,7 @@ module Compile = struct
         IRB.tuple tag (List.map (fun ((fn,_loc), e) -> (fn, exp e)) fields))
 
     | Proj (e, (field, _loc)) ->
-       IRB.project (exp e) (Field_named field)
+       IRB.project (exp e) field
 
     | Seq (e1, e2) ->
        fun k ->

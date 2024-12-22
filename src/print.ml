@@ -144,7 +144,7 @@ and exp_ e =
        | (Some s, x) -> string s ^^ string ":" ^^ space ^^ exp ~prec x
        | (None, x) -> exp ~prec:Max x) args in
      exp ~prec f ^^ parens (sep comma args)
-  | Proj (e, f) -> exp ~prec e ^^ char '.' ^^ field_name (Field_named (fst f))
+  | Proj (e, f) -> exp ~prec e ^^ char '.' ^^ field_name (fst f)
   | If (e, t, f) ->
      string "if" ^^ blank 1 ^^ exp ~prec e ^^ block t ^^ blank 1 ^^ string "else" ^^ block f
   | Match ((e, _loc), cs) ->

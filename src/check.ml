@@ -434,7 +434,6 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
 
   | Proj (e, (field, loc)) ->
      let ty, e = infer env ~mode e in
-     let f = Field_named field in
      let r = ref (tbot None) in
      let tyf =
        match
@@ -442,8 +441,8 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
          [Record { tag = None;
                    args = []; (* FIXME *)
                    body = {
-                       fields = FieldMap.singleton f (Fields.Fpresent (r, loc));
-                       fnames = [Field_named field]} }]
+                       fields = FieldMap.singleton field (Fields.Fpresent (r, loc));
+                       fnames = [field]} }]
        with
        | Ok () -> !r
        | Error c -> fail eloc (Conflict (`Expr, c)) in

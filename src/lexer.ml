@@ -59,6 +59,8 @@ let rec lex buf =
      DOT_SYMBOL (chop (lexeme buf))
   | '.', ('A'..'Z'), Star('a'..'z'|'_'|'A'..'Z'|'0'..'9') ->
      DOT_USYMBOL (chop (lexeme buf))
+  | '.', ('0'..'9'), Star('0'..'9') ->
+     DOT_INT (int_of_string (chop (lexeme buf)))
 
   | '@', Star('a'..'z') ->
      PRAGMA (sub_lexeme buf 1 (lexeme_length buf - 1))

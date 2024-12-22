@@ -842,6 +842,21 @@ fn (a) { if (a.foo) { #{bar: a.bar} } else { a } }
 >   expected: Bool
 
 # more tuple cases
+
+fn(c) { let (x,y) = c; (x,c.0,y,c.1) }
+> fn (c) { let (x, y) = c; (x, c.0, y, c.1) }
+>   fn [a, b](c: (a, b)) -> (a, a, b, b) {
+>     let (x, y) : (a, b) = c;
+>     (x, c.0, y, c.1)
+>   }
+> [a, b] (a, b) -> (a, a, b, b)
+> let  = %yield(fun (c) ret {
+>   let x = c.0;
+>   let y = c.1;
+>   ret((0: x, 1: c.0, 2: y, 3: c.1))
+> });
+> done
+
 fn (f) { (f(#{x:1,y:2}), f(#{x:1,z:2})) }
 > fn (f) { (f(#{x: 1, y: 2}), f(#{x: 1, z: 2})) }
 >   fn [a](f: (#{x: Int, y?: Int, z?: Int}) -> a) -> (a, a) {
@@ -2244,4 +2259,4 @@ fn (c) {
 > done
 
 
-> STATS: fix: 129, flex: 1380
+> STATS: fix: 130, flex: 1389

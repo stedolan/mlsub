@@ -81,7 +81,7 @@ type exp = exp' mayloc and exp' =
   (* e; e *)
   | Seq of exp * exp
   (* a.foo *)
-  | Proj of exp * symbol
+  | Proj of exp * Tuple_fields.field_name loc
   (* if a { foo } else { bar } *)
   | If of exp * exp * exp
   (* match e { p => e | ... } *)
@@ -193,8 +193,8 @@ let mapper =
        Let (r.pat r p, Option.map (r.tyexp r) ty, r.exp r e, r.exp r body)
     | Seq (e1, e2) ->
        Seq (r.exp r e1, r.exp r e2)
-    | Proj (e, s) ->
-       Proj (r.exp r e, sym r s)
+    | Proj (e, (s,sloc)) ->
+       Proj (r.exp r e, (s, r.loc r sloc))
     | If (e, et, ef) ->
        If (r.exp r e, r.exp r et, r.exp r ef)
     | Typed (e, t) ->

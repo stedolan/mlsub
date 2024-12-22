@@ -15,6 +15,7 @@
 %token ABSENT
 %token <string> DOT_SYMBOL
 %token <string> DOT_USYMBOL
+%token <int> DOT_INT
 
 %nonassoc low_priority
 %nonassoc ARROW
@@ -178,7 +179,9 @@ term_:
 | fn = term; LPAR; args = separated_list(COMMA, argument); RPAR
   { Some (App (fn, args)) }
 | e = term; f = loc(DOT_SYMBOL)
-  { Some (Proj (e, f)) }
+  { Some (Proj (e, (Field_named (fst f), snd f))) }
+| e = term; f = loc(DOT_INT)
+  { Some (Proj (e, (Field_positional (fst f), snd f))) }
 | tag = struct_tag %prec low_priority
   { Some (Tuple (Some tag, empty_fields)) }
 | LPAR; e = exp; COLON; t = tyexp; RPAR
