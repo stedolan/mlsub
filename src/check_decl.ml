@@ -353,15 +353,14 @@ let check_type_decls types =
     |> List.map (fun (decl, body) : Typedefs.type_decl ->
       let params = decl.params |> List.map (fun (ps : param_state) ->
         let variance = ps.var_found in
-        (* FIXME: these two checks can safely be nonfatal warnings *)
         begin match variance.occurs_neg, ps.var_supplied_neg with
         | `No, Some loc ->
-           fail loc (Illformed_type (`Wrong_args (fst decl.name, `Variance (ps.index, fst ps.name, `Neg))))
+           Error.log ~loc (Illformed_type (`Wrong_args (fst decl.name, `Variance (ps.index, fst ps.name, `Neg))))
         | _ -> ()
         end;
         begin match variance.occurs_pos, ps.var_supplied_pos with
         | `No, Some loc ->
-           fail loc (Illformed_type (`Wrong_args (fst decl.name, `Variance (ps.index, fst ps.name, `Pos))))
+           Error.log ~loc (Illformed_type (`Wrong_args (fst decl.name, `Variance (ps.index, fst ps.name, `Pos))))
         | _ -> ()
         end;
         variance, ps.name)
