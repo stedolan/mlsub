@@ -22,6 +22,20 @@ let subset s t =
 let equal s t =
   subset s t && subset t s
 
+let span_to_string {loc_start=a; loc_end=b} =
+  let cnum (p : Lexing.position) =
+    p.pos_cnum - p.pos_bol
+  in
+  let pos =
+    if a.pos_lnum = b.pos_lnum
+    then Printf.sprintf ":%d:%d-%d" a.pos_lnum (cnum a) (cnum b)
+    else Printf.sprintf ":%d:%d-%d:%d" a.pos_lnum (cnum a) b.pos_lnum (cnum b)
+  in
+  a.pos_fname ^ pos
+
+let to_string t =
+  String.concat "," (t |> List.map span_to_string)
+
 let noloc : t =
   let loc : Lexing.position = {pos_fname="_";pos_lnum=0;pos_cnum=0;pos_bol=0} in
   [{ loc_start = loc; loc_end = loc}]

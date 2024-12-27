@@ -1309,4 +1309,4 @@ fn (x: (#A|#B|#C, Int)) {
 > });
 > done
 
-> STATS: fix: 16, flex: 208
+> STATS: fix: 16, flex: 202

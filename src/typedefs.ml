@@ -237,13 +237,6 @@ module Cons1 = struct
       | Named_tag t | Qualified_tag (_,t) -> Named_tag (Record_tag t)
   end
 
-  let tuple_tag_equal a b =
-    match a, b with
-    | Anon_tag, Anon_tag -> true
-    | Struct_tag (a,_), Struct_tag (b,_) -> String.equal a b
-    | Named_tag a, Named_tag b -> Nom_tag.equal a b
-    | (Struct_tag _ | Named_tag _ | Anon_tag), _ -> false
-
   type (+'neg, +'pos) cons_record =
     { tag: tuple_tag option;
       args: ('neg, 'pos) tyarg list;
@@ -313,7 +306,7 @@ module Cons1 = struct
     | Top, Top -> true
     | Record {tag=ptag; args=pargs; body=pbody},
       Record {tag=qtag; args=qargs; body=qbody} ->
-       Option.equal tuple_tag_equal ptag qtag &&
+       Option.equal Tag.equal ptag qtag &&
        List.for_all2 (Tyarg.equal ~neg ~pos) pargs qargs &&
        Fields.equal ~pos pbody qbody
     | Func (pa, pr), Func (qa, qr) ->
@@ -403,58 +396,16 @@ module Cons1 = struct
        let res = pos Func_res res in
        Func (args, res)
 
-  type head_coercion =
-    | Id
-    | Drop_record_tag of tuple_tag
-    | To_top
-
-  type head_conflict =
-    | Incompatible
-    | Args of [`Too_few | `Too_many | `Wrong_number]
-    | Expected_tag of (Exp.tuple_tag option * tuple_tag list)
-
-  let merge_head_conflicts xs =
-    let merge c d =
-      match c, d with
-      | Incompatible, x | x, Incompatible -> x
-      | Args c, Args d ->
-         if c = d then Args c else Args `Wrong_number
-      | Args _, _ | _, Args _ -> Incompatible
-      | Expected_tag (p, c), Expected_tag (q, d) ->
-         Expected_tag ((if p = q then p else None), c @ d)
-    in
-    List.fold_left merge Incompatible xs
-
-  type head_ordering =
-    | Un of head_conflict
-    | Le of head_coercion
-
-  let sub_head p q =
-    match p, q with
-    | Top, Top -> Le Id
-    | _, Top -> Le To_top
-    | Top, _ -> Un Incompatible
-
-    | Func (pa, _), Func (qa, _) ->
-       begin match List.compare_lengths pa qa with
-       | 0 -> Le Id
-       | n -> Un (Args (if n > 0 then `Too_few else `Too_many))
-       end
-    | Func _, _
-    | _, Func _ -> Un Incompatible
-
-    | Record {tag=ptag; _}, Record {tag=qtag; _} ->
-       begin match ptag, qtag with
-       | None, None -> Le Id
-       | Some t, None -> Le (Drop_record_tag t)
-       | Some pt, Some qt when tuple_tag_equal pt qt -> Le Id
-       | _, Some qt -> Un (Expected_tag (Option.map Tag.unparse ptag, [qt]))
-       end
-
   let incomparable_head a b =
-    match sub_head a b, sub_head b a with
-    | Un _, Un _ -> true
-    | _, _ -> false
+    match a, b with
+    | Top, _ | _, Top -> false
+    | Func _, Record _ | Record _, Func _ -> true
+    | Func (pa, _), Func (qa, _) ->
+       List.compare_lengths pa qa <> 0
+    | Record {tag=Some ptag;_}, Record{tag=Some qtag; _} ->
+       not (Tag.equal ptag qtag)
+    | Record {tag=None; _}, Record _
+    | Record _, Record {tag=None; _} -> false
 end
 
 module Conses = struct
@@ -557,7 +508,9 @@ and upper_rigvar =
      If we learn that a <= C, we can delete C as then a & C = a. *)
   { urv_var : rigvar;
     urv_conses : (lower, flexvar) Cons1.t list Location.loc;
-    urv_ordered : bool ref (* True when urv_var <= urv_conses is known *) }
+    (* When urv_var <= urv_conses is known, this is Some rv.
+       rv must be equal to urv_var, but is kept for its location *)
+    urv_ordered : rigvar option ref }
 
 and rigvar_constraint = (lower, flexvar) Cons1.t list
 
@@ -856,7 +809,7 @@ type flexvar_change =
   | Change_expanded_mark (* hack for logging expand changes *)
   | Change_upper of flexvar * upper
   | Change_lower of flexvar * lower
-  | Change_urv_ordered of bool ref * bool (* FIXME: does this need to be separate? *)
+  | Change_urv_ordered of rigvar option ref * rigvar option (* FIXME: does this need to be separate? *)
 
 let fv_set_upper ~changes fv upper =
   changes := Change_upper (fv, fv.upper) :: !changes;
@@ -877,10 +830,10 @@ let fv_maybe_set_upper ~changes (fv : flexvar) upper =
     (fv_set_upper ~changes fv upper; true)
   else false
 
-let fv_set_ordered ~changes urv =
+let fv_set_ordered ~changes urv rv' =
   let r = urv.urv_ordered in
   changes := Change_urv_ordered (r, !r) :: !changes;
-  r := true
+  r := Some rv'
 
 let revert changes =
   changes |> List.iter (function
@@ -1096,8 +1049,12 @@ and wf_upper ~seen env lvl = function
      wf_conses conses
        ~neg:(wf_lower ~seen env lvl)
        ~pos:(wf_flexvar ~seen env lvl);
-     rvs |> List.iter (fun {urv_var=rv; urv_conses=(cs,_loc); urv_ordered=_} ->
+     rvs |> List.iter (fun {urv_var=rv; urv_conses=(cs,_loc); urv_ordered=ord} ->
        wf_rigvar env lvl rv;
+       begin match !ord with
+       | None -> ()
+       | Some rv' -> wf_rigvar env lvl rv'; assert (equal_rigvar rv rv')
+       end; 
        wf_conses cs ~neg:(wf_lower ~seen env lvl) ~pos:(wf_flexvar ~seen env lvl));
      rvs |> List.iteri (fun i c ->
        rvs |> List.iteri (fun j d ->

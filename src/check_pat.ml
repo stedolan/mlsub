@@ -310,7 +310,7 @@ let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
      Split_type_cases (List.map (fun (t, s) -> t, s ()) splits)
 
 let split_case tag (splits : split_type_cases) : split_type_field list * split_type_cases =
-  match List.partition (fun (t,_) -> Cons1.tuple_tag_equal t tag) splits with
+  match List.partition (fun (t,_) -> Cons1.Tag.equal t tag) splits with
   | [_, c], splits -> c, splits
   | _ -> intfail "split_case: no such case"
 
@@ -386,7 +386,7 @@ let split_on_case (type k w) tag (fields : (k, split_type_field) Clist.t) (mat :
   mat |> List.split_filter_map (fun orig_row ->
     let (p, _ploc), row = orig_row in
     match p with
-    | Ph_tuple (tag', fs, _ext) when Cons1.tuple_tag_equal tag tag' ->
+    | Ph_tuple (tag', fs, _ext) when Cons1.Tag.equal tag tag' ->
        let fs =
          fields |> Clist.map (fun (fn,_mand,_ty) ->
            match
@@ -570,7 +570,7 @@ let rec check_matrix :
             in
             match tag with
             | Some tag ->
-               begin match List.partition (fun (t,_) -> Cons1.tuple_tag_equal t tag) cases with
+               begin match List.partition (fun (t,_) -> Cons1.Tag.equal t tag) cases with
                | (_::_::_), _ -> intfail "nonunique split cases"
                | [_, field_types], rest ->
                   let Ex fields = Clist.of_list (List.rev field_types) in

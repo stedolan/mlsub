@@ -131,26 +131,6 @@ type ty_mode = Mode.t
 let checking = Mode.checking
 let inferring = Mode.inferring
 
-type inspect_result =
-  | Imatches of (ptyp, ntyp) Cons1.t loc
-  (* FIXME: add Ifailed for when a Cons clearly does not match? *)
-  | Iother
-
-let inspect_cons' cons ty =
-  match ty with
-  | Tsimple _ ->
-     (* bidirectional checking does not look inside Tsimple *)
-     Iother
-  | Tpoly _ ->
-     (* FIXME: maybe make this impossible? *)
-     Iother
-  (* FIXME: multiple compatible cons? *)
-  | Tcvj ([c,cloc],[],_loc) ->
-     (match Cons1.sub_head cons c with Le _ -> Imatches (c,cloc) | Un _ -> Iother)
-  | _ -> Iother
-
-let inspect_cons cons ty = inspect_cons' cons (Mode.checking_type ty)
-
 let inspect_poly_func env params ty =
   let poly, ty =
     match Mode.checking_type ty with
@@ -161,8 +141,9 @@ let inspect_poly_func env params ty =
        Some (vars, env'), open_rvs body
     | ty -> None, ty
   in
-  match inspect_cons' (Cons1.Func (params, ())) ty with
-  | Imatches (Func (ptypes, rtype), _) ->
+  match ty with
+  | Tcvj ([Func (ptypes, rtype), _],[],_loc)
+       when List.compare_lengths params ptypes = 0 ->
      Some (poly, ptypes, rtype)
   | _ ->
      None
@@ -314,8 +295,8 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
             match
               List.map (fun (tag,_,_) -> tag) (matching_conses ~tag:None conses)
             with
-            | [] -> Cons1.Incompatible
-            | tags -> (Cons1.Expected_tag (tag, tags))
+            | [] -> Types.Incompatible
+            | tags -> (Types.Expected_tag (tag, tags))
           in
           let tunit _ = Tsimple () in
           let body = Fields.map fields ~pos:tunit in
@@ -577,8 +558,12 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
             split,
             List.map2 (fun (ps,_) e -> ps, e) cases actions)
 
-  | Pragma ("true"|"false" as b) when match inspect_cons (fst (c_bool eloc)) ty with Imatches (Record _,_) -> true | _ -> false ->
-     Pragma b
+  | Pragma ("true"|"false" as b) ->
+     begin match Mode.checking_type ty with
+     | Tcvj ([Record {tag=Some (Named_tag bool);_},_],[],_loc)
+           when fst (Nom_tag.type_name bool) = "Bool" -> Pragma b
+     | _ -> failwith ("pragma: " ^ b)
+     end
   | Pragma "bot" ->
      inferred (tbot (Some eloc));
      Pragma "bot"

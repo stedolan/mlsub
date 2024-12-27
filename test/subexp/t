@@ -1245,10 +1245,10 @@ fn [a <: {foo:{bar:Int}}] (x, y:a) -> ({foo:Bool}, a) { ch(x,y) }
 > fn [a <: {foo: {bar: Int}}](x, y: a) -> ({foo: Bool}, a) {
 >   ch(x, y)
 > }
-> test:2: The tag should be Bool, but no tag is present.
+> test:2: Type error
 >   fn [a <: {foo:{bar:Int}}] (x, y:a) -> ({foo:Bool}, a) { ch(x,y) }
 >                                                           ^^^^^^^
->      found: ({foo: {bar: _}}, _)
+>      found: (a, _)
 >   expected: ({foo: Bool}, _)
 > This {bar: _} comes from test:2:
 >   fn [a <: {foo:{bar:Int}}] (x, y:a) -> ({foo:Bool}, a) { ch(x,y) }
@@ -1262,24 +1262,24 @@ fn [a <: {foo:{bar:Int}}] (x, y:a) -> ({foo:Bool}, a) { ch(x,y) }
 #
 fn [a <: {foo:Int}](x : a) -> Bool { x }
 > fn [a <: {foo: Int}](x: a) -> Bool { x }
-> test:1: The tag should be Bool, but no tag is present.
+> test:1: Type error
 >   fn [a <: {foo:Int}](x : a) -> Bool { x }
 >                                        ^
 >      found: a
 >   expected: Bool
-> This a comes from test:1:
+> This {foo: _} comes from test:1:
 >   fn [a <: {foo:Int}](x : a) -> Bool { x }
->                           ^
+>            ^^^^^^^^^
 > but is used as Bool at test:1:
 >   fn [a <: {foo:Int}](x : a) -> Bool { x }
 >                                 ^^^^
 
 fn [a <: {foo:Int}](x : a) -> ({foo:Bool}) { x }
 > fn [a <: {foo: Int}](x: a) -> ({foo: Bool}) { x }
-> test:1: The tag should be Bool, but tag Int is present.
+> test:1: Type error
 >   fn [a <: {foo:Int}](x : a) -> ({foo:Bool}) { x }
 >                                                ^
->      found: {foo: Int}
+>      found: a
 >   expected: {foo: Bool}
 > This Int comes from test:1:
 >   fn [a <: {foo:Int}](x : a) -> ({foo:Bool}) { x }
@@ -1290,10 +1290,10 @@ fn [a <: {foo:Int}](x : a) -> ({foo:Bool}) { x }
 
 fn [a <: {foo:Int}](x : a) -> ({bar:Bool}) { x }
 > fn [a <: {foo: Int}](x: a) -> ({bar: Bool}) { x }
-> test:1: The field 'bar' is missing.
+> test:1: Type error
 >   fn [a <: {foo:Int}](x : a) -> ({bar:Bool}) { x }
 >                                                ^
->      found: {foo: _}
+>      found: a
 >   expected: {bar: _}
 > This {foo: _} comes from test:1:
 >   fn [a <: {foo:Int}](x : a) -> ({bar:Bool}) { x }
@@ -1304,24 +1304,24 @@ fn [a <: {foo:Int}](x : a) -> ({bar:Bool}) { x }
 
 fn [a <: {foo:Int}](x : a) -> (#Tag{bar:Bool}) { x }
 > fn [a <: {foo: Int}](x: a) -> (#Tag{bar: Bool}) { x }
-> test:1: The tag should be #Tag, but no tag is present.
+> test:1: Type error
 >   fn [a <: {foo:Int}](x : a) -> (#Tag{bar:Bool}) { x }
 >                                                    ^
 >      found: a
 >   expected: #Tag{bar: _}
-> This a comes from test:1:
+> This {foo: _} comes from test:1:
 >   fn [a <: {foo:Int}](x : a) -> (#Tag{bar:Bool}) { x }
->                           ^
+>            ^^^^^^^^^
 > but is used as #Tag{bar: _} at test:1:
 >   fn [a <: {foo:Int}](x : a) -> (#Tag{bar:Bool}) { x }
 >                                 ^^^^^^^^^^^^^^^^
 
 fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 > fn [a <: ({foo: Int}, Int)](x: a) -> (#Tag{bar: Bool}, Int) { x }
-> test:1: The tag should be #Tag, but no tag is present.
+> test:1: Type error
 >   fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 >                                                              ^
->      found: ({foo: _}, _)
+>      found: a
 >   expected: (#Tag{bar: _}, _)
 > This {foo: _} comes from test:1:
 >   fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
@@ -1330,4 +1330,4 @@ fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 >   fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 >                                        ^^^^^^^^^^^^^^
 
-> STATS: fix: 94, flex: 1996
+> STATS: fix: 94, flex: 1795

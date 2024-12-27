@@ -1566,6 +1566,51 @@ fn(f) { fn(a,b) { let z = f(b); if true { a } else { b } } }
 > });
 > done
 
+# join combines types on left
+fn (c, x : {foo: #A}) {
+  let z = if c { #P{foo: #B} } else { #Q{foo: #C} };
+  if c { z } else { x }
+}
+> fn (c, x: {foo: #A}) {
+>   let z = if c { #P{foo: #B} } else { #Q{foo: #C} };
+>   if c {
+>     z
+>   } else {
+>     x
+>   }
+> }
+>   fn (c: Bool, x: {foo: #A}) -> ({foo: #B | #C | #A}) {
+>     let z : #P{foo: #B} | #Q{foo: #C} =
+>     if c { #P{foo: #B} } else { #Q{foo: #C} };
+>     if c {
+>       z
+>     } else {
+>       x
+>     }
+>   }
+> (Bool, {foo: #A}) -> {foo: #B | #C | #A}
+> let  = %yield(fun (c, x) ret {
+>   let k(x2) = {
+>     match c {
+>       true -> {
+>         ret(x2)
+>       };
+>       false -> {
+>         ret(x)
+>       }
+>     }
+>   };
+>   match c {
+>     true -> {
+>       k(P(foo: B()))
+>     };
+>     false -> {
+>       k(Q(foo: C()))
+>     }
+>   }
+> });
+> done
+
 # type validity may require sorting rigvars
 (@bot : [a, b] ((a) -> b) -> [a_2] (a_2, a) -> a | a_2)
 > (@bot : [a, b] (a -> b) -> [a_2] (a_2, a) -> a | a_2)
@@ -2259,4 +2304,4 @@ fn (c) {
 > done
 
 
-> STATS: fix: 130, flex: 1389
+> STATS: fix: 130, flex: 1347
