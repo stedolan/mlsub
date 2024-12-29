@@ -32,7 +32,7 @@ and free_type_names' =
      let names =
        match tag with
        | Some (Named_tag id) -> TagSet.singleton (Record_tag id)
-       | Some (Qualified_tag (s, t)) -> TagSet.singleton (Variant_tag (s,t))
+       | Some (Qualified_tag (s, t)) -> TagSet.singleton (Variant_tag (Vtag s,t))
        | Some (Struct_tag _ | Anon_tag) | None -> TagSet.empty
      in
      let names = List.fold_left (fun acc arg -> TagSet.union acc (free_arg arg)) names args in

@@ -526,7 +526,6 @@ fn gbox(x : Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
 > fn gbox(x: Box[[a] a -> a]) -> (Box[[a] a -> a] | Other) { x }
 
 # variants
-# FIXME: variant aliases
 {
 type Option[a]{
 | None
@@ -534,7 +533,7 @@ type Option[a]{
 }
 type Z[x] {
   foo: Option.Some[x]
-  bar: Option.None[Int] | Option.Some[Int]
+  bar: Option[Int]
 }
 fn f(x) {
   match x {
@@ -545,7 +544,7 @@ fn f(x) {
 fn g() { (f({foo: Some(fn(x){x}), bar:None}), Option.Some(true)) }
 }
 > type Option[+a]{ None | Some(a) }
-> type Z[+x]{foo: Option.Some[x], bar: Option.None[Int] | Option.Some[Int]}
+> type Z[+x]{foo: Option.Some[x], bar: Option[Int]}
 > fn f[a](x: Z[Int -> a]) -> (a, Int) {
 >   match x {
 >     | Z{foo: Some(a), bar: Some(b)} => (a(3), b)
@@ -568,6 +567,39 @@ fn f[a <: T.B](c, x : T.A, y : a) {
 }
 > type T{ A | B }
 > fn f[a <: T.B](c: Bool, x: T.A, y: a) -> Int { match if c { x } else { y } { A => 1 | B => 2 } }
+
+# Variant alias expansion
+# FIXME: less expansion is needed in some cases?
+{
+type Option[a] { None | Some(a) }
+type Other[a] { P(a) | Q(a) }
+fn join1(b, c, x : Option[Int], y:Other[String]) { if c { y } else { if b {x} else {Option.Some(42)} } }
+fn join2(b, c, x : Option[#X], y:Option[#Y]) { let z = if c { x } else { y }; (z,if b {Option.Some(#P)} else { z }) }
+fn meet1(x) -> (Option[#A|#B], Option[#A|#C]) { (x,x) }
+fn meet2(x) -> (Option[#A|#B], Option.Some[#A|#C]) { (x,x) }
+fn meet3(x) -> (Option.Some[#A|#B], Option[#A|#C]) { (x,x) }
+}
+> type Option[+a]{ None | Some(a) }
+> type Other[+a]{ P(a) | Q(a) }
+> fn join1(b: Bool, c: Bool, x: Option[Int], y: Other[String]) -> (Other[String] | Option.None[Int] | Option.Some[Int]) {
+>   if c {
+>     y
+>   } else {
+>     if b {
+>       x
+>     } else {
+>       Option.Some(42)
+>     }
+>   }
+> }
+> fn join2(b: Bool, c: Bool, x: Option[#X], y: Option[#Y]) ->
+>   (Option[#X | #Y], Option.Some[#X | #Y | #P](#P | #X | #Y) | Option.None[#X | #Y]) {
+>   let z : Option[#X | #Y] = if c { x } else { y };
+>   (z, if b { Option.Some(#P) } else { z })
+> }
+> fn meet1(x: Option[#A]) -> (Option[#A | #B], Option[#A | #C]) { (x, x) }
+> fn meet2(x: Option.Some[#A]) -> (Option[#A | #B], Option.Some[#A | #C]) { (x, x) }
+> fn meet3(x: Option.Some[#A]) -> (Option.Some[#A | #B], Option[#A | #C]) { (x, x) }
 
 {
 type A {}
@@ -630,4 +662,4 @@ fn f() {let x : Box[#A|#B] = Box(#A); x}
 > type Box[+a](a)
 > fn f() -> Box[#A | #B](#A) { let x : Box[#A | #B] = Box(#A); x }
 
-> STATS: fix: 25, flex: 347
+> STATS: fix: 27, flex: 367

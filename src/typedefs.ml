@@ -133,44 +133,52 @@ module Fields = struct
 end
 
 module Nom_tag = struct
+  type vtag =
+    | Vtag of Exp.symbol
+
   type t =
     | Record_tag of Exp.symbol
-    | Variant_tag of Exp.symbol * Exp.symbol
+    | Variant_tag of vtag * Exp.symbol
 
   let to_string = function
     | Record_tag (s,_) -> s
-    | Variant_tag ((s,_),(t,_)) -> s ^ "." ^ t
+    | Variant_tag (Vtag (s,_),(t,_)) -> s ^ "." ^ t
+
+  let equal_vtag a b =
+    match a, b with
+    | Vtag (a,_), Vtag (b,_) ->
+       String.equal a b
 
   let equal a b =
     match a, b with
     | Record_tag (a,_), Record_tag (b,_) -> String.equal a b
-    | Variant_tag ((a1,_),(a2,_)), Variant_tag ((b1,_),(b2,_)) ->
-       String.equal a1 b1 && String.equal a2 b2
+    | Variant_tag (a1,(a2,_)), Variant_tag (b1,(b2,_)) ->
+       equal_vtag a1 b1 && String.equal a2 b2
     | (Record_tag _ | Variant_tag _), _ -> false
 
   let compare a b =
     match a, b with
     | Record_tag (a, _), Record_tag (b, _) -> String.compare a b
-    | Variant_tag ((a1,_), (a2,_)), Variant_tag ((b1,_),(b2,_)) ->
+    | Variant_tag (Vtag (a1,_), (a2,_)), Variant_tag (Vtag (b1,_),(b2,_)) ->
        (match String.compare a1 b1 with 0 -> String.compare a2 b2 | n -> n)
     | Record_tag _, Variant_tag _ -> -1
     | Variant_tag _, Record_tag _ -> +1
 
   let type_name = function
     | Record_tag s -> s
-    | Variant_tag (s, _t) -> s
+    | Variant_tag (Vtag s, _t) -> s
 
   let exp_tag = function
     | Record_tag s -> Exp.Named_tag s
-    | Variant_tag (s, t) -> Exp.Qualified_tag (s,t)
+    | Variant_tag (Vtag s, t) -> Exp.Qualified_tag (s,t)
 
   let loc = function
     | Record_tag (_,l) -> l
-    | Variant_tag ((_,_),(_,l)) -> l
+    | Variant_tag (_,(_,l)) -> l
 
   let hash = function
     | Record_tag (s,_) -> String.hash s
-    | Variant_tag ((s,_),(t,_)) -> String.hash s * 678321 + String.hash t
+    | Variant_tag (Vtag (s,_),(t,_)) -> String.hash s * 678321 + String.hash t
 
 end
 
@@ -193,10 +201,10 @@ module Cons1 = struct
       | Anon_tag, Anon_tag -> 0
       | Struct_tag (a, _), Struct_tag (b, _) -> String.compare a b
       | Named_tag a, Named_tag b -> Nom_tag.compare a b
-    
+
       | Anon_tag, (Struct_tag _ | Named_tag _)
       | Struct_tag _, Named_tag _ -> -1
-    
+
       | Named_tag _, (Anon_tag | Struct_tag _)
       | Struct_tag _, Anon_tag -> +1
 
@@ -219,7 +227,7 @@ module Cons1 = struct
       | Struct_tag (s,_), Struct_tag (t,_) -> String.equal s t
       | Named_tag (s,_), Named_tag (Record_tag (t,_)) -> String.equal s t
       | Named_tag (s,_), Named_tag (Variant_tag (_,(t,_))) -> String.equal s t
-      | Qualified_tag ((s,_),(t,_)), Named_tag (Variant_tag ((s',_),(t',_))) ->
+      | Qualified_tag ((s,_),(t,_)), Named_tag (Variant_tag (Vtag (s',_),(t',_))) ->
          String.equal s s' && String.equal t t'
       | _ -> false
 
@@ -245,6 +253,7 @@ module Cons1 = struct
   and (+'neg, +'pos) cons =
     | Top
     | Record of ('neg,'pos) cons_record
+    | Variant_whole of Nom_tag.vtag * ('neg,'pos) tyarg list
     | Func of 'neg list * 'pos
 
   and (+'neg, +'pos) tyarg =
@@ -309,10 +318,14 @@ module Cons1 = struct
        Option.equal Tag.equal ptag qtag &&
        List.for_all2 (Tyarg.equal ~neg ~pos) pargs qargs &&
        Fields.equal ~pos pbody qbody
+    | Variant_whole (Vtag (ptag,_), pargs),
+      Variant_whole (Vtag (qtag,_), qargs) ->
+       String.equal ptag qtag &&
+       List.for_all2 (Tyarg.equal ~neg ~pos) pargs qargs
     | Func (pa, pr), Func (qa, qr) ->
        List.equal neg pa qa &&
        pos pr qr
-    | (Record _|Func _|Top), _ -> false
+    | (Record _|Variant_whole _|Func _|Top), _ -> false
 
   let cons_record_map ~neg ~pos {tag; args; body} =
     {tag; args = List.map (Tyarg.map ~neg ~pos) args; body = Fields.map ~pos body}
@@ -321,34 +334,41 @@ module Cons1 = struct
     | Top -> Top
     | Record r ->
        Record (cons_record_map ~neg ~pos r)
+    | Variant_whole (t,args) ->
+       let args = List.map (Tyarg.map ~neg ~pos) args in
+       Variant_whole (t,args)
     | Func (args, res) ->
        let args = List.map neg args in
        let res = pos res in
        Func (args, res)
+
+  let wf_args ~neg ~pos params args =
+    let wf_arg v arg =
+      match arg, v.Exp.occurs_neg, v.Exp.occurs_pos with
+      | Arg_none, `No, `No
+      | Arg_neg _, `Yes, `No
+      | Arg_pos _, `No, (`Yes|`Strict)
+      | Arg_both _, `Yes, (`Yes|`Strict) -> ()
+      | _ -> intfail "wf_arg: tyargs don't match param"
+    in
+    match params with
+    | pvs ->
+       if List.length pvs <> List.length args then
+         intfail "Cons.wf: %d args, should be %d" (List.length args) (List.length pvs);
+       List.iter2 wf_arg pvs args;
+       List.iter (Tyarg.iter ~neg ~pos) args
+    | exception Not_found -> intfail "Cons.wf: not in env"
 
   let wf ~params ~neg ~pos = function
     | Top -> ()
     | Record {tag; args; body} ->
        begin match tag with
        | None | Some (Anon_tag | Struct_tag _) -> assert (args = [])
-       | Some (Named_tag name) ->
-          let wf_arg v arg =
-            match arg, v.Exp.occurs_neg, v.Exp.occurs_pos with
-            | Arg_none, `No, `No
-            | Arg_neg _, `Yes, `No
-            | Arg_pos _, `No, (`Yes|`Strict)
-            | Arg_both _, `Yes, (`Yes|`Strict) -> ()
-            | _ -> intfail "wf_arg: tyargs don't match param"
-          in
-          match params name with
-          | pvs ->
-             if List.length pvs <> List.length args then
-               intfail "Cons.wf: %d args to %s, should be %d" (List.length args) (Nom_tag.to_string name) (List.length pvs);
-             List.iter2 wf_arg pvs args;
-             List.iter (Tyarg.iter ~neg ~pos) args
-          | exception Not_found -> intfail "Cons.wf: %s not in env" (Nom_tag.to_string name)
+       | Some (Named_tag name) -> wf_args ~neg ~pos (params (Nom_tag.type_name name)) args
        end;
        Fields.wf ~pos body
+    | Variant_whole (Vtag tag, args) ->
+       wf_args ~neg ~pos (params tag) args
     | Func (args, res) ->
        List.iter neg args;
        pos res
@@ -356,13 +376,13 @@ module Cons1 = struct
   type field =
     | Func_arg of int
     | Func_res
-    | Named_arg of [`Neg|`Pos] * Nom_tag.t * int
+    | Named_arg of [`Neg|`Pos] * int
     | Record_field of Tuple_fields.field_name
 
   let field_is_positive = function
     | Func_arg _ -> false
-    | Named_arg (`Pos,_,_) -> true
-    | Named_arg (`Neg,_,_) -> false
+    | Named_arg (`Pos,_) -> true
+    | Named_arg (`Neg,_) -> false
     | Func_res | Record_field _ -> true
 
   let equal_field a b =
@@ -371,26 +391,28 @@ module Cons1 = struct
     | Func_res, Func_res -> true
     | Record_field a, Record_field b ->
        Tuple_fields.equal_field_name a b
-    | Named_arg (p, s, i), Named_arg (p', s', i') ->
-       p = p' && s = s' && i = i'
+    | Named_arg (p, i), Named_arg (p', i') ->
+       p = p' && i = i'
     | (Func_arg _ | Func_res | Record_field _ | Named_arg _), _ -> false
+
+  let mapi_args ~neg ~pos args =
+    let arg i arg =
+      Tyarg.map arg
+        ~neg:(fun x -> neg (Named_arg (`Neg, i)) x)
+        ~pos:(fun x -> pos (Named_arg (`Pos, i)) x)
+    in
+    List.mapi arg args
 
   let mapi ~neg ~pos = function
     | Top -> Top
     | Record {tag; args; body} ->
-       let arg i arg =
-         let tag = match tag with
-           | Some (Named_tag t) -> t
-           | _ -> intfail "args on invalid type"
-         in
-         Tyarg.map arg
-           ~neg:(fun x -> neg (Named_arg (`Neg, tag, i)) x)
-           ~pos:(fun x -> pos (Named_arg (`Pos, tag, i)) x)
-       in
-       let args = List.mapi arg args in
+       let args = mapi_args ~neg ~pos args in
        let field fn x = pos (Record_field fn) x in
        let body = Fields.mapi ~pos:field body in
        Record {tag; args; body}
+    | Variant_whole (tag, args) ->
+       let args = mapi_args ~neg ~pos args in
+       Variant_whole (tag, args)
     | Func (args, res) ->
        let args = List.mapi (fun i x -> neg (Func_arg i) x) args in
        let res = pos Func_res res in
@@ -399,13 +421,19 @@ module Cons1 = struct
   let incomparable_head a b =
     match a, b with
     | Top, _ | _, Top -> false
-    | Func _, Record _ | Record _, Func _ -> true
+    | Func _, (Record _ | Variant_whole _)
+    | (Record _ | Variant_whole _), Func _ -> true
     | Func (pa, _), Func (qa, _) ->
        List.compare_lengths pa qa <> 0
     | Record {tag=Some ptag;_}, Record{tag=Some qtag; _} ->
        not (Tag.equal ptag qtag)
-    | Record {tag=None; _}, Record _
-    | Record _, Record {tag=None; _} -> false
+    | (Record {tag=Some (Named_tag (Variant_tag (s1,_))); _} | Variant_whole (s1,_)),
+      (Record {tag=Some (Named_tag (Variant_tag (s2,_))); _} | Variant_whole (s2,_)) ->
+       not (Nom_tag.equal_vtag s1 s2)
+    | Record {tag=Some _; _}, Variant_whole _
+    | Variant_whole _, Record {tag=Some _; _} -> true
+    | Record {tag=None; _}, (Record _ | Variant_whole _)
+    | (Record _ | Variant_whole _), Record {tag=None; _} -> false
 end
 
 module Conses = struct
@@ -747,7 +775,7 @@ module Env = struct
     { env with env_type_decls }
 
   let param_variances env name =
-    (SymLocMap.find (Nom_tag.type_name name) env.env_type_decls).params |> List.map fst
+    (SymLocMap.find name env.env_type_decls).params |> List.map fst
 
   let get_decl_fields env (s : Nom_tag.t) =
     match s, SymLocMap.find (Nom_tag.type_name s) env.env_type_decls with
@@ -763,6 +791,13 @@ module Env = struct
 
   let get_decl_params env (s : Nom_tag.t) =
     (SymLocMap.find (Nom_tag.type_name s) env.env_type_decls).params
+
+  let get_variant_subtags env (Vtag s : Nom_tag.vtag) =
+    match SymLocMap.find s env.env_type_decls with
+    | {body = Decl_variant vs; _} ->
+       SymLocMap.to_list vs
+       |> List.map (fun (t,_) -> Nom_tag.Variant_tag (Vtag s,t))
+    | _ -> intfail "Not a variant type"
 
 end
 
@@ -1054,7 +1089,7 @@ and wf_upper ~seen env lvl = function
        begin match !ord with
        | None -> ()
        | Some rv' -> wf_rigvar env lvl rv'; assert (equal_rigvar rv rv')
-       end; 
+       end;
        wf_conses cs ~neg:(wf_lower ~seen env lvl) ~pos:(wf_flexvar ~seen env lvl));
      rvs |> List.iteri (fun i c ->
        rvs |> List.iteri (fun j d ->
@@ -1192,24 +1227,31 @@ let unparse_fields ~pos ~tag ({fields; fnames} : _ Fields.t) =
      Exp.Frecord (List.map (fun f -> unparse_field_desc f (Map.find f fields)) fnames,
                   Ext_closed)
 
+let unparse_args ~neg ~pos args =
+  let open Cons1 in
+  args
+  |> List.map (Tyarg.map ~neg ~pos)
+  |> List.map (function
+    | Arg_none -> Exp.Arg_gen (mayloc Exp.Ttop)
+    | Arg_neg t | Arg_pos t -> Exp.Arg_gen t
+    | Arg_both (neg, pos) when Exp.equal_tyexp neg pos -> Exp.Arg_gen pos
+    | Arg_both ((Some Exp.Tbot, _), pos) -> Exp.Arg_pos pos
+    | Arg_both (neg, (Some Exp.Ttop, _)) -> Exp.Arg_neg neg
+    | Arg_both (neg, pos) -> Exp.Arg_both {neg;pos})
+  |> List.map mayloc
+
+
 let unparse_cons ~neg ~pos (ty,_tyloc) =
   let open Cons1 in
   let ty = match ty with
     | Top -> Exp.Ttop
     | Record {tag; args; body} ->
        let fs = unparse_fields ~pos ~tag body in
-       let args =
-         args
-         |> List.map (Tyarg.map ~neg ~pos)
-         |> List.map (function
-           | Arg_none -> Exp.Arg_gen (mayloc Exp.Ttop)
-           | Arg_neg t | Arg_pos t -> Exp.Arg_gen t
-           | Arg_both (neg, pos) when Exp.equal_tyexp neg pos -> Exp.Arg_gen pos
-           | Arg_both ((Some Exp.Tbot, _), pos) -> Exp.Arg_pos pos
-           | Arg_both (neg, (Some Exp.Ttop, _)) -> Exp.Arg_neg neg
-           | Arg_both (neg, pos) -> Exp.Arg_both {neg;pos})
-       in
-       Trecord (Option.map Cons1.Tag.unparse tag, List.map mayloc args, fs)
+       let args = unparse_args ~neg ~pos args in
+       Trecord (Option.map Cons1.Tag.unparse tag, args, fs)
+    | Variant_whole (Vtag tag, args) ->
+       let args = unparse_args ~neg ~pos args in
+       Trecord (Some (Named_tag tag), args, Exp.empty_fields)
     | Func (args, ret) ->
        Tfunc (List.map neg args, pos ret)
   in

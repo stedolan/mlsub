@@ -263,7 +263,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
           | Some {body = Decl_variant vs; _ } when not (SymLocMap.mem (t,tloc) vs) ->
              fail tloc (Bad_name (`Unknown, `Type, t))
           | Some {body = Decl_variant _; _} ->
-             Named_tag (Variant_tag ((s,sloc), (t,tloc)))
+             Named_tag (Variant_tag (Vtag (s,sloc), (t,tloc)))
           end
        | Named_tag ((s,sloc) as t) ->
           match Env.lookup_decl env s with
@@ -284,6 +284,18 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
          | Some tag, Record ({tag=Some tag'; _} as r)
               when Cons1.Tag.matches tag tag' ->
             Some (tag', consloc, r)
+         | Some (Qualified_tag ((s,_),_) as tag),
+           Variant_whole (Vtag (tag',_), args)
+              when String.equal s tag' ->
+            let tag = check_tag tag in
+            Some (tag, consloc, {tag=Some tag;args;body=Fields.empty})
+         | Some (Named_tag t),
+           Variant_whole (Vtag s as tag, args) ->
+            Env.get_variant_subtags env tag
+            |> List.find_opt (Nom_tag.equal (Variant_tag (Vtag s,t)))
+            |> Option.map (fun tag ->
+              (Cons1.Named_tag tag, consloc,
+                 Cons1.{tag=Some (Named_tag tag); args; body=Fields.empty}))
          | _ -> None)
      in
      let get_matching_cons ((conses, rvs, tyloc) : _ tcvj) =

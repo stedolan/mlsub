@@ -95,8 +95,13 @@ let any : pat = (Some Pany, Location.noloc)
 let ptyp_conses ~env (t : ptyp) =
   let rec go = function
     | Tcvj (conses, [], _) ->
-       List.map (function
-         | (Cons1.Record ({tag=Some tag; _} as r)),loc -> tag,(r,loc)
+       List.concat_map (function
+         | (Cons1.Record ({tag=Some tag; _} as r)),loc -> [tag,(r,loc)]
+         | (Cons1.Variant_whole(tag, args)),loc ->
+            Env.get_variant_subtags env tag
+            |> List.map (fun tag ->
+              let cons = Cons1.{tag=Some (Named_tag tag); args; body = Fields.empty} in
+              Cons1.Named_tag tag, (cons,loc))
          | _ -> raise Exit) conses
     | Tcvj ([], [rv], _loc) ->
        go (Types.ptyp_of_rigid_bound env (Types.as_rigvar rv))
@@ -329,7 +334,7 @@ let check_tag ~loc ~env typ (etag : Exp.tuple_tag) : Cons1.Tag.t =
         match SymLocMap.find_opt t vs with
         | None -> Error.fail (snd t) (Bad_name (`Unknown, `Type, fst s ^ "." ^ fst t))
         | Some _ ->
-           Named_tag (Variant_tag (s,t))
+           Named_tag (Variant_tag (Vtag s,t))
      end
   | Named_tag t ->
      match ptyp_conses ~env typ with

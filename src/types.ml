@@ -423,7 +423,18 @@ module Cons1 = struct
               (Typedefs.Env.get_decl_fields env name, fun _ -> Fabsent loc)
        in
        {tag=None; args=[]; body}
+
+  let expand_variant ~env tag args =
+    Env.get_variant_subtags env tag
+    |> List.map (fun tag -> Cons1.Record {tag=Some (Named_tag tag); args; body=Fields.empty})
 end
+
+let subtype_record_args ~neg ~pos a b =
+  let sub_arg i (arg_a, arg_b) =
+    ignore (Cons1.Tyarg.zip arg_a arg_b
+              ~neg:(fun a b -> neg (Cons1.Named_arg (`Neg, i)) b a)
+              ~pos:(fun a b -> pos (Cons1.Named_arg (`Pos, i)) a b))
+  in List.iteri sub_arg (List.combine a b)
 
 let subtype_record_body ~env ~shape_a ~shape_b ~neg ~pos ((a : _ Cons1.cons_record),a_loc) ((b : _ Cons1.cons_record),b_loc) =
   let open Cons1 in
@@ -432,15 +443,9 @@ let subtype_record_body ~env ~shape_a ~shape_b ~neg ~pos ((a : _ Cons1.cons_reco
     | Some _ -> a
     | None -> Cons1.drop_record_tag ~shape:shape_a env a
   in
-  let sub_arg i (arg_a, arg_b) =
-    let sym = match a.tag with Some (Named_tag name) -> name | _ -> assert false in
-    ignore (Tyarg.zip arg_a arg_b
-              ~neg:(fun a b -> neg (Named_arg (`Neg, sym, i)) b a)
-              ~pos:(fun a b -> pos (Named_arg (`Pos, sym, i)) a b))
-  in
   (match a.tag with Some (Named_tag _) -> () | _ -> assert (a.args = []));
   (match b.tag with Some (Named_tag _) -> () | _ -> assert (b.args = []));
-  List.iteri sub_arg (List.combine a.args b.args);
+  subtype_record_args ~neg ~pos a.args b.args;
   let sub_field k a b = pos (Record_field k) a b in
   let a_def = record_def ~env ~shape:shape_a ~loc:a_loc a in
   let b_def = record_def ~env ~shape:shape_b ~loc:b_loc b in
@@ -515,7 +520,17 @@ let subtype_conses ~cnvars env ~shape_a ~shape_b ~neg ~pos (cp,cploc) (cns,cnloc
           in
           raise (SubtypeError err)
        end
-    | cp, (Func _|Record _) :: cns ->
+    | Variant_whole (tag, args), (Variant_whole (tag', args') as cn) :: _
+         when Nom_tag.equal_vtag tag tag' ->
+       subtype_record_args ~neg:(neg cp cn) ~pos:(pos cp cn) args args'
+    | Variant_whole (tag, args), ((Record {tag=Some (Named_tag (Variant_tag (s,_))); _}) :: _ as cns)
+         when Nom_tag.equal_vtag tag s ->
+       Cons1.expand_variant ~env tag args
+       |> List.iter (fun case -> go case cns)
+    | Record {tag=Some (Named_tag (Variant_tag (vtag,_))) as tag;_}, Variant_whole (vtag', args) :: cns
+        when Nom_tag.equal_vtag vtag vtag' ->
+       go cp (Record {tag; args; body=Fields.empty} :: cns)
+    | cp, (Func _|Record _|Variant_whole _) :: cns ->
        go cp cns
   in
   go cp cns
@@ -598,13 +613,45 @@ and meet_conses ~changes env lvl ~must_freshen (conses_a,loc_a) (conses_b,loc_b)
       | Top, cons_b ->
          cons_decreased := true;
          [Cons1.map cons_b ~neg:(fun x -> neg (R x)) ~pos:(fun x -> pos (R x))]
-      | Record _, Func _ | Func _, Record _ -> []
+      | (Record _ | Variant_whole _), Func _ | Func _, (Record _ | Variant_whole _) -> []
 
       | Func (args, _), Func (args', _) when List.compare_lengths args args' <> 0 -> []
       | Func (args, res), Func (args', res') ->
          let args = List.map2 (fun x y -> neg (LR (x,y))) args args' in
          let res = pos (LR (res, res')) in
          [Func (args, res)]
+
+      | Variant_whole (tag_a, args_a), Variant_whole (tag_b, args_b) ->
+         if Nom_tag.equal_vtag tag_a tag_b then
+           let neg a b = neg (LR (a, b)) and pos a b = pos (LR (a, b)) in
+           [Variant_whole (tag_a, List.map2 (Cons1.Tyarg.zip ~neg ~pos) args_a args_b)]
+         else []
+      | Variant_whole (tag_a, args_a), Record ({tag = Some (Named_tag (Variant_tag (tag_b, _))) as tag; _} as b)
+           when Nom_tag.equal_vtag tag_a tag_b ->
+         (* FIXME: This looks like it can duplicate the Variant_whole. Does it need to freshen? *)
+         fixme;
+         let a : _ Cons1.cons_record = {tag; args = args_a; body = Fields.empty} in
+         let a, tag, args =
+           let neg a b = neg (LR (a, b)) and pos a b = pos (LR (a, b)) in
+           a, a.tag, List.map2 (Cons1.Tyarg.zip ~neg ~pos) a.args b.args
+         in
+         let a_def = Cons1.record_def ~env ~shape:Type_shape.simple_neg ~loc:loc_a a in
+         let b_def = Cons1.record_def ~env ~shape:match_shape ~loc:loc_b b in
+         let body = Fields.meet ~pos (a.body, a_def) (b.body, b_def) in
+         [Record {tag; args; body}]
+      | Record ({tag = Some (Named_tag (Variant_tag (tag_a, _))) as tag;_} as a), Variant_whole (tag_b, args_b)
+           when Nom_tag.equal_vtag tag_a tag_b ->
+         let b : _ Cons1.cons_record = {tag; args=args_b; body=Fields.empty} in
+         let a, tag, args =
+           let neg a b = neg (LR (a, b)) and pos a b = pos (LR (a, b)) in
+           a, a.tag, List.map2 (Cons1.Tyarg.zip ~neg ~pos) a.args b.args
+         in
+         let a_def = Cons1.record_def ~env ~shape:Type_shape.simple_neg ~loc:loc_a a in
+         let b_def = Cons1.record_def ~env ~shape:match_shape ~loc:loc_b b in
+         let body = Fields.meet ~pos (a.body, a_def) (b.body, b_def) in
+         [Record {tag; args; body}]
+      | Record _, Variant_whole _ | Variant_whole _, Record _ ->
+         []
 
       | Record {tag=Some a;_}, Record{tag=Some b;_} when not (Cons1.Tag.equal a b) -> []
       | Record a, Record b ->
@@ -631,6 +678,7 @@ and meet_conses ~changes env lvl ~must_freshen (conses_a,loc_a) (conses_b,loc_b)
 
            | tag, None ->
               assert (b.args = []);
+              fixme; (* freshening bug??? args should be L'd *)
               a, tag, a.args
          in
          let a_def = Cons1.record_def ~env ~shape:Type_shape.simple_neg ~loc:loc_a a in
@@ -871,8 +919,8 @@ and join_lower_part ~changes env level lower ty =
     | _, Top -> [Lcons (Top, cb_loc)]
     | (Lflexvar _ | Lrigvar _) as part :: rest, cb -> part :: join_cons rest (cb, cb_loc)
     | Lcons (Top, _loc) :: _, _ -> lower
-    | (Lcons (Func _, _loc) as part :: rest), Record _
-    | (Lcons (Record _, _loc) as part :: rest), Func _ ->
+    | (Lcons (Func _, _loc) as part :: rest), (Record _ | Variant_whole _)
+    | (Lcons ((Record _ | Variant_whole _), _loc) as part :: rest), Func _ ->
        part :: join_cons rest (cb, cb_loc)
 
     | Lcons (Func (a_args, _), _) as part :: rest, Func (b_args, _)
@@ -916,6 +964,34 @@ and join_lower_part ~changes env level lower ty =
                        body = Fields.join ~pos (a.body, a_def) (b.body, b_def)}
        in
        Lcons (r, a_loc) :: rest
+
+    | Lcons (Variant_whole (a_tag,a_args), a_loc) as part :: rest, Variant_whole(b_tag,b_args) ->
+       if Nom_tag.equal_vtag a_tag b_tag then
+         let args = List.map2 (Cons1.Tyarg.zip ~neg ~pos) a_args b_args in
+         Lcons (Variant_whole(a_tag, args), a_loc) :: rest
+       else
+         part :: join_cons rest (cb, cb_loc)
+
+    | Lcons (Variant_whole (a_tag,a_args), a_loc) :: rest, Record{tag=Some (Named_tag (Variant_tag (b_tag, _))); _}
+         when Nom_tag.equal_vtag a_tag b_tag ->
+       (* FIXME: it would be neat to skip expansion in some cases.
+          Requires knowledge of per-case variance information - is this worth computing in general?
+          (Easy case: no parameters) *)
+       let exp =
+         Cons1.expand_variant ~env a_tag a_args
+         |> List.map (fun c -> Lcons (c, a_loc))
+       in
+       join_cons (exp @ rest) (cb, cb_loc)
+    | (Lcons (Record{tag=Some (Named_tag (Variant_tag (a_tag, _))); _}, _) :: _) as orig, Variant_whole (b_tag,b_args)
+         when Nom_tag.equal_vtag a_tag b_tag ->
+       (* FIXME: skip expansion as per above? *)
+       let exp = Cons1.expand_variant ~env b_tag b_args in
+       List.fold_left (fun acc cons -> join_cons acc (cons, cb_loc)) orig exp
+    | (Lcons (Variant_whole _, _loc) as part) :: rest, Record _
+    | (Lcons (Record _, _loc) as part) :: rest, Variant_whole _ ->
+       part :: join_cons rest (cb, cb_loc)
+
+
     | [], cb ->
        let cons =
          Cons1.map cb

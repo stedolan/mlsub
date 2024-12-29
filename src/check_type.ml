@@ -75,7 +75,7 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
              | false, true -> Arg_pos t
              | true, true -> Arg_both (t,t)
      in
-     let (tag : Typedefs.Cons1.Tag.t option), args, override_decl =
+     let (tag : (Typedefs.Cons1.Tag.t option, Typedefs.Nom_tag.vtag) Either.t), args, override_decl =
        let check_args ~name ~params =
          let nparams = List.length params in
          let nargs = List.length args in
@@ -84,9 +84,9 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
          List.map2 (check_arg (fst name)) params (List.mapi (fun i x -> i,x) args)
        in
        match tag with
-       | None -> None, [], None
-       | Some Anon_tag -> Some Anon_tag, [], None
-       | Some (Struct_tag s) -> Some (Struct_tag s), [], None
+       | None -> Left None, [], None
+       | Some Anon_tag -> Left (Some Anon_tag), [], None
+       | Some (Struct_tag s) -> Left (Some (Struct_tag s)), [], None
        | Some (Qualified_tag (name, case)) ->
           begin match lookup ~env name args with
           | None -> fail (snd name) (Bad_name (`Unknown, `Type, fst name))
@@ -96,8 +96,8 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
              match SymLocMap.find_opt case cases with
              | None -> fail (snd case) (Bad_name (`Unknown, `Type, fst case))
              | Some fs ->
-                let tag = Typedefs.Nom_tag.Variant_tag (name, case) in
-                Some (Named_tag tag),
+                let tag = Typedefs.Nom_tag.Variant_tag (Vtag name, case) in
+                Left (Some (Named_tag tag)),
                 check_args ~name ~params,
                 Some (tag, fs)
           end
@@ -105,19 +105,18 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
           begin match lookup ~env (name,nameloc) args with
           | None -> fail nameloc (Bad_name (`Unknown, `Type, name))
           | Some { name; params; body = Decl_variant _ } ->
-             fixme; (* bad tag here, should be alias *)
-             let tag = Typedefs.Nom_tag.Record_tag name in
-             Some (Named_tag tag),
+             let tag = Typedefs.Nom_tag.Vtag name in
+             Right tag,
              check_args ~name ~params,
              None
           | Some { name; params; body = Decl_primitive } ->
              let tag = Typedefs.Nom_tag.Record_tag name in
-             Some (Named_tag tag),
+             Left (Some (Named_tag tag)),
              check_args ~name ~params,
              None
           | Some { name; params; body = Decl_record fs } ->
              let tag = Typedefs.Nom_tag.Record_tag name in
-             Some (Named_tag tag),
+             Left (Some (Named_tag tag)),
              check_args ~name ~params,
              Some (tag, fs)
           end
@@ -141,14 +140,16 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
                 Types.Field_extra name, name, ploc, nloc
            in
            let err = Types.make_err env err
-                       (Record {tag; args; body = body}, cploc)
-                       (Record {tag; args; body = fields}, cnloc)
+                       (Record {tag = Some (Named_tag ntag); args; body = body}, cploc)
+                       (Record {tag = Some (Named_tag ntag); args; body = fields}, cnloc)
            in
            fail loc (Conflict (`Field_override (ntag, fn), err))
         end
      | _ -> ()
      end;
-     tcons (Record {tag; args; body}, loc)
+     (match tag with
+      | Left tag -> tcons (Record {tag; args; body}, loc)
+      | Right tag -> tcons (Variant_whole (tag, args), loc))
   | Tfunc (args, res) ->
      tcons (Func (List.map (typ_of_tyexp ~lookup ~env) args, typ_of_tyexp ~lookup ~env res), loc)
   | Tjoin (a, b) ->
