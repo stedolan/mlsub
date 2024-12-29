@@ -628,9 +628,9 @@ and meet_conses ~changes env lvl ~must_freshen (conses_a,loc_a) (conses_b,loc_b)
          else []
       | Variant_whole (tag_a, args_a), Record ({tag = Some (Named_tag (Variant_tag (tag_b, _))) as tag; _} as b)
            when Nom_tag.equal_vtag tag_a tag_b ->
-         (* FIXME: This looks like it can duplicate the Variant_whole. Does it need to freshen? *)
-         fixme;
          let a : _ Cons1.cons_record = {tag; args = args_a; body = Fields.empty} in
+         (* Might be duplicating a *)
+         let a = Cons1.cons_record_map a ~neg:(freshen_neg_lower ~changes env lvl) ~pos:(freshen_neg_flexvar ~changes env lvl) in
          let a, tag, args =
            let neg a b = neg (LR (a, b)) and pos a b = pos (LR (a, b)) in
            a, a.tag, List.map2 (Cons1.Tyarg.zip ~neg ~pos) a.args b.args
@@ -678,8 +678,8 @@ and meet_conses ~changes env lvl ~must_freshen (conses_a,loc_a) (conses_b,loc_b)
 
            | tag, None ->
               assert (b.args = []);
-              fixme; (* freshening bug??? args should be L'd *)
-              a, tag, a.args
+              let neg a = neg (L a) and pos a = pos (L a) in
+              a, tag, List.map (Cons1.Tyarg.map ~neg ~pos) a.args
          in
          let a_def = Cons1.record_def ~env ~shape:Type_shape.simple_neg ~loc:loc_a a in
          let b_def = Cons1.record_def ~env ~shape:match_shape ~loc:loc_b b in

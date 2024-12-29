@@ -601,6 +601,20 @@ fn meet3(x) -> (Option.Some[#A|#B], Option[#A|#C]) { (x,x) }
 > fn meet2(x: Option.Some[#A]) -> (Option[#A | #B], Option.Some[#A | #C]) { (x, x) }
 > fn meet3(x: Option.Some[#A]) -> (Option.Some[#A | #B], Option[#A | #C]) { (x, x) }
 
+# Meet freshening
+{
+type LR[a] { L(a) | R(a) }
+fn either[a](x : LR[a]) { match x { L(x) | R(x) => x } }
+fn swap(x) { match x { LR.L(x) => LR.R(x) | LR.R(x) => LR.L(x) } }
+fn f(x) { let _ = either(x); swap(x) }
+fn f2(x : LR.L[Any] | LR.R[Int]) { f(x) }
+}
+> type LR[+a]{ L(a) | R(a) }
+> fn either[a](x: LR[a]) -> a { match x { L(x) | R(x) => x } }
+> fn swap[a, b](x: LR.L[a] | LR.R[b]) -> (LR.R[a](a) | LR.L[b](b)) { match x { LR.L(x) => LR.R(x) | LR.R(x) => LR.L(x) } }
+> fn f[a, b](x: LR.L[a] | LR.R[b]) -> (LR.R[a](a) | LR.L[b](b)) { let _ : Any = either(x); swap(x) }
+> fn f2(x: LR.L[Any] | LR.R[Int]) -> (LR.R[Any](Any) | LR.L[Int](Int)) { f(x) }
+
 {
 type A {}
 fn f(A.B){}
@@ -662,4 +676,4 @@ fn f() {let x : Box[#A|#B] = Box(#A); x}
 > type Box[+a](a)
 > fn f() -> Box[#A | #B](#A) { let x : Box[#A | #B] = Box(#A); x }
 
-> STATS: fix: 27, flex: 367
+> STATS: fix: 30, flex: 392
