@@ -315,7 +315,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
           let tag = Option.map Cons1.Tag.unchecked_tag tag in
           let cp = tcons (Cons1.Record {tag; args=[]; body}, eloc) in
           let ty =
-            let conses = List.map (fun (c,l) -> Cons1.map ~neg:tunit ~pos:tunit c, l) conses in
+            let conses = Conses.map conses ~neg:tunit ~pos:tunit in
             (conses, rvs, tyloc)
           in
           let err = make_err' env (Head err) (cp,eloc) (Tcvj ty, Option.value tyloc ~default:eloc) in
@@ -435,7 +435,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
                    args = []; (* FIXME *)
                    body = {
                        fields = FieldMap.singleton field (Fields.Fpresent (r, loc));
-                       fnames = [field]} }]
+                       fnames = [field]} }, eloc]
        with
        | Ok () -> !r
        | Error c -> fail eloc (Conflict (`Expr, c)) in
@@ -545,7 +545,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      let tyargs = List.map (fun _ -> ref (tcons (Top, Location.noloc))) args in
      let tyret = ref (tbot None) in
      let () =
-       match match_ptyp ~loc:eloc env fty [Func (tyargs, tyret)] with
+       match match_ptyp ~loc:eloc env fty [Func (tyargs, tyret), eloc] with
        | Ok () -> ()
        | Error e -> fail eloc (Conflict (`Expr, e)) in
      (* FIXME: don't ignore param names *)

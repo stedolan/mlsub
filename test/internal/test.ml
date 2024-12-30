@@ -50,7 +50,7 @@ let fresh_flow lvl =
 let match_as_fn env f =
   let arg = ref (tcons (Top, Location.noloc)) in
   let ret = ref (tbot None) in
-  match_ptyp ~loc:Location.noloc env f [func [arg] ret]
+  match_ptyp ~loc:Location.noloc env f [func [arg] ret, noloc]
   |> function Ok () -> !arg, !ret
             | _ -> assert false
 

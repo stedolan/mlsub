@@ -283,7 +283,7 @@ let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
                   if ext = Ext_open then
                     Error.fail loc (Illformed_pat `Unknown_fields);
                   let tybody, split = split_fields fields in
-                  Cons1.Record {tag = Some tag; args = []; body = tybody},
+                  (Cons1.Record {tag = Some tag; args = []; body = tybody}, loc),
                   (tag, split)
                | Named_tag name ->
                   (* FIXME: check whether invariant params need to be
@@ -299,7 +299,7 @@ let split_type ~env ~matchloc (t : ptyp) (kind : split_kind) : split_type =
                   let fields, split = split_fields fields in
                   let cons : _ Cons1.cons_record =
                     { tag = Some tag; args; body = Fields.empty } in
-                  Cons1.Record cons,
+                  (Cons1.Record cons, loc),
                   (tag, (fun () ->
                     let cons = Cons1.cons_record_map ~neg:(!) ~pos:(!) cons in
                     check_fields ~env ~loc (cons,Nom_tag.loc name) (fields, ext);

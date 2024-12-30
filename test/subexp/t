@@ -1330,4 +1330,4 @@ fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 >   fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 >                                        ^^^^^^^^^^^^^^
 
-> STATS: fix: 94, flex: 1795
+> STATS: fix: 94, flex: 1791

@@ -437,10 +437,11 @@ module Cons1 = struct
 end
 
 module Conses = struct
-  type ('neg,'pos) t = ('neg,'pos) Cons1.t list
-  type ('neg,'pos) tloc = ('neg,'pos) Cons1.t loc list
-  let map ~neg ~pos (t : _ t) : _ t = List.map (Cons1.map ~neg ~pos) t
-  let map_loc ~neg ~pos (t : _ tloc) : _ tloc = List.map (fun (c,l) -> Cons1.map c ~neg ~pos, l) t
+  type ('neg,'pos) t = ('neg,'pos) Cons1.t loc list
+  let map ~neg ~pos (t : _ t) : _ t = List.map (fun (c,l) -> Cons1.map c ~neg ~pos, l) t
+  let is_top : _ t -> bool = function
+    | [Top, _] -> true
+    | _ -> false
 end
 
 
@@ -527,7 +528,7 @@ and upper =
 
 and upper_gen =
   (* Interpretation: (conses | (rv & rv_c)) & higher_fvs *)
-  { conses: (lower, flexvar) Cons1.t list Location.loc;
+  { conses: (lower, flexvar) Conses.t loc;
     rvs: upper_rigvar list;
     higher_fvs: flexvar list }
 
@@ -535,12 +536,10 @@ and upper_rigvar =
   (* (a & C), for rv a and cons type C.
      If we learn that a <= C, we can delete C as then a & C = a. *)
   { urv_var : rigvar;
-    urv_conses : (lower, flexvar) Cons1.t list Location.loc;
+    urv_conses : (lower, flexvar) Conses.t loc;
     (* When urv_var <= urv_conses is known, this is Some rv.
        rv must be equal to urv_var, but is kept for its location *)
     urv_ordered : rigvar option ref }
-
-and rigvar_constraint = (lower, flexvar) Cons1.t list
 
 (* Temporary structure used during generalisation *)
 and flexvar_gen_visit_counts = { mutable pos : int; mutable neg : int }
@@ -588,7 +587,7 @@ type (+'neg, +'pos) typ =
   | Tcvj of ('neg, 'pos) tcvj
   (* No Tpoly allowed under a join involving vars *)
   | Tpoly of ('neg, 'pos) poly_typ
-and (+'neg, +'pos) cons_typ = (('pos, 'neg) typ, ('neg, 'pos) typ) Cons1.t Location.loc
+and (+'neg, +'pos) conses_typ = (('pos, 'neg) typ, ('neg, 'pos) typ) Conses.t
 and (+'neg, +'pos) poly_typ =
   { (* names must be distinct *)
     (* bound must be a constructed type, possibly joined with some rigid/bound vars *)
@@ -596,7 +595,7 @@ and (+'neg, +'pos) poly_typ =
     body : ('neg, 'pos) typ }
 
 and ('neg,'pos) tcvj =
-  ('neg, 'pos) cons_typ list * typ_var list * Location.t option
+  ('neg, 'pos) conses_typ * typ_var list * Location.t option
 
 let tbot loc = Tcvj ([], [], loc)
 let ttop loc = Tcvj ([Top, loc], [], Some loc)
@@ -821,7 +820,7 @@ let rec equal_lower (p : lower) (q : lower) =
 
 let equal_upper_rigvar (p : upper_rigvar) (q : upper_rigvar) =
   equal_rigvar p.urv_var q.urv_var &&
-  List.equal (Cons1.equal ~neg:equal_lower ~pos:equal_flexvar) (fst p.urv_conses) (fst q.urv_conses)
+  List.equal (fun (p,_) (q,_) -> Cons1.equal ~neg:equal_lower ~pos:equal_flexvar p q) (fst p.urv_conses) (fst q.urv_conses)
 
 let equal_upper (p : upper) (q : upper) =
   match p, q with
@@ -829,7 +828,7 @@ let equal_upper (p : upper) (q : upper) =
   | Uflexvar pv, Uflexvar qv -> equal_flexvar pv qv
   | Ugen {conses=(pc,_); rvs=prvs; higher_fvs=pv},
     Ugen {conses=(qc,_); rvs=qrvs; higher_fvs=qv} ->
-     List.equal (Cons1.equal ~neg:equal_lower ~pos:equal_flexvar) pc qc &&
+     List.equal (fun (a,_) (b,_) -> Cons1.equal ~neg:equal_lower ~pos:equal_flexvar a b) pc qc &&
      List.equal equal_upper_rigvar prvs qrvs &&
      List.equal equal_flexvar pv qv
   | _, _ -> false
@@ -1068,10 +1067,10 @@ let rec wf_flexvar ~seen env lvl (fv : flexvar) =
   end
 
 and wf_conses ~neg ~pos cs =
-  cs |> List.iter (fun c ->
+  cs |> List.iter (fun (c,_) ->
     Cons1.map c ~neg ~pos |> ignore);
-  cs |> List.iteri (fun i c ->
-    cs |> List.iteri (fun j d ->
+  cs |> List.iteri (fun i (c,_) ->
+    cs |> List.iteri (fun j (d,_) ->
       if i < j then assert (Cons1.incomparable_head c d)))
 
 and wf_upper ~seen env lvl = function
@@ -1355,11 +1354,11 @@ and unparse_lower ~env ~flexvar l =
 let unparse_upper ~env ~flexvar = function
   | Utop -> []
   | Uflexvar v -> [unparse_flexvar ~env ~flexvar v]
-  | Ugen {conses=([Top], _loc); rvs=[]; higher_fvs=[]} -> []
+  | Ugen {conses=([Top,_], _loc); rvs=[]; higher_fvs=[]} -> []
   | Ugen {conses=(conses,_loc); rvs; higher_fvs} ->
      let conses =
-       conses |> List.map (fun c ->
-         unparse_cons (c, ())
+       conses |> List.map
+         (unparse_cons
            ~neg:(unparse_lower ~env ~flexvar)
            ~pos:(unparse_flexvar ~env ~flexvar))
      in

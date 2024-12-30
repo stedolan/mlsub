@@ -115,11 +115,9 @@ let rec map_typ_0 : 'neg1 'pos1 'neg2 'pos2 .
   fun ~neg ~pos ~index -> function
   | Tcvj (conses, vars, loc) ->
      let conses =
-       conses |> List.map (fun (c, cloc) ->
-         Cons1.map c
-           ~neg:(map_typ_0 ~pos:neg ~neg:pos ~index)
-           ~pos:(map_typ_0 ~neg ~pos ~index),
-         cloc)
+       Conses.map conses
+         ~neg:(map_typ_0 ~pos:neg ~neg:pos ~index)
+         ~pos:(map_typ_0 ~neg ~pos ~index)
      in
      Tcvj (conses, vars, loc)
   | Tsimple t -> pos ~index t
@@ -147,7 +145,7 @@ let as_rigvar = function
 
 let upper_rigvar rv =
   { urv_var = rv;
-    urv_conses = ([Top],rv.loc) (*FIXME location?*);
+    urv_conses = ([Top,rv.loc],rv.loc) (*FIXME location?*);
     urv_ordered = ref (Some rv) }
 
 let rec instantiate_flex env vars (body : ptyp) : ptyp =
@@ -191,10 +189,9 @@ and ntyp_to_upper ~simple env : ntyp -> upper = function
   | t when is_ttop t -> Utop
   | Tcvj (conses, vars, loc) ->
      let conses =
-       conses |> List.map (fun (cons, _loc) ->
-         (Cons1.map cons
-            ~neg:(ptyp_to_lower ~simple env)
-            ~pos:(ntyp_to_fresh_flexvar ~simple env)))
+       Conses.map conses
+         ~neg:(ptyp_to_lower ~simple env)
+         ~pos:(ntyp_to_fresh_flexvar ~simple env)
      in
      let rvs = List.map (fun v -> upper_rigvar (as_rigvar v)) vars in
      let loc = Option.value loc ~default:Location.(fixme "neg loc") in
@@ -452,21 +449,20 @@ let subtype_record_body ~env ~shape_a ~shape_b ~neg ~pos ((a : _ Cons1.cons_reco
   Fields.sub ~f:sub_field (a.body,a_def) (b.body,b_def)
 
 let subtype_conses ~cnvars env ~shape_a ~shape_b ~neg ~pos (cp,cploc) (cns,cnloc) =
-  let wrap_err cp cn k err = wrap_cons_err (cp, cploc) (cn, cnloc) k err in
   let neg cp cn k a b =
     try neg a b
-    with SubtypeError err -> raise (SubtypeError (wrap_err cp cn k err))
+    with SubtypeError err -> raise (SubtypeError (wrap_cons_err cp cn k err))
   in
   let pos cp cn k a b =
     try pos a b
-    with SubtypeError err -> raise (SubtypeError (wrap_err cp cn k err))
+    with SubtypeError err -> raise (SubtypeError (wrap_cons_err cp cn k err))
   in
   let conflict () =
     let conflict : head_conflict =
       match cp with
       | Cons1.Func (pargs, _) ->
          begin match cns |> List.filter_map (function
-           | Cons1.Func (args,_) -> Some (List.length args)
+           | Cons1.Func (args,_), _ -> Some (List.length args)
            | _ -> None)
          with
          | [n] when List.length pargs < n -> Args `Too_many
@@ -476,7 +472,7 @@ let subtype_conses ~cnvars env ~shape_a ~shape_b ~neg ~pos (cp,cploc) (cns,cnloc
          end
       | Cons1.Record {tag=ptag; _} ->
          begin match cns |> List.filter_map (function
-           | Cons1.Record {tag=Some t;_} -> Some t
+           | Cons1.Record {tag=Some t;_}, _ -> Some t
            | _ -> None) with
          | [] -> Incompatible
          | tags -> Expected_tag (Option.map Cons1.Tag.unparse ptag, tags)
@@ -487,24 +483,25 @@ let subtype_conses ~cnvars env ~shape_a ~shape_b ~neg ~pos (cp,cploc) (cns,cnloc
       let lhs = tcons_head (cp, cploc) in
       let err = Head conflict in
       let tunit _ = Tsimple () in
-      let cns = List.map (fun c -> Cons1.map c ~neg:tunit ~pos:tunit, cnloc) cns in
+      let cns = Conses.map ~neg:tunit ~pos:tunit cns in
       let rvs = List.map (fun v -> Vrigid v) cnvars in
       let rhs = Tcvj (cns, rvs, Some cnloc) in
       make_err' env err (lhs, cploc) (rhs, cnloc)
     in
     raise (SubtypeError err)
   in
-  let rec go cp cns =
-    match (cp : _ Cons1.t), (cns : _ Cons1.t list) with
+  let rec go (cp : _ Cons1.t loc) (cns : _ Cons1.t loc list) =
+    let cp', cploc = cp in
+    match cp', cns with
     | _, [] ->
        conflict ()
-    | _, Top::_ -> ()
-    | Func (pargs, pret), (Func (qargs, qret) as cn) :: _
+    | _, (Top,_)::_ -> ()
+    | Func (pargs, pret), (Func (qargs, qret), _ as cn) :: _
          when List.compare_lengths pargs qargs = 0 ->
        List.combine qargs pargs
        |> List.iteri (fun i (a', a) -> neg cp cn (Func_arg i) a' a);
        pos cp cn Cons1.Func_res pret qret;
-    | Record ({tag=ptag; _} as prec), (Record ({tag=qtag; _} as qrec) as cn):: _
+    | Record ({tag=ptag; _} as prec), (Record ({tag=qtag; _} as qrec), cnloc as cn):: _
          when Option.is_none qtag || Option.equal Cons1.Tag.equal ptag qtag ->
        begin match
          subtype_record_body ~env ~shape_a ~shape_b ~neg:(neg cp cn) ~pos:(pos cp cn) (prec,cploc) (qrec,cnloc)
@@ -514,26 +511,27 @@ let subtype_conses ~cnvars env ~shape_a ~shape_b ~neg ~pos (cp,cploc) (cns,cnloc
           let err =
             match err with
             | Field_missing (name, ploc, nloc) ->
-               make_err env (Field_missing name) (cp, ploc) (cn, nloc)
+               make_err env (Field_missing name) (fst cp, ploc) (fst cn, nloc)
             | Field_extra (name, ploc, nloc) ->
-               make_err env (Field_extra name) (cp, ploc) (cn, nloc)
+               make_err env (Field_extra name) (fst cp, ploc) (fst cn, nloc)
           in
           raise (SubtypeError err)
        end
-    | Variant_whole (tag, args), (Variant_whole (tag', args') as cn) :: _
+    | Variant_whole (tag, args), (Variant_whole (tag', args'), _ as cn) :: _
          when Nom_tag.equal_vtag tag tag' ->
        subtype_record_args ~neg:(neg cp cn) ~pos:(pos cp cn) args args'
-    | Variant_whole (tag, args), ((Record {tag=Some (Named_tag (Variant_tag (s,_))); _}) :: _ as cns)
+    | Variant_whole (tag, args), ((Record {tag=Some (Named_tag (Variant_tag (s,_))); _}, _) :: _ as cns)
          when Nom_tag.equal_vtag tag s ->
        Cons1.expand_variant ~env tag args
-       |> List.iter (fun case -> go case cns)
-    | Record {tag=Some (Named_tag (Variant_tag (vtag,_))) as tag;_}, Variant_whole (vtag', args) :: cns
+       |> List.iter (fun case -> go (case,cploc) cns)
+    | Record {tag=Some (Named_tag (Variant_tag (vtag,_))) as tag;_},
+      (Variant_whole (vtag', args), cnloc) :: cns
         when Nom_tag.equal_vtag vtag vtag' ->
-       go cp (Record {tag; args; body=Fields.empty} :: cns)
-    | cp, (Func _|Record _|Variant_whole _) :: cns ->
+       go cp ((Record {tag; args; body=Fields.empty}, cnloc) :: cns)
+    | _, ((Func _|Record _|Variant_whole _),_) :: cns ->
        go cp cns
   in
-  go cp cns
+  go (cp,cploc) cns
 
 let lower_contains_fv fv lower =
   List.exists (function
@@ -543,7 +541,7 @@ let lower_contains_fv fv lower =
 
 let rigid_bound_simple env rv =
   Env.rigid_bound env rv
-  |> Conses.map_loc ~neg:(ntyp_to_fresh_flexvar ~simple:true env) ~pos:(ptyp_to_lower ~simple:true env)
+  |> Conses.map ~neg:(ntyp_to_fresh_flexvar ~simple:true env) ~pos:(ptyp_to_lower ~simple:true env)
 
 let lower_of_rigid_bound env rv : lower =
   rigid_bound_simple env rv
@@ -560,7 +558,7 @@ let rec has_flex_upper (pv : flexvar) nv =
   | Ugen {conses=_; rvs=_; higher_fvs} -> List.memq nv higher_fvs
   | Utop -> false
 
-type (+'neg,+'pos) upper_cons = ('neg,'pos) Cons1.t list * upper_rigvar list
+type (+'neg,+'pos) upper_cons = ('neg,'pos) Cons1.t loc list * upper_rigvar list
 
 let upper_find_rv rv (rvs : upper_rigvar list) =
   match
@@ -572,11 +570,6 @@ let upper_find_rv rv (rvs : upper_rigvar list) =
   | _ :: _ :: _ -> intfail "duplicate RV in upper_cons"
   | [ds] -> Ok ds
   | [] -> Error ()
-
-let cons_is_top (cn : _ Cons1.t list) =
-  match cn with
-  | [Top] -> true
-  | _ -> false
 
 
 (* To preserve matchability, negative variables which are being duplicated need to be freshened *)
@@ -590,104 +583,92 @@ and freshen_neg_flexvar ~changes env lvl v =
 (* conses_a assumed matchable (unless must_freshen) and wf at lvl,
    conses_b may need hoisting *)
 and meet_conses ~changes env lvl ~must_freshen (conses_a,loc_a) (conses_b,loc_b) =
-  let cons_decreased = ref false in
   let match_shape = match_shape ~changes ~env in
-  let freshen_neg l = if must_freshen then freshen_neg_lower ~changes env lvl l else l in
-  let freshen_pos v = if must_freshen then freshen_neg_flexvar ~changes env lvl v else v in
-  let neg = let open One_or_two in function
-    | L x -> freshen_neg x
+  (* When a term from conses_a is duplicated (has meets with two conses_b),
+     we need to freshen its matchable variables *)
+  let neg ?(dup=false) x =
+    let freshen l =
+      if must_freshen || dup then freshen_neg_lower ~changes env lvl l else l
+    in
+    match (x : _ One_or_two.t) with
+    | L x -> freshen x
     | R r -> join_lower ~changes env lvl bottom r
-    | LR (x, r) -> join_lower ~changes env lvl (freshen_neg x) r
+    | LR (x, r) -> join_lower ~changes env lvl (freshen x) r
   in
-  let pos = let open One_or_two in function
-    | L x -> freshen_pos x
+  let pos ?(dup=false) x =
+    let freshen v =
+      if must_freshen || dup then freshen_neg_flexvar ~changes env lvl v else v
+    in
+    match (x : _ One_or_two.t) with
+    | L x -> freshen x
     | R r -> let v = fresh_flexvar lvl in r [Lflexvar v]; v
-    | LR (v, r) -> let v = freshen_pos v in r [Lflexvar v]; v
+    | LR (v, r) -> let v = freshen v in r [Lflexvar v]; v
   in
-  let ret =
-  conses_a |> List.concat_map (fun (cons_a : _ Cons1.t) ->
-    conses_b |> List.concat_map (fun (cons_b : _ Cons1.t) ->
+  let meet_records ?(dup=false) ((a,a_loc) : _ Cons1.cons_record loc) ((b,b_loc) : _ Cons1.cons_record loc)
+      : _ Cons1.cons_record loc =
+    let dup, loc, tag, args =
+      match a.tag, b.tag with
+      | None, Some tag ->
+         let dup = true in
+         let args =
+           let neg a = neg ~dup (R a) and pos a = pos ~dup (R a) in
+           List.map (Cons1.Tyarg.map ~neg ~pos) b.args
+         in
+         dup, b_loc, Some tag, args
+
+      | Some ta, Some tb ->
+         assert (Cons1.Tag.equal ta tb);
+         let neg a b = neg ~dup (LR (a, b)) and pos a b = pos ~dup (LR (a, b)) in
+         dup, a_loc, Some ta, List.map2 (Cons1.Tyarg.zip ~neg ~pos) a.args b.args
+
+      | tag, None ->
+         assert (b.args = []);
+         let neg a = neg ~dup (L a) and pos a = pos ~dup (L a) in
+         dup, a_loc, tag, List.map (Cons1.Tyarg.map ~neg ~pos) a.args
+    in
+    let a_def = Cons1.record_def ~env ~shape:Type_shape.simple_neg ~loc:loc_a a in
+    let b_def = Cons1.record_def ~env ~shape:match_shape ~loc:loc_b b in
+    let body = Fields.meet ~pos:(pos ~dup) (a.body, a_def) (b.body, b_def) in
+    { tag; args; body }, loc
+  in
+  conses_a |> List.concat_map (fun ((cons_a : _ Cons1.t), cons_a_loc) ->
+    conses_b |> List.concat_map (fun ((cons_b : _ Cons1.t), cons_b_loc) ->
       match cons_a, cons_b with
       | cons_a, Top ->
-         [cons_a]
+         [cons_a, cons_a_loc]
       | Top, cons_b ->
-         cons_decreased := true;
-         [Cons1.map cons_b ~neg:(fun x -> neg (R x)) ~pos:(fun x -> pos (R x))]
+         [Cons1.map cons_b ~neg:(fun x -> neg (R x)) ~pos:(fun x -> pos (R x)), cons_b_loc]
       | (Record _ | Variant_whole _), Func _ | Func _, (Record _ | Variant_whole _) -> []
 
       | Func (args, _), Func (args', _) when List.compare_lengths args args' <> 0 -> []
       | Func (args, res), Func (args', res') ->
          let args = List.map2 (fun x y -> neg (LR (x,y))) args args' in
          let res = pos (LR (res, res')) in
-         [Func (args, res)]
+         [Func (args, res), cons_a_loc]
 
       | Variant_whole (tag_a, args_a), Variant_whole (tag_b, args_b) ->
          if Nom_tag.equal_vtag tag_a tag_b then
            let neg a b = neg (LR (a, b)) and pos a b = pos (LR (a, b)) in
-           [Variant_whole (tag_a, List.map2 (Cons1.Tyarg.zip ~neg ~pos) args_a args_b)]
+           [Variant_whole (tag_a, List.map2 (Cons1.Tyarg.zip ~neg ~pos) args_a args_b), cons_a_loc]
          else []
       | Variant_whole (tag_a, args_a), Record ({tag = Some (Named_tag (Variant_tag (tag_b, _))) as tag; _} as b)
            when Nom_tag.equal_vtag tag_a tag_b ->
          let a : _ Cons1.cons_record = {tag; args = args_a; body = Fields.empty} in
-         (* Might be duplicating a *)
-         let a = Cons1.cons_record_map a ~neg:(freshen_neg_lower ~changes env lvl) ~pos:(freshen_neg_flexvar ~changes env lvl) in
-         let a, tag, args =
-           let neg a b = neg (LR (a, b)) and pos a b = pos (LR (a, b)) in
-           a, a.tag, List.map2 (Cons1.Tyarg.zip ~neg ~pos) a.args b.args
-         in
-         let a_def = Cons1.record_def ~env ~shape:Type_shape.simple_neg ~loc:loc_a a in
-         let b_def = Cons1.record_def ~env ~shape:match_shape ~loc:loc_b b in
-         let body = Fields.meet ~pos (a.body, a_def) (b.body, b_def) in
-         [Record {tag; args; body}]
+         let r, loc = meet_records ~dup:true (a, cons_a_loc) (b, cons_b_loc) in
+         [Record r, loc]
       | Record ({tag = Some (Named_tag (Variant_tag (tag_a, _))) as tag;_} as a), Variant_whole (tag_b, args_b)
            when Nom_tag.equal_vtag tag_a tag_b ->
          let b : _ Cons1.cons_record = {tag; args=args_b; body=Fields.empty} in
-         let a, tag, args =
-           let neg a b = neg (LR (a, b)) and pos a b = pos (LR (a, b)) in
-           a, a.tag, List.map2 (Cons1.Tyarg.zip ~neg ~pos) a.args b.args
-         in
-         let a_def = Cons1.record_def ~env ~shape:Type_shape.simple_neg ~loc:loc_a a in
-         let b_def = Cons1.record_def ~env ~shape:match_shape ~loc:loc_b b in
-         let body = Fields.meet ~pos (a.body, a_def) (b.body, b_def) in
-         [Record {tag; args; body}]
+         let r, loc = meet_records (a, cons_a_loc) (b, cons_b_loc) in
+         [Record r, loc]
       | Record _, Variant_whole _ | Variant_whole _, Record _ ->
          []
 
       | Record {tag=Some a;_}, Record{tag=Some b;_} when not (Cons1.Tag.equal a b) -> []
       | Record a, Record b ->
-         let a, tag, args =
-           match a.tag, b.tag with
-           | None, Some tag ->
-              cons_decreased := true;
-              let a =
-                (* Might be duplicating a *)
-                Cons1.cons_record_map a
-                  ~neg:(freshen_neg_lower ~changes env lvl)
-                  ~pos:(freshen_neg_flexvar ~changes env lvl)
-              in
-              let args =
-                let neg a = neg (R a) and pos a = pos (R a) in
-                List.map (Cons1.Tyarg.map ~neg ~pos) b.args
-              in
-              a, Some tag, args
-
-           | Some ta, Some tb ->
-              assert (Cons1.Tag.equal ta tb);
-              let neg a b = neg (LR (a, b)) and pos a b = pos (LR (a, b)) in
-              a, Some ta, List.map2 (Cons1.Tyarg.zip ~neg ~pos) a.args b.args
-
-           | tag, None ->
-              assert (b.args = []);
-              let neg a = neg (L a) and pos a = pos (L a) in
-              a, tag, List.map (Cons1.Tyarg.map ~neg ~pos) a.args
-         in
-         let a_def = Cons1.record_def ~env ~shape:Type_shape.simple_neg ~loc:loc_a a in
-         let b_def = Cons1.record_def ~env ~shape:match_shape ~loc:loc_b b in
-         let body = Fields.meet ~pos (a.body, a_def) (b.body, b_def) in
-         [Record {tag; args; body}]))
-  in
-  let loc = if !cons_decreased || loc_a == Location.noloc then loc_b else loc_a in
-  ret, loc
+         let r, loc = meet_records (a, cons_a_loc) (b, cons_b_loc) in
+         [Record r, loc])),
+  (if loc_a == Location.noloc then loc_b else loc_a)
 
 and match_shape ~changes ~env : (lower, lower -> unit, lower, flexvar) Type_shape.t =
   { of_typ_pos = (fun ~env t -> fun l -> subtype_lu ~changes env l (ntyp_to_upper ~simple:false env t));
@@ -700,7 +681,7 @@ and match_sub ~changes ~env ~loc:cnloc (p : lower_part) ((cn_conses, cn_rvs) : (
   let cnvars () =
     cn_rvs |> List.filter_map (fun urv -> !(urv.urv_ordered))
   in
-  if cons_is_top cn_conses then ()
+  if Conses.is_top cn_conses then ()
   else match p with
   | Lrigvar rv ->
      begin match upper_find_rv rv cn_rvs with
@@ -844,18 +825,18 @@ and rotate_flex ~changes env (pv : flexvar) : upper_gen =
   match pv.upper with
   | Ugen c -> c
   | Utop ->
-     let c = { conses = ([Top], Location.noloc); rvs = []; higher_fvs = [] } in
+     let c = { conses = ([Top, Location.noloc], Location.noloc); rvs = []; higher_fvs = [] } in
      fv_set_upper ~changes pv (Ugen c);
      assert (equal_upper pv.upper (Ugen c));
      c
   | Uflexvar v' when Env_level.equal v'.level pv.level ->
-     let c = { conses = ([Top], Location.noloc); rvs = []; higher_fvs = [] } in
+     let c = { conses = ([Top, Location.noloc], Location.noloc); rvs = []; higher_fvs = [] } in
      fv_set_upper ~changes pv (Ugen c);
      noerror (fun () -> subtype_flex_flex ~changes env pv v'); (*FIXME: impl directly?*)
      (* upper may have changed, retry *)
      rotate_flex ~changes env pv
   | Uflexvar v' ->
-     let c = { conses =([Top], Location.noloc); rvs = []; higher_fvs = [v'] } in
+     let c = { conses =([Top, Location.noloc], Location.noloc); rvs = []; higher_fvs = [v'] } in
      fv_set_upper ~changes pv (Ugen c);
      assert (equal_upper pv.upper (Ugen c));
      c
@@ -1018,7 +999,7 @@ let check_simple t =
     | Tpoly _ -> raise Exit
     | Tcvj (_, _ :: _, _cloc) -> () (* by invariant *)
     | Tcvj (c, [], _cloc) ->
-       c |> List.iter (fun (c,_) -> Cons1.map ~neg:aux ~pos:aux c |> ignore)
+       ignore (Conses.map c ~neg:aux ~pos:aux)
   in
   match aux t with
   | () -> true
@@ -1073,7 +1054,7 @@ let rec subtype_exn env (p : ptyp) (n : ntyp) =
          ~shape_a:Type_shape.gen_pos
          ~shape_b:Type_shape.gen_neg
          ~neg:(subtype_exn env) ~pos:(subtype_exn env)
-         cp (List.map fst cns,Option.value nloc ~default:(Location.fixme "subtype_exn")));
+         cp (cns,Option.value nloc ~default:(Location.fixme "subtype_exn")));
      vp |> List.iter (fun vp ->
        if not (List.exists (equal_typ_var vp) vn) then
          subtype_lu ~changes:(ref []) env [Lrigvar (as_rigvar vp)] (ntyp_to_upper ~simple:false env n));
@@ -1140,7 +1121,7 @@ let meet_ntyp env (p : ntyp) (q : ntyp) : ntyp =
      subtype_lpu ~changes:(ref []) env (Lflexvar v) (ntyp_to_upper ~simple:false env q);
      Tsimple v
 
-let rec match_ptyp ~loc env (p : ptyp) (heads : (ntyp->unit, ptyp->unit) Cons1.t list) =
+let rec match_ptyp ~loc env (p : ptyp) (heads : (ntyp->unit, ptyp->unit) Cons1.t loc list) =
   let match_shape : (ntyp->unit, ptyp->unit, lower, flexvar) Type_shape.t =
     { of_typ_pos = (fun ~env (n:ntyp) -> fun p -> subtype_exn env p n);
       of_typ_neg = (fun ~env (p:ptyp) -> fun n -> subtype_exn env p n);
@@ -1170,11 +1151,10 @@ let rec match_ptyp ~loc env (p : ptyp) (heads : (ntyp->unit, ptyp->unit) Cons1.t
      |> List.iter (fun l -> match_sub ~changes:(ref []) ~env ~loc l (shead,[]))
 
 let match_ptyp ~loc env ty heads =
-  let heads = List.map (fun cons ->
-    let cons = Cons1.map cons
+  let heads =
+    Conses.map heads
       ~neg:(fun r -> fun t -> r := meet_ntyp env !r t)
       ~pos:(fun r -> fun t -> r := join_ptyp env !r t)
-    in cons) heads
   in
   match match_ptyp ~loc env ty heads with
   | () -> Ok ()
@@ -1198,11 +1178,11 @@ let rec clearly_subtype env (a : flexvar) (b : lower) : bool =
   | Uflexvar a -> clearly_subtype env a b
   | Ugen {higher_fvs = fvs; _} when
      List.exists (fun a' -> clearly_subtype env a' b) fvs -> true
-  | Ugen {conses=(conses,cnloc); rvs; higher_fvs=_} ->
-     let b_cons = b |> List.filter_map (function Lcons (b,_loc) -> Some b | _ -> None) in
+  | Ugen {conses=(conses,_); rvs; higher_fvs=_} ->
+     let b_cons = b |> List.filter_map (function Lcons b -> Some b | _ -> None) in
      let sub a b = if not (clearly_subtype env a b) then raise Exit in
      (conses |> List.for_all (fun a ->
-     match subtype_conses ~cnvars:[] env ~shape_a:Type_shape.simple_neg ~shape_b:Type_shape.simple_pos ~neg:sub ~pos:sub (a,cnloc) (b_cons,Location.noloc) with
+     match subtype_conses ~cnvars:[] env ~shape_a:Type_shape.simple_neg ~shape_b:Type_shape.simple_pos ~neg:sub ~pos:sub a (b_cons,Location.noloc) with
      | () -> true
      | exception (Exit | SubtypeError _) -> false))
     &&
@@ -1221,7 +1201,7 @@ let rec clearly_subtype_typ env (a : _ typ) (b : _ typ) : bool =
      &&
      cons_a |> List.for_all (fun a ->
        let sub a b = if not (clearly_subtype_typ env a b) then raise Exit in
-       match subtype_conses ~cnvars:[] env ~shape_a:Type_shape.gen_neg ~shape_b:Type_shape.gen_pos ~neg:sub ~pos:sub a (List.map fst cons_b,Location.noloc) with
+       match subtype_conses ~cnvars:[] env ~shape_a:Type_shape.gen_neg ~shape_b:Type_shape.gen_pos ~neg:sub ~pos:sub a (cons_b,Location.noloc) with
        | () -> true
        | exception (Exit | SubtypeError _) -> false)
   | (Tsimple _ | Tcvj _), (Tsimple _ | Tcvj _) ->
@@ -1254,7 +1234,7 @@ let rec clearly_subtype_bounds env (a : (unit,unit) typ) (b : (unit,unit) typ) :
      &&
      cons_a |> List.for_all (fun a ->
        let sub a b = if not (clearly_subtype_bounds env a b) then raise Exit in
-       match subtype_conses ~cnvars:[] env ~shape_a:Type_shape.gen_unit ~shape_b:Type_shape.gen_unit ~neg:sub ~pos:sub a (List.map fst cons_b,Location.noloc) with
+       match subtype_conses ~cnvars:[] env ~shape_a:Type_shape.gen_unit ~shape_b:Type_shape.gen_unit ~neg:sub ~pos:sub a (cons_b,Location.noloc) with
        | () -> true
        | exception (Exit | SubtypeError _) -> false)
   | Tpoly _, _ | _, Tpoly _ -> intfail "Tpoly in rv bounds"
@@ -1509,12 +1489,12 @@ and promote_upper :
   | u ->
      let conses, loc, rvs, vars =
        match u with
-       | Utop -> [Cons1.Top], Location.noloc, [], []
-       | Uflexvar v -> [Cons1.Top], Location.noloc, [], [v]
-       | Ugen {conses=(conses,loc);rvs;higher_fvs}  -> conses, loc, rvs, higher_fvs
+       | Utop -> [Cons1.Top, Location.noloc], Location.noloc, [], []
+       | Uflexvar v -> [Cons1.Top, Location.noloc], Location.noloc, [], [v]
+       | Ugen {conses=(conses,loc);rvs;higher_fvs} -> conses, loc, rvs, higher_fvs
      in
      let conses =
-       conses |> List.map (fun c ->
+       conses |> List.map (fun (c,loc) ->
          let c = Cons1.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s) c in
          trim_overrides s (c,loc))
      in
@@ -1529,8 +1509,8 @@ and promote_upper :
                Otherwise, set to bottom (sound but not principal!)*)
             let ignore_simple t = map_typ_1 ~neg:ignore ~pos:ignore ~index:0 t in
             let bound = ptyp_of_rigid_bound s.env rv in
-            let conses = List.map (Cons1.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s)) conses in
-            let cons_ty = Tcvj (List.map (fun c -> c,loc) conses, [], Some loc) in
+            let conses = Conses.map conses ~neg:(promote_lower s) ~pos:(promote_fv_neg s) in
+            let cons_ty = Tcvj (conses, [], Some loc) in
             if clearly_subtype_bounds s.env (ignore_simple bound) (ignore_simple cons_ty)
             then Some (promote_rigvar s rv)
             else None)
