@@ -393,8 +393,8 @@ fn q(a) {Box(a)}
 fn r(c,a,b) {Box(if c {a} else {b})}
 }
 > type Box[+a](a)
-> fn p() -> Box[#A](#A) { Box(#A) }
-> fn q[a](a: a) -> Box[a](a) { Box(a) }
+> fn p() -> Box[#A] { Box(#A) }
+> fn q[a](a: a) -> Box[a] { Box(a) }
 > fn r[a](c: Bool, a: a, b: a) -> Box[a] { Box(if c { a } else { b }) }
 
 # error messages
@@ -458,7 +458,7 @@ fn meet(x) { ((x : Foo), (x : Foo{p:Any})) }
 }
 > type Foo{p: Int}
 > fn f(p: Any) -> (Foo{p: Any}) { Foo{p} }
-> fn sub_same(x: Foo) -> (Foo{p: Int}) { x }
+> fn sub_same(x: Foo) -> Foo { x }
 > fn mk[a](x: a) -> (Foo{p: a}) { Foo{p: x} }
 > fn sub(x: Int) -> Foo { mk(x) }
 > fn join[a](x: a) -> (Foo{p: Int | a}) { if true { Foo{p: 5} } else { mk(x) } }
@@ -472,7 +472,7 @@ fn use(x: Box[Int]) { x }
 fn app(x) { use(box(x)) }
 }
 > type Box[+a](a)
-> fn box[a](x: a) -> Box[a](a) { Box(x) }
+> fn box[a](x: a) -> Box[a] { Box(x) }
 > fn use(x: Box[Int]) -> Box[Int] { x }
 > fn app(x: Int) -> Box[Int] { use(box(x)) }
 
@@ -551,7 +551,7 @@ fn g() { (f({foo: Some(fn(x){x}), bar:None}), Option.Some(true)) }
 >     | Z{foo: Some(a), bar: Option.None} => (a(7), 1)
 >   }
 > }
-> fn g() -> ((Int, Int), Option.Some[Bool](Bool)) {
+> fn g() -> ((Int, Int), Option.Some[Bool]) {
 >   (f(Z{foo: Option.Some(fn (x) { x }), bar: Option.None}), Option.Some(true))
 > }
 
@@ -611,9 +611,9 @@ fn f2(x : LR.L[Any] | LR.R[Int]) { f(x) }
 }
 > type LR[+a]{ L(a) | R(a) }
 > fn either[a](x: LR[a]) -> a { match x { L(x) | R(x) => x } }
-> fn swap[a, b](x: LR.L[a] | LR.R[b]) -> (LR.R[a](a) | LR.L[b](b)) { match x { LR.L(x) => LR.R(x) | LR.R(x) => LR.L(x) } }
-> fn f[a, b](x: LR.L[a] | LR.R[b]) -> (LR.R[a](a) | LR.L[b](b)) { let _ : Any = either(x); swap(x) }
-> fn f2(x: LR.L[Any] | LR.R[Int]) -> (LR.R[Any](Any) | LR.L[Int](Int)) { f(x) }
+> fn swap[a, b](x: LR.L[a] | LR.R[b]) -> (LR.R[a] | LR.L[b]) { match x { LR.L(x) => LR.R(x) | LR.R(x) => LR.L(x) } }
+> fn f[a, b](x: LR.L[a] | LR.R[b]) -> (LR.R[a] | LR.L[b]) { let _ : Any = either(x); swap(x) }
+> fn f2(x: LR.L[Any] | LR.R[Int]) -> (LR.R[Any] | LR.L[Int]) { f(x) }
 
 {
 type A {}

@@ -111,20 +111,27 @@ let wrap_cons_err (cp, cploc) (cn, cnloc) k err =
 let rec map_typ_0 : 'neg1 'pos1 'neg2 'pos2 .
   neg:(index:int -> 'neg1 -> ('pos2, 'neg2) typ) ->
   pos:(index:int -> 'pos1 -> ('neg2, 'pos2) typ) ->
+  ?neg_cons:(index:int -> ('pos2,'neg2) conses_typ -> ('pos2,'neg2) conses_typ) ->
+  ?pos_cons:(index:int -> ('neg2,'pos2) conses_typ -> ('neg2,'pos2) conses_typ) ->
   index:int -> ('neg1, 'pos1) typ -> ('neg2, 'pos2) typ =
-  fun ~neg ~pos ~index -> function
+  fun ~neg ~pos ?neg_cons ?pos_cons ~index -> function
   | Tcvj (conses, vars, loc) ->
      let conses =
        Conses.map conses
-         ~neg:(map_typ_0 ~pos:neg ~neg:pos ~index)
-         ~pos:(map_typ_0 ~neg ~pos ~index)
+         ~neg:(map_typ_0 ~pos:neg ~neg:pos ?neg_cons:pos_cons ?pos_cons:neg_cons ~index)
+         ~pos:(map_typ_0 ~neg ~pos ?neg_cons ?pos_cons ~index)
+     in
+     let conses =
+       match pos_cons with
+       | None -> conses
+       | Some f -> f ~index conses
      in
      Tcvj (conses, vars, loc)
   | Tsimple t -> pos ~index t
   | Tpoly {vars; body} ->
      let index = index + 1 in
-     let vars = IArray.map (fun (n, t) -> n, Option.map (map_typ_0 ~neg:pos ~pos:neg ~index) t) vars in
-     let body = map_typ_0 ~neg ~pos ~index body in
+     let vars = IArray.map (fun (n, t) -> n, Option.map (map_typ_0 ~neg:pos ~pos:neg ?neg_cons:pos_cons ?pos_cons:neg_cons ~index) t) vars in
+     let body = map_typ_0 ~neg ~pos ?neg_cons ?pos_cons ~index body in
      Tpoly {vars; body}
 
 let map_typ_1 ~neg ~pos ~index t =
@@ -1392,14 +1399,15 @@ type promvar =
   | Prom_hoist of flexvar
   | Prom_drop
 
-let trim_overrides s = function
-  | Cons1.Record r, loc ->
-     let def = Cons1.record_def ~env:s.env ~shape:Type_shape.gen ~loc r in
-     let no _ _ = false in
-     let eq = Fields.equal_field_desc (Typedefs.equal_typ ~neg:no ~pos:no) in
-     let body = Fields.filteri r.body ~f:(fun fn x -> not (eq x (def fn))) in
-     Cons1.Record {r with body}, loc
-  | cons -> cons
+let trim_overrides ~env xs =
+  xs |> List.map (function
+    | Cons1.Record r, loc ->
+       let def = Cons1.record_def ~env ~shape:Type_shape.gen ~loc r in
+       let no _ _ = false in
+       let eq = Fields.equal_field_desc (Typedefs.equal_typ ~neg:no ~pos:no) in
+       let body = Fields.filteri r.body ~f:(fun fn x -> not (eq x (def fn))) in
+       Cons1.Record {r with body}, loc
+    | cons -> cons)
 
 let rec promote_lower :
   type n p . (n, p) promote_info -> lower -> (n, p) typ =
@@ -1431,7 +1439,7 @@ let rec promote_lower :
       | Prom_hoist fv -> Some (Either.Right fv))
     |> List.partition_map id
   in
-  let conses = List.map (trim_overrides s) conses in
+  let conses = trim_overrides ~env:s.env conses in
   let ty = Tcvj(conses, List.sort_uniq compare_typ_var vars, None) in
   match vflex with
   | [] -> ty
@@ -1494,9 +1502,9 @@ and promote_upper :
        | Ugen {conses=(conses,loc);rvs;higher_fvs} -> conses, loc, rvs, higher_fvs
      in
      let conses =
-       conses |> List.map (fun (c,loc) ->
-         let c = Cons1.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s) c in
-         trim_overrides s (c,loc))
+       conses
+       |> Conses.map ~neg:(promote_lower s) ~pos:(promote_fv_neg s)
+       |> trim_overrides ~env:s.env
      in
      (* conses are expanded if urv_ordered is false! *)
      let rigvars =
@@ -1626,13 +1634,20 @@ let promote_exn ~policy ~rigvars ~env (ty : P.t) : _ * P.t =
       let t = promote_lower {s_base with mode; index} t in
       match policy with Policy_generalise _ -> gen_zero t | Policy_hoist _ -> t
     in
+    let trim ~index:_ c = trim_overrides ~env c in
     P.map ty
       ~neg:(fun ~mode ~ext t ->
         let index = List.length ext in
-        map_typ_0 ~neg:(pos_simple ~mode) ~pos:(neg_simple ~mode) ~index t)
+        map_typ_0
+          ~neg:(pos_simple ~mode) ~pos:(neg_simple ~mode)
+          ~neg_cons:trim ~pos_cons:trim
+          ~index t)
       ~pos:(fun ~mode ~ext t ->
         let index = List.length ext in
-        map_typ_0 ~neg:(neg_simple ~mode) ~pos:(pos_simple ~mode) ~index t)
+        map_typ_0
+          ~neg:(neg_simple ~mode) ~pos:(pos_simple ~mode)
+          ~neg_cons:trim ~pos_cons:trim
+          ~index t)
   in
   (* Format.printf "ELAB3 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
   let ty =

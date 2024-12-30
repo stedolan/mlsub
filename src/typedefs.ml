@@ -1398,6 +1398,11 @@ let pp_upper ~flexvar ~env ppf t =
   let docs = List.map Print.tyexp tys in
   pp_doc ppf (PPrint.(separate (comma ^^ space) docs))
 
+let pp_lower ~flexvar ~env ppf t =
+  let env = env, [] in
+  let ty = unparse_lower ~env ~flexvar t in
+  pp_doc ppf (Print.tyexp ty)
+
 let pp_flexvar ppf v =
   let env = Env.empty, [] in
   pp_tyexp ppf (unparse_flexvar ~env ~flexvar:ignore v)
@@ -1413,11 +1418,12 @@ let pp_ptyp ppf t =
 let fmt_unit_typ ~env t =
   unparse_gen_typ t
     ~env
-    ~neg:(fun ~env:_ () -> (mktyexp (named_type "_")))
-      ~pos:(fun ~env:_ () -> (mktyexp (named_type "_")))
+    ~neg:(fun ~env:_ _ -> (mktyexp (named_type "_")))
+      ~pos:(fun ~env:_ _ -> (mktyexp (named_type "_")))
   |> Print.tyexp
 
-let pp_unit_typ ~env ppf t =
+let pp_gen_typ ~env ppf t =
+  let env = env, [] in
   pp_doc ppf (fmt_unit_typ ~env t)
 
 let with_dump_fv ~env ppf f =
