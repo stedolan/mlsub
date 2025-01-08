@@ -25,10 +25,10 @@ type error_kind =
 
 type t = Location.t * error_kind
 
-exception Fail of t
+exception Fail of t * Printexc.raw_backtrace
 
 let fail loc k =
-  raise (Fail (loc, k))
+  raise (Fail ((loc, k), Printexc.get_callstack 1000))
 
 let log_handler = ref None
 let log ~loc e : unit =

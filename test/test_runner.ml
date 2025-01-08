@@ -1,37 +1,40 @@
-type rawline = Comment of string | Input of string | Output of string | Empty
+type rawline = Comment of string | Pragma of [`Backtrace] | Input of string | Output of string | Empty
 
 let rec rawlines acc =
   match input_line stdin with
   | exception End_of_file -> List.rev acc
   | s when String.length s = 0 -> rawlines (Empty :: acc)
+  | "# BACKTRACE" -> rawlines (Pragma `Backtrace :: acc)
   | s when s.[0] = '#' -> rawlines (Comment s :: acc)
   | s when s = ">" || (s.[0] = '>' && s.[1] = ' ') -> rawlines (Output s :: acc)
   | s -> rawlines (Input s :: acc)
 
-type cmd = Comment of string | Input of string list
+type cmd = Comment of string | Input of { backtrace: bool; cmd: string list }
 
 let to_string ?(width=80) doc =
   let b = Buffer.create 100 in
   PPrint.ToBuffer.pretty 1. width b (PPrint.group doc);
   b |> Buffer.to_bytes |> Bytes.to_string
 
-let rec parse_cmds acc curr : rawline list -> cmd list = function
-  | [] -> List.rev (finish_cmd acc curr)
+let rec parse_cmds prgs acc curr : rawline list -> cmd list = function
+  | [] -> List.rev (finish_cmd prgs acc curr)
   | Empty :: rest ->
      (match curr with
-      | [] -> parse_cmds (Comment "" :: acc) [] rest
-      | c -> parse_cmds acc ("" :: c) rest)
+      | [] -> parse_cmds prgs (Comment "" :: acc) [] rest
+      | c -> parse_cmds prgs acc ("" :: c) rest)
   | Comment s :: rest ->
-     parse_cmds (Comment s :: finish_cmd acc curr) [] rest
+     parse_cmds [] (Comment s :: finish_cmd prgs acc curr) [] rest
   | Output _ :: rest ->
-     parse_cmds (finish_cmd acc curr) [] rest
+     parse_cmds [] (finish_cmd prgs acc curr) [] rest
+  | Pragma s :: rest ->
+     parse_cmds (s :: prgs) acc curr rest
   | Input s :: rest ->
-     parse_cmds acc (s :: curr) rest
+     parse_cmds prgs acc (s :: curr) rest
      
-and finish_cmd acc curr : cmd list =
-  match curr with [] -> acc | c -> Input (List.rev c) :: acc
+and finish_cmd prgs acc curr : cmd list =
+  match curr with [] -> acc | c -> Input { cmd = List.rev c; backtrace = List.memq `Backtrace prgs } :: acc
 
-let run_cmd s =
+let run_cmd ~backtrace s =
   let text = String.concat "\n" s in
   let open Lang in
   let outbuf = Buffer.create 100 in
@@ -43,8 +46,9 @@ let run_cmd s =
   let pexn = function
     | ((Assert_failure _ | Util.Internal _ | Out_of_memory | Invalid_argument _) as e) ->
        println "%s\n%s" (Printexc.to_string e) (Printexc.get_backtrace ())
-    | Error.Fail (loc, err) ->
-       pprintln (Error.pp_err s loc err)
+    | Error.Fail ((loc, err), bt) ->
+       pprintln (Error.pp_err s loc err);
+       if backtrace then Buffer.add_string outbuf (Printexc.raw_backtrace_to_string bt);
     | e ->
        println "typechecking error: %s" (Printexc.to_string e) in
   begin match Parse.parse_string text with
@@ -61,7 +65,7 @@ let run_cmd s =
      let check ~warn e =
        let fndef = None, [], None, e in
        let wrapped : Exp.exp = Some (Fn fndef), Location.noloc in
-       let on_warn loc err = if warn then pexn (Error.Fail (loc,err)) in
+       let on_warn loc err = if warn then pexn (Error.Fail ((loc,err), Printexc.get_callstack 1000)) in
        Error.with_warnings ~on_warn (fun () ->
          match Check.infer Env.empty ~mode:(Check.fresh_gen_mode ()) wrapped with
          | Tcvj([Func ([], r), _], [], _),
@@ -164,12 +168,13 @@ let run_cmd s =
 let () =
   Printexc.record_backtrace true;
   let lines = rawlines [] in
-  let cmds = parse_cmds [] [] lines in
+  let cmds = parse_cmds [] [] [] lines in
   Lang.Types.fixpoint_iters := 0;
   cmds |> List.iter (function
     | Comment s -> Printf.printf "%s\n" s
-    | Input cmd ->
+    | Input {backtrace; cmd} ->
+       if backtrace then Printf.printf "# BACKTRACE\n";
        List.iter (Printf.printf "%s\n") cmd;
-       let out = run_cmd cmd in
+       let out = run_cmd ~backtrace cmd in
        out |> String.trim |> String.split_on_char '\n' |> List.iter (Printf.printf "> %s\n"));
   Printf.printf "> STATS: fix: %d, flex: %d\n" !Lang.Types.fixpoint_iters !Lang.Typedefs.next_flexvar_id
