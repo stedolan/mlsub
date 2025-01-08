@@ -190,7 +190,12 @@ let check_type_decls types =
     cs |> List.iter (fun d ->
       SymTbl.add tbl d.name d;
       let vs = d.params |> List.map (fun p -> Option.value p.var_spec ~default:Variance_spec.top, p.name) in
-      SymTbl.add temp_decls d.name Typedefs.{name=d.name; params=vs; body=Decl_primitive});
+      let body : Typedefs.decl_body =
+        match d.body with
+        | Dty_record _ -> Decl_record Typedefs.Fields.empty
+        | Dty_variant cases -> Decl_variant (SymMap.of_list (cases |> List.map (fun (s,_) -> s,Typedefs.Fields.empty)))
+      in
+      SymTbl.add temp_decls d.name Typedefs.{name=d.name; params=vs; body});
     let lookup ~env name args =
       match SymTbl.find tbl name with
       | exception Not_found -> Typedefs.Env.lookup_decl env (fst name)
