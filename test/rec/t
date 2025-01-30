@@ -1,6 +1,103 @@
+# bad poly rec attempt
+{
+fn f[a](x:a) {
+  let z = f(42);
+  x
+}
+}
+> test:3: Type error
+>     let z = f(42);
+>               ^^
+>      found: Int
+>   expected: a
+> This Int is used as a at test:2:
+>   fn f[a](x:a) {
+>             ^
+
+# ok poly rec, all types present
+{
+fn f[a](x:a) -> a {
+  let z = f(42);
+  x
+}
+}
+> fn f[a](x: a) -> a { let z : Any = f(42); x }
+
+# FIXME: type correct, but why so many variables?
+{
+fn f(c, x,y) {
+  if c {
+    let (p,q) = f(false, y,x); (q,p)
+  } else {
+    (x,y)
+  }
+}
+}
+> fn f[a, b, c, d](c: Bool, x: a, y: b) -> (a | b | c | d, a | b | c | d) {
+>   if c {
+>     let (p, q) : (a | b | c | d, a | b | d | c) = f(false, y, x);
+>     (q, p)
+>   } else {
+>     (x, y)
+>   }
+> }
+
+# not enough annotations for poly rec (missing c)
+{
+fn f[a,b](c, x:a,y:b) -> (a,b) {
+  if c {
+    let (p,q) = f(false, y,x); (q,p)
+  } else {
+    (x,y)
+  }
+}
+}
+> test:4: Type error
+>       let (p,q) = f(false, y,x); (q,p)
+>                            ^
+>      found: b
+>   expected: a
+> This b comes from test:2:
+>   fn f[a,b](c, x:a,y:b) -> (a,b) {
+>                      ^
+> but is used as a at test:2:
+>   fn f[a,b](c, x:a,y:b) -> (a,b) {
+>                  ^
+
+{
+fn f[a,b](c:Bool, x:a,y:b) -> (a,b) {
+  if c {
+    let (p,q) = f(false, y,x); (q,p)
+  } else {
+    (x,y)
+  }
+}
+}
+> fn f[a, b](c: Bool, x: a, y: b) -> (a, b) { if c { let (p, q) : (b, a) = f(false, y, x); (q, p) } else { (x, y) } }
+
+
+# ret check
+{
+fn f() {
+  let x = f().x;
+  #{y: 42}
+}
+}
+> test:2: The field 'x' is missing.
+>   fn f() {
+>      ^
+>      found: #{y: _}
+>   expected: {x: _}
+> This #{y: _} comes from test:4:
+>     #{y: 42}
+>     ^^^^^^^^
+> but is used as {x: _} at test:3:
+>     let x = f().x;
+>                ^^
+
 
 # self-app
 (fn (x) { x(x) }) (fn (x) { x(x) })
 > (fn (x) { x(x) })(fn (x) { x(x) })
 > typechecking error: unimplemented: flexvar recursive in own bound
-> STATS: fix: 1, flex: 3
+> STATS: fix: 5, flex: 23

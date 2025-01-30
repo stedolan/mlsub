@@ -676,4 +676,56 @@ fn f() {let x : Box[#A|#B] = Box(#A); x}
 > type Box[+a](a)
 > fn f() -> Box[#A | #B](#A) { let x : Box[#A | #B] = Box(#A); x }
 
-> STATS: fix: 30, flex: 392
+{
+type Box[a] { p: a, q: a}
+fn f(p,q) { Box{p,q} }
+fn g(x,y) { (Box{p:x, q:y}, x, y) }
+}
+> type Box[+a]{p: a, q: a}
+> fn f[a, b](p: a, q: b) -> (Box[a | b]{p: a, q: b}) { Box{p, q} }
+> fn g[a, b](x: a, y: b) -> (Box[a | b]{p: a, q: b}, a, b) { (Box{p: x, q: y}, x, y) }
+
+# FIXME: List should infer covariant!
+{
+type List[+a] {
+| Nil
+| Cons(a, List[a])
+}
+fn map(f, xs) {
+  match xs {
+  | List.Nil => List.Nil
+  | List.Cons(x, xs) => List.Cons(f(x), map(f,xs))
+  }
+}
+}
+> type List[+a]{ Cons(a, List[a]) | Nil }
+> fn map[a, b](f: a -> b, xs: List.Nil[Any] | List.Cons[a]) -> (List.Nil[Nothing] | List.Cons[b]) {
+>   match xs {
+>     | List.Nil => List.Nil
+>     | List.Cons(x, xs) => List.Cons(f(x), map(f, xs))
+>   }
+> }
+
+# poly recursion
+{
+type PTree[+a] {
+| Leaf(a)
+| Br(PTree[(a,a)])
+}
+fn map[a,b](f:a->b, x : PTree[a]) -> PTree[b] {
+  match x {
+  | Leaf(a) => Leaf(f(a))
+  | Br(t) => Br(map(fn((x,y)){(f(x),f(y))}, t))
+  }
+}
+}
+> type PTree[+a]{ Br(PTree[(a, a)]) | Leaf(a) }
+> fn map[a, b](f: a -> b, x: PTree[a]) -> PTree[b] {
+>   match x {
+>     | Leaf(a) => PTree.Leaf(f(a))
+>     | Br(t) => PTree.Br(map(fn ((x, y)) { (f(x), f(y)) }, t))
+>   }
+> }
+
+
+> STATS: fix: 34, flex: 520

@@ -23,6 +23,10 @@ let mark_var_use_at_level ~(mode : generalisation_mode) lvl =
     | Some l1, Some l2 ->
        Some (Env_level.min l1 l2)
 
+let mark_var_use ~mode v =
+  v.used <- true;
+  mark_var_use_at_level ~mode v.gen_level
+
 module Promotion = Types.Promotion (struct
   type t = ptyp * Elab.typed_action
   let map ~neg ~pos (ty, act) =
@@ -188,7 +192,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
      begin match Env.lookup_value env id with
      | None -> fail loc (Bad_name (`Unknown, `Var, id.label))
      | Some v ->
-        mark_var_use_at_level ~mode v.gen_level;
+        mark_var_use ~mode v;
         inferred v.typ;
         Var ((id,loc), v.comp_var)
      end
@@ -530,15 +534,15 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
           Fn tfndef
      end
 
-  | FnDef ((s, sloc), fndef, body) ->
+  | FnDef ((name,nameloc), fndef, body) ->
      let fmode = fresh_gen_mode () in
-     let fty, tfndef = infer_func_def env ~loc:sloc ~mode:fmode eloc fndef in
+     let fty, tfndef = infer_func_def env ~loc:nameloc ~mode:fmode ~name eloc fndef in
      mark_var_use_at_level ~mode fmode.gen_level_acc;
-     let cvar = IR.Binder.fresh ~name:s () in
-     let binding = {typ = fty; gen_level = fmode.gen_level_acc; comp_var = IR.Binder.ref cvar} in
-     let env = Env.extend_vals env ~vals:(SymMap.singleton s binding) in
+     let cvar = IR.Binder.fresh ~name () in
+     let binding = {typ = fty; gen_level = fmode.gen_level_acc; comp_var = IR.Binder.ref cvar; used=false} in
+     let env = Env.extend_vals env ~vals:(SymMap.singleton name binding) in
      let body = check env ~mode body ty in
-     FnDef((s,sloc), cvar, tfndef, body)
+     FnDef((name,nameloc), cvar, tfndef, body)
 
   | App (f, args) ->
      let fty, f = infer env ~mode f in
@@ -587,116 +591,162 @@ and infer env ~(mode : generalisation_mode) (e : exp) : ptyp * typed_exp =
   let e = check env ~mode e ty_mode in
   Mode.inferred_type env ty_mode, e
 
-and infer_func_def env ~loc ~mode eloc (poly, params, ret, body) : ptyp * typed_func_def =
-   let ty, typed_poly, _generalised, (act, split) =
-
-  let rigvars', rig_names =
+and infer_func_def env ~loc ~mode ?name eloc (poly, params, ret, body) : ptyp * typed_func_def =
+  (* Typecheck poly bounds, parameter (patterns & types) and return type *)
+  let rigvars', env' =
     match poly with
-    | None -> IArray.empty, SymMap.empty
-    | Some poly -> Check_type.enter_polybounds ~lookup:Check_type.default_lookup_fn ~env poly in
-
-  let env', _rigvars, _rv2 = enter_rigid env rigvars' rig_names in
-  let check_ty ~ispos ty =
-    let ty = typ_of_tyexp env' ty in
-    (* check for contravariant joins *)
-    begin try ignore (close_typ_poly_exn ~ispos (Env.level env') ty)
-    with Types.CloseError (err,loc) ->
+    | None ->
+       let env', _, _ = enter_rigid env IArray.empty SymMap.empty in
+       IArray.empty, env'
+    | Some poly ->
+       let rvs, names = Check_type.enter_polybounds ~lookup:Check_type.default_lookup_fn ~env poly in
+       let env', _rigvars, _rigvars2 = enter_rigid env rvs names in
+       rvs, env'
+  in
+  let params = List.map (fun (p,ty) -> p, Option.map (typ_of_tyexp env') ty) params in
+  let ret = Option.map (typ_of_tyexp env') ret in
+  let cl_params, cl_ret =
+    try
+      List.map (fun (_p,ty) -> Option.map (close_typ_poly_exn ~ispos:false (Env.level env')) ty) params,
+      Option.map (close_typ_poly_exn ~ispos:true (Env.level env')) ret
+    with Types.CloseError (err, loc) ->
       let loc = Option.value loc ~default:eloc in
       fail loc (Illformed_type (`Close_error err))
-    end;
-    ty
   in
-  let orig_ty, typed_exp, gen_level, act, split =
-    let params = List.map (fun (p, ty) ->
-      match ty with
-      | Some ty ->
-         let ty = check_ty ~ispos:false ty in
-         (ty,ty), p, None
-      | None ->
-         fresh_flow env', p, Some (Env.level env')) params in
-    let param_ptyps = List.map (fun (((_tn, tp), _p, gen_level)) -> tp, gen_level) params in
-    let case : case =
-      ([List.map (fun ((_ty, p, _lvl)) -> p) params], eloc), body in
-    let act, split = Check_pat.split_cases ~matchloc:eloc env' param_ptyps [case] in
-    let act = Util.as_singleton act in
-    let env' = extend_env env' act in
+  let param_pats, param_tys = List.split params in
+  let param_tys =
+    param_tys |> List.map (function
+      | None -> Either.Left (fresh_flow env')
+      | Some t -> Either.Right t)
+  in
+  let param_ptyps =
+    param_tys |> List.map (function
+      | Either.Left (_,p) -> p, Some (Env.level env')
+      | Either.Right t -> t, None)
+  in
+  let param_ntyps =
+    param_tys |> List.map (function
+      | Either.Left (n,_) -> n
+      | Either.Right t -> t)
+  in
+  let ret =
+    match ret with
+    | None -> Either.Left (Option.map (fun _ -> fresh_flow env') name)
+    | Some t -> Either.Right t
+  in
+  let act, split = Check_pat.split_one_case ~matchloc:eloc env' param_ptyps (([param_pats],eloc), body) in
+  let env', rec_vb =
+    match name with
+    | None -> env', None
+    | Some name ->
+       let typ, gen_level =
+         match List.map Option.get cl_params, Option.get cl_ret with
+         | params, ret ->
+            let ty = tcons (Func (params, ret), eloc) in
+            let ty = match poly with None -> ty | Some _ -> Tpoly {vars=rigvars'; body=ty} in
+            ty, None
+         | exception (Invalid_argument _) ->
+            let ret_ptyp =
+              match ret with
+              | Either.Left f -> snd (Option.get f)
+              | Either.Right t -> t
+            in
+            tcons (Func (param_ntyps, ret_ptyp), eloc), Some (Env.level env')
+       in
+       let cvar = IR.Binder.fresh ~name () in
+       let vb = {typ; gen_level; comp_var = IR.Binder.ref cvar; used=false} in
+       Env.extend_vals env' ~vals:(SymMap.singleton name vb), Some vb
+  in
+  let env' = extend_env env' act in
 
+  (* Typecheck the function body in the new environment *)
+  let rec strip_overrides ~env (ty : ptyp) : ptyp =
+    (* hack to avoid some equirecursive types *)
+    match ty with
+    | Tcvj (conses, vars, loc) ->
+       let conses =
+         conses
+         |> Conses.map ~neg:Fun.id ~pos:(strip_overrides ~env)
+         |> List.map (function
+           | Cons1.Record {tag=Some (Named_tag _) as tag; args; body}, loc as cons 
+                when not (Fields.is_empty body) ->
+              let args = List.map (Cons1.Tyarg.map ~neg:(fun _ -> ref (ttop Location.noloc)) ~pos:(fun _ -> ref (tbot None))) args in
+              let cons' = Cons1.Record {tag; args; body = Fields.empty} in
+              match_ptyp ~loc env (Tcvj ([cons],[],Some loc)) [cons', loc] |> or_raise `Expr loc;
+              Cons1.map ~neg:(!) ~pos:(!) cons', loc
+           | c -> c)
+       in
+       Tcvj (conses, vars, loc)
+    | Tpoly _ as t -> t (* FIXME: handle this too? *)
+    | Tsimple _ as t -> t
+  in
+  let orig_ty, typed_exp, gen_level =
     let bmode = fresh_gen_mode () in
-    let res, body =
+    let ty_mode =
       match ret with
-      | Some ty ->
-         let ty = check_ty ~ispos:true ty in
-         ty, check env' ~mode:bmode body (checking ty)
-      | None ->
-         infer env' ~mode:bmode body in
-    let _ = List.map (fun ((tn,tp),_,_) -> wf_ntyp env' tn; wf_ptyp env' tp) params in
-    (* FIXME params or ptys? What happens if they disagree? *)
-    tcons (Func (List.map (fun ((tn,_tp),_,_) -> tn) params, res), eloc),
-    body,
-    bmode.gen_level_acc,
-    act,
-    split
+      | Either.Left _ -> Mode.inferring ()
+      | Either.Right ty -> Mode.checking ty
+    in
+    let body = check env' ~mode:bmode body ty_mode in
+    let ret_ptyp =
+      match ret with
+      | Either.Left recty ->
+         let recty =
+           match rec_vb with
+           | Some vb when vb.used -> recty
+           | _ -> None
+         in
+         let ty = Mode.inferred_type env' ty_mode in
+         (match recty with
+          | None -> ty
+          | Some (n, _) ->
+             let ty = strip_overrides ~env:env' ty in
+             subtype env' ty n |> or_raise `Expr loc;
+             ty)
+      | Either.Right ty -> ty
+    in
+    tcons (Func (param_ntyps, ret_ptyp), eloc), body, bmode.gen_level_acc
   in
   wf_ptyp env' orig_ty;
   wf_typed_exp env' typed_exp;
-  let can_generalise =
+
+  (* Promote the function type to the old environment *)
+  let policy =
     match gen_level with
-    | None -> true
-    | Some lvl when Env_level.equal lvl (Env.level env') -> true
+    | None -> `Generalise loc
+    | Some lvl when Env_level.equal lvl (Env.level env') -> `Generalise loc
     | lvl ->
        mark_var_use_at_level ~mode lvl;
-       false
+       `Hoist env
   in
-  let policy = if can_generalise then `Generalise loc else `Hoist env in
-  let act = mk_action act typed_exp in
-  let bvars, (ty, act) =
+  let bounds, (func_ty, act) =
+    let act = mk_action act typed_exp in
     try Promotion.promote_exn ~policy ~rigvars:rigvars' ~env:env' (orig_ty, act)
     with Types.CloseError (err,errloc) ->
       (* FIXME: locations and explanations here are poor *)
       let loc = Option.value errloc ~default:loc in
       fail loc (Illformed_type (`Close_error err))
   in
-  if Array.length bvars = 0 then
-    ty, None, can_generalise, (act, split)
-  else
-    let next_name = ref 0 in
-    let rec mkname () =
-      let n = !next_name in
-      incr next_name;
-      let name = match n with
-        | n when n < 26 -> Printf.sprintf "%c" (Char.chr (Char.code 'a' + n))
-        | n -> Printf.sprintf "t_%d" (n-26) in
-      (* NB: look up env', to ensure no collisions with rigvars *)
-      match Typedefs.env_lookup_type_var env' Location.noloc name with
-      | None -> name, Location.noloc
-      | Some _ -> mkname () in
-    let bounds = bvars
-      |> Array.map (function
-        | Gen_rigid rv -> IArray.get rigvars' rv.var
-        | Gen_flex r when is_ttop r -> mkname (), None
-        | Gen_flex r -> mkname (), Some r)
-      |> IArray.of_array in
-    let tpoly = Tpoly { vars = bounds; body = ty } in
-    wf_ptyp env tpoly;
-    tpoly,
-    (Some (IArray.map (function (_,None) as b -> b | (s, Some t) -> s, Some (Elab_ntyp t)) bounds)),
-    can_generalise,
-    (act, split)
-   in
-   let tparams, tret =
-     (* FIXME awful hack *)
-     match ty with
-     | Tcvj ([Func (t,r),_], [], _loc)
-     | Tpoly { body = Tcvj ([Func (t,r),_],[], _loc); _ } -> t,r
-     | _ -> intfail "wuh?"
-   in
-   let params = List.map2 (fun (p, _) t -> (p, Some (Elab_ntyp t))) params tparams in
-   ty,
-   (typed_poly,
-    params,
-    split,
-    Some (Elab_ptyp tret),
-    act)
+  let ty, typed_poly =
+    if IArray.length bounds = 0 then
+      func_ty, None
+    else
+      Tpoly { vars = bounds; body = func_ty },
+      Some (IArray.map (function (_,None) as b -> b | (s, Some t) -> s, Some (Elab_ntyp t)) bounds)
+  in
+  wf_ptyp env ty;
+  let tparams, tret =
+    match func_ty with
+    | Tcvj ([Func (t,r),_], [], _loc) -> t,r
+    | _ -> assert false
+  in
+  let params = List.map2 (fun (p, _) t -> (p, Some (Elab_ntyp t))) params tparams in
+  ty,
+  (typed_poly,
+   params,
+   split,
+   Some (Elab_ptyp tret),
+   act)
 
 and extend_env env act =
   let vals =
@@ -708,7 +758,8 @@ and extend_env env act =
        act.Check_pat.var_names |> SymMap.mapi (fun name loc ->
          { typ = tbot (Some loc);
            gen_level = None;
-           comp_var = IR.Binder.ref (IR.Binder.fresh ~name ()) })
+           comp_var = IR.Binder.ref (IR.Binder.fresh ~name ());
+           used = false })
   in
   Env.extend_vals env ~vals
 

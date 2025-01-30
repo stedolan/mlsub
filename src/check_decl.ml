@@ -303,7 +303,9 @@ let check_type_decls types =
                         | `Yes -> walk ~decl (vpos var) ~index pos))
                   params args
              | cons, _loc ->
-                ignore (Typedefs.Cons1.map ~neg:(walk ~decl (vneg var) ~index) ~pos:(walk ~decl var ~index) cons)
+                fixme; (* strict vs non strict positivity wrong here *)
+                fixme; (* should handle whole_variant - just match the conses? *)
+                ignore (Typedefs.Cons1.map ~neg:(walk ~decl (vneg var) ~index) ~pos:(walk ~decl (fixme;(*vpos*)var) ~index) cons)
            in
            let walk_var : Typedefs.typ_var -> unit = function
              | Vrigid _ -> assert false
@@ -395,9 +397,9 @@ let check_prog (program : Exp.decl list) =
              env, Dtype (Option.get (Typedefs.Env.lookup_decl env s))
           | Some (Exp.Dfn ((s,sloc), fndef)), loc ->
              let mode = Check.fresh_gen_mode () in
-             let typ, tfndef = Check.infer_func_def env ~loc:sloc ~mode loc fndef in
+             let typ, tfndef = Check.infer_func_def env ~loc:sloc ~mode ~name:s loc fndef in
              let cvar = IR.Binder.fresh ~name:s () in
-             let binding = Typedefs.{typ; gen_level = mode.gen_level_acc; comp_var = IR.Binder.ref cvar} in
+             let binding = Typedefs.{typ; gen_level = mode.gen_level_acc; comp_var = IR.Binder.ref cvar; used=false} in
              let env = Typedefs.Env.extend_vals env ~vals:(Typedefs.SymMap.singleton s binding) in
              env, Dfn ((s,sloc), tfndef)
         in

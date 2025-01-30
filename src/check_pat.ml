@@ -373,7 +373,7 @@ let head_first_column ~env (typ,gen_level) mat =
             | Some v -> v
           in
           let bindings, action = act in
-          let bindings = SymMap.add name {typ; gen_level; comp_var = IR.Binder.ref var } bindings in
+          let bindings = SymMap.add name {typ; gen_level; comp_var = IR.Binder.ref var; used=false } bindings in
           go ~var:(Some var) (((p::row),(bindings,action))::rest)
        | Pt_tuple {tag = Some tag; fields; ext; loc; _} ->
           let tag = check_tag ~loc ~env typ tag in
@@ -861,6 +861,10 @@ let split_cases ~matchloc env (typs : (ptyp * Typedefs.gen_level) list) (cases :
      Error.log ~loc:matchloc (Nonexhaustive (List.map Clist.to_list unmatched))
   end;
   actions, Ex (typs, dtree)
+
+let split_one_case ~matchloc env typs case =
+  let act, split = split_cases ~matchloc env typs [case] in
+  Util.as_singleton act, split
 
 type compiled_action =
   | Act_unused

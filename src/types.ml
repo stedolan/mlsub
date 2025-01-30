@@ -816,6 +816,7 @@ and subtype_lpu ~changes env (p : lower_part) (n : upper) =
          fun p -> subtype_lu ~changes env p (Uflexvar n))
      in
      match_sub ~changes ~env ~loc p (conses, rvs);
+     ()
   | Uflexvar nv ->
      begin match p with
      | Lflexvar pv -> subtype_flex_flex ~changes env pv nv
@@ -1674,6 +1675,25 @@ let promote_exn ~policy ~rigvars ~env (ty : P.t) : _ * P.t =
       | Gen_flex b -> Gen_flex (neg ~mode:`Poly ~ext:[] b)) in
     bvars, P.map ty ~neg ~pos
   in
-  bvars, ty
+  let bounds =
+    let next_name = ref 0 in
+    let rec mkname () =
+      let n = !next_name in
+      incr next_name;
+      let name = match n with
+        | n when n < 26 -> Printf.sprintf "%c" (Char.chr (Char.code 'a' + n))
+        | n -> Printf.sprintf "t_%d" (n-26) in
+      (* NB: look up env, to ensure no collisions with rigvars *)
+      match Typedefs.env_lookup_type_var env Location.noloc name with
+      | None -> name, Location.noloc
+      | Some _ -> mkname () in
+    bvars
+    |> Array.map (function
+      | Gen_rigid rv -> IArray.get rigvars rv.var
+      | Gen_flex r when is_ttop r -> mkname (), None
+      | Gen_flex r -> mkname (), Some r)
+    |> IArray.of_array
+  in
+  bounds, ty
 
 end

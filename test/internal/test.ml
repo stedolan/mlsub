@@ -33,14 +33,10 @@ let dump env (t : ptyp) =
       dump t_orig;
       t
   end) in
-  let bvars, t = Promotion.promote_exn ~policy:(`Generalise noloc) ~rigvars:IArray.empty ~env t_orig in
+  let bounds, t = Promotion.promote_exn ~policy:(`Generalise noloc) ~rigvars:IArray.empty ~env t_orig in
+  let t = if IArray.length bounds > 0 then Tpoly {vars=bounds; body=t} else t in
   dump t;
-  Types.log_changes := false;
-  bvars |> Array.iteri (fun ix v -> match v with
-  | Gen_rigid _ -> assert false
-  | Gen_flex r ->
-    PPrint.ToChannel.pretty 1. 120 stdout PPrint.(utf8string (Printf.sprintf "  $%d ≤ " ix) ^^ group (Print.tyexp (unparse_ntyp ~flexvar:nope r)) ^^ hardline));
-  print_endline ""
+  Types.log_changes := false
 
 let fresh_flow lvl =
   let fv = fresh_flexvar lvl in

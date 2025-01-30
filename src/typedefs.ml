@@ -668,7 +668,8 @@ type value_binding =
        reachable from this binding by expanding untyped let definitions.
        (cf. Haskell's MonoLocalBinds) *)
     gen_level: gen_level;
-    comp_var: IR.value IR.Binder.ref
+    comp_var: IR.value IR.Binder.ref;
+    mutable used: bool;
   }
 
 (* Rigid type variables. *)
@@ -783,10 +784,10 @@ module Env = struct
     | Record_tag _, {name=_; params=_; body = Decl_record fs} -> fs
     | Variant_tag (_,t), {body = Decl_variant vs; _} ->
        SymLocMap.find t vs
-    | Record_tag _, {body = Decl_variant _; _} ->
-       intfail "Not a record type"
-    | Variant_tag _, {body = (Decl_record _ | Decl_primitive); _} ->
-       intfail "Not a variant type"
+    | Record_tag _ as tag, {body = Decl_variant _; _} ->
+       intfail "Not a record type: %s" (Nom_tag.to_string tag)
+    | Variant_tag _ as tag, {body = (Decl_record _ | Decl_primitive); _} ->
+       intfail "Not a variant type: %s" (Nom_tag.to_string tag)
 
   let get_decl_params env (s : Nom_tag.t) =
     (SymLocMap.find (Nom_tag.type_name s) env.env_type_decls).params
