@@ -25,7 +25,7 @@ and free_type_names' =
      TagSet.empty (* free *named type* names, not vars *)
   | Trecord (tag, args, fs) ->
      let free_arg = function
-       | None, _ -> TagSet.empty
+       | None, _ | Some Arg_none, _ -> TagSet.empty
        | Some (Arg_pos t | Arg_neg t | Arg_gen t), _ -> free_type_names t
        | Some (Arg_both {neg;pos}), _ -> TagSet.union (free_type_names neg) (free_type_names pos)
      in
@@ -58,7 +58,7 @@ type scc_state =
     mutable on_stack: bool }
 
 type param_state =
-  { name: Exp.symbol;
+  { name: Exp.symbol option;
     index: int;
     var_spec: Exp.variance_spec option;
     (* Variance as used in definition. Always <= var_spec (if present) *)
@@ -109,9 +109,15 @@ type variance =
   | Vpos
   | Vneg
 
-let env_with_params ~env (params : Exp.symbol list) : Typedefs.env =
+let env_with_params ~env (params : Exp.symbol option list) : Typedefs.env =
   let open Typedefs in
   let level = Env_level.extend (Env.level env) in
+  let params =
+    params
+    |> List.mapi (fun i -> function
+       | Some s -> s
+       | None -> Printf.sprintf "$unused_param%d" i, Location.noloc)
+  in
   let rig_defns =
     params
     |> List.map (fun name : rigvar_defn ->
@@ -260,7 +266,7 @@ let check_type_decls types =
           assert (Variance_spec.le p.var_found var_found);
           let spec = Option.value p.var_spec ~default:Variance_spec.top in
           if not (Variance_spec.le var_found spec) then
-            fail loc (Illformed_type (`Misused_param (spec, fst p.name, vtype)));
+            fail loc (Illformed_type (`Misused_param (spec, Option.map fst p.name, vtype)));
           changed := true;
           p.var_found <- var_found
         end
@@ -387,12 +393,12 @@ let check_type_decls types =
         let variance = ps.var_found in
         begin match variance.occurs_neg, ps.var_supplied_neg with
         | `No, Some loc ->
-           Error.log ~loc (Illformed_type (`Wrong_args (fst decl.name, `Variance (ps.index, fst ps.name, `Neg))))
+           Error.log ~loc (Illformed_type (`Wrong_args (fst decl.name, `Variance (ps.index, Option.map fst ps.name, `Neg))))
         | _ -> ()
         end;
         begin match variance.occurs_pos, ps.var_supplied_pos with
         | `No, Some loc ->
-           Error.log ~loc (Illformed_type (`Wrong_args (fst decl.name, `Variance (ps.index, fst ps.name, `Pos))))
+           Error.log ~loc (Illformed_type (`Wrong_args (fst decl.name, `Variance (ps.index, Option.map fst ps.name, `Pos))))
         | _ -> ()
         end;
         variance, ps.name)

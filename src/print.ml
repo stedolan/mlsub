@@ -236,6 +236,7 @@ and tyexp_ t =
      let args =
        let tyarg = function
          | None, _ -> string "<err>"
+         | Some Arg_none, _ -> string "_"
          | Some (Arg_pos t), _ -> string "+" ^^ tyexp ~prec:Exp t
          | Some (Arg_neg t), _ -> string "-" ^^ tyexp ~prec:Exp t
          | Some (Arg_gen t), _ -> tyexp ~prec:Exp t
@@ -288,18 +289,23 @@ let pat = pat ~prec:Term
 
 let variance_spec v =
   match v.occurs_neg, v.occurs_pos with
-  | `No, `No -> "0 "
+  | `No, `No -> ""
   | `No, `Strict -> "+"
   | `No, `Yes -> "++"
   | `Yes, `No -> "-"
   | `Yes, `Strict -> "+-"
   | `Yes, `Yes -> "++-"
 
-let decl_ty_param ((v, s) : Exp.variance_spec option * symbol) =
+let decl_ty_param ((v, s) : Exp.variance_spec option * symbol option) =
+  let s =
+    match s with
+    | Some s -> symbol s
+    | None -> string "_"
+  in
   match v with
-  | None -> symbol s
+  | None -> s
   | Some v ->
-     string (variance_spec v) ^^ symbol s
+     string (variance_spec v) ^^ s
 
 let decl_ty_params = function
   | [] -> empty

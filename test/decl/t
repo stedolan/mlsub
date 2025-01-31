@@ -116,12 +116,12 @@ type First{}
 type Second_1(Second_2)
 type Second_2(Second_1)
 type Qux(Int, Bar, Quux)
-type Foo[a, + b, ++ c, ++-d, +e, -+f, 0 g, h]{
+type Foo[a, + b, ++ c, ++-d, +e, -+f, _, _]{
   field_1: a
   field_2: b
   field_3: Baz[d,f]
   field_4: (Bar,(Qux) -> Quux)
-  field_5: Nop[(g,h)]
+  field_5: Nop[_]
 }
 type Blah{}
 type Blorp(Blah,Blah)
@@ -137,19 +137,19 @@ type Nop[g] { rec: Nop[g -> g] }
 > type Second_1(Second_2)
 > type Second_2(Second_1)
 > type Qux(Int, Bar, Quux)
-> type Foo[+a, +b, ++c, ++-d, +e, +-f, 0 g, 0 h]{
+> type Foo[+a, +b, ++c, ++-d, +e, +-f, _, _]{
 >   field_1: a
 >   field_2: b
 >   field_3: Baz[d, f]
 >   field_4: (Bar, Qux -> Quux)
->   field_5: Nop[Any]
+>   field_5: Nop[_]
 > }
 > type Blah()
 > type Blorp(Blah, Blah)
 > type Quux{blah: (Bar, Qux)}
 > type Bar(Int, Qux)
 > type Baz[+a, +b]{ Baz_A(a) | Baz_B{foo: (a, b, Bar)} }
-> type Nop[0 g]{rec: Nop[Any]}
+> type Nop[g]{rec: Nop[_]}
 
 #
 # Functions using declared types

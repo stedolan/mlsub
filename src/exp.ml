@@ -117,6 +117,7 @@ and tyexp = tyexp' mayloc and tyexp' =
   | Tbot
 
 and tyarg = tyarg' mayloc and tyarg' =
+  | Arg_none
   | Arg_pos of tyexp
   | Arg_neg of tyexp
   | Arg_gen of tyexp
@@ -135,7 +136,7 @@ type type_decl_body =
 
 type decl = decl' mayloc and decl' =
   | Dfn of symbol * func_def
-  | Dtype of symbol * (variance_spec option * symbol) list * type_decl_body
+  | Dtype of symbol * (variance_spec option * symbol option) list * type_decl_body
 
 type mapper = {
   loc : mapper -> location -> location;
@@ -222,6 +223,7 @@ let mapper =
        Ttyvar (sym r v)
     | Trecord (tag, args, ts) ->
        let tyarg = mayloc @@ fun r t -> match t with
+         | Arg_none -> Arg_none
          | Arg_pos t -> Arg_pos (r.tyexp r t)
          | Arg_neg t -> Arg_neg (r.tyexp r t)
          | Arg_gen t -> Arg_gen (r.tyexp r t)
@@ -246,7 +248,7 @@ let mapper =
   let decl = mayloc @@ fun r d -> match d with
     | Dfn (s, f) -> Dfn (sym r s, fndef r f)
     | Dtype (s, ps, body) ->
-       Dtype (sym r s, List.map (fun (v,s) -> v, sym r s) ps, ty_decl_body r body)
+       Dtype (sym r s, List.map (fun (v,s) -> v, Option.map (sym r) s) ps, ty_decl_body r body)
   in
   { loc; exp; pat; tyexp; decl }
 

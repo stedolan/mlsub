@@ -658,7 +658,7 @@ let map_decl_body ~pos = function
 
 type type_decl =
   { name: Exp.symbol;
-    params: (Exp.variance_spec * Exp.symbol) list;
+    params: (Exp.variance_spec * Exp.symbol option) list;
     body: decl_body }
 
 
@@ -1232,7 +1232,7 @@ let unparse_args ~neg ~pos args =
   args
   |> List.map (Tyarg.map ~neg ~pos)
   |> List.map (function
-    | Arg_none -> Exp.Arg_gen (mayloc Exp.Ttop)
+    | Arg_none -> Exp.Arg_none
     | Arg_neg t | Arg_pos t -> Exp.Arg_gen t
     | Arg_both (neg, pos) when Exp.equal_tyexp neg pos -> Exp.Arg_gen pos
     | Arg_both ((Some Exp.Tbot, _), pos) -> Exp.Arg_pos pos

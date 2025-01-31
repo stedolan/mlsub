@@ -48,8 +48,7 @@ let rec lex buf =
   | "Any" -> T_ANY
   | "Nothing" -> T_NOTHING
 
-  | '0' -> ZERO
-  | Plus('0'..'9') -> NZINT (int_of_string (lexeme buf))
+  | Plus('0'..'9') -> INT (int_of_string (lexeme buf))
   | ('a'..'z'|'_'), Star('a'..'z'|'_'|'A'..'Z'|'0'..'9') ->
      SYMBOL (lexeme buf)
   | ('A'..'Z'), Star('a'..'z'|'_'|'A'..'Z'|'0'..'9') ->

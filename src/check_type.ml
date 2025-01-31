@@ -43,27 +43,36 @@ and typ_of_tyexp' : 'a 'b . lookup:lookup_fn -> env:env -> Location.t -> tyexp' 
   | Tbot ->
      tbot (Some loc)
   | Trecord (tag, args, fields) ->
-     let check_arg name (v, (argname,_loc)) (i, arg) : _ Cons1.tyarg =
+     let check_arg name (v, argname) (i, arg) : _ Cons1.tyarg =
        let bad_variance p loc =
-         fail loc (Illformed_type (`Wrong_args (name, `Variance (i, argname, p))))
+         fail loc (Illformed_type (`Wrong_args (name, `Variance (i, Option.map fst argname, p))))
        in
        let has_pos = match v.occurs_pos with `Yes | `Strict -> true | `No -> false in
        let has_neg = match v.occurs_neg with `Yes -> true | `No -> false in
        let ok_pos loc t = if not has_pos then bad_variance `Pos loc; typ_of_tyexp ~lookup ~env t in
        let ok_neg loc t = if not has_neg then bad_variance `Neg loc; typ_of_tyexp ~lookup ~env t in
+       let def_pos = ttop loc in
+       let def_neg = tbot (Some loc) in
        match arg with
        | None, loc -> fail loc Syntax
        | Some arg, loc ->
           match arg with
+          | Arg_none ->
+             begin match has_neg, has_pos with
+             | false, false -> Arg_none
+             | true, false -> Arg_neg def_neg
+             | false, true -> Arg_pos def_pos
+             | true, true -> Arg_both (def_neg,def_pos)
+             end
           | Arg_pos t ->
              let t = ok_pos loc t in
              if has_neg
-             then Arg_both (tbot (Some loc), t)
+             then Arg_both (def_neg, t)
              else Arg_pos t
           | Arg_neg t ->
              let t = ok_neg loc t in
              if has_pos
-             then Arg_both (t, ttop loc)
+             then Arg_both (t, def_pos)
              else Arg_neg t
           | Arg_both {neg; pos} ->
              Arg_both (ok_neg loc neg, ok_pos loc pos)

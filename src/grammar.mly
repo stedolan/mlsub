@@ -1,7 +1,6 @@
 %token <string> SYMBOL
 %token <string> USYMBOL
-%token ZERO
-%token <int> NZINT
+%token <int> INT
 %token <string> STRING
 %token <string> PRAGMA
 %token SHIFT
@@ -41,8 +40,6 @@ let pvar s = Pbind (s, (Some Pany, snd s))
 %inline mayfail_opt(X): e = X { e } | ERROR { None }
 %inline mayloc_opt(X): e = loc(mayfail_opt(X)) { e }
 
-INT: ZERO { 0 } | n = NZINT { n }
-
 prog:
 | e = exp; EOF
   { `Exp e }
@@ -53,6 +50,10 @@ prog:
 
 symbol: s = loc(SYMBOL) { s }
 usymbol: s = loc(USYMBOL) { s }
+
+symbol_or_under:
+| s = symbol { Some s }
+| UNDER { None }
 
 struct_tag:
 | HASH { Anon_tag }
@@ -310,6 +311,8 @@ typolybound:
 
 tyarg: v = loc(tyarg_) { Some (fst v), snd v }
 tyarg_:
+| UNDER
+  { Arg_none }
 | t = tyexp
   { Arg_gen t }
 | PLUS; t = tyexp
@@ -347,11 +350,10 @@ decl_ty_params:
   { ps }
 
 decl_ty_param:
-| v = option(variance_spec); id = symbol
+| v = option(variance_spec); id = symbol_or_under
   { v, id }
 
 variance_spec:
-| ZERO            { { occurs_pos = `No; occurs_neg = `No  } }
 | MINUS           { { occurs_pos = `No; occurs_neg = `Yes } }
 | PLUS PLUS       { { occurs_pos = `Yes; occurs_neg = `No } }
 | PLUS PLUS MINUS

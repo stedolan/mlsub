@@ -8,8 +8,8 @@ type error_kind =
       | `Join_poly
       | `Bound_not_simple
       | `Bound_not_cons
-      | `Wrong_args of string * [`Arity of int * int | `Variance of int * string * [`Pos|`Neg]]
-      | `Misused_param of Exp.variance_spec * string * [`Pos|`Neg]
+      | `Wrong_args of string * [`Arity of int * int | `Variance of int * string option * [`Pos|`Neg]]
+      | `Misused_param of Exp.variance_spec * string option * [`Pos|`Neg]
       | `Recursion of [`Not_strictly_positive of string]
       | `Close_error of Types.close_typ_err
       | `Join_of_ty_param
@@ -102,9 +102,11 @@ let pp_err input loc err : PPrint.document =
         | `Arity (0, _actual) -> pp "does not take arguments"
         | `Arity (exp, actual) -> pp "takes %d arguments, not %d" exp actual
         | `Variance (i, name, v) ->
-           pp "does not take argument %d (%s) %s" (i+1) name (vtype v))
+           let name = match name with Some s -> Printf.sprintf " (%s)" s | None -> "" in
+           pp "does not take argument %d%s %s" (i+1) name (vtype v))
        ^^ context
   | Illformed_type (`Misused_param (vspec, name, v)) ->
+     let name = Option.value name ~default:"_" in
      pp "The type parameter %s%s cannot be used here %s" (Print.variance_spec vspec) name (vtype v) ^^ context
   | Illformed_type (`Recursion (`Not_strictly_positive t)) ->
      pp "The type %s is used recursively in a non-strictly-positive position" t ^^ context
