@@ -685,9 +685,8 @@ fn g(x,y) { (Box{p:x, q:y}, x, y) }
 > fn f[a, b](p: a, q: b) -> (Box[a | b]{p: a, q: b}) { Box{p, q} }
 > fn g[a, b](x: a, y: b) -> (Box[a | b]{p: a, q: b}, a, b) { (Box{p: x, q: y}, x, y) }
 
-# FIXME: List should infer covariant!
 {
-type List[+a] {
+type List[a] {
 | Nil
 | Cons(a, List[a])
 }
@@ -708,7 +707,7 @@ fn map(f, xs) {
 
 # poly recursion
 {
-type PTree[+a] {
+type PTree[a] {
 | Leaf(a)
 | Br(PTree[(a,a)])
 }

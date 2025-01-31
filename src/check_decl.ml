@@ -278,34 +278,52 @@ let check_type_decls types =
            walk ~decl var ~index:(index + 1) body
         | Tsimple _ -> .
         | Tcvj (conses, vars, _loc) ->
-           let walk_cons = function
-             | Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc ->
-                assert (Typedefs.Fields.is_empty body);
-                let params =
-                  match SymTbl.find tbl (Nom_tag.type_name t) with
+           let walk_args ~tag ~loc args =
+             let params =
+               match tag with
+               | Either.Left (Some Typedefs.Cons1.(Anon_tag | Struct_tag _) | None) -> []
+               | Either.Left (Some (Named_tag t)) ->
+                  begin match SymTbl.find tbl (Nom_tag.type_name t) with
                   | decl' ->
                      found_recursion ~loc var decl';
                      List.map (fun (p : param_state) -> p.var_found) decl'.params
                   | exception Not_found ->
                      List.map fst (Typedefs.Env.get_decl_params env t)
-                in
-                List.iter2
-                  (fun (param : Exp.variance_spec) (arg : _ Typedefs.Cons1.tyarg) ->
-                    Typedefs.Cons1.Tyarg.iter arg
-                      ~neg:(fun neg ->
-                        match param.occurs_neg with
-                        | `No -> ()
-                        | `Yes -> walk ~decl (vneg var) ~index neg)
-                      ~pos:(fun pos ->
-                        match param.occurs_pos with
-                        | `No -> ()
-                        | `Strict -> walk ~decl var ~index pos
-                        | `Yes -> walk ~decl (vpos var) ~index pos))
-                  params args
-             | cons, _loc ->
-                fixme; (* strict vs non strict positivity wrong here *)
-                fixme; (* should handle whole_variant - just match the conses? *)
-                ignore (Typedefs.Cons1.map ~neg:(walk ~decl (vneg var) ~index) ~pos:(walk ~decl (fixme;(*vpos*)var) ~index) cons)
+                  end
+               | Either.Right (Nom_tag.Vtag s) ->
+                  (* FIXME messy, dedup? *)
+                  begin match SymTbl.find tbl s with
+                  | decl' ->
+                     found_recursion ~loc var decl';
+                     List.map (fun (p : param_state) -> p.var_found) decl'.params
+                  | exception Not_found ->
+                     List.map fst (Typedefs.Env.lookup_decl env (fst s) |> Option.get).params
+                  end
+             in
+             List.iter2
+               (fun (param : Exp.variance_spec) (arg : _ Typedefs.Cons1.tyarg) ->
+                 Typedefs.Cons1.Tyarg.iter arg
+                   ~neg:(fun neg ->
+                     match param.occurs_neg with
+                     | `No -> ()
+                     | `Yes -> walk ~decl (vneg var) ~index neg)
+                   ~pos:(fun pos ->
+                     match param.occurs_pos with
+                     | `No -> ()
+                     | `Strict -> walk ~decl var ~index pos
+                     | `Yes -> walk ~decl (vpos var) ~index pos))
+               params args;
+
+           in
+           let walk_cons = function
+             | Typedefs.Cons1.Record {tag; args; body}, loc ->
+                walk_args ~tag:(Left tag) ~loc args;
+                ignore (Typedefs.Fields.map ~pos:(walk ~decl var ~index) body);
+                ()
+             | Variant_whole (tag, args), loc ->
+                walk_args ~tag:(Right tag) ~loc args
+             | (Top | Func _) as cons, _loc ->
+                ignore (Typedefs.Cons1.map ~neg:(walk ~decl (vneg var) ~index) ~pos:(walk ~decl var ~index) cons)
            in
            let walk_var : Typedefs.typ_var -> unit = function
              | Vrigid _ -> assert false
@@ -330,25 +348,32 @@ let check_type_decls types =
          let body = trim_args body in
          Tpoly {vars; body}
       | Tcvj (conses, vars, loc) ->
+         let trim_arglist params args =
+           let trim_arg (param : param_state) (arg : _ Typedefs.Cons1.tyarg) =
+             match param.var_spec, arg with
+             | Some _, arg ->
+                (* specified variance, no trimming *)
+                Typedefs.Cons1.Tyarg.map ~neg:trim_args ~pos:trim_args arg
+             | None, (Arg_none | Arg_pos _ | Arg_neg _) -> assert false
+             | None, Arg_both (n, p) ->
+                match param.var_found.occurs_neg, param.var_found.occurs_pos with
+                | `No, `No -> Arg_none
+                | `Yes, `No -> Arg_neg (trim_args n)
+                | `No, (`Yes|`Strict) -> Arg_pos (trim_args p)
+                | `Yes, (`Yes|`Strict) -> Arg_both (trim_args n, trim_args p)
+           in
+           List.map2 trim_arg params args
+         in
          let trim_cons = function
            | (Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc) when SymTbl.mem tbl (Nom_tag.type_name t) ->
               let decl = SymTbl.find tbl (Nom_tag.type_name t) in
-              let trim_arg (param : param_state) (arg : _ Typedefs.Cons1.tyarg) =
-                match param.var_spec, arg with
-                | Some _, arg ->
-                   (* specified variance, no trimming *)
-                   Typedefs.Cons1.Tyarg.map ~neg:trim_args ~pos:trim_args arg
-                | None, (Arg_none | Arg_pos _ | Arg_neg _) -> assert false
-                | None, Arg_both (n, p) ->
-                   match param.var_found.occurs_neg, param.var_found.occurs_pos with
-                   | `No, `No -> Arg_none
-                   | `Yes, `No -> Arg_neg (trim_args n)
-                   | `No, (`Yes|`Strict) -> Arg_pos (trim_args p)
-                   | `Yes, (`Yes|`Strict) -> Arg_both (trim_args n, trim_args p)
-              in
-              let args = List.map2 trim_arg decl.params args in
+              let args = trim_arglist decl.params args in
               let body = Typedefs.Fields.map ~pos:trim_args body in
               (Typedefs.Cons1.Record {tag=Some (Named_tag t); args; body}, loc)
+           | (Typedefs.Cons1.Variant_whole (Vtag tag, args), loc) when SymTbl.mem tbl tag ->
+              let decl = SymTbl.find tbl tag in
+              let args = trim_arglist decl.params args in
+              (Typedefs.Cons1.Variant_whole (Vtag tag, args), loc)
            | (cons, loc) ->
               (Typedefs.Cons1.map ~neg:trim_args ~pos:trim_args cons, loc)
          in

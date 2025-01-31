@@ -789,7 +789,7 @@ module Env = struct
     | Variant_tag _ as tag, {body = (Decl_record _ | Decl_primitive); _} ->
        intfail "Not a variant type: %s" (Nom_tag.to_string tag)
 
-  let get_decl_params env (s : Nom_tag.t) =
+  let get_decl_params env s =
     (SymLocMap.find (Nom_tag.type_name s) env.env_type_decls).params
 
   let get_variant_subtags env (Vtag s : Nom_tag.vtag) =
