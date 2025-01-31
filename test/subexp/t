@@ -1002,13 +1002,13 @@ fn(y) {
 >   let z = ch(#{bar: true}, y).bar;
 >   (y.bar : Int)
 > }
->   fn (y: {bar: Int}) -> Int {
+>   fn [a <: Int](y: {bar: a}) -> Int {
 >     let ch : [x] (x, x) -> x =
 >     fn [x](a: x, b: x) -> x { if true { a } else { b } };
->     let z : Any = ch(#{bar: true}, y).bar;
+>     let z : Bool | a = ch(#{bar: true}, y).bar;
 >     (y.bar : Int)
 >   }
-> ({bar: Int}) -> Int
+> [a <: Int] ({bar: a}) -> Int
 > let  = %yield(fun (y) ret {
 >   let ch =
 >     fun (a, b) ret2 {
@@ -1330,4 +1330,4 @@ fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 >   fn [a <: ({foo:Int},Int)](x : a) -> (#Tag{bar:Bool},Int) { x }
 >                                        ^^^^^^^^^^^^^^
 
-> STATS: fix: 94, flex: 1791
+> STATS: fix: 103, flex: 1794

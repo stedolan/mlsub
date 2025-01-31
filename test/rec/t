@@ -21,7 +21,7 @@ fn f[a](x:a) -> a {
   x
 }
 }
-> fn f[a](x: a) -> a { let z : Any = f(42); x }
+> fn f[a](x: a) -> a { let z : Int = f(42); x }
 
 # FIXME: type correct, but why so many variables?
 {
@@ -33,9 +33,9 @@ fn f(c, x,y) {
   }
 }
 }
-> fn f[a, b, c, d](c: Bool, x: a, y: b) -> (a | b | c | d, a | b | c | d) {
+> fn f[a, b](c: Bool, x: a, y: b) -> (a | b, a | b) {
 >   if c {
->     let (p, q) : (a | b | c | d, a | b | d | c) = f(false, y, x);
+>     let (p, q) : (a | b, a | b) = f(false, y, x);
 >     (q, p)
 >   } else {
 >     (x, y)
@@ -100,4 +100,4 @@ fn f() {
 (fn (x) { x(x) }) (fn (x) { x(x) })
 > (fn (x) { x(x) })(fn (x) { x(x) })
 > typechecking error: unimplemented: flexvar recursive in own bound
-> STATS: fix: 5, flex: 23
+> STATS: fix: 8, flex: 21

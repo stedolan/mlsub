@@ -29,21 +29,14 @@ let mark_var_use ~mode v =
 
 module Promotion = Types.Promotion (struct
   type t = ptyp * Elab.typed_action
-  let map ~neg ~pos (ty, act) =
-    let ty = pos ~mode:`Poly ~ext:[] ty in
-    let act = typed_map_typs_action act ~ext:[]
-                ~neg:(neg ~mode:`Elab)
-                ~pos:(pos ~mode:`Elab)
-    in
+  let map ~poly ~elab (ty, act) =
+    let ty = poly ~ext:[] ty in
+    let act = typed_map_typs_action act ~ext:[] ~f:elab in
     (ty, act)
 end)
 
-(* FIXME:
-   This improves elaborations but is a bit of a hack.
-   Decide whether to keep it! *)
-let elab_ptyp = function
-  | Tsimple [Lflexvar v] -> Elab_ntyp (Tsimple v)
-  | ty -> Elab_ptyp ty
+let elab_ptyp t = ptyp_to_etyp ~index:0 t
+let elab_ntyp t = ntyp_to_etyp ~index:0 t
 
 let fresh_flow env : ntyp * ptyp =
   let fv = fresh_flexvar (Env.level env) in
@@ -469,7 +462,7 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
         let poly, env =
           match typoly with
           | Some (vars, env) ->
-             let poly = (IArray.map (function (_,None) as b -> b | (s, Some t) -> s, Some (Elab_ptyp t)) vars) in
+             let poly = (IArray.map (function (_,None) as b -> b | (s, Some t) -> s, Some (elab_ptyp t)) vars) in
              Some poly, env
           | None -> None, env
         in
@@ -519,12 +512,12 @@ and check' env ~mode eloc (e : exp') ty : typed_exp' =
                  (None,
                   List.map2 (fun (p, _) ty -> p, Some (elab_ptyp ty)) params ptypes,
                   split,
-                  Some (Elab_ntyp rtype) (*FIXME ret_type?*),
+                  Some (elab_ntyp rtype) (*FIXME ret_type?*),
                   mk_action act body)
                in
-               let close ~ext t =
-                 close_typ ~neg:ignore ~pos:ignore (Env.level env) (List.length ext) t in
-               let (_, params, psplit, ret, body) = typed_map_func_def ~neg:close ~pos:close ~ext:[] fndef in
+               let close ~ext t = close_typ ~neg:ignore ~pos:ignore (Env.level env) (List.length ext) t
+               in
+               let (_, params, psplit, ret, body) = typed_map_func_def ~f:close ~ext:[] fndef in
                (Some poly, params, psplit, ret, body)
           in
           Fn fndef
@@ -732,7 +725,7 @@ and infer_func_def env ~loc ~mode ?name eloc (poly, params, ret, body) : ptyp * 
       func_ty, None
     else
       Tpoly { vars = bounds; body = func_ty },
-      Some (IArray.map (function (_,None) as b -> b | (s, Some t) -> s, Some (Elab_ntyp t)) bounds)
+      Some (IArray.map (function (_,None) as b -> b | (s, Some t) -> s, Some (elab_ntyp t)) bounds)
   in
   wf_ptyp env ty;
   let tparams, tret =
@@ -740,12 +733,12 @@ and infer_func_def env ~loc ~mode ?name eloc (poly, params, ret, body) : ptyp * 
     | Tcvj ([Func (t,r),_], [], _loc) -> t,r
     | _ -> assert false
   in
-  let params = List.map2 (fun (p, _) t -> (p, Some (Elab_ntyp t))) params tparams in
+  let params = List.map2 (fun (p, _) t -> (p, Some (elab_ntyp t))) params tparams in
   ty,
   (typed_poly,
    params,
    split,
-   Some (Elab_ptyp tret),
+   Some (elab_ptyp tret),
    act)
 
 and extend_env env act =

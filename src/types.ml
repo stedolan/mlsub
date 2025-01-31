@@ -1251,7 +1251,7 @@ let rec clearly_subtype_bounds env (a : (unit,unit) typ) (b : (unit,unit) typ) :
 (* FIXME: bit weird... There must be a better representation for bvars here *)
 
 type genvar =
-  | Gen_flex of ntyp
+  | Gen_flex of (zero,zero) typ
   | Gen_rigid of rigvar
 
 (*
@@ -1273,14 +1273,14 @@ design:
 
 let is_visited_pos visit fv =
   match fv.gen with
-  | Not_generalising -> assert false
+  | Not_generalising -> false
   | Generalising {visit={pos;_};_} ->
      assert (pos land 1 = 0);
      pos = visit
 
 let is_visited_neg visit fv =
   match fv.gen with
-  | Not_generalising -> assert false
+  | Not_generalising -> false
   | Generalising {visit={neg;_};_} ->
      assert (neg land 1 = 0);
      neg = visit
@@ -1567,7 +1567,7 @@ and promote_flexvar :
           match s.policy with
           | Policy_generalise _ ->
             assert (vars = []); (* since visited_pos *)
-            let n = Vector.push s.bvars (Gen_flex (gen_zero upper)) in
+            let n = Vector.push s.bvars (Gen_flex upper) in
             Generalised n
           | Policy_hoist hoist_env ->
               (* FIXME: surely I need to consider fv.lower as well? *)
@@ -1588,20 +1588,23 @@ let fixpoint_iters = ref 0
 let log_changes = ref false
 let verbose_types = match Sys.getenv "VERBOSE_TYPES" with _ -> true | exception Not_found -> false
 
+let ntyp_to_etyp ~index (t : ntyp) =
+  map_typ_1 ~neg:(fun x -> Esimple_pos x) ~pos:(fun x -> Esimple_neg x) ~index t
+
+let ptyp_to_etyp ~index (t : ptyp) =
+  map_typ_1 ~neg:(fun x -> Esimple_neg x) ~pos:(fun x -> Esimple_pos x) ~index t
+
+
 module Promotion (P : sig
   type t
   val map :
-    neg:(mode:[ `Elab | `Poly ] ->
-         ext:int list -> ntyp -> ntyp) ->
-    pos:(mode:[ `Elab | `Poly ] ->
-         ext:int list -> ptyp -> ptyp) ->
+    poly:(ext:int list -> ptyp -> ptyp) ->
+    elab:(ext:int list -> etyp -> etyp) ->
     t -> t
 end) = struct
 
 let promote_exn ~policy ~rigvars ~env (ty : P.t) : _ * P.t =
-  (* Format.printf "ELAB %a{\n%a}@." dump_ptyp orig_ty pp_elab_req erq; *)
   let rec fixpoint visit (prev_ty : P.t) =
-    (* if verbose_types then Format.printf "FIX: %a" dump_ptyp prev_ty; *)
     if visit > 99 then intfail "looping?";
     let changes = ref [] in
     let neg_simple t =
@@ -1613,16 +1616,27 @@ let promote_exn ~policy ~rigvars ~env (ty : P.t) : _ * P.t =
         changes := Change_expanded_mark :: !changes;
       t'
     in
-    let neg ~mode:_ ~ext t = map_typ_1 ~index:(List.length ext) ~neg:pos_simple ~pos:neg_simple t in
-    let pos ~mode:_ ~ext t = map_typ_1 ~index:(List.length ext) ~neg:neg_simple ~pos:pos_simple t in
-    let ty = P.map ~neg ~pos prev_ty in
+    let poly ~ext t = map_typ_1 ~index:(List.length ext) ~neg:neg_simple ~pos:pos_simple t in
+    let elab ~ext t =
+      (* Format.printf "ELAB: %a" dump_etyp t; *)
+      (* FIXME:
+         This improves elaborations but is a bit of a hack.
+         Decide whether to keep it! *)
+      let simple = function
+        | Esimple_pos [Lflexvar v] when is_visited_neg visit v ->
+           Esimple_neg (neg_simple v)
+        | Esimple_pos p -> Esimple_pos (pos_simple p)
+        | Esimple_neg t -> Esimple_neg (neg_simple t)
+      in
+      map_typ_1 ~index:(List.length ext) ~neg:simple ~pos:simple t
+    in
+    let ty = P.map ~poly ~elab prev_ty in
     if !log_changes || visit > 90 then Format.printf "changed: %a\n\n%!" pp_changes !changes;
     if !changes = [] then
       (visit, ty)
     else
       (incr fixpoint_iters; fixpoint (visit+2) ty) in
   let visit, ty = fixpoint 2 ty in
-  (* Format.printf "ELAB2 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
   let bvars = Vector.create () in
   rigvars |> IArray.iteri (fun var ((_,loc),_) -> ignore (Vector.push bvars (Gen_rigid {loc;var;level=Env.level env})));
   let promote (type p) (type n) (policy : (n,p) promotion_policy) =
@@ -1636,19 +1650,31 @@ let promote_exn ~policy ~rigvars ~env (ty : P.t) : _ * P.t =
       match policy with Policy_generalise _ -> gen_zero t | Policy_hoist _ -> t
     in
     let trim ~index:_ c = trim_overrides ~env c in
-    P.map ty
-      ~neg:(fun ~mode ~ext t ->
-        let index = List.length ext in
-        map_typ_0
-          ~neg:(pos_simple ~mode) ~pos:(neg_simple ~mode)
-          ~neg_cons:trim ~pos_cons:trim
-          ~index t)
-      ~pos:(fun ~mode ~ext t ->
-        let index = List.length ext in
-        map_typ_0
-          ~neg:(neg_simple ~mode) ~pos:(pos_simple ~mode)
-          ~neg_cons:trim ~pos_cons:trim
-          ~index t)
+    let poly ~ext t =
+      let index = List.length ext in
+      let mode = `Poly in
+      map_typ_0
+        ~neg:(neg_simple ~mode) ~pos:(pos_simple ~mode)
+        ~neg_cons:trim ~pos_cons:trim
+        ~index t
+    in
+    let elab ~ext t =
+      let index = List.length ext in
+      let mode = `Elab in
+      let simple ~index = function
+        | Esimple_neg t ->
+           neg_simple ~mode ~index t
+           |> ntyp_to_etyp ~index
+        | Esimple_pos t ->
+           pos_simple ~mode ~index t
+           |> ptyp_to_etyp ~index
+      in
+      map_typ_0
+        ~neg:simple ~pos:simple
+        ~neg_cons:trim ~pos_cons:trim
+        ~index t
+    in
+    P.map ~poly ~elab ty
   in
   (* Format.printf "ELAB3 %a{\n%a}@." dump_ptyp ty pp_elab_req erq; *)
   let ty =
@@ -1657,23 +1683,19 @@ let promote_exn ~policy ~rigvars ~env (ty : P.t) : _ * P.t =
     | `Hoist env -> promote (Policy_hoist env)
   in
   let bvars, ty =
-    let neg ~mode ~ext t =
+    let poly ~ext t =
       let index = List.length ext in
-      match mode with
-        | `Elab -> close_typ ~neg:ignore ~pos:ignore (Env.level env) index t
-        | `Poly -> close_typ ~neg:close_poly_pos ~pos:close_poly_neg (Env.level env) index t
+      close_typ ~neg:close_poly_neg ~pos:close_poly_pos (Env.level env) index t
     in
-    let pos ~mode ~ext t =
+    let elab ~ext t =
       let index = List.length ext in
-      match mode with
-      | `Elab -> close_typ ~neg:ignore ~pos:ignore (Env.level env) index t
-      | `Poly -> close_typ ~neg:close_poly_neg ~pos:close_poly_pos (Env.level env) index t
+      close_typ ~neg:ignore ~pos:ignore (Env.level env) index t
     in
     let bvars = Vector.to_array bvars in
     let bvars = bvars |> Array.map (function
       | Gen_rigid _ as x -> x
-      | Gen_flex b -> Gen_flex (neg ~mode:`Poly ~ext:[] b)) in
-    bvars, P.map ty ~neg ~pos
+      | Gen_flex b -> Gen_flex (close_typ ~neg:close_poly_pos ~pos:close_poly_neg (Env.level env) 0 b)) in
+    bvars, P.map ty ~poly ~elab
   in
   let bounds =
     let next_name = ref 0 in
@@ -1691,7 +1713,7 @@ let promote_exn ~policy ~rigvars ~env (ty : P.t) : _ * P.t =
     |> Array.map (function
       | Gen_rigid rv -> IArray.get rigvars rv.var
       | Gen_flex r when is_ttop r -> mkname (), None
-      | Gen_flex r -> mkname (), Some r)
+      | Gen_flex r -> mkname (), Some (gen_zero r))
     |> IArray.of_array
   in
   bounds, ty

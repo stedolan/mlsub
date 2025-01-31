@@ -28,8 +28,8 @@ let dump env (t : ptyp) =
   let t_orig = t in
   let module Promotion = Types.Promotion (struct
     type t = ptyp
-    let map ~neg:_ ~pos t =
-      let t = pos ~mode:`Poly ~ext:[] t in
+    let map ~poly ~elab:_ t =
+      let t = poly ~ext:[] t in
       dump t_orig;
       t
   end) in

@@ -612,7 +612,7 @@ fn f2(x : LR.L[Any] | LR.R[Int]) { f(x) }
 > type LR[+a]{ L(a) | R(a) }
 > fn either[a](x: LR[a]) -> a { match x { L(x) | R(x) => x } }
 > fn swap[a, b](x: LR.L[a] | LR.R[b]) -> (LR.R[a] | LR.L[b]) { match x { LR.L(x) => LR.R(x) | LR.R(x) => LR.L(x) } }
-> fn f[a, b](x: LR.L[a] | LR.R[b]) -> (LR.R[a] | LR.L[b]) { let _ : Any = either(x); swap(x) }
+> fn f[a, b](x: LR.L[a] | LR.R[b]) -> (LR.R[a] | LR.L[b]) { let _ : a | b = either(x); swap(x) }
 > fn f2(x: LR.L[Any] | LR.R[Int]) -> (LR.R[Any] | LR.L[Int]) { f(x) }
 
 {
@@ -727,4 +727,4 @@ fn map[a,b](f:a->b, x : PTree[a]) -> PTree[b] {
 > }
 
 
-> STATS: fix: 34, flex: 520
+> STATS: fix: 36, flex: 520

@@ -1373,17 +1373,16 @@ fn (x, wid : (([a <: {foo:Int}] a -> a | {foo:Int,bar:String}) -> Int)) { let f 
 >   let f = fn (a) { x(a) };
 >   wid(f)
 > }
->   fn [a, b <: {foo: Int, bar: String}](
->     x: ({foo: Int} | a) -> b,
+>   fn [a](
+>     x: ({foo: Int} | a) -> {foo: Int, bar: String},
 >     wid: ([a_2 <: {foo: Int}] a_2 -> {foo: Int, bar: String} | a_2) -> Int
 >   ) -> Int {
->     let f : ({foo: Int} | a) -> b = fn (a: {foo: Int} | a) -> b { x(a) };
+>     let f : ({foo: Int} | a) -> {foo: Int, bar: String} =
+>     fn (a: {foo: Int} | a) -> ({foo: Int, bar: String}) { x(a) };
 >     wid(f)
 >   }
-> [a, b <: {foo: Int, bar: String}] (
->   ({foo: Int} | a) -> b,
->   ([a_2 <: {foo: Int}] a_2 -> {foo: Int, bar: String} | a_2) -> Int
-> ) -> Int
+> [a] (({foo: Int} | a) -> {foo: Int, bar: String}, ([a_2 <: {foo: Int}] a_2 -> {foo: Int, bar: String} | a_2) -> Int) ->
+> Int
 > let  = %yield(fun (x, wid) ret {
 >   let f = fun (a) ret2 { let x2 = x(a); ret2(x2) };
 >   let x2 = wid(f);
@@ -2042,12 +2041,11 @@ fn(f) { fn(x) { (x, f(x)) } }
 
 fn(x) { let y = (fn(x){x})(x); (x.foo.bar.a.b.c, y.foo.bar.a.b.c) }
 > fn (x) { let y = (fn (x) { x })(x); (x.foo.bar.a.b.c, y.foo.bar.a.b.c) }
->   fn [a, b](x: {foo: {bar: {a: {b: {c: a}}}}}) -> (a, a | b) {
->     let y : {foo: {bar: {a: {b: {c: a | b}}}}} =
->     (fn [a_2](x: a_2) -> a_2 { x })(x);
+>   fn [a, b <: {foo: {bar: {a: {b: {c: a}}}}}](x: b) -> (a, a) {
+>     let y : b = (fn [a_2](x: a_2) -> a_2 { x })(x);
 >     (x.foo.bar.a.b.c, y.foo.bar.a.b.c)
 >   }
-> [a, b] ({foo: {bar: {a: {b: {c: a}}}}}) -> (a, a | b)
+> [a, b <: {foo: {bar: {a: {b: {c: a}}}}}] b -> (a, a)
 > let  = %yield(fun (x) ret {
 >   let x2 = fun (x2) ret2 {
 >     ret2(x2)
@@ -2205,11 +2203,7 @@ fn f(x) {
 fn h() { f(#Foo{foo:#{p:1}}) }
 }
 > fn g(x: #Foo{foo: {p: Int}} | #Bar{foo: {q: String}}) -> () { () }
-> fn f[a <: {p: Int}, b <: {q: String}, c](x: #Foo{foo: a} | #Bar{foo: b}) -> (a | b | c) {
->   let y : a | b | c = x.foo;
->   g(x);
->   y
-> }
+> fn f[a <: {p: Int}, b <: {q: String}](x: #Foo{foo: a} | #Bar{foo: b}) -> (a | b) { let y : a | b = x.foo; g(x); y }
 > fn h() -> (#{p: Int}) { f(#Foo{foo: #{p: 1}}) }
 
 # ditto but with nominal types
@@ -2227,8 +2221,8 @@ fn h() { f(Foo{foo:#{p:1}}) }
 > type Foo[+a]{foo: a}
 > type Bar[+b]{foo: b}
 > fn g(x: Foo[{p: Int}] | Bar[{q: String}]) -> () { () }
-> fn f[a <: {p: Int}, b <: {q: String}, c](x: Foo[{p: Int}]{foo: a} | Bar[{q: String}]{foo: b}) -> (a | b | c) {
->   let y : a | b | c = x.foo;
+> fn f[a <: {p: Int}, b <: {q: String}](x: Foo[{p: Int}]{foo: a} | Bar[{q: String}]{foo: b}) -> (a | b) {
+>   let y : a | b = x.foo;
 >   g(x);
 >   y
 > }
@@ -2304,4 +2298,4 @@ fn (c) {
 > done
 
 
-> STATS: fix: 130, flex: 1325
+> STATS: fix: 132, flex: 1309

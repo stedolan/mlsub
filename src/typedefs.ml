@@ -884,6 +884,12 @@ let commit ~changes rest =
  * Environment ordering
  *)
 
+type elab_simple =
+  | Esimple_neg of flexvar
+  | Esimple_pos of lower
+
+type etyp = (elab_simple, elab_simple) typ
+
 let rec env_bindings_level (env : Env.bindings) =
   match env with
   | Env_types tys -> tys.level
@@ -1374,6 +1380,12 @@ let unparse_ptyp ~flexvar ?(env=(Env.empty,[])) (t : ptyp) =
   unparse_gen_typ ~env ~neg:(unparse_flexvar ~flexvar) ~pos:(unparse_lower ~flexvar) t
 let unparse_ntyp ~flexvar ?(env=(Env.empty,[])) (t : ntyp) =
   unparse_gen_typ ~env ~neg:(unparse_lower ~flexvar) ~pos:(unparse_flexvar ~flexvar) t
+let unparse_etyp ~flexvar ?(env=(Env.empty,[])) (t : etyp) =
+  let unparse_simple ~env = function
+    | Esimple_neg t -> unparse_flexvar ~flexvar ~env t
+    | Esimple_pos t -> unparse_lower ~flexvar ~env t
+  in
+  unparse_gen_typ ~env ~neg:unparse_simple ~pos:unparse_simple t
 
 
 
@@ -1415,6 +1427,10 @@ let pp_ntyp ppf t =
 let pp_ptyp ppf t =
   let env = Env.empty, [] in
   pp_tyexp ppf (unparse_ptyp ~env ~flexvar:ignore t)
+
+let pp_etyp ppf t =
+  let env = Env.empty, [] in
+  pp_tyexp ppf (unparse_etyp ~env ~flexvar:ignore t)
 
 let fmt_unit_typ ~env t =
   unparse_gen_typ t
@@ -1462,7 +1478,7 @@ let with_dump_fv ~env ppf f =
   Format.fprintf ppf "%!"
 
 
-let dump_ptyp ppf t =
+let dump_typ ~unparse_typ ppf t =
   let env = Env.empty, [] in
   let fvs = Hashtbl.create 20 in
   let fv_list = ref [] in
@@ -1481,7 +1497,7 @@ let dump_ptyp ppf t =
        Hashtbl.replace fvs fv.id (fv_name, Some (l, u));
        ()
   and unparse t =
-    unparse_ptyp ~env ~flexvar t
+    unparse_typ ~flexvar ?env:(Some env) t
   in
   let t = unparse t in
   let fvs = !fv_list |> List.rev |> List.map (fun i -> let (n, t) = (Hashtbl.find fvs i) in n, Option.get t) in
@@ -1497,6 +1513,10 @@ let dump_ptyp ppf t =
        us |> List.iteri (fun i u ->
          Format.fprintf ppf "%s %a" (if i = 0 then " <=" else ";") pp_tyexp u);
        Format.fprintf ppf "\n")
+
+let dump_ptyp = dump_typ ~unparse_typ:unparse_ptyp
+let dump_ntyp = dump_typ ~unparse_typ:unparse_ntyp
+let dump_etyp = dump_typ ~unparse_typ:unparse_etyp
 
 let pp_changes ppf changes =
   Format.fprintf ppf "[";
@@ -1527,3 +1547,15 @@ let wf_ntyp ?(ext=[]) env (t : ntyp) =
   with
   | Assert_failure (file, line, _char) when file = __FILE__ ->
      intfail "Ill-formed type (%s:%d): %a" file line pp_ntyp t
+
+let wf_etyp ?(ext=[]) env (t : etyp) =
+  try
+    let seen = Hashtbl.create 10 in
+    let wf_simple = function
+      | Esimple_neg t -> wf_flexvar ~seen env (Env.level env) t
+      | Esimple_pos t -> wf_lower ~seen env (Env.level env) t
+    in
+    wf_typ ~neg:wf_simple ~pos:wf_simple ~ispos:false env None ext t
+  with
+  | Assert_failure (file, line, _char) when file = __FILE__ ->
+     intfail "Ill-formed type (%s:%d): %a" file line pp_etyp t
